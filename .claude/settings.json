@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+
+  "model": "opus",
+  "_model_note": "Main session = ORCHESTRATOR on Opus 4.8 — it drives the active design stage, authors the inventory/design notes, and dispatches specialists. Subagents override via their own model: frontmatter. Reasoning-heavy nodes (spec-consistency-auditor, cto-reviewer) run on Opus 4.8 xhigh; reference-scout runs Opus 4.8 high (faithful code-contract extraction); cross-model-reviewer is a cheap Sonnet 5 driver for the Codex call. Pin exact IDs for reproducibility: claude-opus-4-8, claude-sonnet-5. NOTE: the `sonnet` alias resolves to Sonnet 5 (claude-sonnet-5) since v2.1.197, so a `model: sonnet` node runs on Sonnet 5; pin claude-sonnet-4-6 only if you need the prior Sonnet.",
+
+  "effortLevel": "xhigh",
+  "_effort_note": "Main session (orchestrator) runs at xhigh — Opus 4.8 supports it. Locking implementation contracts is the highest-ROI reasoning in the whole rewrite, so the author runs at max effort. Subagents set their own effort in frontmatter and override this default.",
+
+  "disableAgentView": true,
+  "_view_note": "멀티 서브에이전트 dispatch이지만 --dangerously-skip-permissions가 dispatched bg session으로 전파되는 P0 위험을 피하려고 Agent View를 끈다. 정책상 필요하면 해제.",
+
+  "enabledPlugins": {
+    "claude-mem@thedotmack": false
+  },
+  "_plugins_note": "claude-mem은 PostToolUse matcher '*'로 모든 도구 호출마다 프로세스를 띄운다. 다회 fan-out에서는 끈다(전역·타 프로젝트 영향 없음). perf-audit 2026-06-05 항목 2.",
+
+  "permissions": {
+    "allow": [
+      "Bash(git status)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git branch:*)",
+      "Bash(git show:*)",
+      "Bash(git checkout:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(wc:*)",
+      "Bash(find:*)",
+      "Bash(rg:*)",
+      "Bash(grep:*)",
+      "Bash(jq:*)",
+      "Bash(tree:*)",
+      "Bash(python:*)",
+      "Bash(python3:*)",
+      "Bash(sha256sum:*)",
+      "Bash(shasum:*)"
+    ],
+    "deny": [
+      "Bash(rm -rf:*)",
+      "Bash(rm -fr:*)",
+      "Bash(sudo:*)",
+      "Bash(curl:*)",
+      "Bash(wget:*)",
+      "Bash(nc:*)",
+      "Bash(ssh:*)",
+      "Bash(scp:*)",
+      "Bash(psql:*)",
+      "Bash(pg_dump:*)",
+      "Bash(git push:*)",
+      "Bash(git reset --hard:*)",
+      "Bash(npm publish:*)",
+      "Bash(pip install:*)",
+      "Bash(docker:*)",
+      "Bash(kubectl:*)"
+    ]
+  },
+  "_permissions_note": "This is a READ-ONLY design phase: no product code is built, no DB is touched. Bash is limited to read/search/inspect (ls/cat/rg/grep/find/tree/wc, git read commands, python for scratch counting/diffing) plus git add/commit for committing design notes per part (dev_plan 커밋 규약). psql/pg_dump denied — the design produces schema *design*, never runs DDL. git push denied (human checkpoint). The legacy-repo + design-doc immutability boundary is write-scope.sh, not permissions.",
+
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/guardrails.sh" } ] }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          { "type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/write-scope.sh" }
+        ]
+      }
+    ]
+  },
+  "_hooks_note": "Two hooks only, by policy: guardrails.sh (SessionStart — active stage objective + anti-drift/anti-hallucination hard rules; runs once, no per-tool cost) and write-scope.sh (PreToolUse — blocks writes under TRADING_SYSTEM_DIR, CRYPTO_DATA_HUB_DIR, and DESIGN_DOC_DIR (immutable inputs) and real .env files; only OUTPUT_DIR + the harness's own .claude/ are writable). No test-gate hook — this phase produces no code to test."
+}
