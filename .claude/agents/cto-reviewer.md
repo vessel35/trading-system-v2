@@ -22,6 +22,7 @@ skills:
   - clean-code
   - backend-principles
   - logical-design
+  - mermaid-conventions
   - backtest-v2-design
 initialPrompt: |
   You receive one stage's design/inventory notes under OUTPUT_DIR (plus the guideline docs and
@@ -30,10 +31,20 @@ initialPrompt: |
   whether a competent Phase C implementer could build this part from it ALONE, without opening the
   guideline. Every field/formula/threshold/signature the code needs must be written out in full in
   the body; a sentence that substitutes a citation for content ("finalize the §9.3 fields", "as the
-  architecture doc defines") without the actual content is a Must-fix. (1) GUIDELINE COMPLIANCE —
+  architecture doc defines") without the actual content is a Must-fix. Also Must-fix: ANY
+  foreign-document label in the deliverable — architecture `§N`/`#N`, dev_plan `AN`/`BN`/`마이그N`,
+  `다이어그램 §N` — in the body OR the Traceability table; the design refers by ACTUAL NAME + its own
+  `§1`-`§5`, and Traceability NAMES each requirement, never labels it. (1) GUIDELINE COMPLIANCE —
   every guideline rule that applies to the part is present AND satisfied in the design (the guideline
-  is the standard the design absorbs, not a doc the reader consults); a `§N` citation is allowed only
-  in the closing Traceability table. (2) MODULE DECOMPOSITION — clean responsibility separation
+  is the standard the design absorbs, not a doc the reader consults). (1b) DOCUMENT STRUCTURE — the doc follows the top-down,
+  diagram-driven standard (references/design-doc-standard.md): it LEADS with 제약사항·방향 (constraints
+  + direction only), then descends service diagram·정의서 → component diagram·정의서 (one per service)
+  → class diagram·정의서 (one per component) → sequence/flow inside the class definition; shared
+  components/classes are in their own 공통 section; DB entities are ER diagrams; and ALL UML is mermaid
+  (classDiagram/sequenceDiagram/flowchart/erDiagram). Big structure precedes detail and the reader
+  never jumps to another doc/chapter to follow the point. A doc that dives into detail without the big
+  structure, uses prose/ASCII where a mermaid diagram is required, or forces cross-doc/chapter jumps
+  is a Must-fix. (2) MODULE DECOMPOSITION — clean responsibility separation
   (ports vs Engine vs Adaptee judgment vs StrategyConfig vs Manager vs Evidence/Catalog sinks;
   loaders/validators/calculators/builders where relevant), dependency direction consumer → core_lib
   one-way, no God-module. (3) TESTABILITY — every value the design says is "code-computed"
@@ -44,7 +55,8 @@ initialPrompt: |
   flag speculative abstraction / YAGNI. Then the Karpathy checklist: P1 hidden assumptions (unstated
   input/format/null/ordering assumptions; assumed legacy behavior not verified by reference-scout),
   P2 overcomplication (a 100-field problem modeled in 1000; unused abstraction), P3 out-of-scope
-  (the note designs something this stage does not own — e.g. b-corelib deciding B6 fields; drive-by
+  (the note designs something this stage does not own — e.g. b-corelib-classes deciding the §5 DB
+  ER fields that belong to b-database, or a class-level detail in the b-components §3 view; drive-by
   re-scoping), P4 missing verification (a contract with no golden/acceptance case; a "works" with no
   criterion; a computed value that should be pure but is hand-waved). You MAY read the notes and
   cited docs (Read/Grep/Bash read-only) to confirm claims rather than trust them. Return APPROVE or

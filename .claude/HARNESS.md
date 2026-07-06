@@ -12,25 +12,29 @@ which mirrors the **canonical design docs** in `DESIGN_DOC_DIR`
 (`backtest_v2_architecture.md` · `_diagrams.md` · `_dev_plan.md`). The architecture doc is
 canonical; if the skill and the doc disagree, the **doc wins** and you flag the drift.
 
-## The five stages (one per session — never combine)
+## The eight stages (one per session — never combine)
 
-Every stage is read-only against the inputs and writes only design notes under `OUTPUT_DIR`. What
-rises across stages is not *risk* (all are read-only) but **dependency**: each stage's notes are the
-next stage's input, Phase A precedes Phase B, B1's foundation precedes engine/eval, adoption is
-last. The active stage is set by `DESIGN_STAGE`; `guardrails.sh` injects that stage's objective
-from `.claude/objectives/`.
+Every stage is read-only against the inputs and writes only under `OUTPUT_DIR`. What rises across
+stages is not *risk* (all are read-only) but **dependency**: Phase A precedes Phase B, and Phase B is
+built strictly top-down (dev_plan 원칙 3) — services before tree before components before classes
+before DB. **Phase B produces ONE document `backtest_v2_detailed_design.md`; each b-* stage appends
+its §-sections in order.** The active stage is set by `DESIGN_STAGE`; `guardrails.sh` injects that
+stage's objective from `.claude/objectives/`.
 
-| Stage | dev_plan parts | Session goal | Deliverables (under OUTPUT_DIR) |
-|---|---|---|---|
-| **a-domain** | A1·A2·A3 | Inventory the pure domain logic to PORT: indicators, strategy `analyze`, execution/costs/sizing | `A1_indicator_inventory.md`, `A2_strategy_inventory.md`, `A3_execution_cost_sizing_inventory.md` |
-| **a-infra** | A4·A5·A6 | Inventory types/config/DB-creation plan, collector-internalization scope, the removal list + reconciliation waiver (old backtest is a removal target, not referenced) | `A4_types_config_db_inventory.md`, `A5_collector_internalization_scope.md`, `A6_baseline_and_reconciliation.md` |
-| **b-corelib** | B1·B2·B3·B4 | Finalize the core-lib contracts: topology+ports+Protocol, types, indicator registry/contracts, StrategyConfig/Manager | `B1_topology_ports.md`, `B2_types_detail.md`, `B3_indicator_contracts.md`, `B4_strategyconfig_manager.md` |
-| **b-engine-eval** | B5·B6·B7 | Finalize the runtime + persistence + judgment: Engine/1m-feed/look-ahead, Evidence+backtest_db entity fields, metrics/Hard-Gate/Decision | `B5_engine_1m_lookahead.md`, `B6_output_entities.md`, `B7_eval_judgment.md` |
-| **b-adoption** | B8 | Finalize how existing signal/wallet adopt core-lib without behavior change: adoption points, re-export shim, new-backtest validation baseline (old↔new reconciliation waived per A6), wallet regression, `fill_timing` switch, credential rotation | `B8_adoption_reconciliation_regression.md` |
+| Stage | dev_plan | 설계서 절 | Session goal | Deliverable |
+|---|---|---|---|---|
+| **a-domain** | A1·A2·A3 | — | Inventory the pure domain logic to PORT: indicators, strategy `analyze`, execution/costs/sizing | `A1/A2/A3_*_inventory.md` |
+| **a-infra** | A4·A5·A6 | — | Inventory types/config/DB-creation, collector scope, the removal list + reconciliation waiver (old backtest is a removal target, not referenced) | `A4/A5/A6_*.md` |
+| **b-skeleton** | B1·B2 | §1·§2 | Service diagram + definition, project code tree; CREATE the design doc + §1-§5 reading map | `backtest_v2_detailed_design.md` §1-§2 |
+| **b-components** | B3·B4·B5 | §3.1-§3.3 | Component diagrams (one per service): core-lib (shared) / backtest-service (finalizes the port list) / adoption | append §3 |
+| **b-corelib-classes** | B6·B7·B8 | §4.1-§4.3 | core-lib class diagrams + definitions: types·indicators / strategy+config (config sequence) / execution·eval (judgment flow) | append §4.1-§4.3 |
+| **b-service-classes** | B9·B10 | §4.4-§4.5 | backtest-service class diagrams: Engine (candle-loop + 1m trigger-walk sequence, trailing-parity tolerance) / output (run-save sequence) | append §4.4-§4.5 |
+| **b-database** | B11·B12·B13 | §5.1-§5.3 | DB ER diagrams + field tables: crypto_data/signal_db / backtest_db (§9.3 fields) / Evidence SQLite (§9.6 fields) | append §5 |
+| **b-adoption** | B14 | appendix | Adoption points + shim, new-backtest validation baseline (reconciliation WAIVED), regression, credential rotation | append appendix |
 
 > **Phase order (dev_plan §0 "A 분석 → B 상세 설계 → C 구현 … 순서대로 진행한다"; §4 "Phase A의
-> 인벤토리를 입력으로 받는다"):** do not begin Phase B (b-corelib …) until BOTH Phase A stages are
-> done. Analysis makes the port-source map; detailed design makes the confirmed contracts; only then
+> 인벤토리를 입력으로 받는다"; 원칙 3 "B는 위에서 아래로 쌓는다"):** do not begin Phase B (b-skeleton …)
+> until BOTH Phase A stages are done. Analysis makes the port-source map; detailed design makes the confirmed contracts; only then
 > does an implementation part stand alone. (dev_plan 원칙 1 goes one step further — it forbids
 > starting Phase C before A AND B are complete.)
 > **원칙 2:** production (existing signal/wallet) is TOUCHED only in implementation part C7 — this
@@ -71,6 +75,7 @@ facts so the orchestrator's context is not swamped by whole repos.
 | `execution-modeling` | orchestrator / reference-scout: net-of-cost fee/slippage/funding, fill rules (A3/B5) |
 | `logical-design` | orchestrator / cto-reviewer: Evidence + backtest_db entity/relationship design (B6/B7) |
 | `physical-design` | orchestrator: SQLite/PostgreSQL table + index + DDL-shape design (B6) |
+| `mermaid-conventions` | orchestrator / cto-reviewer / spec-consistency-auditor: all UML (service/component/class/sequence/flow/ER) in mermaid, per the document standard (auto-triggers on `*.md`) |
 | `python` | reference-scout: reading loaders/indicators/strategies/calculators to extract contracts |
 | `git-conventions` | orchestrator: per-part work branch + commit (dev_plan §0 커밋 규약; push needs a human) |
 
@@ -85,9 +90,9 @@ implementation-phase (Phase C) gate. Each stage here closes on exactly two check
    Entity fields (§9.3/§9.6) the rule is literally "용도 불변, 필드만 확정". `spec-consistency-auditor`
    is the independent gate; it returns PASS or an itemized FIX.
 2. **리뷰 게이트 (review gate).** On stage completion: commit the notes, then a design review
-   (`cto-reviewer`, and on b-corelib/b-engine-eval also `cross-model-reviewer`) returns
-   APPROVE / REQUEST CHANGES. On REQUEST CHANGES or FIX, revise once and re-submit; if a second pass
-   still disagrees, escalate rather than loop.
+   (`cto-reviewer`, and on the heavy Phase B stages b-corelib-classes / b-service-classes / b-database
+   also `cross-model-reviewer`) returns APPROVE / REQUEST CHANGES. On REQUEST CHANGES or FIX, revise
+   once and re-submit; if a second pass still disagrees, escalate rather than loop.
 
 > If a consistency check fails, fix it inside that stage. Never carry design debt to the next stage.
 
@@ -97,24 +102,31 @@ Every stage runs the same shape; the skill's §parts lists the exact parts and c
 sections. Missing a required input file → record its name + impact, stop that line, do not invent it.
 
 1. **Branch + read.** Create a work branch (`git-conventions`). Read the canonical docs in
-   `DESIGN_DOC_DIR` for the cited sections, the prior stages' notes in `OUTPUT_DIR` (Phase B reads
-   Phase A; b-engine-eval reads b-corelib; b-adoption reads all), and — for Phase A — dispatch
+   `DESIGN_DOC_DIR` for the cited sections, the prior stages' output in `OUTPUT_DIR` (Phase B reads
+   the Phase A inventories AND the already-written §-sections of `backtest_v2_detailed_design.md` —
+   each b-* stage appends the next sections top-down), and — for Phase A — dispatch
    `reference-scout` to extract the actual contracts from `TRADING_SYSTEM_DIR` (signal/wallet) and
    `CRYPTO_DATA_HUB_DIR` (collector, A5), read-only.
-2. **Author self-contained notes.** YOU author each part's note under `OUTPUT_DIR`. Write every rule
-   OUT IN FULL — actual fields (name·type·constraint·default·nullability), actual formulas +
-   units + edge cases, actual thresholds + where they are canonically tuned, full port signatures +
-   semantics, and each touched invariant stated as an explicit rule. **A Phase C implementer must be
-   able to build from this doc ALONE, never opening the guideline.** A guideline citation (`§9.3`)
-   appears ONLY in the doc's closing **Traceability** table (design section → guideline rule), never
-   as a content-substitute in the body. Every deferred item the stage owns is written out in full;
-   every invariant it touches is stated as preserved (never re-decided).
+2. **Author self-contained notes, top-down + diagram-driven.** YOU author each part's note under
+   `OUTPUT_DIR` following the document standard (`skill §Detailed-design document standard` /
+   `references/design-doc-standard.md`): lead with **제약사항·방향**, then descend service diagram·
+   정의서 → component diagram·정의서 (per service) → class diagram·정의서 (per component) →
+   sequence/flow (inside the class definition); shared elements in a 공통 section; DB entities as ER
+   diagrams; **all UML in mermaid** (apply `mermaid-conventions`). Write every rule OUT IN FULL —
+   actual fields (name·type·constraint·default·nullability), actual formulas + units + edge cases,
+   actual thresholds + where tuned, full port/method signatures + semantics, each touched invariant
+   as an explicit rule — so **a Phase C implementer builds from this doc ALONE, never opening the
+   guideline**. Use NO foreign-document label in the deliverable — not architecture `§N`/`#N`, not
+   dev_plan `AN`/`BN`/`마이그N`, not `다이어그램 §N`; refer by ACTUAL NAME + the design doc's own
+   `§1`-`§5`. The closing **Traceability** table names each requirement it satisfies (e.g. "look-ahead
+   prevention"), never labels it. Big structure before detail; the reader never jumps to another
+   doc/chapter. B1 is the entry doc (service diagram + component map + reading map).
 3. **설계-정합 + 흡수 + 자기완결 audit.** Dispatch `spec-consistency-auditor` on the stage's notes:
    no contradiction with a guideline rule, FULL ABSORPTION (every applicable rule written out, no bare
    reference), SELF-CONTAINMENT (standalone-implementable), deferred-item coverage, 용도-불변 for
    Phase B, invariant preservation. On FIX, revise once, re-submit.
 4. **리뷰 게이트.** Dispatch `cto-reviewer` (design soundness + P1-P4 + standalone-implementability +
-   guideline compliance). On b-corelib/b-engine-eval, dispatch `cross-model-reviewer` (Codex) in the
+   guideline compliance). On b-corelib-classes / b-service-classes / b-database, dispatch `cross-model-reviewer` (Codex) in the
    **same turn** for a cross-model second opinion. Apply Must-fix / Should-fix, re-review the changed parts.
 5. **Done-when.** All of the stage's deliverable notes exist and are SELF-CONTAINED (a Phase C
    implementer builds from them alone), every deferred item the stage owns is written out in full,
@@ -129,7 +141,7 @@ finish — but the harness still delivers each subagent's result back to you, th
 orchestrator. Act on that returned result; it is your join point. **Never read or poll task output
 files** to reconstruct a result — the harness already returns it.
 - **Parallel dispatch:** to run independent subagents concurrently, call multiple `Agent` tools in
-  the **same message turn** (e.g. `cto-reviewer` + `cross-model-reviewer` together on b-corelib; or
+  the **same message turn** (e.g. `cto-reviewer` + `cross-model-reviewer` together on b-corelib-classes; or
   several `reference-scout` reads for A1/A2/A3). Sequential Agent calls serialize what could be
   parallel and multiply latency.
 - **Single-central (policy):** subagents CAN nest (up to 5 levels, v2.1.172), but this harness keeps
@@ -151,9 +163,10 @@ files** to reconstruct a result — the harness already returns it.
   standalone-implementable: a Phase C implementer builds from it ALONE, never opening the guideline.
   Write every field / formula / threshold / signature / invariant OUT IN FULL. The guideline
   (`DESIGN_DOC_DIR`) is the STANDARD the design absorbs and complies with — NOT a reference the
-  reader consults. A guideline citation (`§9.3`) is allowed ONLY in the closing Traceability table,
-  never as a content-substitute in the body. "finalize the §9.3 fields" without the actual fields is
-  a DEFECT.
+  reader consults. **NO foreign-document label in the deliverable** — not architecture `§N`/`#N`, not
+  dev_plan `AN`/`BN`/`마이그N`, not `다이어그램 §N`; use actual names + the design doc's own `§1`-`§5`.
+  The closing Traceability table names each requirement, never labels it. "finalize the §9.3 fields"
+  without the actual fields, or any foreign label in the body, is a DEFECT.
 - **Inputs are IMMUTABLE.** The legacy repos under `TRADING_SYSTEM_DIR` + `CRYPTO_DATA_HUB_DIR` and the design docs under
   `DESIGN_DOC_DIR` are read-only reference — never Write/Edit them (write-scope.sh blocks it).
   Notes go under `OUTPUT_DIR` only.

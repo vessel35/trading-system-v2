@@ -41,13 +41,13 @@ logic. (backtest/replay under `TRADING_SYSTEM_DIR` are removal targets — do NO
   exist under `OUTPUT_DIR`, each with the port / gap classification.
 - Each inventory is SELF-CONTAINED: it states the actual extracted contract (the real signature,
   indicator list, formula, or field) inline with its `file:symbol` provenance — not a bare pointer —
-  so b-corelib designs from the inventory itself without re-reading the legacy code.
+  so the Phase B stages design from the inventory itself without re-reading the legacy code.
 - `reference-scout` extractions are cited (file:symbol), not guessed.
 - `spec-consistency-auditor` returned PASS (inventory matches "구현은 전부·계산은 설정" §5.8,
   Adaptee=판단 전용 §4.1#3, 동작 보존 마이그5) in this transcript.
 - `cto-reviewer` returned APPROVE on inventory completeness + separation (port vs drop vs gap).
-- Complete enough that b-corelib (B3 indicator contracts, B4 config/manager) and b-engine-eval
-  (B5 from A3) proceed without re-inventorying.
+- Complete enough that b-components / b-corelib-classes (indicators B6, strategy/config B7) and
+  b-service-classes (Engine/execution B9 from A3) design from the inventory without re-inventorying.
 - Turn budget: ≤ <fill in> orchestrator turns. If exceeded → STOP and escalate.
 
 **Register with /goal (example):**

@@ -1,10 +1,16 @@
 # Backtest v2 Design — stages, deferred items, invariants (reference)
 
-Long checklists for the `backtest-v2-design` skill. Section numbers (§N.M, §4.1#K) refer to
-`backtest_v2_architecture.md` in `DESIGN_DOC_DIR`, which is canonical. `_diagrams.md` is supporting.
-Exception: in the indicator context (A1/B3 and the glossary), the shorthand `§7 breadth`,
+Long checklists for the `backtest-v2-design` skill. Reference-notation follows dev_plan §0.2:
+`§N`·`§N.M` = a section of `backtest_v2_architecture.md` (canonical); `#K` (e.g. §4.1#3) = component K
+of §4.1; `마이그N`·`§13-N` = migration step N of §13; `다이어그램 §N` = `backtest_v2_diagrams.md`;
+`AN`/`BN`/`CN` = a dev_plan part; a code path (`services/…`) = a legacy repo file. `_diagrams.md` is
+supporting. **This notation is agent-facing ONLY — it tells the AGENT what to read.** The DELIVERABLES
+(the design document + inventories) must NOT use any of these foreign-document labels; they refer to
+everything by actual name + their own §1-§5 numbers, and the closing Traceability table names each
+guideline requirement (e.g. "look-ahead prevention"), never labels it (§0.2, self-contained-design-docs).
+Exception: in the indicator context (A1/B6 and the glossary), the shorthand `§7 breadth`,
 `§8 Ehlers`, `§12 pinned` refers to sections of the indicator spec `technical_indicators_calc_spec.md`
-(as the arch doc itself uses that shorthand), NOT to this doc — where §7=체결, §8=비용, §12=테스트.
+(as the arch doc itself uses that shorthand), NOT to the architecture doc — where §7=체결, §8=비용, §12=테스트.
 
 ---
 
@@ -65,12 +71,12 @@ one, STOP and escalate to the human — do not quietly relax it.
 > signatures / tolerance value, not a reference to the section. A `§N` citation belongs only in the
 > doc's closing Traceability table.
 
-| Item | Section | Owning stage | Rule |
+| Item | Section | Owning stage (설계서 절) | Rule |
 |---|---|---|---|
-| `backtest_db` meta table fields (backtest_run / backtest_summary / backtest_prereg / backtest_tag) | §9.3 | b-engine-eval (B6) | 용도만 정의됨 → 필드·타입·제약 확정, 용도·목록 조정 가능하나 목적은 유지 |
-| SQLite Evidence Entity fields (basic 13 + extended 7) | §9.6 | b-engine-eval (B6) | same — 용도 불변, 필드만 확정 |
-| The port list (which concerns become ports) | §4.3 / §4.1#7 | b-corelib (B1) | "미리 고정하지 않는다" → finalize the actual list + method signatures (repr. six named) |
-| Trailing-parity tolerance (candle-unit vs live 1m watermark gap) | §14 / diagram 4 | b-engine-eval (B5) | 1m execution feed adopted 2026-07-03 → finalize allowed deviation + parity criterion (§12) |
+| `backtest_db` meta table fields (backtest_run / backtest_summary / backtest_prereg / backtest_tag) | §9.3 | b-database / B12 (§5.2) | 용도만 정의됨 → mermaid erDiagram + 필드·타입·키·제약 확정, 목적 유지 |
+| SQLite Evidence Entity fields (basic 13 + extended 7) | §9.6 | b-database / B13 (§5.3) | same — erDiagram + 필드 확정, 용도 불변 |
+| The port list (which concerns become ports) | §4.3 / §4.1#7 | b-components / B4 (§3.2 concrete adapters) + b-corelib-classes / B8 (§4.3 port ABCs) | "미리 고정하지 않는다" → finalize the actual list + method signatures (repr. six named) |
+| Trailing-parity tolerance (candle-unit vs live 1m watermark gap) | §14 / diagram 4 | b-service-classes / B9 (§4.4) | 1m execution feed adopted 2026-07-03 → finalize allowed deviation + parity criterion (§12) |
 
 Basic 13 SQLite entities (§9.6): Backtest Run (local copy), Source Data Snapshot, Feature/Indicator
 Definition, Feature/Indicator Snapshot, Signal, Decision, Execution, Trade, Position, Portfolio/PnL,
@@ -82,7 +88,7 @@ Finding/Claim.
 
 ## §parts — per-part spine (목적 · 입력 · 작업 · 산출물 · 정합성)
 
-Faithful to `backtest_v2_dev_plan.md`. Grouped into the five stages.
+Faithful to `backtest_v2_dev_plan.md`. Grouped into the eight stages.
 
 ### Stage a-domain
 - **A1 지표 인벤토리** — 입력 §3.3·§5.8 + `$TRADING_SYSTEM_DIR` signal
@@ -116,42 +122,65 @@ Faithful to `backtest_v2_dev_plan.md`. Grouped into the five stages.
   `feat/vessel-reversion-short-only` 브랜치에 있으며 Phase C 이식 대상으로 **이름·브랜치만 기록**(여기서
   읽지 않음). 산출: `A6_baseline_and_reconciliation.md`. 정합성: 대사 waive가 명시·사유화됐는지(§2/§14).
 
-### Stage b-corelib
-- **B1 토폴로지 + core-lib 구조 + 포트** — 입력 §0.1·§4.1·§4.2·§7·§11.1 + A1~A6. 작업: 신규 repo →
-  `core-lib` 설치형 패키징 → `core_lib` 트리 → 포트 시그니처(DataFeed bounded+1m·Broker·Clock·
-  CostModel·EvidenceSink·CatalogStore) → `StrategyAdapter` Protocol(get_metadata/get_parameter_schema/
-  analyze) → 의존 방향 단방향. **§4.3 포트 목록 확정(deferred).** 산출: `B1_topology_ports.md`.
-- **B2 타입 상세** — 입력 §4.1#1·§5.1 + A4. 작업: Candle·Order·Position·Trade(+r0)·Fill·enums·
-  money(quantize) 필드 확정 → 캔들 검증 불변식 → Decimal 정밀도 + single-cast gate 명시. 산출:
-  `B2_types_detail.md`.
-- **B3 지표 registry·contracts** — 입력 §2·§5.8·§6.1·§11.1 + A1. 작업: IndicatorSpec(버전·min_history·§12
-  pinned)·compute_batch·IndicatorState.update·assert_finalized(close_time≤T) 계약 → 82종 목록·파라미터·
-  pinned 확정 → 벡터화↔증분 seed·워밍업. 산출: `B3_indicator_contracts.md`.
-- **B4 StrategyConfig·Manager·레지스트리** — 입력 §4.1#9·#10·§5.5 + A2. 작업: StrategyConfig(resolve/
-  json_schema/serialize/version) → Adapter Manager(create/lifecycle/registry) → signal_db Adaptee
-  레지스트리 스키마 → config 검증(extra=forbid·기본값·교차필드) → 레지스트리 접근 포트(core_lib DB
-  비의존). 경계: 선언=Adaptee, 해석=StrategyConfig, 생성=Manager. 산출: `B4_strategyconfig_manager.md`.
+> Phase B = ONE doc `backtest_v2_detailed_design.md`, built top-down. 각 파트가 설계서의 한 절을
+> **전문(자기완결)** 으로 채우고, 모든 다이어그램은 mermaid. 파트 순서 = 문서 절 순서.
 
-### Stage b-engine-eval
-- **B5 Engine·1m 피드·look-ahead** — 입력 §6.2·§7·§11.1·§14 + A3·B1. 작업: 캔들 루프 의사코드(§6.2 시가/
-  종가) → bounded DataFeed 미래 비노출 강제 → 1m 집행 피드 트리거 walk(손절·트레일링·청산 시간순) →
-  `decision_ts < execution_ts` 강제 지점 → 워밍업 프리로드. **트레일링 parity 허용 편차 확정(deferred).**
-  산출: `B5_engine_1m_lookahead.md`.
-- **B6 출력 계층(Entity 필드)** — 입력 §9(용도 표) + A4·B2·B7. 작업: Evidence SQLite 필드 확정(기본 13·
-  확장 7) → `backtest_db` meta 4테이블 필드 확정 → 정규화 해시 규칙(파일 바이트 아님·wall-clock 제외) →
-  EvidenceSink·CatalogStore 계약. **§9.3·§9.6 필드 확정(deferred), 용도 불변.** 산출:
-  `B6_output_entities.md`.
-- **B7 판정·eval** — 입력 §10·§10.1·§10.2 + diagrams §5 + B6. 작업: metrics 수식(√365 리샘플·Sortino·
-  SQN·intrabar MDD·Calmar/MAR·RoR MC) → Integrity 항목 → Hard Gate (A) 임계값 정본 위치·(B) 프로파일 →
-  Decision 라우팅(promote/partial_keep/retest/abandon) → envelope_status 성숙도. 산출:
-  `B7_eval_judgment.md`. 정합성: Scorecard 없음·3단계·forensics 루프.
+### Stage b-skeleton (설계서 §1-§2)
+- **B1 서비스 다이어그램 + 정의서 → §1** — 입력 §0.1·§4.1·§4.2 + A 전체. 작업: 서비스 다이어그램(mermaid:
+  `core-lib`·`backtest-service`·기존 `signal-service`/`wallet-service`·저장소 `crypto_data`/`backtest_db`/
+  `signal_db`/Evidence SQLite, 의존 방향) → 서비스 정의서(책임·경계·소비·패키징). backtest/replay는 서비스
+  아님(제거 대상). 정합성: §0.1·§4.1 의존 방향.
+- **B2 프로젝트 코드 트리 → §2** — 입력 §4.2 + B1. 작업: 전체 트리(`core_lib/{types,indicators,strategy,
+  sizing,costs,execution,ports,eval}` + backtest-service) + 경로별 한 줄 역할. 트리 노드 = B3 컴포넌트 1:1.
+  이 파트가 설계 문서를 생성하고 §1-§5 읽기 지도를 넣는다.
 
-### Stage b-adoption
-- **B8 채택·검증기준·회귀** — 입력 §13 + A6. 작업: 기존 서비스 내부 구현→`core_lib` import 치환 지점 +
-  re-export shim 배치 → **구↔신 backtest 대사는 WAIVE**(A6 — 구 backtest 제거 대상), 대신 신 backtest의
-  자체 검증 기준선(골든/parity + A6가 넘긴 bias-fix 이식 대상) 명시 → 회귀 범위(wallet 1175·fill_timing
-  next_bar 전환 시점) → 크리덴셜 회전. 산출: `B8_adoption_reconciliation_regression.md`. 정합성: §13
-  채택 시 프로덕션 동작 불변.
+### Stage b-components (설계서 §3.1-§3.3)
+- **B3 core-lib 컴포넌트 → §3.1 (공유)** — 입력 §4.1 + B1·B2. mermaid 컴포넌트 다이어그램(types·indicators·
+  strategy〈StrategyAdapter/Adaptee〉·sizing·costs·execution·ports·eval·StrategyConfig·Adapter Manager) +
+  정의서(책임·인터페이스·의존). 공유는 여기 한 번만.
+- **B4 backtest-service 컴포넌트 → §3.2** — 입력 §4.1 + B1·B3. 컴포넌트 다이어그램(Engine·ConfigLayer·
+  Harness + 포트 어댑터 DataFeed·Broker·Clock·CostModel·EvidenceSink·CatalogStore) + 정의서. **§4.3 포트
+  목록을 구체 어댑터로 확정(deferred).**
+- **B5 채택 컴포넌트 → §3.3 (signal/wallet)** — 입력 §13 + A2·A3·B3. 채택 후 컴포넌트 다이어그램(내부 구현이
+  `core_lib` import로 치환된 모습) + 정의서(치환 지점·shim·동작 불변). 설계만(C7 실행).
+
+### Stage b-corelib-classes (설계서 §4.1-§4.3)
+- **B6 클래스: types·indicators → §4.1** — 입력 §4.1#1·#2·§5.1·§5.8·§6.1 + B3. classDiagram + 정의서:
+  types(Candle·Order·Position·Trade·Fill·enums·money, 필드 전문·검증 불변식·Decimal single-cast gate),
+  indicators(IndicatorSpec·registry·IndicatorState·contracts, 82종 목록·seed). 지표 계산 flow는 정의서 안.
+- **B7 클래스: 전략 (+config 시퀀스) → §4.2** — 입력 §4.1#3·#9·#10·§5.5 + B3·A2. classDiagram + 정의서:
+  StrategyAdapter(Protocol)·Adaptee·Adapter Manager·StrategyConfig·trailing·profile(메서드 전문). **Adaptee
+  생성·config resolve 시퀀스(mermaid)는 정의서 안.** 경계: 선언=Adaptee, 해석=Config, 생성=Manager.
+- **B8 클래스: 실행·평가 (+판정 플로우) → §4.3** — 입력 §4.1#4-8·§7·§8·§10·다이어그램 §5 + B3·A3.
+  classDiagram + 정의서: execution·costs·sizing·ports(포트 ABC)·eval(metrics 수식·integrity·hard_gate
+  임계값 전문·decision·thresholds·profile). **판정 파이프라인(Integrity→Hard Gate→Decision) 플로우(mermaid)는
+  eval 정의서 안.**
+
+### Stage b-service-classes (설계서 §4.4-§4.5)
+- **B9 클래스: Engine (+캔들 루프·1m 시퀀스) → §4.4** — 입력 §6.2·§7·§11.1·§14 + B4·B6·B7·B8. classDiagram +
+  정의서: Engine·DataFeed/Broker/Clock/CostModel 구현·ConfigLayer·Harness. **캔들 루프(6.2)·1m 트리거 walk·
+  look-ahead 순서 시퀀스(mermaid)는 Engine 정의서 안.** **트레일링 parity 허용 편차 확정(deferred).**
+- **B10 클래스: 출력 (+run 저장 시퀀스) → §4.5** — 입력 §9 + B4·B9. classDiagram + 정의서: EvidenceSink·
+  CatalogStore 책임·인터페이스. **run 저장·finalize 시퀀스(mermaid)는 정의서 안.** 실제 테이블·Entity 스키마는
+  §5(B11~B13) ERD로, 여기선 쓰기 계약만.
+
+### Stage b-database (설계서 §5.1-§5.3, DB by ERD — 원칙 4)
+- **B11 DB 전체 + crypto_data·signal_db ERD → §5.1** — 입력 §9·다이어그램 §7 + A4·A5. DB 전체 구성 다이어그램
+  (crypto_data〈공유·읽기〉·backtest_db〈신규·meta〉·signal_db〈+Adaptee 레지스트리〉·Evidence SQLite〈run별〉,
+  역할·접근·경계) → crypto_data 읽기 테이블 erDiagram·정의서(ohlcv 전략TF·1m·funding) → signal_db Adaptee
+  레지스트리 erDiagram·정의서.
+- **B12 backtest_db ERD + 테이블 정의서 → §5.2** — 입력 §9.3·다이어그램 §7 + B10. `backtest_db` erDiagram
+  (backtest_run·backtest_summary·backtest_prereg·backtest_tag, run_id 1:1/0..1/N) → 테이블 정의서(컬럼·타입·
+  키·제약 전문 = **§9.3 deferred, 용도 불변**) → run_id 단독 발급·정규화 해시·FK 비강제.
+- **B13 Evidence SQLite ERD + Entity 정의서 → §5.3** — 입력 §9.5·§9.6 + B10·B6·B8. Evidence SQLite erDiagram
+  (기본 13 + 확장 7, 관계) → Entity 정의서(컬럼·타입·키 전문 = **§9.6 deferred, 용도 불변**) → run 자기완결·
+  backtest_run_id 참조.
+
+### Stage b-adoption (설계서 부록)
+- **B14 채택·회귀 절차 → 부록** — 입력 §13 + A6. 작업: 채택 지점 + re-export shim(mermaid 시퀀스) → **구↔신
+  backtest 대사는 WAIVE**(A6 — 구 backtest 제거 대상), 대신 신 backtest 자체 검증 기준선(골든/parity +
+  bias-fix 이식 대상) 명시 → 회귀 범위(wallet 1175·fill_timing next_bar 전환, mermaid 플로우) → 크리덴셜
+  회전. 정합성: §13 채택 시 프로덕션 동작 불변.
 
 ---
 

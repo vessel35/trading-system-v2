@@ -47,14 +47,15 @@ the extractions (it resolves each repo's exact layout).
   `A6_baseline_and_reconciliation.md` exist under `OUTPUT_DIR`.
 - Each inventory is SELF-CONTAINED: it states the actual extracted content (the real type/field,
   config key, ingest boundary, removal item) inline with its `file:symbol` provenance — not a bare
-  pointer — so b-corelib/b-engine-eval design from the inventory itself.
+  pointer — so the Phase B stages design from the inventory itself.
 - The `backtest_db` creation plan (A4) is sourced from `init-scripts/` + infra (cited), with the
   keep-or-rename DB-name/role decision recorded; credential-rotation targets are listed.
 - `spec-consistency-auditor` returned PASS (§9.2 DB-creation 규약, §14 "collector는 적재만",
   and the A6 reconciliation-waiver is explicit + rationalized, not silently dropped) in this transcript.
 - `cto-reviewer` returned APPROVE on the DB-creation plan + collector boundary + removal/waiver record.
-- Complete enough that b-corelib (B2 types from A4) and b-engine-eval (B6 fields from A4) and
-  b-adoption (B8 reads the A6 removal list + reconciliation waiver) proceed without re-inventorying.
+- Complete enough that b-corelib-classes (types B6 from A4), b-database (backtest_db creation from
+  A4, §5 ERDs) and b-adoption (reads the A6 removal list + reconciliation waiver) proceed without
+  re-inventorying.
 - Turn budget: ≤ <fill in> orchestrator turns. If exceeded → STOP and escalate.
 
 **Register with /goal (example):**

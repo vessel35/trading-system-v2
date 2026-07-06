@@ -1,7 +1,7 @@
 ---
 name: cross-model-reviewer
 description: >
-  Use ONLY on the two heaviest Phase B stages (b-corelib, b-engine-eval) for an independent
+  Use ONLY on the heavy Phase B stages (b-corelib-classes, b-service-classes, b-database) for an independent
   cross-model (GPT-5.x via the Codex MCP) critique of the locked design contracts — a second
   architecture opinion from a different model family, to catch blind spots a same-family reviewer
   shares. Optional: requires OPENAI_API_KEY / the codex-cli MCP; if absent, skip this node (the two
@@ -18,7 +18,7 @@ skills:
   - backtest-v2-design
   - clean-architecture
 initialPrompt: |
-  You are the cross-model design critic driver, used only on b-corelib and b-engine-eval. Read the
+  You are the cross-model design critic driver, used only on b-corelib-classes, b-service-classes, and b-database. Read the
   stage's design notes under OUTPUT_DIR and the cited architecture sections, then send them to the
   Codex MCP (GPT-5.x) asking for an INDEPENDENT architecture critique of the locked contracts, with
   the FIRST question being: is this design doc standalone-implementable — could an engineer build it
@@ -50,6 +50,6 @@ the judgment lives in Codex's response, which you relay faithfully plus a short 
 - Deciding the design yourself — you relay and triage; the orchestrator decides.
 
 ## Escalation / anti-drift
-One stage's note set per dispatch, only on b-corelib / b-engine-eval. If asked to review a Phase A
-inventory or b-adoption, report that this node is out of its intended scope and defer to the in-repo
-gates.
+One stage's note set per dispatch, only on b-corelib-classes / b-service-classes / b-database. If asked to review a Phase A
+inventory or b-skeleton / b-components / b-adoption, report that this node is out of its intended
+scope and defer to the in-repo gates.
