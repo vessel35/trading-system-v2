@@ -31,7 +31,10 @@ a-domain (A2/A3) + a-infra inventories.
 
 **Done when:**
 - §3.1, §3.2, §3.3 appended to `backtest_v2_detailed_design.md`, each a mermaid component diagram +
-  definition; shared core-lib components are in §3.1 only (referenced, not duplicated).
+  definition; shared core-lib components are in §3.1 only (referenced, not duplicated). UML-FIRST at
+  this level: the diagram CARRIES the components, their interface boundaries, and their dependency
+  direction (arrows); prose supplies ONLY what the diagram cannot — each component's responsibility and
+  where it consumes core-lib. Don't describe a dependency in prose that the diagram should draw.
 - The port list (§4.3) is finalized as concrete backtest-service adapters in §3.2.
 - SELF-CONTAINED (the reader builds the component picture from the doc alone); top-down (component
   under its already-defined service; no class-level identifier yet); NO foreign-document label

@@ -48,10 +48,14 @@ Do not start any b-* stage before both a-* stages are complete (dev_plan §0 sta
   cite. NO foreign-document label in the deliverable (architecture §N / dev_plan AN·BN·마이그N /
   diagrams §N) — actual names + the design doc's own §1-§5; the closing Traceability table NAMES each
   requirement it satisfies, never labels it.
-- TOP-DOWN DIAGRAM-DRIVEN structure: every design doc leads with 제약사항·방향, then descends
+- TOP-DOWN UML-FIRST structure: every design doc leads with 제약사항·방향, then descends
   service→component→class→sequence/flow (one component diagram per service, one class diagram per
-  component; shared elements separated); DB entities as ER diagrams; ALL UML in mermaid. Big
-  structure before detail; the reader never jumps to another doc/chapter. B1 is the entry doc.
+  component; shared elements separated); DB entities as ER diagrams; ALL UML in mermaid. UML-first —
+  the diagram is the primary representation: attributes+types, signatures, relationships+cardinality,
+  ER fields+keys, and flow order go INSIDE the diagram; prose supplies ONLY what UML cannot encode
+  (constraints, defaults, formulas, thresholds, enforced invariants, semantics, responsibility,
+  rationale). Never restate the diagram in prose; never hide structure in prose. Big structure before
+  detail; the reader never jumps to another doc/chapter. B1 is the entry doc.
 - Inputs are IMMUTABLE: never Write/Edit under `TRADING_SYSTEM_DIR`, `CRYPTO_DATA_HUB_DIR`, or `DESIGN_DOC_DIR`; notes go under `OUTPUT_DIR`.
 - Design NOTES only (contracts / fields / pseudocode) — no product code, no live DB, no executed DDL.
 - Preserve every hard invariant (look-ahead, decision_ts<execution_ts, Decimal single-cast gate,

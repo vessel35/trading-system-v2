@@ -33,9 +33,13 @@ field definition tables, DB by DB. This stage owns the two central deferred item
   prose (it must be a mermaid erDiagram).
 
 **Done when:**
-- §5.1, §5.2, §5.3 appended to `backtest_v2_detailed_design.md` — each a mermaid `erDiagram` + a
-  full field-definition table; every §9.3 backtest_db field and every §9.6 Evidence Entity field is
-  written OUT IN FULL (type + constraint + key + nullable + default), with each Entity's 용도 unchanged.
+- §5.1, §5.2, §5.3 appended to `backtest_v2_detailed_design.md` — UML-FIRST: each a mermaid
+  `erDiagram` that CARRIES every entity's fields with `name · type`, its primary/foreign keys, and its
+  relationship cardinality; the accompanying field table supplies ONLY the residue the ER notation
+  cannot hold — per field `constraint · nullable · default · semantics`. Together they write every
+  §9.3 backtest_db field and every §9.6 Evidence Entity field OUT IN FULL, with each Entity's 용도
+  unchanged. Do NOT restate `name·type·key` in prose (they are in the erDiagram); do NOT leave a field
+  or key out of the erDiagram.
 - The normalized-hash / run_id single-issue / FK-not-enforced rules are stated.
 - SELF-CONTAINED (a Phase C implementer creates the schema from the doc alone); DB separated from
   classes per 원칙 4; NO foreign-document label (architecture §N / dev_plan BN·마이그N / diagrams §N) —

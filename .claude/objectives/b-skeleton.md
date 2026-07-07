@@ -35,7 +35,10 @@ inventories under `OUTPUT_DIR`. (§N = architecture doc; dev_plan part = AN/BN �
 - `backtest_v2_detailed_design.md` exists under `OUTPUT_DIR` with §1 (service diagram + definition)
   and §2 (code tree) filled, plus the full §1-§5 + appendix 목차/reading map.
 - Both diagrams are mermaid; every service/store and every tree path has its definition (SELF-CONTAINED
-  — the reader needs no other doc). NO foreign-document label (architecture §N / dev_plan BN·마이그N /
+  — the reader needs no other doc). UML-FIRST at this level: the service diagram CARRIES the services/
+  stores and their dependency direction (arrows); prose supplies ONLY what it cannot — each service's
+  responsibility, boundary, and packaging. Don't put a dependency in prose that the diagram should
+  draw. NO foreign-document label (architecture §N / dev_plan BN·마이그N /
   diagrams §N) — actual names + own §1-§5 only; the closing Traceability table NAMES each requirement.
 - Reads strictly top-down: service before tree; nothing references a not-yet-defined lower unit.
 - `spec-consistency-auditor` returned PASS (§0.1·§4.1 dependency direction; §4.2 tree↔component 1:1;

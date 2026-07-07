@@ -28,9 +28,12 @@ b-corelib-classes (the core-lib classes these consume), a-domain A3 (fill/cost).
 - Weakening look-ahead order or the same-touch stop-before-TP rule.
 
 **Done when:**
-- §4.4, §4.5 appended to `backtest_v2_detailed_design.md` — one mermaid classDiagram per component +
-  full definitions; the candle-loop, 1m trigger-walk, and run-save SEQUENCES are mermaid diagrams
-  INSIDE the class definitions.
+- §4.4, §4.5 appended to `backtest_v2_detailed_design.md` — UML-FIRST: one mermaid classDiagram per
+  component that CARRIES the attributes+types, method/port signatures, and relationships+stereotypes;
+  the accompanying prose supplies ONLY the residue (constraints·defaults·nullability, method semantics,
+  the trailing-parity tolerance rule, enforced invariants). Never restate the diagram in prose, never
+  hide structure in prose. The candle-loop, 1m trigger-walk, and run-save SEQUENCES are mermaid
+  diagrams INSIDE the class definitions.
 - The 1m trigger-walk enforces `decision_ts < execution_ts` and the conservative same-touch priority
   (stop before TP); the trailing-parity tolerance is finalized as an explicit rule.
 - SELF-CONTAINED + full inline content; NO foreign-document label (§N/BN/마이그N/diagrams) — actual

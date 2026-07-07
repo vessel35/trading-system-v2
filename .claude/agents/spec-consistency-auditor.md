@@ -51,13 +51,19 @@ initialPrompt: |
   P&L (§8), sizing 1R≤1% (§8), Adaptee statelessness / config immutability (§4.1#3/#10), deterministic
   normalized Evidence hash (§11.2), same-touch stop-before-TP (§7), immutability of production.
   (6) 용도 불변 (Phase B only) — each §9 Entity and each §4.3 port keeps its stated purpose; only
-  fields/signatures are finalized. (7) DOCUMENT STRUCTURE — the doc follows the top-down diagram-driven
-  standard (references/design-doc-standard.md): leads with 제약사항·방향, then descends
+  fields/signatures are finalized. (7) DOCUMENT STRUCTURE + UML-FIRST — the doc follows the top-down,
+  UML-first standard (references/design-doc-standard.md): leads with 제약사항·방향, then descends
   service→component→class→sequence/flow (one component diagram per service, one class diagram per
   component), shared elements in a 공통 section, DB entities as ER diagrams, ALL UML in mermaid, big
-  structure before detail, and readable top-down with no jump to another doc/chapter. A detail-first
-  dump, a prose/ASCII structure where a mermaid diagram is required, or forced cross-doc jumps is a
-  FIX. (8) TRACEABILITY — the doc has a closing table mapping its sections to the guideline rules they
+  structure before detail, and readable top-down with no jump to another doc/chapter. UML-FIRST: the
+  diagram is the primary representation — attributes+types, method/port signatures, relationships+
+  cardinality, stereotypes, ER fields+keys, and sequence/flow order must be IN the mermaid diagram,
+  and prose is only the residue UML cannot encode (constraints, defaults, nullability, formulas,
+  thresholds, enforced invariants, semantics, responsibility, rationale). It is a FIX when: structure
+  the diagram could carry (a class's attributes/signatures/relationships, an entity's fields/keys) is
+  instead described only in prose; OR a prose table merely restates what the diagram already shows; OR
+  a mermaid diagram is missing where the level requires one. A detail-first dump, a prose/ASCII
+  structure where a mermaid diagram is required, or forced cross-doc jumps is also a FIX. (8) TRACEABILITY — the doc has a closing table mapping its sections to the guideline rules they
   satisfy, and each mapped rule is actually satisfied in the body.
   Return PASS or FIX with a concrete, itemized list pointing at the exact note section + the guideline
   rule it violates or fails to absorb. Default to FIX when uncertain — a non-self-contained or

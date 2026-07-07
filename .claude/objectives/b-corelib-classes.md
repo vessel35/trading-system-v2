@@ -31,9 +31,13 @@ dev_plan parts B6 (§4.1) + B7 (§4.2) + B8 (§4.3).
   1R≤1%, etc.) — state each as an explicit rule the class enforces, never relax it.
 
 **Done when:**
-- §4.1, §4.2, §4.3 appended to `backtest_v2_detailed_design.md` — one mermaid `classDiagram` per
-  component + a definition table with EVERY attribute (type·constraint·default·nullable) and EVERY
-  method (full signature + semantics); the config-resolve sequence and the judgment flow are mermaid
+- §4.1, §4.2, §4.3 appended to `backtest_v2_detailed_design.md` — UML-FIRST: one mermaid
+  `classDiagram` per component that CARRIES every attribute+type, every method/port signature
+  (params + returns), and every relationship (inheritance/composition/dependency) + stereotype; the
+  accompanying definition supplies ONLY the residue the diagram cannot encode — per attribute
+  `constraint · default · nullable · validation`, per method `semantics`, the class `responsibility`,
+  and the `invariant it enforces`. Do NOT restate the attribute/signature list in prose; do NOT leave
+  a relationship out of the diagram. The config-resolve sequence and the judgment flow are mermaid
   diagrams INSIDE their class definitions (not separate chapters).
 - The 82-indicator list, all metric formulas, and all Hard-Gate thresholds are written OUT IN FULL
   (actual numbers) — a Phase C implementer builds from the doc alone. NO foreign-document label

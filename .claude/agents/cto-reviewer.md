@@ -36,12 +36,18 @@ initialPrompt: |
   `다이어그램 §N` — in the body OR the Traceability table; the design refers by ACTUAL NAME + its own
   `§1`-`§5`, and Traceability NAMES each requirement, never labels it. (1) GUIDELINE COMPLIANCE —
   every guideline rule that applies to the part is present AND satisfied in the design (the guideline
-  is the standard the design absorbs, not a doc the reader consults). (1b) DOCUMENT STRUCTURE — the doc follows the top-down,
-  diagram-driven standard (references/design-doc-standard.md): it LEADS with 제약사항·방향 (constraints
+  is the standard the design absorbs, not a doc the reader consults). (1b) DOCUMENT STRUCTURE + UML-FIRST — the doc follows the top-down,
+  UML-first standard (references/design-doc-standard.md): it LEADS with 제약사항·방향 (constraints
   + direction only), then descends service diagram·정의서 → component diagram·정의서 (one per service)
   → class diagram·정의서 (one per component) → sequence/flow inside the class definition; shared
   components/classes are in their own 공통 section; DB entities are ER diagrams; and ALL UML is mermaid
-  (classDiagram/sequenceDiagram/flowchart/erDiagram). Big structure precedes detail and the reader
+  (classDiagram/sequenceDiagram/flowchart/erDiagram). UML-FIRST: the diagram is the primary
+  representation — attributes+types, method/port signatures, relationships+cardinality, stereotypes,
+  ER fields+keys, and sequence/flow order belong INSIDE the diagram, and prose is only the residue UML
+  cannot encode (constraints, defaults, nullability, formulas, thresholds, enforced invariants,
+  semantics, responsibility, rationale). It is a Must-fix when structure the diagram could carry sits
+  only in prose, when a prose table merely restates the diagram, or when a required mermaid diagram is
+  missing. Big structure precedes detail and the reader
   never jumps to another doc/chapter to follow the point. A doc that dives into detail without the big
   structure, uses prose/ASCII where a mermaid diagram is required, or forces cross-doc/chapter jumps
   is a Must-fix. (2) MODULE DECOMPOSITION — clean responsibility separation

@@ -107,16 +107,19 @@ sections. Missing a required input file → record its name + impact, stop that 
    each b-* stage appends the next sections top-down), and — for Phase A — dispatch
    `reference-scout` to extract the actual contracts from `TRADING_SYSTEM_DIR` (signal/wallet) and
    `CRYPTO_DATA_HUB_DIR` (collector, A5), read-only.
-2. **Author self-contained notes, top-down + diagram-driven.** YOU author each part's note under
+2. **Author self-contained notes, top-down + UML-first.** YOU author each part's note under
    `OUTPUT_DIR` following the document standard (`skill §Detailed-design document standard` /
    `references/design-doc-standard.md`): lead with **제약사항·방향**, then descend service diagram·
    정의서 → component diagram·정의서 (per service) → class diagram·정의서 (per component) →
    sequence/flow (inside the class definition); shared elements in a 공통 section; DB entities as ER
-   diagrams; **all UML in mermaid** (apply `mermaid-conventions`). Write every rule OUT IN FULL —
-   actual fields (name·type·constraint·default·nullability), actual formulas + units + edge cases,
-   actual thresholds + where tuned, full port/method signatures + semantics, each touched invariant
-   as an explicit rule — so **a Phase C implementer builds from this doc ALONE, never opening the
-   guideline**. Use NO foreign-document label in the deliverable — not architecture `§N`/`#N`, not
+   diagrams. **UML-FIRST — the mermaid diagram is the primary representation** (apply
+   `mermaid-conventions`): attributes+types, method/port signatures, relationships+cardinality,
+   stereotypes, ER fields+keys, and sequence/flow order go INSIDE the diagram; prose supplements ONLY
+   what UML cannot encode. Write every rule OUT IN FULL, but in its right home — structure in the
+   diagram, and in prose the residue: constraints·defaults·nullability, formulas + units + edge cases,
+   thresholds + where tuned, method semantics, each touched invariant as an explicit rule. Never
+   restate the diagram in prose; never hide structure in prose. So **a Phase C implementer builds from
+   this doc ALONE, never opening the guideline**. Use NO foreign-document label in the deliverable — not architecture `§N`/`#N`, not
    dev_plan `AN`/`BN`/`마이그N`, not `다이어그램 §N`; refer by ACTUAL NAME + the design doc's own
    `§1`-`§5`. The closing **Traceability** table names each requirement it satisfies (e.g. "look-ahead
    prevention"), never labels it. Big structure before detail; the reader never jumps to another

@@ -1,10 +1,33 @@
-# Detailed Design Document Standard (top-down, diagram-driven, mermaid)
+# Detailed Design Document Standard (UML-first, top-down, mermaid)
 
 Every Phase B design document follows this standard. Goal: the reader grasps the BIG STRUCTURE first
 and reads strictly top-down, never jumping to another doc or a later chapter to understand the
 current point. All UML/diagrams are **mermaid** (apply the `mermaid-conventions` skill). This standard
-COMPOSES with self-containment: the diagrams + their definition tables ARE the full content, so a
+COMPOSES with self-containment: the diagrams + their residual prose ARE the full content, so a
 Phase C implementer builds from the doc alone.
+
+## UML-first (the primary representation rule)
+
+The detailed design is expressed **in UML by default; prose is only for what UML cannot encode.** The
+mermaid diagram is the PRIMARY carrier of the design — structure and behavior go INTO the diagram, and
+prose is a SUPPLEMENT for the residue the notation genuinely cannot hold.
+
+- **Put in the diagram (UML can express it):** class attributes with their types and visibility;
+  method / port signatures (parameters + return types); class relationships (inheritance, composition,
+  aggregation, dependency) with cardinality; `«interface»` / `«abstract»` stereotypes; ER entities
+  with attributes, primary/foreign keys, and relationship cardinality; sequence interactions
+  (participants, message order, `alt`/`opt`/`loop`); control flow and state transitions. If UML can
+  show it, it lives in the diagram — not in a prose table that restates the diagram.
+- **Put in prose (UML cannot encode it), as a short supplement under the diagram:** value constraints
+  and validation rules; default values and nullability semantics; numeric thresholds + where they are
+  tuned; formulas (expression · units · boundary conditions); the invariants a class/method enforces;
+  error / edge-case behavior; responsibility and boundary text at the service/component level (UML
+  shows the "what/how-connected", not the "why"); config-key meanings; design rationale and direction.
+- **Two prohibitions.** Do NOT restate in prose what the diagram already shows (no attribute/method/
+  entity list duplicated as a table when it is in the `classDiagram`/`erDiagram`). Do NOT push into
+  prose what the diagram could show (no attributes/signatures/relationships hidden in paragraphs
+  because drawing them was easier to skip). The diagram + its residual prose together are the full,
+  self-contained contract — with no overlap and no gap.
 
 ## Mandatory section order (every design doc)
 
@@ -20,9 +43,13 @@ Phase C implementer builds from the doc alone.
 3. **컴포넌트 다이어그램 & 정의서 (Component)** — per service, a SEPARATE component diagram (mermaid)
    of the components inside it, + a definition (each component: responsibility · public interface ·
    dependencies · the classes it holds). One diagram per service — never mix services in one diagram.
-4. **클래스 다이어그램 & 정의서 (Class)** — per component, a SEPARATE mermaid `classDiagram` + a
-   definition (each class: attributes with `type·constraint·default·nullable` · methods with FULL
-   signatures + semantics · responsibility · the invariants it enforces). One diagram per component.
+4. **클래스 다이어그램 & 정의서 (Class)** — per component, a SEPARATE mermaid `classDiagram` that
+   CARRIES the structure: every class with its attributes+types, its method/port signatures
+   (params + returns), and its relationships (inheritance/composition/dependency) + stereotypes. The
+   accompanying definition adds ONLY the UML-inexpressible residue per member — `constraint · default ·
+   nullable · validation`, method `semantics`, the class `responsibility`, and the `invariants it
+   enforces`. Do not restate the attribute/signature list in prose; do not leave a structural relation
+   out of the diagram. One diagram per component.
 5. **공통 (Shared / common)** — shared components and shared classes live in their OWN section with
    their own diagrams, referenced by the services/components that use them — NEVER duplicated inline
    per consumer.
@@ -30,17 +57,21 @@ Phase C implementer builds from the doc alone.
    separate top-level chapter): a mermaid `sequenceDiagram` or `flowchart` for that class's key
    method interaction / control flow (e.g. the Engine candle loop, the 1m trigger walk, the judgment
    pipeline, the write transaction).
-7. **DB 엔티티 (Database entities)** — as a mermaid `erDiagram` + a field definition table (each
-   field: `name · type · constraint · key · nullable · default`). Evidence SQLite and `backtest_db`
-   each get their own ER diagram.
+7. **DB 엔티티 (Database entities)** — as a mermaid `erDiagram` that CARRIES each entity's fields with
+   their `name · type` and primary/foreign `key`s plus relationship cardinality. The accompanying
+   field table adds ONLY what the ER notation cannot hold — `constraint · nullable · default ·
+   semantics` per field. Evidence SQLite and `backtest_db` each get their own ER diagram.
 
 ## Rules
 
 - **Top-down, no forward jumps.** The reader never opens another doc or scrolls to a later chapter to
   understand the current point. Big structure (service → component) precedes detail (class → method);
   any concept a detail needs was introduced above it.
-- **Diagram + definition always paired.** Every diagram is immediately followed by its definition
-  table/prose; a diagram without a definition, or a definition without its diagram, is incomplete.
+- **Diagram + residual prose always paired.** Every diagram is immediately followed by the prose that
+  supplies what the diagram cannot encode (constraints, defaults, formulas, thresholds, invariants,
+  semantics, rationale). A diagram with no residual prose (where residue exists), or prose that
+  restates the diagram or that hides structure the diagram should carry, is incomplete. UML-first
+  (above) governs the split.
 - **All UML in mermaid.** `classDiagram` / `sequenceDiagram` / `flowchart` / `erDiagram` / `graph`,
   in ` ```mermaid ` fences (top-level, never nested inside another fence). No ASCII art; no
   prose-only structure where a diagram is expected. Follow the `mermaid-conventions` skill.
@@ -48,8 +79,9 @@ Phase C implementer builds from the doc alone.
   services' components, or multiple components' classes, into a single diagram.
 - **Shared elements separated once.** Common components/classes are defined once in the shared
   section and referenced — not re-drawn per consumer.
-- **Composes with self-containment.** The definition tables carry the actual fields/signatures/values
-  in full. NO foreign-document label appears anywhere in the deliverable — not the architecture doc's
+- **Composes with self-containment.** The diagram (structure) + its residual prose (constraints,
+  defaults, formulas, thresholds, invariants, semantics) together carry the actual fields / signatures
+  / values in full. NO foreign-document label appears anywhere in the deliverable — not the architecture doc's
   `§N`/`#N`, not the dev_plan's `AN`/`BN`/`마이그N`, not `다이어그램 §N`. Use actual names + the design
   doc's own `§1`-`§5` numbers. The closing Traceability table names the guideline requirement it
   satisfies (e.g. "look-ahead prevention"), never labels it.

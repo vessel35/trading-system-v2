@@ -7,8 +7,9 @@ description: >
   and which dev_plan parts + architecture sections each owns; the 정합성-확인 규약 (설계 정합 + 리뷰
   게이트, parity is Phase C only); the TOP RULE that every Phase B deliverable is self-contained /
   standalone-implementable (the guideline is the STANDARD to absorb, never a reference the
-  implementer consults); the top-down diagram-driven document standard (제약사항·방향 first, then
-  service→component→class→sequence/flow, DB as ER, all UML in mermaid — references/design-doc-standard.md);
+  implementer consults); the top-down UML-first document standard (제약사항·방향 first, then
+  service→component→class→sequence/flow, DB as ER, structure in the mermaid diagram and prose only for
+  what UML cannot encode — references/design-doc-standard.md);
   the deferred-item checklist the doc left for detailed design (backtest_db
   meta fields §9.3, SQLite Entity fields §9.6, the port list §4.3, the trailing-parity tolerance
   §14/diagram 4); the 16 hard invariants every contract must preserve; the per-stage deliverable
@@ -80,10 +81,10 @@ guideline requirements they satisfy **BY NAME** (e.g. "look-ahead prevention", "
 backtest_db catalog tables"), NEVER by a foreign label like `§11.1` or `B12`. That table is for the
 compliance audit; naming the requirement (not labeling it) keeps even the provenance self-contained.
 
-## Detailed-design document standard (top-down, diagram-driven — the structure rule)
+## Detailed-design document standard (top-down, UML-first — the structure rule)
 
 Self-containment fixes *completeness*; this fixes *readability*. Every Phase B design doc is written
-TOP-DOWN and DIAGRAM-DRIVEN so the reader grasps the big structure first and never jumps to another
+TOP-DOWN and UML-FIRST so the reader grasps the big structure first and never jumps to another
 doc/chapter to follow the current point. Full standard: `references/design-doc-standard.md`. In short:
 
 - **Lead with 제약사항·방향 (Constraints & Direction).** State only the binding invariants, the design
@@ -94,8 +95,14 @@ doc/chapter to follow the current point. Full standard: `references/design-doc-s
 - **Separate:** one component diagram per service, one class diagram per component; shared
   components/classes in their own 공통 section (referenced, not re-drawn).
 - **DB entities as ER diagrams** (+ field definition tables).
-- **All UML in mermaid** (`classDiagram`/`sequenceDiagram`/`flowchart`/`erDiagram`/`graph`) — apply
-  the `mermaid-conventions` skill. The diagram + its definition table together ARE the full content.
+- **UML-first — the diagram is the primary representation.** Express the design IN the mermaid diagram
+  (`classDiagram`/`sequenceDiagram`/`flowchart`/`erDiagram`/`graph`, per `mermaid-conventions`); use
+  prose ONLY for what UML cannot encode. Attributes+types, method/port signatures, relationships+
+  cardinality, stereotypes, ER fields+keys, and interaction/flow order live INSIDE the diagram; prose
+  supplements ONLY the residue — constraints, defaults, nullability, formulas (expr·units·bounds),
+  thresholds + tuning source, enforced invariants, semantics, service/component responsibility, and
+  rationale. Never restate the diagram in prose; never hide structure the diagram could carry. The
+  diagram + its residual prose together ARE the full content.
 - **Doc ownership (dev_plan §4 outline):** the single doc's sections map to dev_plan parts —
   §1 서비스(B1)·§2 코드 트리(B2) = b-skeleton; §3.1-§3.3 컴포넌트(B3-B5) = b-components;
   §4.1-§4.3 core-lib 클래스(B6-B8) = b-corelib-classes; §4.4-§4.5 backtest-service 클래스(B9-B10) =
@@ -236,8 +243,8 @@ No nested triple-backtick fences. Diagrams use top-level ` ```mermaid ` fences (
 another fence). Use `BEGIN_JSON`/`END_JSON`, `BEGIN_SQL`/`END_SQL`, `BEGIN_PSEUDOCODE`/`END_PSEUDOCODE`
 markers for those blocks. Keep long JSON/SQL/pseudocode out of Markdown tables. Filenames,
 table/column/port/method names, and status values in inline backticks. Every design doc follows the
-top-down diagram-driven standard (§Detailed-design document standard), carries its full content inline
-(self-contained), uses NO foreign-document label (architecture §N / dev_plan AN·BN·마이그N / diagrams
+top-down UML-first standard (§Detailed-design document standard) — structure in the mermaid diagram,
+prose only for the residue — carries its full content inline (self-contained), uses NO foreign-document label (architecture §N / dev_plan AN·BN·마이그N / diagrams
 §N) — only its own §1-§5 numbers and actual names — and ends with a **Traceability** table mapping
 each design section to the guideline requirement it satisfies BY NAME, never by a foreign label.
 
