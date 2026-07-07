@@ -153,108 +153,34 @@ collector가 소유하던 관심사로, 저장소 중심 뷰에는 표시하지 
 
 ### §1.2 서비스 정의서
 
-각 서비스·저장소의 책임(무엇을 하는가)·경계(무엇을 하지 않는가)·소비(무엇에 의존하는가)·패키징(어떻게 배포·
-접근되는가)을 확정한다. 저장소는 책임·접근(읽기/쓰기)·경계로 기술한다.
+서비스·저장소의 정의를 두 표로 확정한다. 소비(의존)의 방향은 §1.1 다이어그램이 담고, 표는 각 요소의 유형·책임·
+경계(하지 않는 것)·패키징을 담는다. 표로 담기 어려운 규칙(변경 거버넌스)만 표 아래 문장으로 둔다.
 
-**`core-lib` (설치형 공유 패키지, import 이름 `core_lib`)**
+**서비스 정의**
 
-- 책임: 세 실행 모드가 공유하는 도메인 표준 — 값 타입·금액 정밀도, 82종 지표, 전략 판단 계약, 사이징·비용·실행
-  수식, 성과 평가·판정, 어댑터 경계(ports), 전략 Adaptee 생성·파라미터 해석 — 의 유일한 구현처.
-- 경계: 실행 드라이버가 아니다. 캔들 루프·데이터 읽기·결과 저장을 스스로 하지 않고, wall-clock·네트워크·파일
-  입출력을 갖지 않는다. 특정 DB에 직접 의존하지 않는다(레지스트리 접근도 주입 포트 경유). 어떤 서비스 코드도
-  import하지 않는다.
-- 소비: 없음(의존 그래프의 바닥). 내부에서는 `types`가 바닥이고 나머지 모듈이 그 위에 쌓인다.
-- 패키징: 디렉터리 `services/core-lib/`, `pyproject.toml`로 editable 설치(`pip install -e`) 가능한 단일 패키지
-  `core_lib`. 하이픈 없는 패키지명으로 네임스페이스 충돌과 `sys.path` 조작을 제거한다.
-- 변경 거버넌스(재드리프트 방지): 세 소비자(백테스트·signal·wallet)가 공유하므로, 통제 없는 변경이 "모두가
-  건드리고 아무도 소유하지 않는" 결합 허브로 퇴화하지 않게 세 규칙을 강제한다. 첫째, `core-lib` 변경이 포함된
-  커밋은 리뷰 게이트 대상에 항상 포함한다. 둘째, `core_lib` 밖에 표준 모듈(지표·실행 계산기 등)의 사본이 생기면
-  실패하는 저비용 재복제 가드 테스트(glob 검사 또는 import 계약)를 두어 복제 드리프트 재발을 원천 차단한다(CI
-  없이도 작동). 셋째, editable 설치(HEAD 추적)는 페이퍼까지만 허용하고, 실거래 전환 시 고정 버전 릴리스로 바꿔
-  전략 한 줄 수정이 즉시 실거래 경로에 반영되는 것을 막는다.
+| 요소 | 유형 | 책임 | 경계 (하지 않음) | 소비 (→ §1.1) | 패키징 |
+|---|---|---|---|---|---|
+| `core-lib` | 설치형 공유 패키지 | 도메인 표준(값 타입·금액 정밀도·82종 지표·전략 판단 계약·사이징·비용·실행 수식·성과 평가·판정·포트 경계·Adaptee 생성/파라미터 해석)의 유일한 구현처 | 실행 드라이버 아님(캔들 루프·읽기·저장·wall-clock·IO 없음); 특정 DB 직접 의존 없음(레지스트리도 주입 포트 경유); 서비스 코드 import 안 함 | 없음 — 의존 그래프의 바닥(내부 계층 방향은 §2.1 의존 다이어그램) | `services/core-lib/`, editable 설치 단일 패키지 `core_lib`(하이픈 없음 → 네임스페이스 충돌·`sys.path` 조작 제거) |
+| `backtest-service` | 신규 서비스 | `core_lib`만 import하는 결정적 실행 드라이버·입출력 오케스트레이터(사전등록·채번·워밍업 프리로드·캔들 루프·데이터 피드 push·체결·2계층 저장·상위 검증) | 전략 판단·지표·사이징·비용·실행 규칙 자체 미보유(전부 `core_lib` 호출); 라이브 인프라(큐·폴링·HTTP·상태 복구) 없음; 전략 파라미터 스키마·검증 미소유(run 설정만 소유) | `core-lib`(import); `crypto_data`·Evidence SQLite·`backtest_db`·`signal_db`(전부 포트 경유) | `services/backtest-service/`; `core-lib` 의존; 포트의 backtest 구현(어댑터) 소유 |
+| `signal-service` | 기존 서비스 (유지·채택) | 확정 캔들마다 지표 증분(O(1)) 직접 계산 + Adapter Manager로 Adaptee 생성·판단 호출 → `wallet-service` 큐로 신호 전달 | 이 설계 단계 미변경(채택 단계에서만 내부 구현→`core_lib` 치환, 동작 불변); 판정 루프 안 돎(라이브 Evidence는 연구 피드백만) | 채택 후 `core-lib`(import); `crypto_data`(읽기·지표 계산); `signal_db` | 기존 리포 서비스; 채택은 무중단 re-export shim |
+| `wallet-service` | 기존 서비스 (유지·채택) | 신호 큐 소비 → 사이징·실행·비용 호출로 체결·리스크·킬스위치; 체결·포지션·회계를 자기 운영 DB에 기록 | 이 설계 단계 미변경(채택 단계에서 체결 시점 즉시→다음 캔들 시가 전환, 회귀 ~1175건 필요); 라이브 인프라 백테스트로 미이관 | 채택 후 `core-lib`(import); `wallet_db` | 기존 리포 서비스; 채택은 re-export shim |
+| `OHLCV 수집기` | 내부 컴포넌트 | 거래소 확정 캔들 OHLCV를 `crypto_data`에 적재(확정 캔들마다 1행·무조건) | 지표 미생성(계산은 signal·backtest가 `core_lib`로); 진행 중 캔들 미적재(look-ahead 방지의 데이터 층 근거); 단일 심볼 Binance 선물만(Upbit 현물 범위 밖) | 거래소 REST·WebSocket(입력); `crypto_data`(쓰기); `config_db`(활성 심볼 읽기) | 외부 collector의 리포 내부 이관분; 과거 구간은 기존 backfill 재사용 + `crypto_data` 보존 연장(예: 2000일) |
 
-**`backtest-service` (신규 서비스)**
+**저장소 정의**
 
-- 책임: `core_lib`만 import하는 결정적 실행 드라이버이자 입출력 오케스트레이터. run을 사전등록·채번하고, 워밍업을
-  프리로드하며, 캔들 루프를 돌려 매 확정 캔들의 데이터를 데이터 피드 포트로 확보해 전략 판단에 넘기고, 반환 신호로
-  체결을 돌린 뒤, 상세 Evidence와 수행 결과 메타를 각각 SQLite·`backtest_db`에 기록하고, 단일 run 밖의 상위
-  검증(표본 내/외 분리·워크포워드·몬테카를로·확률적 샤프·파라미터 스윕)을 오케스트레이션한다.
-- 경계: 전략 판단 로직·지표 수식·사이징·비용·실행 규칙을 자기 안에 두지 않는다(전부 `core_lib` 호출). 라이브
-  인프라(큐·폴링·HTTP·상태 복구)를 갖지 않는다. 전략 파라미터 스키마·검증은 소유하지 않는다(`core_lib`의
-  `StrategyConfig` 소관) — run 설정(데이터·비용·거래소 규칙·실행/리스크·스윕·지표 계산 모드·프로파일 선택)만 소유.
-- 소비: `core-lib`(import), `crypto_data`(DataFeed 포트로 과거 OHLCV·funding 읽기), Evidence SQLite(EvidenceSink
-  포트로 쓰기), `backtest_db`(CatalogStore 포트로 카탈로그 쓰기·비교 읽기), `signal_db`(주입 포트로 Adaptee
-  레지스트리 조회).
-- 패키징: 디렉터리 `services/backtest-service/`, `core-lib`를 의존성으로 갖는 새 서비스. 포트의 backtest 구현
-  (어댑터)을 소유한다.
+| 저장소 | 유형 | 책임 | 접근 (쓰기/읽기) | 경계 |
+|---|---|---|---|---|
+| `crypto_data` | 공유·읽기 | 확정 캔들 OHLCV(1분 적재, 상위 TF는 연속 집계 뷰) + funding rate 시계열 | `OHLCV 수집기` 쓰기; `backtest-service`(DataFeed 포트)·`signal-service` 읽기; 백테스트 미기록 | crypto-data-hub가 생성·소유하는 공유 DB; 백테스트 결과 미저장; 전략 TF와 별도로 1분 트리거 캔들 보유(1분 집행 피드 사용은 §4.4 확정) |
+| `backtest_db` | 신규·전용 메타 | run 요약·카탈로그·사전등록·태그 등 run 메타(검색·비교·집계 근거) | `backtest-service`(CatalogStore 포트) 쓰기, Harness 읽기; 조회용 읽기 전용 역할을 writer와 분리 | 운영 DB와 분리(연구 데이터 오염 방지); 상세 Evidence 미보유; 이름·writer 계승·스키마 신규·읽기 전용 역할 신설(필드는 §5.2) |
+| `signal_db` | 기존 + 레지스트리 | `signal-service` 운영 DB + 신규 구현 Adaptee 목록 레지스트리 | `signal-service` 쓰기; Adapter Manager가 주입 포트로 등록·조회(`backtest-service`도 주입 포트로 조회) | `core_lib` 직접 의존 없음(주입 포트 경유); 레지스트리 스키마는 §5.1 |
+| Evidence SQLite | run별 상세 | run별 캔들 신호·주문·체결·포지션·손익·지표 스냅샷(forensics·재현 원천) | `backtest-service`(EvidenceSink 포트) 쓰기; 대시보드·연구 읽기; 라이브는 연구 피드백용만 | run 자기완결(원천 스냅샷 로컬 사본); 운영 DB 미저장; 결정성 해시=정렬 행 정규화 직렬화(파일 바이트 아님)(필드는 §5.3) |
 
-**`signal-service` (기존 서비스, 유지·채택)**
-
-- 책임: 확정 캔들 마감마다 지표를 증분(O(1))으로 직접 계산하고, 각 엔진이 Adapter Manager로 전략 Adaptee를 생성해
-  확정 캔들마다 판단을 호출해 신호를 만들어 `wallet-service` 큐로 전달한다.
-- 경계: 이 설계 단계에서는 손대지 않는다(읽기 전용 참조·프로덕션 유지). 채택 단계에서만 내부 지표·전략 구현을
-  `core_lib` import로 치환하며, 그때도 신호 생성 동작은 불변이다. 백테스트 판정 루프를 돌지 않는다(라이브 Evidence를
-  연구로 피드백만 한다).
-- 소비: 채택 후 `core-lib`(import), `crypto_data`(확정 캔들 OHLCV 읽기·지표 직접 계산), `signal_db`(자기 운영 DB +
-  Adaptee 레지스트리).
-- 패키징: 기존 리포의 서비스. 채택은 무중단 re-export shim으로 진행한다.
-
-**`wallet-service` (기존 서비스, 유지·채택)**
-
-- 책임: 신호 큐를 소비해 사이징·실행·비용 호출로 체결·리스크·킬스위치를 수행하고, 체결·포지션·회계를 자기 운영
-  DB에 기록한다.
-- 경계: 이 설계 단계에서는 손대지 않는다. 채택 단계에서 페이퍼 체결·사이징·비용·트레일링을 `core_lib` 단일 구현
-  호출로 바꾸고 체결 시점을 신호 캔들 즉시 체결에서 다음 캔들 시가로 전환한다 — 이 변경은 기존 단위 테스트(약
-  1175건) 회귀 검증을 요한다. 라이브 인프라는 백테스트로 넘어가지 않는다.
-- 소비: 채택 후 `core-lib`(import), 자기 운영 DB(`wallet_db`).
-- 패키징: 기존 리포의 서비스. 채택은 re-export shim으로 진행한다.
-
-**`OHLCV 수집기` (내부 컴포넌트)**
-
-- 책임: 거래소에서 확정 캔들 OHLCV를 받아 `crypto_data`에 적재한다(확정 캔들마다 1행·무조건, 값 변화 시에만 넣는
-  방식이 아니다).
-- 경계: 지표를 만들지 않는다(지표 계산은 `signal-service`·`backtest-service`가 `core_lib`로 직접 수행). 진행
-  중(미마감) 캔들은 적재하지 않는다 — look-ahead 방지의 데이터 층 근거다. 1차 대상은 단일 심볼 Binance 선물
-  경로이며 현물(Upbit) 경로는 범위 밖이다.
-- 소비: 거래소 REST·WebSocket(입력), `crypto_data`(쓰기), `config_db`(활성 심볼 읽기).
-- 패키징: 리포 밖 외부 collector를 리포 내부로 이관한 컴포넌트. 과거 구간 확보는 기존 backfill 경로를 재사용하고,
-  `crypto_data`의 보존 기간을 늘려(예: 2000일) 백테스트 데이터가 삭제되지 않게 한다.
-
-**`crypto_data` (저장소 — 공유·읽기)**
-
-- 책임: 확정 캔들 OHLCV와 funding rate 시계열의 공유 저장소. 1분봉을 적재하고 상위 타임프레임(5분~1일)은 1분
-  베이스에서 파생한 연속 집계 뷰로 제공한다.
-- 접근: `OHLCV 수집기`가 쓰고, `backtest-service`(DataFeed 포트)와 `signal-service`가 읽는다. 백테스트는 쓰지
-  않는다.
-- 경계: crypto-data-hub 인프라가 생성·소유하는 공유 DB다. 백테스트는 이 DB에 백테스트 결과를 넣지 않는다. 전략
-  타임프레임 캔들과 별개로 트리거 평가용 1분 캔들을 함께 보유하며, 1분 집행 피드의 실제 사용은 Engine 설계(§4.4)가
-  확정한다.
-
-**`backtest_db` (저장소 — 신규·전용 메타)**
-
-- 책임: run 요약·카탈로그·사전등록·태그 등 백테스트 run 메타의 전용 저장소. run을 검색·비교·집계하는 근거다.
-- 접근: `backtest-service`가 CatalogStore 포트로 쓰고 Harness가 카탈로그를 읽어 run 집합을 비교한다. 대시보드
-  조회용 읽기 전용 역할을 writer와 분리해 둔다.
-- 경계: 운영 DB(wallet·signal)와 분리된 별도 DB로, 연구 데이터가 운영 서비스 DB를 오염시키지 않게 한다. 상세
-  Evidence는 여기 두지 않는다(그것은 run별 SQLite). DB 이름·writer 역할은 기존 프로비저닝을 계승하되 스키마는
-  신규이며, 읽기 전용 역할은 신설한다(테이블·필드는 §5.2에서 확정).
-
-**`signal_db` (저장소 — 기존 + 레지스트리 추가)**
-
-- 책임: `signal-service`의 기존 운영 DB이자, 새로 추가되는 구현 Adaptee 목록 레지스트리의 저장처.
-- 접근: `signal-service`가 쓰고, Adapter Manager가 주입 포트를 통해 레지스트리를 등록·조회한다(`backtest-service`도
-  주입 포트로 조회).
-- 경계: `core_lib`는 이 DB에 직접 의존하지 않는다 — 레지스트리 접근은 서비스가 제공하는 주입 포트 경유다.
-  레지스트리 스키마는 §5.1에서 확정한다.
-
-**Evidence SQLite (저장소 — run별 상세)**
-
-- 책임: 한 run이 남긴 모든 상세 기록 — 캔들별 신호·주문·체결·포지션·손익·지표 스냅샷 — 을 담는 run별 독립 SQLite
-  파일. forensics(원인 규명)의 원천이며 결정성·재현의 근거다.
-- 접근: `backtest-service`가 EvidenceSink 포트로 쓴다. 대시보드·연구가 읽는다. 라이브는 자기 Evidence를 연구
-  피드백용으로만 남긴다.
-- 경계: run 자기완결이다(run 실행에 쓴 원천 스냅샷을 로컬 사본으로 포함). 운영 DB에 넣지 않는다. 결정성 해시는
-  파일 바이트가 아니라 정렬된 행의 정규화 직렬화로 산출한다(기본 13 + 확장 7 Entity·필드는 §5.3에서 확정).
+**표로 담기 어려운 규칙 (문장).** `core-lib`는 세 소비자(백테스트·signal·wallet)가 공유하므로, 통제 없는 변경이
+"모두가 건드리고 아무도 소유하지 않는" 결합 허브로 퇴화하지 않게 **변경 거버넌스 3규칙**을 강제한다. 첫째,
+`core-lib` 변경이 포함된 커밋은 리뷰 게이트 대상에 항상 포함한다. 둘째, `core_lib` 밖에 표준 모듈(지표·실행 계산기
+등)의 사본이 생기면 실패하는 저비용 재복제 가드 테스트(glob 검사 또는 import 계약)를 두어 복제 드리프트 재발을
+원천 차단한다(CI 없이도 작동). 셋째, editable 설치(HEAD 추적)는 페이퍼까지만 허용하고, 실거래 전환 시 고정 버전
+릴리스로 바꿔 전략 한 줄 수정이 즉시 실거래 경로에 반영되는 것을 막는다.
 
 ---
 
@@ -345,10 +271,37 @@ services/core-lib/
     test_no_reduplication.py         #   재복제 가드 — core_lib 밖에 표준 모듈(지표·실행 계산기 등) 사본이 생기면 실패(변경 거버넌스 규칙 2, CI 없이 작동)
 ```
 
-`types`가 의존 그래프의 바닥이고 `indicators`·`sizing`·`costs`·`eval`·`ports`는 `types`만 참조한다. `strategy`는
-`types`와 지표 값을, `execution`은 `types`와 `costs`를, `strategy/manager.py`(Adapter Manager)는 `strategy`·
-`config.py`와 레지스트리 주입 포트를, `strategy/config.py`(StrategyConfig)는 `strategy`(파라미터 스키마 조회)를
-참조한다. 구체 방향과 클래스 계약은 §3.1·§4에서 확정한다.
+`core_lib` 내부 모듈의 의존 방향(한 방향, 역참조 없음)을 아래 다이어그램이 확정한다. 화살표는 "참조한다(의존)"를
+뜻하고 `types`가 바닥이다. 클래스 계약과 컴포넌트 인터페이스는 §3.1·§4에서 확정한다.
+
+```mermaid
+flowchart TD
+    TYPES["types (바닥)"]
+    IND["indicators"]
+    SIZ["sizing"]
+    CST["costs"]
+    EVAL["eval"]
+    PORT["ports"]
+    STRAT["strategy · base (판단 계약)"]
+    EXE["execution"]
+    MGR["strategy · manager (Adapter Manager)"]
+    CFG["strategy · config (StrategyConfig)"]
+    REG(["레지스트리 주입 포트"])
+
+    IND --> TYPES
+    SIZ --> TYPES
+    CST --> TYPES
+    EVAL --> TYPES
+    PORT --> TYPES
+    STRAT --> TYPES
+    STRAT -->|지표 값 소비| IND
+    EXE --> TYPES
+    EXE --> CST
+    MGR --> STRAT
+    MGR --> CFG
+    MGR --> REG
+    CFG --> STRAT
+```
 
 ### §2.2 `backtest-service` 트리 (신규 서비스)
 
