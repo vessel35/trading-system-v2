@@ -105,8 +105,10 @@
 
 최상위 뷰다. 신규로 짓는 것(공유 라이브러리 `core-lib`·`backtest-service`), 유지하며 채택하는 것(`signal-service`·
 `wallet-service`), 데이터를 적재하는 것(`OHLCV 수집기`), 그리고 저장소 넷(`crypto_data`·`backtest_db`·`signal_db`·
-Evidence SQLite)이 어떻게 의존하는지를 보인다. 화살표는 의존·데이터 흐름 방향이며, 서비스→`core_lib` 한 방향과
-서비스→저장소 접근만 존재한다.
+Evidence SQLite)이 어떻게 의존하는지를 보인다. 화살표는 두 종류다 — 실선 `import`는 서비스→`core_lib` 의존
+(한 방향)이고, 라벨에 포트명이 붙은 화살표는 서비스→저장소 접근(포트 경유)이다. 점선은 채택 단계에 성립하는
+의존이다. `core_lib` 내부의 순수 import 의존만 따로 보는 그래프는 §2.1에 있다(그 그래프의 화살표는 import/참조
+한 종류뿐).
 
 ```mermaid
 flowchart TD
@@ -182,6 +184,12 @@ collector가 소유하던 관심사로, 저장소 중심 뷰에는 표시하지 
 원천 차단한다(CI 없이도 작동). 셋째, editable 설치(HEAD 추적)는 페이퍼까지만 허용하고, 실거래 전환 시 고정 버전
 릴리스로 바꿔 전략 한 줄 수정이 즉시 실거래 경로에 반영되는 것을 막는다.
 
+**채택 후 포트 경계 (문장).** 위 정의 표는 `signal-service`가 `crypto_data`를 읽고 `wallet-service`가 `wallet_db`에
+쓰는 것으로 적었지만, 이는 요약이다. 두 서비스는 채택 단계에서 백테스트와 **같은 포트 계약의 반대편**을 채운다 —
+각자의 live/paper 포트 구현(DataFeed 실시간 스트림·Broker 거래소 API·Clock 실시계·CostModel 실측·EvidenceSink
+라이브)을 자기 서비스 안에 둔다. 그래야 "환경 차이는 포트로만 주입한다"가 backtest뿐 아니라 paper·live에도
+성립한다. 이 구현 자체는 이 판이 아니라 채택 설계(§3.3·부록)에서 그린다.
+
 ---
 
 ## §2 프로젝트 코드 트리
@@ -190,12 +198,20 @@ collector가 소유하던 관심사로, 저장소 중심 뷰에는 표시하지 
 `services/`와, 배포 시 DB·역할을 초기화하는 `init-scripts/` 루트가 `services/`와 형제로 놓인다. 각 경로에 한 줄
 역할을 붙였고, 트리 노드는 뒤에서 그릴 컴포넌트(§3)와 대응한다.
 
-대응은 대부분 1:1이되 두 곳은 한 디렉터리가 여러 컴포넌트를 담는다. `core_lib/` 디렉터리 대부분은 §3.1의 한
-컴포넌트에 1:1로 대응하지만, `strategy/`는 세 컴포넌트를 담고(부속 `profile.py`·`trailing/`을 낀 `base.py`가
-전략 판단 계약, `manager.py`가 Adapter Manager, `config.py`가 StrategyConfig), `adaptees/`는 플러그인 전략
-위치라 플랫폼 컴포넌트가 아니다. `backtest-service`에서는 `config/`·`engine/`·`harness/`가 각각 한 컴포넌트이고
-`adapters/`는 §3.2가 그릴 여섯 포트 어댑터를 담는다. 그래서 §3.1은 core-lib 컴포넌트 열 종을, §3.2는
-Engine·ConfigLayer·Harness에 여섯 어댑터를 더해 그린다.
+대응은 대부분 1:1이되 두 곳(`strategy/`·`adapters/`)은 한 디렉터리가 여러 컴포넌트를 담고, `adaptees/`는 플랫폼
+컴포넌트가 아니다. 아래 표가 디렉터리 → §3 컴포넌트 대응과 개수를 확정한다.
+
+| 경로 | §3 컴포넌트 | 개수 |
+|---|---|---|
+| `core_lib/{types, indicators, sizing, costs, execution, ports, eval}` | 각 동명 컴포넌트 | 각 1 (합 7) |
+| `core_lib/strategy/` (`base`+`profile`+`trailing` / `manager` / `config`) | 전략 판단 계약 · Adapter Manager · StrategyConfig | 3 |
+| `core_lib/strategy/adaptees/` | 참조 플러그인 전략 | 0 (플랫폼 컴포넌트 아님) |
+| **§3.1 core-lib 소계** | | **10** |
+| `backtest_service/{engine, config, harness}` | Engine · ConfigLayer · Harness | 각 1 (합 3) |
+| `backtest_service/adapters/` | 포트 어댑터(6 대표 + `strategy_registry`) | 7 |
+| **§3.2 backtest-service 소계** | | **3 + 어댑터 7** |
+
+그래서 §3.1은 core-lib 컴포넌트 열 종을, §3.2는 Engine·ConfigLayer·Harness에 일곱 포트 어댑터를 더해 그린다.
 
 ### §2.1 `core-lib` 트리 (설치형 공유 패키지)
 
@@ -229,14 +245,14 @@ services/core-lib/
       contracts.py                   #   확정 캔들 전용 계약 강제(close_time ≤ 판단 시각)
     strategy/                        # [컴포넌트×3] 전략 판단 계약(base.py) + Adapter Manager(manager.py) + StrategyConfig(config.py)
       base.py                        #   StrategyAdapter(typing.Protocol) — 전략 판단 계약(analyze·metadata·파라미터 스키마 선언)
-      registry.py                    #   Adaptee 등록 규약(구현 목록) — Adapter Manager(manager.py) 소관
+      registry.py                    #   in-process 플러그인(Adaptee) 등록·조회 규약 — Adapter Manager 소관; 외부 signal_db 구현 카탈로그와 별개(그건 ports/strategy_registry.py)
       factory.py                     #   Adaptee 생성 규약 — Adapter Manager(manager.py) 소관
-      manager.py                     #   Adapter Manager — Adaptee 생성(Factory)·lifecycle·레지스트리(주입 포트로 signal_db)
+      manager.py                     #   Adapter Manager — Adaptee 생성(Factory)·lifecycle; 외부 구현 카탈로그는 ports/strategy_registry.py(주입 포트)로 signal_db 등록·조회
       config.py                      #   StrategyConfig — 전략 파라미터 해석·검증·직렬화·UI JSON Schema 노출
       profile.py                     #   전략 프로파일 스키마(family·기대 승률/손익비 범위·tail_shape·성숙도 등) — 판단 계약 부속
       trailing/                      #   ATR 트레일링 표준 위치 — 판단 계약 부속(첫 검증 스코프 유보; 재도입 시 단일 표준으로 통합·파리티 확정)
         trailing_stop.py             #     트레일링 스탑 순수 함수 계산기(Adaptee가 상속 아닌 호출)
-      adaptees/                      #   구현 전략(Adaptee) 위치 — 플러그인, 플랫폼 컴포넌트 아님; 진입·청산 엣지는 각 Adaptee 소유(범위 밖), 레지스트리로 등록
+      adaptees/                      #   구현 전략(Adaptee) 위치 — 코어 계약 거버넌스와 별도 관리되는 첫 검증 참조 플러그인(플랫폼 컴포넌트 아님); 진입·청산 엣지는 각 Adaptee 소유(범위 밖), 플러그인 레지스트리로 등록
         vessel_*.py                  #     첫 파이프라인 검증용 Vessel 계열 Adaptee(신규 구현, 트레일링 없이); 터틀 진입 전략은 만들지 않음
     sizing/                          # [컴포넌트] 거래당 위험 규율과 사이징 인스턴스
       risk_money.py                  #   보편 사이징: 수량=(risk_per_trade×Equity)/손절거리, 1R≤1%, 노출 한도, RoR 연동
@@ -253,13 +269,15 @@ services/core-lib/
       matcher.py                     #   결정적 체결 규칙(fill_timing·다음 캔들 시가·트리거·동시 터치 우선·갭·수량 절삭)
       position_book.py               #   포지션 갱신·가중평균·reduce_only·청산 판정·최초 체결 캔들 자기검사 회피
       accounting.py                  #   cash+position=equity 항등식·비용 1회 차감
-    ports/                           # [컴포넌트] 환경별 관심사의 어댑터 경계(전부 ABC; 구현은 서비스가 주입) — 대표 여섯 종, 최종 포트 목록은 §3.2에서 확정
+      normalizer.py                  #   float→Decimal 단일 변환·quantize 관문(공유 코드) — Broker.submit()이 호출, 어댑터별 캐스팅 금지(불변식: 단일·동일 캐스트)
+    ports/                           # [컴포넌트] 환경별 관심사의 어댑터 경계(전부 ABC; 구현은 서비스가 주입) — 대표 포트 + Adaptee 레지스트리 접근 포트, 최종 목록은 §3.2에서 확정
       data_feed.py                   #   DataFeed ABC: candles(up_to 경계)·funding·mark_price
-      broker.py                      #   Broker ABC: submit(order)→Fill·open_orders·cancel (Decimal 단일 변환 관문 위치)
+      broker.py                      #   Broker ABC: submit(order)→Fill·open_orders·cancel; submit()에서 core_lib.execution.normalizer(공유)를 호출해 Decimal 단일 변환 — 어댑터별 캐스팅 금지
       clock.py                       #   Clock ABC: now·advance(wall-clock 금지)
       cost_model.py                  #   CostModel ABC: fee·slippage·funding_rate·liq_params(값 주입)
       evidence_sink.py               #   EvidenceSink ABC: record(entity)·finalize(run)
       catalog_store.py               #   CatalogStore ABC: save_prereg·register·upsert_summary
+      strategy_registry.py           #   Adaptee 구현 카탈로그 접근 ABC — 외부 signal_db 등록·조회(주입 포트); core_lib은 특정 DB에 직접 의존 안 함
     eval/                            # [컴포넌트] 성과 수식 표준 1곳 + 판정 3단계
       metrics.py                     #   성과 지표 수식(일간 리샘플 후 √365, Sortino 분모 전체 N, SQN √min(N,100), MDD 등)
       integrity.py                   #   무결성 검사(회계·시점·비용 1회·결정성·Evidence 완성도)
@@ -272,7 +290,11 @@ services/core-lib/
 ```
 
 `core_lib` 내부 모듈의 의존 방향(한 방향, 역참조 없음)을 아래 다이어그램이 확정한다. 화살표는 "참조한다(의존)"를
-뜻하고 `types`가 바닥이다. 클래스 계약과 컴포넌트 인터페이스는 §3.1·§4에서 확정한다.
+뜻하고 `types`가 바닥이다. `ports`·`eval`은 core_lib 안에서 `types`만 참조하는 잎(leaf)이며, 이들의 소비자는
+`backtest-service`의 Engine 등 서비스 계층(§1.1의 서비스→core_lib 의존)이라 이 내부 다이어그램에는 나타나지 않는다.
+`MGR`(Adapter Manager)이 참조하는 `REG`는 `ports/strategy_registry.py` 접근 포트(ABC)이며, 구체 어댑터는 서비스
+(backtest·signal)가 주입한다 — 그래서 `core_lib`은 `signal_db`에 직접 의존하지 않는다. 클래스 계약과 컴포넌트
+인터페이스는 §3.1·§4에서 확정한다.
 
 ```mermaid
 flowchart TD
@@ -286,7 +308,7 @@ flowchart TD
     EXE["execution"]
     MGR["strategy · manager (Adapter Manager)"]
     CFG["strategy · config (StrategyConfig)"]
-    REG(["레지스트리 주입 포트"])
+    REG(["ports · strategy_registry<br/>Adaptee 카탈로그 주입 포트"])
 
     IND --> TYPES
     SIZ --> TYPES
@@ -317,13 +339,14 @@ services/backtest-service/
       run_config.py                  #   run 설정 pydantic 스키마·검증(OHLCV·funding 소스/구간, CostModel 값, 거래소 규칙, 실행/리스크, 파라미터 sweep, 지표 계산 모드, 프로파일 선택); 전략 스키마·검증은 제외(core_lib.StrategyConfig 소관)
     engine/                          # [컴포넌트] Engine — 결정적 실행 드라이버·입출력 오케스트레이터
       engine.py                      #   캔들 루프·look-ahead 순서·데이터 피드 push·체결·저장·eval 호출; Adapter Manager로 Adaptee 생성 (캔들 루프·집행 시퀀스는 §4.4)
-    adapters/                        # [컴포넌트×6] core_lib.ports 여섯 ABC의 backtest 구현(어댑터) — 대표 여섯 종, 최종 목록은 §3.2에서 확정
+    adapters/                        # [컴포넌트×7] core_lib.ports ABC의 backtest 구현(어댑터) — 여섯 대표 포트 + strategy_registry(레지스트리 접근); 최종 목록은 §3.2에서 확정
       data_feed.py                   #   DataFeed 구현: crypto_data 과거 OHLCV·funding 공급, up_to 이후 캔들 미노출
-      broker.py                      #   Broker 구현: 결정적 시뮬 체결 + CostModel; Decimal 단일 변환 관문
+      broker.py                      #   Broker 구현: 결정적 시뮬 체결 + CostModel; core_lib.execution.normalizer(공유)를 통과 — 어댑터 자체 캐스팅 없음
       clock.py                       #   Clock 구현: 시뮬 캔들 시각(결정적, wall-clock 금지)
       cost_model.py                  #   CostModel 구현: 보수적 주입값·과거 실측 펀딩 rate
       evidence_sink.py               #   EvidenceSink 구현: run별 SQLite 상세 기록
       catalog_store.py               #   CatalogStore 구현: backtest_db 카탈로그 메타 기록·조회
+      strategy_registry.py           #   strategy_registry 구현: signal_db Adaptee 카탈로그 등록·조회(backtest 측 주입 어댑터)
     harness/                         # [컴포넌트] Harness — 단일 run 밖 상위 검증 오케스트레이션
       harness.py                     #   표본 내/외 분리·워크포워드·몬테카를로·확률적 샤프·파라미터 스윕(카탈로그 비교)
   tests/                             # 패키지 테스트 스캐폴드(포트 어댑터·Engine 루프·결정성)
