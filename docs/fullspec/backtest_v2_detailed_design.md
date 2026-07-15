@@ -8,7 +8,7 @@
 
 이 문서는 최상위 구조 — 서비스 뷰(§1)·프로젝트 코드 트리(§2) — 와 문서 전체의 읽기 지도, 그 아래 컴포넌트
 뷰(§3, 서비스별 컴포넌트 다이어그램·정의서)에 더해, 공유 라이브러리 `core-lib`의 클래스 뷰를 확정한다 — 값
-타입과 82종 지표(§4.1), 전략을 끼우는 계약과 파라미터 해석 시퀀스(§4.2), 체결·비용·사이징·포트와 판정
+타입과 지표(§4.1), 전략을 끼우는 계약과 파라미터 해석 시퀀스(§4.2), 체결·비용·사이징·포트와 판정
 플로우(§4.3). 컴포넌트마다 클래스 다이어그램과 정의서를 두고, 시퀀스·플로우는 그 정의서 안에 둔다.
 
 ---
@@ -792,7 +792,7 @@ flowchart TD
 
 이 절이 확정하는 것은 공유 라이브러리 `core-lib`의 클래스이고, 세 묶음으로 나뉜다.
 
-- **§4.1 기반** — 세 실행 모드가 공유하는 값 타입(`types`)과 82종 지표 계산 표준(`indicators`). 의존 그래프의
+- **§4.1 기반** — 세 실행 모드가 공유하는 값 타입(`types`)과 지표 계산 표준(`indicators`). 의존 그래프의
   바닥이라 나머지 묶음이 모두 이 위에 얹힌다.
 - **§4.2 전략** — 전략을 끼우는 계약(`StrategyAdapter`), 그 자리에 꽂힌 전략을 만드는 생성기(`Adapter Manager`),
   파라미터를 해석·검증하는 곳(`StrategyConfig`). 생성·해석 시퀀스를 정의서 안에 둔다.
@@ -811,7 +811,7 @@ flowchart TD
 ## §4.1 기반 클래스 — 타입·지표
 
 **두 컴포넌트의 자리.** 둘 다 의존 그래프의 바닥이다. `types`는 아무것도 참조하지 않고 세 실행 모드가 공유하는
-값 타입과 금액 정밀도를 정의하며, `indicators`는 `types`의 `Candle`만 참조해 82종 지표를 계산한다.
+값 타입과 금액 정밀도를 정의하며, `indicators`는 `types`의 `Candle`만 참조해 등록된 지표를 계산한다.
 
 **여기서 강제하는 불변식.**
 
@@ -820,8 +820,8 @@ flowchart TD
   건너뛴 값이 눈에 띈다.
 - **look-ahead 배제** — 지표는 확정 캔들 전용 계약(`close_time ≤ 판단 시각`)을 통과해야만 계산된다.
 
-**구현 표준 참조(구현까지 유지).** 이 설계서는 82종 지표의 목록·분류·파라미터·워밍업 규약·활성 조건과 모든 성과
-수식·통과선·리스크 규율을 아래 본문에 전부 적어 자기완결로 둔다. 다만 82종 각 지표의 **닫힌 형태 계산식**(예:
+**구현 표준 참조(구현까지 유지).** 이 설계서는 지표의 목록·분류·파라미터·워밍업 규약·활성 조건과 모든 성과
+수식·통과선·리스크 규율을 아래 본문에 전부 적어 자기완결로 둔다. 다만 개별 지표의 **닫힌 형태 계산식**(예:
 Ehlers 필터 계수, Wilder 평활 상수, T3 볼륨 팩터)만은 그 양이 방대하고 이견 고정이 계산 명세의 소관이므로,
 지표별 최종 계산식은 **지표 계산 명세 표준**을 계산 권위로 삼아 구현 단계까지 그대로 참조한다. 이 한 표준을 제외한
 모든 설계 결정(목록·필드·계약·플로우·수식·임계값)은 이 문서 안에 있다.
@@ -1266,9 +1266,15 @@ enqueue에만 쓰며, 백테스트 판단 경로는 이 ENUM을 쓰지 않는다
 
 ### §4.1.2 `indicators` 컴포넌트
 
-82종 지표의 유일 구현처다. 다이어그램은 지표 명세 `IndicatorSpec`, 등록·조회 `IndicatorRegistry`, 증분 상태
+지표의 유일 구현처다. 다이어그램은 지표 명세 `IndicatorSpec`, 등록·조회 `IndicatorRegistry`, 증분 상태
 `IndicatorState`, look-ahead 계약 `contracts`, 공용 프리미티브 `primitives`와 그 관계를 담는다. 한 지표는 벡터화
 경로(`compute_vectorized`)와 증분 경로(`IndicatorState.update`) 두 가지를 가지며, 둘의 값은 일치해야 한다.
+
+**이 컴포넌트가 고정하는 것은 지표 목록이 아니라 관리 방식이다.** 어떤 지표든 예외 없이 같은 길을 지난다 —
+`IndicatorSpec`으로 `registry`에 등록되고, 벡터화·증분 두 경로를 갖고, 확정 캔들 계약(`close_time ≤ 판단 시각`)을
+통과하고, 같은 프리미티브 위에서 조립되며, 같은 seed·워밍업 규약을 따른다. 그래서 **지표를 더하거나 빼는 일은
+registry 항목이 늘고 주는 것일 뿐 이 설계를 바꾸지 않는다.** 아래 목록은 지금까지 수집한 것이고 그 개수는 현재
+상태일 뿐이니, 개수를 계약으로 읽으면 안 된다.
 
 ```mermaid
 classDiagram
@@ -1337,7 +1343,7 @@ classDiagram
 - **필드 의미**
     - `version`·`pinned_impl` — 이견 있는 계산의 채택 구현을 고정한다. 재현·정합의 근거다.
     - `min_history` — 그 지표가 유효값을 내기 전에 필요한 최소 캔들 수.
-    - `category` — 아래 82종 목록의 계열(추세·모멘텀 등).
+    - `category` — 아래 등록 지표 목록의 계열(추세·모멘텀 등).
     - `required_inputs` — OHLCV 외에 필요한 입력 채널. 시장폭 지표만 해당한다.
 - **메서드 의미**
     - `compute_vectorized` — 전 구간을 한 번에 계산한다.
@@ -1355,7 +1361,7 @@ classDiagram
 - **계산 대상 모드**
     - `auto`(기본) — 활성 전략이 선언한 필요 지표만 계산한다. 성능 기본값이다.
     - `explicit` — 명시 리스트를 계산한다. 전략 필요분에 손실원인 탐색용 추가 지표를 더한 집합이다.
-    - `all` — 82종 전량을 계산한다. 전면 스캔용이다.
+    - `all` — 등록된 지표 전량을 계산한다. 전면 스캔용이다.
 - **계산 전 검증**
     - 요청 지표·파라미터가 등록돼 있는가.
     - 워밍업(`min_history`)이 확보됐는가.
@@ -1384,17 +1390,19 @@ look-ahead 배제 계약(모듈 수준).
 
 공용 계산 단위(모듈 수준).
 
-- **책임** — 82종 지표가 이 위에서 조립되도록 중복 계산을 한 곳에 모은다.
+- **책임** — 모든 지표가 이 위에서 조립되도록 중복 계산을 한 곳에 모은다.
 - **구성** — 이동평균 4종(단순·지수·선형가중·Wilder 평활), True Range, 대표 가격(typical price), 표준편차,
   구간 최고·최저, 누적, 변화율, 선형회귀.
 
-#### 82종 지표 목록(확정)
+#### 등록 지표 목록 (현재 수집분)
 
-표준 골격은 이식 원천 목록만 두었고 "미리 고정하지 않는다"고 했던 지표 집합을 이 절이 82종으로 확정한다. 아래
-표가 그 전량이며, 무엇을 1종으로 셌는지는 표 다음의 첫 항목이 밝힌다. 각 지표의 닫힌 형태 계산식은 지표 계산
-명세 표준이 계산 권위로 고정한다(구현까지 유지 참조).
+**개수는 계약이 아니다.** 아래 표는 지금까지 수집한 지표를 정리한 것이다. 규칙이 불명확해 빠질 것도 있고 새
+지표가 들어올 수도 있으므로, 총수는 현재 상태를 적은 것이지 고정값이 아니다. 고정하는 것은 위에 적은 **공통 관리
+방식**이며, 목록의 증감은 `registry` 항목의 증감일 뿐 설계를 바꾸지 않는다. 그래서 구현자가 맞춰야 할 것은 "몇
+개를 만들었나"가 아니라 "**모든 지표가 같은 방식으로 등록·계산되는가**"다. 각 지표의 닫힌 형태 계산식은 지표
+계산 명세 표준이 계산 권위로 고정한다(구현까지 유지 참조).
 
-| 계열 | 지표 (개수) |
+| 계열 | 지표 (현재 개수) |
 |---|---|
 | 추세·이동평균 (10) | DEMA, TEMA, T3, HMA, ZLEMA, ALMA, KAMA, VIDYA, McGinley Dynamic, Guppy GMMA |
 | 모멘텀·오실레이터 (27) | RSI, Stochastic(%K/%D), Stochastic RSI, MACD(+Histogram), PPO, TRIX, TSI, SMI, CMO, Williams %R, CCI, Ultimate Oscillator, Awesome Oscillator, Accelerator Oscillator, Fisher Transform, Connors RSI, QStick, Chande Forecast Oscillator, DeMarker, DPO, Schaff Trend Cycle, Relative Vigor Index(Ehlers), Laguerre RSI, Pretty Good Oscillator, KST, Coppock Curve, Special K |
@@ -1406,13 +1414,13 @@ look-ahead 배제 계약(모듈 수준).
 | 사이클·Ehlers (4) | MAMA/FAMA, Center of Gravity Oscillator, Roofing Filter, Sinewave/Instantaneous Trendline |
 | 기타 시스템 (6) | Parabolic SAR, Ichimoku Kinko Hyo, Elder Ray, Elder Impulse System, TD Sequential, Woodies CCI |
 
-목록에 대한 확정 규칙은 다음과 같다.
+목록에 대한 규칙은 다음과 같다.
 
-- **무엇을 1종으로 세는가** — 지표 하나, 또는 DMI/ADX·Ichimoku처럼 여러 값을 한 묶음으로 내는 지표 시스템
-  하나를 **1종**으로 센다. 그 기준으로 위 표가 `10+27+12+10+6+4+3+4+6 = 82`종이다. 이 기준을 바꾸면 총수가
-  달라지므로 고정한다 — DMI/ADX를 구성요소 넷(`+DI`·`−DI`·`ADX`·`ADXR`)으로 펼치거나 MACD와 히스토그램을 나누면
-  늘고, Bollinger Bands를 밴드 하나로 묶고 `%B`·`BandWidth`를 파생으로 빼면 준다. `registry`에 등록하는 단위도
-  위 표에 적힌 이름 그대로다.
+- **등록 단위 — 무엇이 `registry`의 한 항목인가.** 개수가 아니라 이 **단위**가 계약이다. 지표 하나, 또는
+  DMI/ADX·Ichimoku처럼 여러 값을 한 묶음으로 내는 지표 시스템 하나가 한 항목이며, 표에 적힌 이름이 곧 등록
+  이름이다. 같은 지표라도 단위를 다르게 잡으면 항목 수가 달라진다 — DMI/ADX를 구성요소 넷(`+DI`·`−DI`·`ADX`·
+  `ADXR`)으로 펼치거나 MACD와 히스토그램을 나누면 늘고, Bollinger Bands를 밴드 하나로 묶고 `%B`·`BandWidth`를
+  파생으로 빼면 준다. 지표가 늘거나 줄어도 이 단위 규칙은 그대로 적용한다.
 - **의도적 제외.** Wilder의 Swing Index·ASI·CSI·Volatility Stop은 무기한 시장 적용성이 낮아 넣지 않는다(Swing
   Index·ASI의 "limit move" 파라미터가 무기한 시장에 정의되지 않고, Volatility Stop은 Chandelier Exit로 사실상
   대체된다). 필요 시 별도 추가한다.
@@ -1420,8 +1428,8 @@ look-ahead 배제 계약(모듈 수준).
   있어야 계산되며, 단일 심볼 OHLCV만으로는 입력이 없어 비활성 처리한다(`required_inputs`에 그 채널을 선언하고,
   없으면 `compute_batch`가 건너뛴다).
 - **첫 검증 전략 커버리지.** 첫 파이프라인 검증 전략이 요구하는 최소 집합은 EMA 9/21/55/200, RSI 14, Bollinger
-  Bands(기간 20·표준편차 2.0), Stochastic(%K 14·%D 3), ATR 14, 거래량 이동평균 20이다. 82종 구현이 이를 빠짐없이
-  덮는다.
+  Bands(기간 20·표준편차 2.0), Stochastic(%K 14·%D 3), ATR 14, 거래량 이동평균 20이다. 현재 목록이 이를 빠짐없이
+  덮는다. 목록이 바뀌더라도 이 커버리지는 유지해야 한다.
 
 #### 워밍업·seed 규약
 
@@ -1435,7 +1443,7 @@ look-ahead 배제 계약(모듈 수준).
 
 #### 지표 계산 플로우
 
-한 run에서 지표 값을 만드는 길은 두 가지이고, 어느 쪽이든 같은 82종 구현·같은 프리미티브를 거쳐 값이 서로 같아야
+한 run에서 지표 값을 만드는 길은 두 가지이고, 어느 쪽이든 같은 지표 구현·같은 프리미티브를 거쳐 값이 서로 같아야
 한다(일치 테스트로 못박는다). 아래가 두 경로와 그 공통 look-ahead 관문이다.
 
 ```mermaid
@@ -2240,7 +2248,7 @@ forensics로 가 개선 루프를 돌고, 둘 다 통과한 run만 Decision이 �
 | 문서 구성(읽기 지도) | top-down 단일 문서(구조→행위, DB는 ERD로 분리, 정의 우선) |
 | §4 서문, §4.1 float·Decimal 경계 | Decimal 단일 변환 관문(판단 경로 float·체결 경로 Decimal의 경계를 타입에 각인) |
 | §4.1 `types` | 단일 표준 값 타입·금액 정밀도(단일 정의처) · 캔들 검증 불변식(시각 단조·`high≥max(o,c)`·`low≤min(o,c)`·`price>0`·`volume≥0`을 타입 계층에서 강제) · 신호 판단 전용(방향·수량 필드 없음) |
-| §4.1 `indicators` | 82종 단일 구현·DRY(목록 확정) · look-ahead 구조적 배제(확정 캔들 전용 계약 `close_time ≤ T`) · 벡터화·증분 일치 · 시장폭 조건부 활성 · 워밍업 seed 규약 |
+| §4.1 `indicators` | 지표는 공유 라이브러리에서 공통 방식으로 단 한 번 구현·DRY(계약은 관리 방식이며 개수가 아님 — 목록 증감은 registry 항목 증감) · look-ahead 구조적 배제(확정 캔들 전용 계약 `close_time ≤ T`) · 벡터화·증분 일치 · 시장폭 조건부 활성 · 워밍업 seed 규약 |
 | §4.2 전략 클래스 | 전략 판단 계약(`StrategyAdapter` — Adaptee는 판단 전용·stateless, look-ahead는 Engine이 통제) · 책임 분리(스키마 선언은 Adaptee, 해석은 `StrategyConfig`, 생성은 `Adapter Manager`) · config 불변·무순환 · 전략 프로파일 스키마 |
 | §4.3 `execution` | Decimal 단일 변환 관문(`normalizer` 한 곳, 모든 Broker `submit` 통과) · 시점 순서(next-bar, `decision_ts < execution_ts`) · 동시 도달 손절 우선(OHLC-locked) · 회계 항등식 `cash+position=equity`·비용 1회 차감 |
 | §4.3 `costs` | 모든 손익 net(4비용 수식) · 이산 펀딩·과거 실측 rate 주입 · 청산 Isolated 보수 방향 |
