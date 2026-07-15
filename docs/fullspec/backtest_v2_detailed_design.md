@@ -1,12 +1,12 @@
 # 백테스트 v2 상세 설계서
 
 암호화폐 무기한 선물·현물 전략의 백테스트·평가·개선 플랫폼을, 세 실행 모드(백테스트·페이퍼·라이브)가
-물리적으로 같은 코드를 쓰도록 공유 라이브러리 위에 다시 짓는다. 이 문서는 그 시스템을 **위에서 아래로** —
+물리적으로 같은 코드를 쓰도록 공유 라이브러리 위에 다시 만든다. 이 문서는 그 시스템을 **위에서 아래로** —
 서비스, 코드 트리, 컴포넌트, 클래스, 데이터베이스 순으로 — 하나의 설계서에 담는다. 각 절은 다이어그램과 정의를
 함께 실어, 이 문서 하나만으로 구현할 수 있게 자기완결로 쓴다. 다른 문서를 열지 않아도 되도록, 필드·수식·임계값·
 시그니처·불변식은 이 문서 안에 전부 적는다.
 
-이 판은 최상위 구조 — 서비스 뷰(§1)·프로젝트 코드 트리(§2) — 와 문서 전체의 읽기 지도, 그 아래 컴포넌트
+이 문서는 최상위 구조 — 서비스 뷰(§1)·프로젝트 코드 트리(§2) — 와 문서 전체의 읽기 지도, 그 아래 컴포넌트
 뷰(§3, 서비스별 컴포넌트 다이어그램·정의서)에 더해, 공유 라이브러리 `core-lib`의 클래스 뷰(§4.1~§4.3: 기반
 타입·지표, 전략 판단 계약·config, 실행·비용·사이징·포트·평가 — 컴포넌트별 클래스 다이어그램·정의서와 그 안의
 시퀀스·플로우)를 확정한다.
@@ -69,11 +69,22 @@
 
 ## 설계 방향
 
-빈 새 프로젝트에서 짓는다. 공유 라이브러리 `core-lib`(설치형 패키지 `core_lib`)와 새 `backtest-service`를 깨끗이
-만들고, 기존 리포(signal·wallet)는 빌드 동안 읽기 전용 참조이자 프로덕션 유지다. `core_lib`가 백테스트로 검증된
-뒤 **채택 단계**에서 기존 서비스가 이를 의존성으로 받아들여 내부 구현(지표·전략·실행·사이징)을 `core_lib` import로
-치환한다 — 동작은 불변. 세 실행 모드가 같은 코드를 쓴다는 목표는 이 채택으로 완성되며, 빈 프로젝트로 시작하는
-것은 그 단계를 없애는 게 아니라 뒤로 미뤄 위험을 줄이는 것이다.
+네 서비스를 **하나의 monorepo**에 만든다. 공유 라이브러리 `core-lib`(설치형 패키지 `core_lib`)와 새
+`backtest-service`, 그리고 유지·채택 대상인 `signal-service`·`wallet-service`가 한 저장소 안 형제 패키지로 놓인다.
+단, **배포는 서비스별로 독립**이다(§2·§1.2에서 확정). 특히 실거래를 도는 signal/wallet은 `core-lib`을 작업 트리에
+링크하지 않고 **버전 고정한 빌드 산출물**로 받아, core-lib 한 줄 수정이 즉시 실거래로 새지 않게 한다. backtest는
+검증이 목적이므로 core-lib을 editable로 최신 소스에 맞춰 쓴다.
+
+빌드 순서는 위험을 뒤로 미루는 쪽으로 잡는다. 먼저 `core-lib`와 `backtest-service`를 깨끗이 만들어 `core-lib`을
+백테스트로 검증하고, 그 뒤 **채택 단계**에서 기존 signal/wallet 구현을 이 monorepo로 들여와 내부 구현(지표·전략·
+실행·사이징)을 `core_lib` import로 치환한다 — 동작은 불변. 채택 전까지 기존 리포의 signal/wallet이 프로덕션을
+유지하고 이식 원천으로만 참조되며, 채택이 끝나면 monorepo가 그 서비스들의 단일 홈이 된다. 세 실행 모드가 같은
+코드를 쓴다는 목표는 이 채택으로 완성된다.
+
+> **토폴로지 divergence(사용자 확정 2026-07-13).** 표준 개발 계획은 signal/wallet을 별도의 기존 리포에 두는 '두
+> 세계' 토폴로지였으나, 네 서비스를 **단일 monorepo**에 두되 서비스별 독립 배포로 관리하도록 사용자가 확정했다.
+> core-lib을 backtest로 먼저 검증해 위험을 미루는 논리는 그대로 유지되고, 실거래 격리는 "monorepo 안이라도 실거래
+> 배포는 버전 고정 산출물을 설치한다"로 지킨다.
 
 기존 백테스트·replay 서비스는 전면 폐기 대상이라 서비스가 아니며 이 뷰에 등장하지 않는다. 그 필요 기능은 새
 `backtest-service`가 새로 구현한다. 외부 collector는 리포 내부 `OHLCV 수집기`로 이관해 OHLCV 적재만 맡기고, 지표
@@ -96,12 +107,12 @@
 
 | 절 | 제목 | 담는 내용 | 상태 |
 |---|---|---|---|
-| §1 | 서비스 다이어그램 + 정의서 | 어떤 서비스·저장소가 있고 어떻게 의존하는지 (최상위 뷰) | 이 판에서 확정 |
-| §2 | 프로젝트 코드 트리 | 서비스 아래 디렉터리·패키지 구조 + 경로별 역할 | 이 판에서 확정 |
-| §3 | 컴포넌트 다이어그램 + 정의서 (서비스별) | §3.1 `core-lib`(공유) · §3.2 `backtest-service` · §3.3 채택분(signal·wallet) | 이 판에서 확정 |
-| §4 | 클래스 다이어그램 + 정의서 (컴포넌트별) | §4.1 타입·지표 · §4.2 전략(+config 시퀀스) · §4.3 실행·평가(+판정 플로우) · §4.4 Engine(+캔들 루프·집행 시퀀스) · §4.5 출력(+run 저장 시퀀스) | §4.1~§4.3 이 판에서 확정 · §4.4~§4.5 후속 판 |
-| §5 | 데이터베이스 ERD + 정의서 (DB별) | §5.1 DB 전체 구성 + `crypto_data`·`signal_db` · §5.2 `backtest_db` · §5.3 Evidence SQLite | 후속 판에서 작성 |
-| 부록 | 채택·대사·회귀 절차 | 채택 지점·shim·회귀 범위·자체 검증 기준선·비밀 저장 방식 변경 | 후속 판에서 작성 |
+| §1 | 서비스 다이어그램 + 정의서 | 어떤 서비스·저장소가 있고 어떻게 의존하는지 (최상위 뷰) | 확정 |
+| §2 | 프로젝트 코드 트리 | 서비스 아래 디렉터리·패키지 구조 + 경로별 역할 | 확정 |
+| §3 | 컴포넌트 다이어그램 + 정의서 (서비스별) | §3.1 `core-lib`(공유) · §3.2 `backtest-service` · §3.3 채택분(signal·wallet) | 확정 |
+| §4 | 클래스 다이어그램 + 정의서 (컴포넌트별) | §4.1 타입·지표 · §4.2 전략(+config 시퀀스) · §4.3 실행·평가(+판정 플로우) · §4.4 Engine(+캔들 루프·집행 시퀀스) · §4.5 출력(+run 저장 시퀀스) | §4.1~§4.3 확정 · §4.4~§4.5 예정 |
+| §5 | 데이터베이스 ERD + 정의서 (DB별) | §5.1 DB 전체 구성 + `crypto_data`·`signal_db` · §5.2 `backtest_db` · §5.3 Evidence SQLite | 예정 |
+| 부록 | 채택·대사·회귀 절차 | 채택 지점·shim·회귀 범위·자체 검증 기준선·비밀 저장 방식 변경 | 예정 |
 
 ---
 
@@ -109,33 +120,34 @@
 
 ## §1.1 서비스 다이어그램
 
-이 그림은 시스템을 가장 위에서 본 것이다. 크게 네 묶음이 있다. 새로 짓는 것은 공유 라이브러리 `core-lib`와
-백테스트 전용 서비스 `backtest-service`다. 지금은 그대로 두고 나중에 `core-lib`를 받아들이는 것은 기존
-`signal-service`와 `wallet-service`다. 데이터를 채워 넣는 것은 `OHLCV 수집기`이고, 저장소는 `crypto_data`·
-`backtest_db`·`signal_db`·Evidence SQLite 넷이다.
+이 그림은 시스템을 가장 위에서 본 것이다. 네 서비스가 **한 monorepo 안**에 형제 패키지로 들어 있다 — 공유
+라이브러리 `core-lib`, 백테스트 전용 `backtest-service`, 그리고 유지·채택 대상인 `signal-service`·`wallet-service`다.
+한 저장소에 있어도 **배포는 서비스별로 독립**이다(아래에서 설명). 데이터를 채워 넣는 것은 `OHLCV 수집기`이고,
+저장소는 `crypto_data`·`backtest_db`·`signal_db`·Evidence SQLite 넷이다.
 
-화살표는 세 가지다. 실선에 `import`가 붙은 것은 서비스가 `core_lib`를 가져다 쓰는 의존이며, 방향은 언제나
-서비스에서 `core_lib` 한쪽뿐이다. 라벨에 포트 이름이 붙은 실선은 서비스가 그 포트를 거쳐 저장소를 읽고 쓴다는
-뜻이다. 점선은 지금이 아니라 채택 단계에 가서야 성립하는 의존이다. `core-lib` 내부 모듈끼리의 import 의존만 따로
-본 그래프는 §2.1에 있다.
+화살표는 세 가지다.
+
+- **실선 `import`** — 서비스가 `core_lib`를 가져다 쓰는 의존. 방향은 언제나 서비스에서 `core_lib` 한쪽뿐이다.
+- **포트 이름이 붙은 실선** — 서비스가 그 포트를 거쳐 저장소를 읽고 쓴다.
+- **점선** — 지금이 아니라 채택 단계에 가서야 성립하는 의존.
+
+`core-lib` 내부 모듈끼리의 import 의존만 따로 본 그래프는 §2.1에 있다.
 
 ```mermaid
 flowchart TD
-    subgraph NEW["새 프로젝트 (신규 빌드)"]
+    subgraph REPO["monorepo (단일 repo · 서비스별 독립 배포)"]
         subgraph CORELIB["core-lib (설치형 공유 패키지 · import core_lib)"]
             CORE["도메인 표준: 타입·지표·사이징·비용·실행·평가<br/>+ 포트 경계(ports) · StrategyConfig · Adapter Manager"]
             subgraph STRATBLK["전략 (strategy)"]
-                SADP["전략 판단 계약<br/>StrategyAdapter (Protocol)"]
+                SADP["StrategyAdapter (Protocol)<br/>전략 판단 계약"]
                 ADP["Adaptees — 전략 구현<br/>(참조 플러그인)"]
             end
         end
-        subgraph BTS["backtest-service (신규)"]
+        subgraph BTS["backtest-service (신규 · core-lib editable)"]
             ENG["Engine · ConfigLayer · Harness<br/>+ 포트 어댑터(DataFeed·Broker·Clock·CostModel·EvidenceSink·CatalogStore·StrategyRegistry)"]
         end
-    end
-    subgraph KEEP["기존 서비스 (유지 · 채택 대상)"]
-        SS["signal-service<br/>신호 생성 스케줄러"]
-        WS["wallet-service<br/>체결·리스크"]
+        SS["signal-service (유지·채택)<br/>신호 생성 스케줄러"]
+        WS["wallet-service (유지·채택)<br/>체결·리스크"]
     end
     subgraph COLLECT["데이터 수집 (내부)"]
         COLL["OHLCV 수집기<br/>확정 캔들 적재만"]
@@ -148,9 +160,9 @@ flowchart TD
     ADP -.->|구현| SADP
     CORE -->|Adaptee 생성| ADP
 
-    BTS -->|import| CORELIB
-    SS -.->|import · 채택 단계| CORELIB
-    WS -.->|import · 채택 단계| CORELIB
+    BTS -->|import · editable| CORELIB
+    SS -.->|import · 채택 단계 · 고정 버전| CORELIB
+    WS -.->|import · 채택 단계 · 고정 버전| CORELIB
 
     ENG -->|DataFeed 포트로 읽기 · up_to 경계| CD
     ENG -->|EvidenceSink 포트로 쓰기| SQ
@@ -163,33 +175,32 @@ flowchart TD
     SS -->|신호 enqueue| WS
 ```
 
-점선 두 개는 `signal-service`와 `wallet-service`가 채택 단계에 가서야 생기는 의존이다. 여기서 채택 단계란 core-lib를
-'쓰기 시작한다'는 뜻이 아니라, 이미 자기 코드로 돌아가고 있는 기존 서비스가 그 내부 구현(지표·전략·실행 등)을
-`core_lib` import로 갈아 끼우는 이행 단계를 말한다. 두 서비스는 지금 자기 구현으로 프로덕션을 돌리고 있어 아직
-`core-lib` 의존이 없고, 그 의존은 채택에 가서야 생기므로 점선으로 그렸다. 갈아 끼운 뒤에도 계산 결과는 그대로다
-(같은 계산을 `core_lib`이 대신할 뿐).
+**점선(채택 단계)의 뜻.** 점선 두 개는 `signal-service`·`wallet-service`가 채택 단계에 가서야 생기는 의존이다. 채택
+단계란 core-lib을 '쓰기 시작한다'가 아니라, 이미 자기 코드로 도는 기존 서비스가 그 내부 구현(지표·전략·실행)을
+`core_lib` import로 갈아 끼우는 이행 단계다. 지금은 두 서비스가 자기 구현으로 프로덕션을 돌려 core-lib 의존이 없고,
+그 의존은 채택에 가서 생기므로 점선이다. 갈아 끼운 뒤에도 계산 결과는 그대로다.
 
-`backtest-service`도 `core-lib`를 쓰지만 실선인 이유가 여기서 갈린다. 이 서비스는 처음부터 `core_lib`로 새로 짓기
-때문에 갈아 끼울 기존 구현이 없다 — 태어날 때부터 core-lib에 의존하므로 '채택'이라는 단계가 없고, 그 의존이 지금
-곧바로 성립한다. 그래서 실선이다. 요컨대 실선과 점선을 가르는 것은 'core-lib를 쓰느냐'가 아니라 '그 의존이 지금
-있느냐(신규 서비스), 채택 단계에 가서 생기느냐(기존 서비스)'이다.
+**backtest가 실선인 이유.** `backtest-service`는 처음부터 core_lib로 새로 개발해 갈아 끼울 기존 구현이 없다. 태어날
+때부터 의존하므로 지금 성립하는 실선이다. 실선·점선을 가르는 것은 'core-lib를 쓰느냐'가 아니라 '그 의존이 지금
+있느냐(신규 서비스)냐, 채택에 가서 생기느냐(기존 서비스)냐'다.
 
-저장소 둘은 이 그림에서 일부러 뺐다. `wallet-service`가 체결·포지션·회계를 적는 자기 운영 DB `wallet_db`는
-백테스트 데이터 흐름과 상관이 없어 넣지 않았다. `OHLCV 수집기`가 활성 심볼을 읽어 오는 설정 DB `config_db`도
-원래 외부 collector가 갖고 있던 관심사라 저장소 중심 뷰에는 넣지 않았다.
+**editable vs 고정 버전.** 화살표 라벨의 두 값은 같은 monorepo 안에서도 배포가 서비스별로 독립임을 뜻한다. backtest는
+core-lib을 editable로 붙여 최신 소스를 검증하고, 실거래를 도는 signal/wallet은 버전 고정한 빌드 산출물로 받는다.
+그래서 core-lib 한 줄 수정이 실거래로 곧장 새지 않는다(규율은 §1.2에서 확정).
 
-`core-lib` 안의 전략 블록에는 두 가지가 들어 있다. `전략 판단 계약`은 플랫폼이 소유하는 '전략을 끼우는 자리'로,
-`StrategyAdapter`라는 Protocol이다. `Adaptees`는 그 자리에 꽂히는 실제 전략 구현들이다. 각 전략이 언제 진입하고
-언제 청산하는지는 전략 작성자의 몫이라 이 설계의 범위 밖이며, 플랫폼은 끼우는 계약만 정한다.
+**그림에서 뺀 저장소.** 두 저장소는 일부러 뺐다. `wallet_db`(wallet의 체결·포지션·회계)는 백테스트 데이터 흐름과
+무관하고, `config_db`(수집기가 읽는 활성 심볼)는 원래 외부 collector의 관심사라서다.
 
-어떤 전략(Adaptee)이 실제로 있는지, 곧 '실행할 전략 목록'은 코드에 적어 두지 않고 `signal_db`에 레지스트리로
-둔다. 이 목록을 다루는 것은 `Adapter Manager`인데, `signal_db`를 직접 건드리지 않고 주입된 `StrategyRegistry`
-포트를 거친다. 그래서 `core-lib`은 특정 DB에 묶이지 않는다.
+**전략 블록의 두 요소.** `core-lib` 안 전략 블록에는 둘이 있다.
 
-이렇게 목록을 DB에 두는 방식은 새로 지어낸 것이 아니라 현행 signal-service에서 가져왔다. 지금은 쓸 수 있는 전략
-목록이 코드에 박혀 있어서, 서비스가 부팅할 때 하드코딩으로 등록한다. 신규 설계는 그 목록을 `signal_db`로 올려
-목록의 단일 출처로 삼는다. 레지스트리의 컬럼 구조도 현행 배포 인스턴스 테이블 `trading_strategies`(전략 클래스명·
-파라미터 JSONB·심볼·타임프레임·활성 여부·버전)를 그대로 차용하며, 실제 표와 필드는 §5.1에서 확정한다.
+- **`StrategyAdapter`** — 플랫폼이 소유하는 '전략을 끼우는 자리'(Protocol). 끼우는 계약만 정한다.
+- **`Adaptees`** — 그 자리에 꽂히는 실제 전략 구현들. 언제 진입·청산할지는 전략 작성자 몫이라 이 설계 범위 밖이다.
+
+**전략 목록은 DB에 둔다.** 어떤 Adaptee가 있는지(실행할 전략 목록)는 코드가 아니라 `signal_db` 레지스트리에 둔다.
+`Adapter Manager`가 이 목록을 다루되 `signal_db`를 직접 건드리지 않고 주입된 `StrategyRegistry` 포트를 거치므로,
+core-lib은 특정 DB에 묶이지 않는다. 이 방식은 현행 signal-service에서 가져왔다 — 지금은 목록이 코드(부팅 하드코딩)에
+박혀 있는데, 신규 설계는 이를 `signal_db`로 올려 단일 출처로 삼는다. 레지스트리 컬럼 구조는 현행 `trading_strategies`
+(클래스명·파라미터 JSONB·심볼·타임프레임·활성·버전)를 차용하고, 실제 표·필드는 §5.1에서 확정한다.
 
 ## §1.2 서비스 정의서
 
@@ -200,10 +211,10 @@ flowchart TD
 
 | 요소 | 유형 | 책임 | 경계 (하지 않음) | 소비 (→ §1.1) | 패키징 |
 |---|---|---|---|---|---|
-| `core-lib` | 설치형 공유 패키지 | 도메인 표준(값 타입·금액 정밀도·82종 지표·전략 판단 계약·사이징·비용·실행 수식·성과 평가·판정·포트 경계·Adaptee 생성/파라미터 해석)의 유일한 구현처 | 실행 드라이버 아님(캔들 루프·읽기·저장·wall-clock·IO 없음); 특정 DB 직접 의존 없음(레지스트리도 주입 포트 경유); 서비스 코드 import 안 함 | 없음 — 의존 그래프의 바닥(내부 계층 방향은 §2.1 의존 다이어그램) | `services/core-lib/`, editable 설치 단일 패키지 `core_lib`(하이픈 없음 → 네임스페이스 충돌·`sys.path` 조작 제거) |
-| `backtest-service` | 신규 서비스 | `core_lib`만 import하는 결정적 실행 드라이버·입출력 오케스트레이터(사전등록·채번·워밍업 프리로드·캔들 루프·데이터 피드 push·체결·2계층 저장·상위 검증) | 전략 판단·지표·사이징·비용·실행 규칙 자체 미보유(전부 `core_lib` 호출); 라이브 인프라(큐·폴링·HTTP·상태 복구) 없음; 전략 파라미터 스키마·검증 미소유(run 설정만 소유) | `core-lib`(import); `crypto_data`·Evidence SQLite·`backtest_db`·`signal_db`(전부 포트 경유) | `services/backtest-service/`; `core-lib` 의존; 포트의 backtest 구현(어댑터) 소유 |
-| `signal-service` | 기존 서비스 (유지·채택) | 확정 캔들마다 지표 증분(O(1)) 직접 계산 + Adapter Manager로 Adaptee 생성·판단 호출 → `wallet-service` 큐로 신호 전달 | 이 설계 단계 미변경(채택 단계에서만 내부 구현→`core_lib` 치환, 동작 불변); 판정 루프 안 돎(라이브 Evidence는 연구 피드백만) | 채택 후 `core-lib`(import); `crypto_data`(읽기·지표 계산); `signal_db` | 기존 리포 서비스; 채택은 무중단 re-export shim |
-| `wallet-service` | 기존 서비스 (유지·채택) | 신호 큐 소비 → 사이징·실행·비용 호출로 체결·리스크·킬스위치; 체결·포지션·회계를 자기 운영 DB에 기록 | 이 설계 단계 미변경(채택 단계에서 체결 시점 즉시→다음 캔들 시가 전환, 회귀 ~1279건 필요); 라이브 인프라 백테스트로 미이관 | 채택 후 `core-lib`(import); `wallet_db` | 기존 리포 서비스; 채택은 re-export shim |
+| `core-lib` | 설치형 공유 패키지 | 도메인 표준(값 타입·금액 정밀도·82종 지표·전략 판단 계약·사이징·비용·실행 수식·성과 평가·판정·포트 경계·Adaptee 생성/파라미터 해석)의 유일한 구현처 | 실행 드라이버 아님(캔들 루프·읽기·저장·wall-clock·IO 없음); 특정 DB 직접 의존 없음(레지스트리도 주입 포트 경유); 서비스 코드 import 안 함 | 없음 — 의존 그래프의 바닥(내부 계층 방향은 §2.1 의존 다이어그램) | monorepo `services/core-lib/`; 단일 설치형 패키지 `core_lib`(하이픈 없음 → 네임스페이스 충돌·`sys.path` 조작 제거); backtest는 editable·실거래 signal/wallet은 버전 고정으로 설치 |
+| `backtest-service` | 신규 서비스 | 도메인 로직을 `core_lib`에서만 가져오는(다른 서비스 import 안 함) 결정적 실행 드라이버·입출력 오케스트레이터(사전등록·채번·워밍업 프리로드·캔들 루프·데이터 피드 push·체결·2계층 저장·상위 검증) | 전략 판단·지표·사이징·비용·실행 규칙 자체 미보유(전부 `core_lib` 호출); 라이브 인프라(큐·폴링·HTTP·상태 복구) 없음; 전략 파라미터 스키마·검증 미소유(run 설정만 소유) | `core-lib`(import); `crypto_data`·Evidence SQLite·`backtest_db`·`signal_db`(전부 포트 경유) | monorepo `services/backtest-service/`; core-lib editable 의존; 독립 배포; 포트의 backtest 구현(어댑터) 소유 |
+| `signal-service` | 기존 서비스 (유지·채택) | 확정 캔들마다 지표 증분(O(1)) 직접 계산 + Adapter Manager로 Adaptee 생성·판단 호출 → `wallet-service` 큐로 신호 전달 | 이 설계 단계 미변경(채택 단계에서만 내부 구현→`core_lib` 치환, 동작 불변); 판정 루프 안 돎(라이브 Evidence는 연구 피드백만) | 채택 후 `core-lib`(import); `crypto_data`(읽기·지표 계산); `signal_db` | monorepo `services/signal-service/`(채택 시 이관); 독립 배포; 실거래는 core-lib 버전 고정; 채택 전 기존 리포가 프로덕션·이식 원천; 채택은 무중단 re-export shim |
+| `wallet-service` | 기존 서비스 (유지·채택) | 신호 큐 소비 → 사이징·실행·비용 호출로 체결·리스크·킬스위치; 체결·포지션·회계를 자기 운영 DB에 기록 | 이 설계 단계 미변경(채택 단계에서 체결 시점 즉시→다음 캔들 시가 전환, 회귀 ~1279건 필요); 라이브 인프라 백테스트로 미이관 | 채택 후 `core-lib`(import); `wallet_db` | monorepo `services/wallet-service/`(채택 시 이관); 독립 배포; 실거래는 core-lib 버전 고정; 채택 전 기존 리포가 프로덕션·이식 원천; 채택은 re-export shim |
 | `OHLCV 수집기` | 내부 컴포넌트 | 거래소 확정 캔들 OHLCV를 `crypto_data`에 적재(확정 캔들마다 1행·무조건) | 지표 미생성(계산은 signal·backtest가 `core_lib`로); 진행 중 캔들 미적재(look-ahead 방지의 데이터 층 근거); 단일 심볼 Binance 선물만(Upbit 현물 범위 밖) | 거래소 REST·WebSocket(입력); `crypto_data`(쓰기); `config_db`(활성 심볼 읽기) | 외부 collector의 리포 내부 이관분; 과거 구간은 기존 backfill 재사용 + `crypto_data` 보존 연장(예: 2000일) |
 
 **저장소 정의**
@@ -215,41 +226,68 @@ flowchart TD
 | `signal_db` | 기존 + 레지스트리 | `signal-service` 운영 DB + 실행할 전략(Adaptee) 목록 레지스트리 — 현행 코드 상주(부팅 하드코딩) 목록을 DB로 승격해 전략 목록의 단일 출처로 삼음 | `signal-service` 쓰기; Adapter Manager가 주입 포트로 등록·조회(`backtest-service`도 주입 포트로 조회) | `core_lib` 직접 의존 없음(주입 포트 경유); 레지스트리는 현행 `trading_strategies`(클래스명·파라미터 JSONB·심볼·타임프레임·활성·버전) 구조 차용, ERD·필드는 §5.1 |
 | Evidence SQLite | run별 상세 | run별 캔들 신호·주문·체결·포지션·손익·지표 스냅샷(forensics·재현 원천) | `backtest-service`(EvidenceSink 포트) 쓰기; 대시보드·연구 읽기; 라이브는 연구 피드백용만 | run 자기완결(원천 스냅샷 로컬 사본); 운영 DB 미저장; 결정성 해시=정렬 행 정규화 직렬화(파일 바이트 아님)(필드는 §5.3) |
 
-**표로 담기 어려운 규칙 (문장).** `core-lib`는 세 소비자(백테스트·signal·wallet)가 공유하므로, 통제 없는 변경이
-"모두가 건드리고 아무도 소유하지 않는" 결합 허브로 퇴화하지 않게 **변경 거버넌스 3규칙**을 강제한다. 첫째,
-`core-lib` 변경이 포함된 커밋은 리뷰 게이트 대상에 항상 포함한다. 둘째, `core_lib` 밖에 표준 모듈(지표·실행 계산기
-등)의 사본이 생기면 실패하는 저비용 재복제 가드 테스트(glob 검사 또는 import 계약)를 두어 복제 드리프트 재발을
-원천 차단한다(CI 없이도 작동). 셋째, editable 설치(HEAD 추적)는 페이퍼까지만 허용하고, 실거래 전환 시 고정 버전
-릴리스로 바꿔 전략 한 줄 수정이 즉시 실거래 경로에 반영되는 것을 막는다.
+> `wallet_db`(wallet 운영 DB)와 `config_db`(수집기가 읽는 활성 심볼)는 백테스트 데이터 흐름 밖이라 이 저장소 표에서
+> 뺐다(§1.1 참고).
+
+**표로 담기 어려운 규칙 (문장).** `core-lib`는 세 서비스(백테스트·signal·wallet)가 공유하므로, 통제 없이 바뀌면
+"모두가 건드리고 아무도 책임지지 않는" 결합 허브로 퇴화하기 쉽다. 그런데 복제 드리프트를 실제로 막는 힘은 자동
+검사가 아니라 **구조와 리뷰**에 있고, 자동 테스트는 그 아래 좁은 보조 알람이다. 세기 순서로 적는다.
+
+- **가장 강한 방어는 구조 자체다.** 표준 코드를 설치형 단일 패키지 `core_lib` 하나에만 두고 세 서비스가 모두
+  import하게 하면, 표준 로직이 물리적으로 한 곳에만 존재한다. 예전에 사본이 생긴 근본 원인은 공유 패키지가 없어 각
+  서비스가 `sys.path` 조작으로 자기 트리를 끌어다 쓴 데 있었다. 공유 패키지가 있으면 import가 기본 경로가 되고
+  복사는 오히려 품이 드는 일이라, 굳이 다시 구현할 이유 자체가 사라진다.
+- **그다음은 리뷰다.** `core-lib`를 건드린 커밋은 예외 없이 리뷰 게이트에 넣는다. 구조가 막지 못하는 경우 — 누군가
+  표준 로직을 이름만 바꿔 서비스 안에 다시 짜 넣는 것 — 은 자동으로 검출할 수 없으므로(두 코드가 같은 계산인지
+  판정하는 것은 원리상 불가능하다), 사람이 "이 서비스가 왜 이걸 자기가 계산하지?"라고 알아채는 리뷰가 마지막
+  방어선이다.
+- **자동 테스트는 좁은 보조 알람이다.** `core_lib` 밖에 표준 모듈의 사본이 생기면 실패하는 저비용 가드 테스트
+  (파일·심볼 이름 스캔 또는 import 규칙 검사)를 둔다. 단, 이 테스트가 잡는 것은 파일·이름을 그대로 둔 통째 복사
+  하나뿐이다. 이름을 조금만 바꾸거나 다시 구현하면 빠져나가므로, 이건 예전에 실제로 났던 사고(지표 디렉터리 통째
+  복제)를 값싸게 걸러 주는 덫일 뿐 중복 금지의 보장이 아니다. CI 없이 로컬에서도 돈다.
+
+복제와는 별개로, 배포 독립성과 실거래 안전을 위한 규칙을 하나 더 둔다.
+
+- **서비스별로 독립 배포하고, 실거래 직전에 core-lib 설치 방식을 바꾼다.** 네 서비스가 한 monorepo에 있어도 배포
+  단위는 서비스마다 따로다 — 각자 자기 `pyproject.toml`로 빌드·배포한다. 페이퍼 단계까지는 "core-lib을 고치면 곧바로
+  반영되는" editable 방식으로 설치해 서비스가 늘 최신 코드를 따라가게 둔다. 개발엔 편하지만, 이 상태로 실거래에
+  들어가면 core-lib을 한 줄만 고쳐도 그 변경이 즉시 실거래 경로로 흘러든다. 그래서 실거래로 전환할 때는 — monorepo
+  안이라도 작업 트리를 링크하지 않고 — 태그에서 빌드한 버전 고정 산출물(wheel)로 core-lib을 받는다. 새 버전을 일부러
+  내보내기 전까지는 어떤 코드 수정도 실거래에 닿지 않고, `core_lib_version` 메타가 "백테스트가 검증한 버전 = 실거래가
+  도는 버전"을 대조해 준다.
 
 **채택 후 포트 경계 (문장).** 위 정의 표는 `signal-service`가 `crypto_data`를 읽고 `wallet-service`가 `wallet_db`에
 쓰는 것으로 적었지만, 이는 요약이다. 두 서비스는 채택 단계에서 백테스트와 **같은 포트 계약의 반대편**을 채운다 —
 각자의 live/paper 포트 구현(DataFeed 실시간 스트림·Broker 거래소 API·Clock 실시계·CostModel 실측·EvidenceSink
 라이브)을 자기 서비스 안에 둔다. 그래야 "환경 차이는 포트로만 주입한다"가 backtest뿐 아니라 paper·live에도
-성립한다. 이 구현 자체는 이 판이 아니라 채택 설계(§3.3·부록)에서 그린다.
+성립한다. 이 구현 자체는 여기가 아니라 채택 설계(§3.3·부록)에서 그린다.
 
 ---
 
 # §2 프로젝트 코드 트리
 
-서비스 아래의 실제 디렉터리·패키지 구조다. 클래스를 그리기 전에 구조부터 확정한다. 새 프로젝트의 루트에는 두 축이
-형제로 놓인다. 하나는 두 패키지(`core-lib`·`backtest-service`)를 담는 `services/`이고, 다른 하나는 배포할 때 DB와
-역할을 초기화하는 `init-scripts/`다. 트리의 각 경로에는 한 줄로 역할을 달았고, 각 노드는 뒤(§3)에서 그릴 컴포넌트와
-짝이 된다.
+서비스 아래의 실제 디렉터리·패키지 구조다. 클래스를 그리기 전에 구조부터 확정한다. monorepo 루트에는 두 축이
+형제로 놓인다. 하나는 네 서비스 패키지(`core-lib`·`backtest-service`·`signal-service`·`wallet-service`)를 담는
+`services/`이고, 다른 하나는 배포할 때 DB와 역할을 초기화하는 `init-scripts/`다. 각 서비스는 자기 `pyproject.toml`을
+가진 독립 배포 단위다. 트리의 각 경로에는 한 줄로 역할을 달았고, 각 노드는 뒤(§3)에서 그릴 컴포넌트와 짝이 된다.
 
-짝은 대부분 1:1이지만 예외가 있다. `strategy/` 한 디렉터리가 컴포넌트 셋(전략 판단 계약·Adapter Manager·
+아래 §2.1·§2.2는 여기서 새로 만드는 `core-lib`·`backtest-service`의 트리를 확정한다. 채택 대상인 `signal-service`·
+`wallet-service`도 같은 `services/` 아래 형제 패키지로 들어오되(각자 독립 배포, 실거래는 core-lib 버전 고정), 그 내부
+트리는 현행 구조를 이어받으므로 채택 설계(§3.3·부록)에서 확정한다.
+
+짝은 대부분 1:1이지만 예외가 있다. `strategy/` 한 디렉터리가 컴포넌트 셋(StrategyAdapter·Adapter Manager·
 StrategyConfig)을 담고, `adapters/` 한 디렉터리가 어댑터 일곱을 담는다. 반대로 `adaptees/`는 참조 플러그인이 놓이는
 자리라 플랫폼 컴포넌트로 세지 않는다. 아래 표가 디렉터리와 §3 컴포넌트의 짝, 그리고 개수를 확정한다.
 
-| 경로 | §3 컴포넌트 | 개수 |
-|---|---|---|
-| `core_lib/{types, indicators, sizing, costs, execution, ports, eval}` | 각 동명 컴포넌트 | 각 1 (합 7) |
-| `core_lib/strategy/` (`base`+`profile`+`trailing` / `manager`(+`registry`+`factory`) / `config`) | 전략 판단 계약 · Adapter Manager · StrategyConfig | 3 |
-| `core_lib/strategy/adaptees/` | 참조 플러그인 전략 | 0 (플랫폼 컴포넌트 아님) |
-| **§3.1 core-lib 소계** | | **10** |
-| `backtest_service/{engine, config, harness}` | Engine · ConfigLayer · Harness | 각 1 (합 3) |
-| `backtest_service/adapters/` | 포트 어댑터(6 대표 + `strategy_registry`) | 7 |
-| **§3.2 backtest-service 소계** | | **3 + 어댑터 7** |
+| 경로                                                                                               | §3 컴포넌트                                     | 개수              |
+| ------------------------------------------------------------------------------------------------ | ------------------------------------------- | --------------- |
+| `core_lib/{types, indicators, sizing, costs, execution, ports, eval}`                            | 각 동명 컴포넌트                                   | 각 1 (합 7)       |
+| `core_lib/strategy/` (`base`+`profile`+`trailing` / `manager`(+`registry`+`factory`) / `config`) | StrategyAdapter · Adapter Manager · StrategyConfig | 3               |
+| `core_lib/strategy/adaptees/`                                                                    | 참조 플러그인 전략                                  | 0 (플랫폼 컴포넌트 아님) |
+| **§3.1 core-lib 소계**                                                                             |                                             | **10**          |
+| `backtest_service/{engine, config, harness}`                                                     | Engine · ConfigLayer · Harness              | 각 1 (합 3)       |
+| `backtest_service/adapters/`                                                                     | 포트 어댑터(6 대표 + `strategy_registry`)          | 7               |
+| **§3.2 backtest-service 소계**                                                                     |                                             | **3 + 어댑터 7**   |
 
 그래서 §3.1은 core-lib 컴포넌트 열 종을, §3.2는 Engine·ConfigLayer·Harness에 일곱 포트 어댑터를 더해 그린다.
 
@@ -283,7 +321,7 @@ services/core-lib/
       donchian.py                    #   Donchian(82종의 하나·옵션, 특정 전략용)
       registry.py                    #   지표 등록·버전·구현 고정 근거·min_history
       contracts.py                   #   확정 캔들 전용 계약 강제(close_time ≤ 판단 시각)
-    strategy/                        # [컴포넌트×3] 전략 판단 계약(base.py) + Adapter Manager(manager.py) + StrategyConfig(config.py)
+    strategy/                        # [컴포넌트×3] StrategyAdapter(base.py) + Adapter Manager(manager.py) + StrategyConfig(config.py)
       base.py                        #   StrategyAdapter(typing.Protocol) — 전략 판단 계약(analyze·metadata·파라미터 스키마 선언)
       registry.py                    #   in-process 플러그인(Adaptee) 등록·조회 규약 — Adapter Manager 소관; 외부 signal_db 구현 카탈로그와 별개(그건 ports/strategy_registry.py)
       factory.py                     #   Adaptee 생성 규약 — Adapter Manager(manager.py) 소관
@@ -343,10 +381,10 @@ services/core-lib/
 서비스 계층이라, core_lib 안쪽만 그린 이 그림에는 그 소비자가 나타나지 않는다(서비스가 core_lib에 의존하는 관계는
 §1.1에 그려져 있다).
 
-둘째, `MGR`(Adapter Manager)이 가리키는 `REG`는 `ports/strategy_registry.py`의 접근 포트(ABC)일 뿐이다. `signal_db`에
+둘째, `Adapter Manager`가 가리키는 것은 `ports/strategy_registry.py`의 접근 포트(ABC)일 뿐이다. `signal_db`에
 실제로 붙는 구체 어댑터는 backtest·signal 서비스가 주입하므로, `core_lib` 자체는 어떤 DB에도 직접 묶이지 않는다.
-게다가 `REG`는 Adaptee 카탈로그 식별자와 직렬화 metadata만 다루고 core 값 타입은 쓰지 않아, `types`로 가는 엣지도
-없다.
+게다가 이 접근 포트는 Adaptee 카탈로그 식별자와 직렬화 metadata만 다루고 core 값 타입은 쓰지 않아, `types`로 가는
+엣지도 없다.
 
 셋째, `strategy/adaptees/`의 구현 전략은 이 그림에서 뺐다. 이들은 `strategy`(base·profile·trailing)·`indicators`·
 `types`를, 필요하면 `sizing`·`costs`까지만 참조하고, `ports`·`execution`이나 서비스 코드·DB 어댑터는 참조하지
@@ -362,7 +400,7 @@ flowchart TD
     CST["costs"]
     EVAL["eval"]
     PORT["ports"]
-    STRAT["strategy · base (판단 계약)"]
+    STRAT["strategy · base (StrategyAdapter)"]
     EXE["execution"]
     MGR["strategy · manager (Adapter Manager)"]
     CFG["strategy · config (StrategyConfig)"]
@@ -380,7 +418,6 @@ flowchart TD
     MGR --> STRAT
     MGR --> CFG
     MGR --> REG
-    CFG --> STRAT
 ```
 
 ## §2.2 `backtest-service` 트리 (신규 서비스)
@@ -413,12 +450,13 @@ services/backtest-service/
     # + 포트 어댑터·Engine 루프·결정성 테스트
 ```
 
-`Engine`은 오직 `core_lib`만 import하고, 데이터 읽기·체결·저장·시계는 전부 `adapters/`의 포트 구현에 맡긴다.
-전략 판단·지표·사이징·비용·실행 규칙은 이 서비스에 두지 않는다 — 모두 `core_lib`을 호출해서 쓴다.
+`Engine`은 도메인 로직을 `core_lib`에서만 가져오고(다른 서비스는 import하지 않음), 데이터 읽기·체결·저장·시계는
+전부 `adapters/`의 포트 구현에 맡긴다. 전략 판단·지표·사이징·비용·실행 규칙은 이 서비스에 두지 않는다 — 모두
+`core_lib`을 호출해서 쓴다.
 
 ## §2.3 배포 루트 (DB 초기화)
 
-`backtest_db`를 만들고 역할을 세우는 일은 서비스 패키지 안이 아니라 새 프로젝트의 배포 루트에서 한다. 그 자리는
+`backtest_db`를 만들고 역할을 세우는 일은 서비스 패키지 안이 아니라 monorepo의 배포 루트에서 한다. 그 자리는
 `services/`와 형제인 `init-scripts/`이며, 기존 서비스별 마이그레이션 미러 구조를 그대로 따른다. 실제 테이블·Entity
 스키마는 데이터베이스 설계(§5)가 ERD로 확정하고, 여기서는 디렉터리·역할 배치와 파일 번호 규약만 고정한다.
 
@@ -448,7 +486,7 @@ services/backtest-service/
 `core-lib`는 세 실행 모드가 공유하는 도메인 표준의 유일한 구현처다. 열 개 컴포넌트로 이뤄지며, 여기서 한 번
 정의해 모든 소비자가 참조한다. 아래 다이어그램이 열 컴포넌트와 그 내부 의존 방향을 담는다 — `types`가 바닥이고,
 화살표는 "참조한다(의존)"를 뜻하며 역방향은 없다. `strategy/adaptees/`의 구현 전략(Adaptee)은 플랫폼 컴포넌트가
-아니라 참조 플러그인이므로 이 뷰에 컴포넌트로 등장하지 않는다 — 플랫폼은 전략을 끼우는 계약(`전략 판단 계약`)만
+아니라 참조 플러그인이므로 이 뷰에 컴포넌트로 등장하지 않는다 — 플랫폼은 전략을 끼우는 계약(`StrategyAdapter`)만
 그린다. `ports`·`eval`은 `types`만 참조하는 잎이다. `eval`과 여섯 환경 포트(`DataFeed`·`Broker`·`Clock`·
 `CostModel`·`EvidenceSink`·`CatalogStore`)의 소비자는 서비스 계층(Engine 등)이라 이 내부 뷰가 아니라 §3.2·§3.3의
 소비 화살표에 나타나지만, 일곱 번째 포트인 `StrategyRegistry`(Adaptee 카탈로그 주입 포트)만은 `Adapter Manager`가
@@ -461,7 +499,7 @@ flowchart TD
     subgraph CORELIB["core-lib (설치형 공유 패키지 · import core_lib)"]
         TYPES["types<br/>값 타입·금액 정밀도"]
         IND["indicators<br/>82종 지표·프리미티브"]
-        STRAT["전략 판단 계약<br/>StrategyAdapter (Protocol)"]
+        STRAT["StrategyAdapter (Protocol)<br/>전략 판단 계약"]
         SIZ["sizing<br/>거래당 위험 규율"]
         CST["costs<br/>net 비용 4수식"]
         EXE["execution<br/>체결·장부·회계·Decimal 관문"]
@@ -479,10 +517,9 @@ flowchart TD
     EXE --> CST
     PORT --> TYPES
     EVAL --> TYPES
-    MGR --> STRAT
-    MGR --> CFG
+    MGR -->|스키마 취득·Adaptee 생성| STRAT
+    MGR -->|스키마 주입해 resolve| CFG
     MGR -->|주입 포트 경유| PORT
-    CFG -->|파라미터 스키마 조회| STRAT
 ```
 
 의존 방향은 다이어그램이 담으므로, 정의서는 각 컴포넌트의 **책임**과 **인터페이스 경계**(공개 표면과 하지 않는
@@ -493,7 +530,7 @@ flowchart TD
 |---|---|---|---|
 | `types` | 세 실행 모드가 공유하는 값 타입·금액 정밀도의 유일한 정의처 | 공개: `Candle`·`TradingSignal`(판단 전용, 수량·방향 필드 없음)·`Order`·`Position`·`Trade`(`r0` 포함)·`Fill`·enums·`money`(ZERO·Q_*·quantize_*). 하지 않음: 계산·IO 없음; 캔들 검증 불변식(시각 단조·`high ≥ max(open,close)`·`low ≤ min(open,close)`)을 타입 계층에서 강제 | `types/`의 candle·signal·order·position·trade·fill·enums·money |
 | `indicators` | §0 프리미티브 + 82종 지표 표준(벡터화·증분 두 경로) | 공개: `registry.get(name, params)`·`compute_batch(candles, enabled_set)`·`IndicatorState.update(candle)`·`contracts.assert_finalized`. 하지 않음: 확정 캔들만 입력(`close_time ≤ 판단 시각`); 계산은 float64(Decimal 변환은 `execution` 관문 소관); 계산 대상은 run 설정이 결정 | `indicators/`의 primitives·지표군 9파일·donchian·registry·contracts |
-| `전략 판단 계약` | 전략을 끼우는 판단 계약(Strategy 패턴)의 선언 | 공개: `StrategyAdapter`(`typing.Protocol`) — `get_metadata()`·`get_parameter_schema()`·`analyze(market_data, position?) → TradingSignal`; metadata에 `required_indicators`·`min_history`·`timeframe`·프로파일 선언. 하지 않음: 판단만(읽기·저장·루프 없음); Adaptee는 stateless; 미래 데이터 자가 인출 없음(look-ahead는 Engine 피드 경계가 통제); 파라미터 스키마는 선언만(해석은 `StrategyConfig`); 진입·청산 엣지는 각 Adaptee 소유(범위 밖); 트레일링은 순수 함수 호출(상속 아님·유보) | `strategy/base.py`·`profile.py`·`trailing/`(유보) |
+| `StrategyAdapter` | 전략을 끼우는 판단 계약(Strategy 패턴)의 선언 | 공개: `StrategyAdapter`(`typing.Protocol`) — `get_metadata()`·`get_parameter_schema()`·`analyze(market_data, position?) → TradingSignal`; metadata에 `required_indicators`·`min_history`·`timeframe`·프로파일 선언. 하지 않음: 판단만(읽기·저장·루프 없음); Adaptee는 stateless; 미래 데이터 자가 인출 없음(look-ahead는 Engine 피드 경계가 통제); 파라미터 스키마는 선언만(해석은 `StrategyConfig`); 진입·청산 엣지는 각 Adaptee 소유(범위 밖); 트레일링은 순수 함수 호출(상속 아님·유보) | `strategy/base.py`·`profile.py`·`trailing/`(유보) |
 | `sizing` | 거래당 위험 규율과 사이징 인스턴스 | 공개: `risk_money.size(equity, stop_distance, risk_per_trade ≤ 1%)`·`turtle_unit`·`wallet_pct.size`(호환)·`kelly.cap`. 하지 않음: 엣지 창조 없음(엣지는 진입 신호); `1R = |체결가 − 최초 보호 스탑| × 수량`이고 `1R ≤ 1%`; pct 경로는 보장 실패 시 비준수 플래그 의무 | `sizing/`의 risk_money·turtle_unit·wallet_pct·kelly |
 | `costs` | net 손익 4개 비용 수식 표준(값은 주입) | 공개: `fee.calc`·`slippage.apply`·`funding.settle`·`liquidation.price/is_triggered`. 하지 않음: 비용 값 미보유(전량 `CostModel` 주입); 펀딩은 이산 정산(UTC 경계, 정산가 = 경계 포함 최소 가용 TF 캔들 시가); 청산은 Isolated 우선·보수 방향 | `costs/`의 fee·slippage·funding·liquidation |
 | `execution` | 주문 라이프사이클·결정적 체결·포지션 장부·회계 + Decimal 단일 변환 관문 | 공개: `order_lifecycle`(VALID_TRANSITIONS)·`matcher`(체결 규칙)·`position_book`·`accounting.recompute`·`normalizer`. 하지 않음: `cash + position = equity` 유지·비용 1회 차감; float→Decimal 단일 변환은 `normalizer` 한 곳에서만(모든 Broker 어댑터가 `submit()`에서 통과, 어댑터별 캐스팅 금지); `decision_ts < execution_ts` 강제 | `execution/`의 order_lifecycle·matcher·position_book·accounting·normalizer |
@@ -502,20 +539,27 @@ flowchart TD
 | `Adapter Manager` | Adaptee 생성(Factory)·lifecycle + 구현 목록 레지스트리 | 공개: `create(strategy_id, raw_config) → StrategyAdapter`(내부에서 `StrategyConfig` 해석 호출)·lifecycle·`registry.list()/register()`. 하지 않음: 전략 결정 로직·파라미터 검증 로직 미보유(각각 Adaptee·`StrategyConfig`); 레지스트리 DB 접근은 주입 포트로만(core-lib은 특정 DB 직접 의존 없음) | `strategy/manager.py`·`registry.py`·`factory.py` |
 | `StrategyConfig` | 전략 파라미터 config의 해석·검증·직렬화·스키마 노출 | 공개: `resolve(schema, raw_config) → ResolvedConfig`·`json_schema(schema)`·`serialize/version`(스키마를 값으로 받아 무순환; 정확한 시그니처는 §4.2). 하지 않음: 스키마 선언은 Adaptee 소유(여기서 재정의 금지); 값은 호출자 소유(소스 미보유); 파라미터 스윕·실행 설정은 범위 밖(`ConfigLayer`) | `strategy/config.py` |
 
-`전략 판단 계약`이 참조하는 `strategy/adaptees/`의 구현 전략과 `strategy/trailing/`은 유보다 — 첫 검증 전략은
-트레일링 없이 ATR 기반 고정 손절·익절로 구현하고, 트레일링을 쓰는 전략이 도입될 때 `trailing`을 단일 표준으로
-되살려 파리티를 확정한다. 표준 위치는 트리에 남지만 이 판의 컴포넌트 계약을 바꾸지 않는다. `execution`의
-`normalizer`와 `ports`의 `StrategyRegistry`는 표준 골격을 구체화한 추가분으로, 각각 Decimal 단일 변환을 한 곳에
-모으고 Adaptee 카탈로그 접근을 주입 포트로 격리한다.
+유보한 것과 표준에 더한 파일만 따로 정리한다.
+
+- **구현 전략·트레일링은 유보(지금 만들지 않음).** `strategy/adaptees/`의 구현 전략과 `strategy/trailing/`은 지금은
+  두지 않는다. 첫 검증 전략은 트레일링 없이 ATR 기반 고정 손절·익절로 만든다.
+- **트레일링 재도입 시.** 트레일링을 쓰는 전략이 들어올 때 `trailing`을 하나의 표준 계산기로 되살리고, 두 구현의
+  결과가 같은지(파리티) 확인한다. 표준 자리는 트리에 남아 있고, 컴포넌트 계약은 바뀌지 않는다.
+- **`execution/normalizer` — 표준에 더한 파일.** float→Decimal 변환을 한 곳에 모은다.
+- **`ports/StrategyRegistry` — 표준에 더한 파일.** 전략(Adaptee) 목록 접근을 주입 포트로 분리해, `core_lib`이 특정
+  DB에 직접 묶이지 않게 한다.
 
 ## §3.2 backtest-service 컴포넌트
 
-`backtest-service`는 이 판이 새로 짓는 유일한 실행 드라이버 서비스로, `core_lib`만 import한다. 세 자체 컴포넌트
-(`ConfigLayer`·`Engine`·`Harness`)와, `core_lib.ports`의 각 ABC를 실체화한 backtest 어댑터로 이뤄진다. 아래
-다이어그램은 이 서비스의 컴포넌트와, 그것이 `core_lib`(§3.1 정의)의 무엇을 소비하는지, 그리고 어댑터가 어느 포트
-ABC를 구현하는지를 담는다. `core_lib` 컴포넌트는 §3.1에서 정의했으므로 여기서는 소비 대상 참조 노드로만 둔다.
-저장소 접근(어느 어댑터가 어느 저장소를 읽고 쓰는지)은 §1.1 서비스 다이어그램이 담으므로 다이어그램에서 반복하지
-않고 아래 어댑터 표의 `저장소 접근` 열에 적는다.
+`backtest-service`는 새로 개발하는 유일한 실행 드라이버 서비스다. 전략 판단·지표·사이징·비용·실행 같은 도메인
+로직은 전부 `core_lib`에서만 가져오고, 다른 서비스(`signal-service`·`wallet-service`)는 import하지 않는다 — pandas
+같은 범용 라이브러리는 자유롭게 쓴다(제약은 도메인 로직의 출처가 `core_lib` 하나라는 뜻이다). 세 자체 컴포넌트
+(`ConfigLayer`·`Engine`·`Harness`)와, `core_lib.ports`의 각 ABC를 실체화한 backtest 어댑터로 이뤄진다.
+
+읽는 방법:
+- 다이어그램 — 이 서비스의 컴포넌트, `core_lib` 소비 지점, 어댑터의 포트 ABC 구현 관계.
+- `core_lib` 컴포넌트 정의 — §3.1(다이어그램에서는 소비 대상 참조 노드로만 등장).
+- 저장소 접근(어느 어댑터가 어느 저장소를 읽고 쓰는지) — §1.1 서비스 다이어그램과 아래 어댑터 표의 `저장소 접근` 열(컴포넌트 다이어그램에서는 생략).
 
 backtest-service 컴포넌트와 core_lib 소비·포트 구현.
 
@@ -537,7 +581,7 @@ flowchart TD
     end
     subgraph CLREF["core_lib (§3.1 정의 · 참조)"]
         RMGR["Adapter Manager"]
-        RSTR["전략 판단 계약"]
+        RSTR["StrategyAdapter"]
         REXE["execution<br/>matcher·normalizer·장부·회계"]
         REVAL["eval"]
         RSIZ["sizing"]
@@ -561,6 +605,7 @@ flowchart TD
     ENG -->|사이징| RSIZ
     ENG -->|판정| REVAL
     ENG -->|장부·회계| REXE
+    ENG -->|펀딩 정산 · 경계 캔들| RCST
     BR -->|체결 규칙·단일 캐스트 관문| REXE
     BR -->|비용 수식| RCST
     DF -.->|구현| RPORT
@@ -577,48 +622,58 @@ flowchart TD
 | 컴포넌트 | 책임 | core_lib 소비 지점 | 구성 (§2 트리) |
 |---|---|---|---|
 | `ConfigLayer` | 백테스트 run 설정(OHLCV·funding 소스/구간·`CostModel` 값·거래소 규칙·실행/리스크·파라미터 스윕·지표 계산 모드·프로파일 선택)의 pydantic 스키마·검증 후 Engine 주입 | 전략 파라미터 스키마·검증은 소유하지 않고 선택값(전략 id·파라미터 값·symbol·timeframe)만 담아 `Adapter Manager`로 넘긴다 — 해석·검증은 `StrategyConfig` 소관(같은 config가 backtest·라이브에서 동일 검증) | `config/run_config.py` |
-| `Engine` | `core_lib`만 import하는 결정적 캔들 루프·입출력 오케스트레이터: 사전등록·채번·워밍업 프리로드·피드 push·체결·2계층 저장·finalize·eval 호출; 워밍업 구간 신호 discard, 동일 입력·seed → 동일 Evidence | `Adapter Manager`로 Adaptee 생성, `전략 판단 계약`의 `analyze` 호출, `sizing`으로 수량 산정, `execution`으로 포지션 장부·회계, `eval`로 판정; 데이터·체결·시계·비용·기록은 전부 포트 어댑터 경유(체결 규칙 자체는 Broker 어댑터가 `execution.matcher` 소비) | `engine/engine.py` |
+| `Engine` | 도메인 로직을 `core_lib`에서만 가져오는(다른 서비스 import 안 함) 결정적 캔들 루프·입출력 오케스트레이터: 사전등록·채번·워밍업 프리로드·피드 push·체결·2계층 저장·finalize·eval 호출; 워밍업 구간 신호 discard, 동일 입력·seed → 동일 Evidence | `Adapter Manager`로 Adaptee 생성, `StrategyAdapter`의 `analyze` 호출, `sizing`으로 수량 산정, `execution`으로 포지션 장부·회계, `costs.funding.settle`로 경계 펀딩 정산, `eval`로 판정; 데이터·체결·시계·기록은 전부 포트 어댑터 경유하고, 비용도 값(rate·fallback)은 CostModel·DataFeed 포트에서 받되 정산 수식 `costs`는 Engine이 직접 호출한다(체결 규칙 자체는 Broker 어댑터가 `execution.matcher` 소비) | `engine/engine.py` |
 | `Harness` | 단일 run 밖 상위 검증(표본 내/외 분리·워크포워드·몬테카를로·확률적 샤프·파라미터 스윕) 오케스트레이션, 카탈로그로 run 집합 비교 | `eval`로 집계 판정, `CatalogStore` 어댑터로 `backtest_db` 읽기; 개별 run 구동은 `Engine` 재사용(스윕 run_id는 Engine이 카탈로그 시퀀스로 단독 발급) | `harness/harness.py` |
 
-**포트 목록 확정 (7종).** 표준 골격은 "어떤 관심사가 포트가 되는지 미리 고정하지 않는다"고 두었고, 이 판이 그
-목록을 확정한다. 환경(백테스트·페이퍼·라이브)에 따라 값이 갈리는 관심사가 정확히 아래 일곱이며, 순수 결정
-로직(전략 판단·지표·사이징·비용 수식·체결 규칙·평가)은 포트 밖 `core_lib`에 남는다. 따라서 포트 목록을 이 일곱으로
-고정한다(표준 여섯 종 + Adaptee 레지스트리 접근 = 7). 아래 표가 각 backtest 어댑터의 구현 대상 ABC·구체 동작·
-`core_lib` 소비·저장소 접근을 확정한다. 라이브·페이퍼는 같은 ABC의 반대편 구현을 각 서비스가 소유하며(§3.3),
-`CatalogStore`만은 백테스트 전용이라 라이브 구현이 없다.
+**포트 목록 확정 (7종).** 무엇을 포트로 뺄지 표준은 미리 정하지 않았다. 그 목록을 여기서 확정한다.
 
-| 어댑터 (backtest 구현) | 구현하는 포트 ABC | 구체 동작 | core_lib 소비 | 저장소 접근 |
-|---|---|---|---|---|
-| DataFeed 구현 | `DataFeed` | 과거 확정 OHLCV·funding·mark_price를 **전략 TF 캔들**로 공급, `up_to` 경계 이후 캔들 미노출(look-ahead 구조 배제). 1분 하위 집행 피드는 유보되어 이 어댑터 표면은 전략 TF 캔들 기준이며, 1분 트리거 walk·트레일링 파리티 편차는 Engine 설계(§4.4)에서 확정하되 소비 전략이 없어 재유보 | `ports.DataFeed`·`types.Candle` | `crypto_data` 읽기(백테스트 미기록) |
-| Broker 구현 | `Broker` | 결정적 시뮬 체결(다음 캔들 시가 기본·intrabar 트리거·캔들 내 손절·익절 동시 도달 시 손절 우선 OHLC-locked·갭·수량 절삭) + `CostModel` 적용. `submit()`은 `core_lib.execution.normalizer`(공유)를 통과해 float→Decimal 단일 변환 — 어댑터 자체 캐스팅 없음 | `ports.Broker`·`execution`(matcher·normalizer)·`costs` | — |
-| Clock 구현 | `Clock` | 시뮬 캔들 시각 공급(결정적, wall-clock 금지) | `ports.Clock` | — |
-| CostModel 구현 | `CostModel` | 보수적 주입값 공급 — 수수료 maker 0.0002(0.02%)/taker 0.0005(0.05%)·유지증거금률 0.004(0.4%)·펀딩 정산 간격 UTC 0/8/16시·펀딩 fallback rate 0.0001(0.01%)·pct 사이징 기본 0.20(20%)를 시작 기본값으로, 슬리피지는 호환 bps 기본(선물 진입 0.0005 등)이되 표준 경로는 스프레드/2 + 충격 스트레스. 부과 규칙·fallback rate만 소유(실측 rate는 미소유) | `ports.CostModel` | 없음(펀딩 실측 rate는 DataFeed 소유) |
-| EvidenceSink 구현 | `EvidenceSink` | run별 SQLite에 캔들 신호·주문·체결·포지션·손익·지표 스냅샷 상세 기록·finalize; 결정성 해시는 정렬 행의 정규화 직렬화(파일 바이트 아님·wall-clock 제외) | `ports.EvidenceSink` | Evidence SQLite 쓰기 |
-| CatalogStore 구현 | `CatalogStore` | `backtest_db`에 run 요약·카탈로그·사전등록·태그 meta 기록·조회; run_id를 카탈로그 시퀀스로 단독 발급 | `ports.CatalogStore` | `backtest_db` 쓰기·읽기 |
-| StrategyRegistry 구현 | `StrategyRegistry` | `signal_db`의 Adaptee 구현 카탈로그 등록·조회(backtest 측 주입 어댑터) — `Adapter Manager`가 이 포트로 목록을 다룬다 | `ports.StrategyRegistry` | `signal_db` 조회·(등록 시) 쓰기 |
+- **포트 선정 기준** — 환경(백테스트·페이퍼·라이브)에 따라 값이나 방식이 달라지는 것만 포트로 선정한다(데이터 출처·체결·시계·비용값·기록 위치 등).
+- **포트 밖(`core_lib`)에 남는 것** — 환경과 무관한 순수 판단·계산 로직: 전략 판단·지표·사이징·비용 수식·체결 규칙·평가.
+- **목록은 일곱으로 고정** — 표준 포트 여섯(`DataFeed`·`Broker`·`Clock`·`CostModel`·`EvidenceSink`·`CatalogStore`)개와  전략(Adaptee) 목록 접근 포트 `StrategyRegistry`를 더해 일곱. 더 늘리지 않는다.
+- **아래 표가 정하는 것** — 각 backtest 어댑터가 구현할 포트(ABC)·구체 동작·`core_lib` 소비·저장소 접근.
+- **라이브·페이퍼 쪽** — 같은 포트(ABC)의 반대편 구현은 각 서비스가 가진다(§3.3). 단 `CatalogStore`는 백테스트
+  전용이라 라이브 구현이 없다.
 
-`CostModel`의 수치값은 legacy에서 코드가 아니라 **값만** 가져온 시작 기본값이며, run 설정으로 덮어쓴다. 슬리피지
-호환 기본값은 곱셈 고정 bps이고, 표준 목표는 스프레드 절반에 주문량/유동성 충격을 더한 스트레스 모델(왕복
-0.1~0.3%)로, 이 전환은 §4가 수식으로 확정한다.
+| 어댑터 (backtest 구현)   | 구현하는 포트 ABC        | 구체 동작                                                                                                                                                                                                                                                            | core_lib 소비                                            | 저장소 접근                      |
+| ------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ | --------------------------- |
+| DataFeed 구현         | `DataFeed`         | 과거 확정 OHLCV·funding·mark_price를 **전략 TF 캔들**로 공급, `up_to` 경계 이후 캔들 미노출(look-ahead 구조 배제). 1분 하위 집행 피드는 유보되어 이 어댑터 표면은 전략 TF 캔들 기준이며, 1분 트리거 walk·트레일링 파리티 편차는 Engine 설계(§4.4)에서 확정하되 소비 전략이 없어 재유보                                                               | `ports.DataFeed`·`types.Candle`                        | `crypto_data` 읽기(백테스트 미기록)  |
+| Broker 구현           | `Broker`           | 결정적 시뮬 체결(다음 캔들 시가 기본·intrabar 트리거·캔들 내 손절·익절 동시 도달 시 손절 우선 OHLC-locked·갭·수량 절삭) + `CostModel` 적용. `submit()`은 `core_lib.execution.normalizer`(공유)를 통과해 float→Decimal 단일 변환 — 어댑터 자체 캐스팅 없음                                                                      | `ports.Broker`·`execution`(matcher·normalizer)·`costs` | —                           |
+| Clock 구현            | `Clock`            | 시뮬 캔들 시각 공급(결정적, wall-clock 금지)                                                                                                                                                                                                                                  | `ports.Clock`                                          | —                           |
+| CostModel 구현        | `CostModel`        | 보수적 주입 시작 기본값 공급(수수료·유지증거금률·펀딩 정산 간격·펀딩 fallback·pct 사이징 등 — 구체 수치는 CostModel 클래스가 정본, §4.3); 슬리피지는 호환 bps 기본이되 표준 경로는 스프레드 절반 + 충격 스트레스. 부과 규칙·fallback rate만 소유(실측 rate는 미소유) | `ports.CostModel`                                      | 없음(펀딩 실측 rate는 DataFeed 소유) |
+| EvidenceSink 구현     | `EvidenceSink`     | run별 SQLite에 캔들 신호·주문·체결·포지션·손익·지표 스냅샷 상세 기록·finalize; 결정성 해시는 정렬 행의 정규화 직렬화(파일 바이트 아님·wall-clock 제외)                                                                                                                                                            | `ports.EvidenceSink`                                   | Evidence SQLite 쓰기          |
+| CatalogStore 구현     | `CatalogStore`     | `backtest_db`에 run 요약·카탈로그·사전등록·태그 meta 기록·조회; run_id를 카탈로그 시퀀스로 단독 발급                                                                                                                                                                                           | `ports.CatalogStore`                                   | `backtest_db` 쓰기·읽기         |
+| StrategyRegistry 구현 | `StrategyRegistry` | `signal_db`의 Adaptee 구현 카탈로그 조회(backtest는 목록 읽기만; 등록·쓰기는 signal-service 몫) — `Adapter Manager`가 이 포트로 목록을 다룬다                                                                                                                                                                         | `ports.StrategyRegistry`                               | `signal_db` 조회(읽기)    |
 
-펀딩 rate의 소유는 둘로 갈린다 — 과거 실측 펀딩 시계열은 `DataFeed` 어댑터가 `crypto_data`에서 소유·공급하고,
-`CostModel` 어댑터는 부과 규칙과 fallback rate(0.0001)만 소유한다. 경계 캔들에서 Engine이 `DataFeed`의 실측 rate를
-`costs`의 펀딩 정산에 중개하며, 어댑터끼리 직접 호출하지 않는다(포트 간 결합 없음). 실측 rate가 없을 때만 `CostModel`
-fallback을 쓴다.
+**`CostModel` 값에 관하여.**
+
+- **시작 기본값의 출처** — legacy에서 코드가 아니라 숫자값만 가져온 시작 기본값이다. run 설정으로 덮어쓸 수 있다.
+- **슬리피지 기본값(호환)** — 가격에 고정 비율(bps)을 곱해 매기는 방식이다.
+- **슬리피지 표준 목표** — 호가 스프레드의 절반에, 주문량·유동성에 따른 충격을 더한 모델(왕복 기준 0.1~0.3%). 정확한
+  수식은 §4에서 확정한다.
+
+**펀딩 rate는 두 어댑터가 나눠 맡는다.**
+
+- **`DataFeed` 어댑터** — 과거 실측 펀딩 시계열을 `crypto_data`에서 가져와 공급한다(실측값 소유).
+- **`CostModel` 어댑터** — 부과 규칙과 대체값(fallback rate `0.0001`)만 가진다.
+- **연결 방식** — 펀딩 정산 시점(경계 캔들)에 Engine이 `DataFeed`의 실측 rate를 `costs`의 정산에 넘긴다. 어댑터끼리
+  직접 부르지 않는다(포트 간 결합 없음). 실측값이 없을 때만 `CostModel`의 대체값을 쓴다.
 
 ## §3.3 채택 컴포넌트 (signal·wallet)
 
-유지 서비스인 `signal-service`·`wallet-service`가 `core_lib`를 채택한 뒤의 컴포넌트 뷰다. 미래 계약을 앞세운다 —
-두 서비스의 내부 지표·전략·실행·비용·사이징 구현이 `core_lib` import로 치환된 모습을 그리고, 현행 구조는 치환
-지점을 식별하는 근거로만 인용한다. 이 판은 **설계**이며 실제 치환은 채택 단계(부록)가 수행한다. 한 서비스에 한
-다이어그램을 두어 두 서비스를 섞지 않는다.
+유지 서비스인 `signal-service`·`wallet-service`가 `core_lib`를 채택한 뒤의 모습을 그린다. 두 서비스의 내부 지표·
+전략·실행·비용·사이징 구현을 `core_lib` import로 바꾼 상태이고, 현행 코드는 "무엇을 무엇으로 바꾸는지" 짚기
+위해서만 인용한다. 여기는 설계이고, 실제 교체는 채택 단계(부록)에서 한다. 서비스마다 다이어그램을 하나씩 둔다.
 
-채택의 효과는 **표면마다 다르다.** `signal-service`의 지표 계산·`analyze` 인소싱은 **동작 보존**(같은 계산값,
-동등성 게이트로 확인)이지만, `wallet-service`의 회계·손익·체결 표면은 `core_lib`가 신규 구현이라 **정확도 교정
-(동작 변경)** 이다 — 거래소 실측 대비 골든 기준선을 재수립한다. 따라서 "회귀가 그대로 통과 = 동작 불변"은 signal
-지표 표면에서 성립하고 wallet 회계 표면에서는 성립하지 않는다. 두 서비스 모두 자기 live/paper 포트 어댑터(같은
-포트 계약의 반대편 구현)를 서비스 안에 소유하고, 구 import 경로에는 re-export shim(구 경로에서 새 위치를 다시
-내보내는 얇은 호환 계층)을 남겨 무중단으로 진행한다.
+채택의 효과는 서비스의 **어느 부분이냐에 따라 다르다.**
+
+- **signal 쪽(지표·`analyze`)** — 계산 결과가 그대로다(동작 보존). 옛 값과 `core_lib` 값이 같은지 동등성 검사로 확인한다.
+- **wallet 쪽(회계·손익·체결)** — `core_lib`가 새 구현이라 계산값이 바뀐다(정확도 교정). 거래소 실측과 맞춰 골든
+  기준선을 다시 잡는다.
+
+그래서 "기존 회귀 테스트가 그대로 통과 = 동작 그대로"는 signal 지표 쪽에서만 맞고, wallet 회계 쪽에서는 아니다.
+
+**두 서비스 공통** — 각자 live/paper 포트 어댑터(같은 포트 계약의 반대편 구현)를 서비스 안에 두고, 구 import
+경로에는 re-export shim(옛 경로를 새 위치로 다시 내보내는 얇은 호환 층)을 남겨 무중단으로 채택한다.
 
 ### §3.3.1 signal-service (채택 후)
 
@@ -637,7 +692,7 @@ flowchart TD
     subgraph CLREF["core_lib (§3.1 정의 · 참조)"]
         RIND["indicators"]
         RMGR["Adapter Manager"]
-        RSTR["전략 판단 계약"]
+        RSTR["StrategyAdapter"]
         RCFG["StrategyConfig"]
         RPORT["ports<br/>DataFeed·StrategyRegistry ABC"]
     end
@@ -661,23 +716,17 @@ flowchart TD
     SHIM -.->|구 경로 재노출| SSTR
 ```
 
-치환 지점과 동작 성질은 다음과 같다.
+바꾸는 것은 둘이고, 둘 다 계산 결과는 그대로다(동작 보존).
 
-- **지표 계산 (동작 보존).** 현행 지표 공급은 외부 collector 사전계산과 `technical_indicators` 테이블 읽기를 거쳐
-  `IndicatorLoader.load_latest`(`strategy_executor.py`)가 `indicator_mapper.build_market_data_from_db`로 컬럼을
-  매핑하는 경로다. 이를 `core_lib.indicators` 증분 계산(확정 캔들 마감마다 O(1))으로 치환한다. 동등성 게이트는
-  옛 테이블 값 대 `core_lib` 증분 값(허용오차 명시, 첫 대상 지표 하나)과 벡터화↔증분 일치다. 외부 collector는
-  리포 내부 OHLCV 수집기로 이관돼 지표 역할을 폐지하고 적재만 맡는다.
-- **전략 구동 (동작 보존).** 현행 `StrategyFactory.create_from_db`(`factory.py`)·`registry.py` 수동 등록·
-  `AbstractStrategy` 상속 골격을 `Adapter Manager`(생성·lifecycle·레지스트리)·`StrategyAdapter`(analyze 호출)·
-  `StrategyConfig`(파라미터 해석)로 치환한다. 현행 드라이버의 분당 폴링 게이트(`check_interval_minutes`)는
-  제거하고 전략 TF 캔들 마감 판단으로 되돌린다. 생성된 신호는 wallet 큐로 enqueue한다(유지).
-- **유지 컴포넌트.** 신호 스케줄러(확정 캔들 마감 트리거), 서비스 소유 live DataFeed 어댑터(실시간 확정 캔들·
-  funding — 같은 `DataFeed` 계약의 라이브 구현), 서비스 소유 live StrategyRegistry 어댑터(Adaptee 카탈로그 등록·
-  조회 — 같은 `StrategyRegistry` 계약의 라이브 구현). `Adapter Manager`는 core_lib 안에서 이 주입 포트로만
-  카탈로그에 접근하므로 core_lib이 `signal_db`에 직접 의존하지 않는다.
-- **shim·유보.** 구 import 경로에 re-export shim을 남겨 무중단. 트레일링은 소비 전략이 없어 유보(재도입 시 단일
-  표준으로 통합).
+| 대상 | 현행 | `core_lib`로 바꾼 뒤 | 확인 |
+|---|---|---|---|
+| 지표 계산 | collector가 미리 계산한 값을 `technical_indicators` 테이블에서 읽음 | `core_lib.indicators`가 캔들 마감마다 직접 증분 계산(O(1)) | 옛 값 = 새 값(허용오차 내) |
+| 전략 구동 | `StrategyFactory`·`registry.py` 수동 등록·`AbstractStrategy` 상속 | `Adapter Manager`(생성)·`StrategyAdapter`(`analyze`)·`StrategyConfig`(파라미터 해석) | 분당 폴링 제거, 전략 타임프레임 캔들 마감마다 판단 |
+
+- **그대로 두는 것** — 신호 스케줄러, 서비스 소유 live DataFeed·StrategyRegistry 어댑터. `Adapter Manager`는 주입
+  포트로만 카탈로그에 접근하므로 `core_lib`이 `signal_db`에 직접 묶이지 않는다.
+- **유보·기타** — 트레일링은 쓰는 전략이 없어 유보. 구 import 경로엔 re-export shim(무중단). 외부 collector는 리포
+  내부 OHLCV 수집기로 옮겨 적재만 맡는다(지표 계산 역할 폐지).
 
 ### §3.3.2 wallet-service (채택 후)
 
@@ -713,21 +762,24 @@ flowchart TD
     WSHIM -.->|구 경로 재노출| WSIZE
 ```
 
-치환 지점과 동작 성질은 다음과 같다.
+바꾸는 것은 한 묶음이다 — 체결·포지션·회계·비용·사이징. `core_lib`이 새 구현이라 계산값이 바뀐다(정확도 교정).
 
-- **체결·포지션·회계·비용·사이징 (동작 변경 = 정확도 교정).** 현행 `futures_paper_trading_service.py`(선물 진입
-  체결·펀딩·청산 시뮬)·`futures_calculator.py`·`slippage_calculator.py`·페이퍼 체결·사이징을
-  `core_lib.execution`(matcher·position_book·accounting·normalizer)·`costs`·`sizing` import로 치환한다.
-  `core_lib`는 표준 기준 신규 구현이므로 회계·손익·체결 표면의 계산값이 바뀐다(정확도 교정). 수용 기준은 거래소
-  실측 대비 정확성(정의된 허용오차 내 골든)이며, 회귀(약 1279건 — 실행·비용·사이징·트레일링 커버 약 262건 중
-  트레일링·15분 폴링 45건은 유보 스코프)를 재검증한다. 무결성 검사(회계 항등식 `cash + position = equity`·비용 1회 차감·
-  net-of-cost)로 라이브 손익 불일치 재발을 구조적으로 막는다. `fill_timing` 기본값을 즉시(immediate)에서 다음 캔들
-  시가(next_bar)로 전환해 `decision_ts < execution_ts`를 통일한다.
-- **유지 컴포넌트.** 신호 큐 소비자, 서비스 소유 live Broker 어댑터(거래소 주문 API — 같은 `Broker` 계약의 라이브
-  구현이며, `submit()`은 동일하게 `core_lib.execution.normalizer`를 통과), `wallet_db`(체결·포지션·회계 기록).
-- **라이브 인프라·shim·유보.** 큐·폴링·HTTP·상태 복구·WebSocket 등 라이브 인프라는 백테스트로 이관하지 않고
-  wallet에 남되, wall-clock 즉시 체결(`filled_at = now()`)은 `Clock` 포트·`fill_timing`으로 대체한다. 구 import
-  경로에 re-export shim. 트레일링은 유보이며, 현행 wallet 3곳 중복은 재도입 시 단일 표준으로 통합한다.
+| 대상 | 현행 | `core_lib`로 바꾼 뒤 |
+|---|---|---|
+| 체결·포지션·회계·비용·사이징 | wallet 자체 구현(`futures_paper_trading_service.py`·`futures_calculator.py`·`slippage_calculator.py`) | `core_lib`의 `execution`·`costs`·`sizing` import |
+
+계산값이 바뀌므로 **해야 할 것**:
+
+- **골든 재수립** — 거래소 실측과 맞춘 정확성이 통과 기준. 회귀 약 1279건 재검증(트레일링·폴링 45건은 유보).
+- **무결성 검사** — 회계 항등식 `cash + position = equity`·비용 1회 차감·net-of-cost로 라이브 손익 불일치 재발 차단.
+- **체결 시점 전환** — `fill_timing` 기본값을 즉시(immediate)에서 다음 캔들 시가(next_bar)로 바꿔 `decision_ts < execution_ts` 준수.
+
+그 밖에:
+
+- **그대로 두는 것** — 신호 큐 소비자, 서비스 소유 live Broker 어댑터(`submit()`은 `core_lib.execution.normalizer`
+  통과), `wallet_db`. 큐·폴링·HTTP·WebSocket 등 라이브 인프라도 wallet에 그대로 둔다.
+- **유보·기타** — wall-clock 즉시 체결(`filled_at = now()`)은 `Clock` 포트·`fill_timing`으로 대체. 구 import 경로엔
+  re-export shim. 트레일링은 유보(현행 wallet 3곳 중복은 재도입 시 하나로 합침).
 
 ---
 
