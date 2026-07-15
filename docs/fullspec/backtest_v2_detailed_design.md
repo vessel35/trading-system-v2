@@ -1254,33 +1254,71 @@ classDiagram
     contracts ..> Candle
 ```
 
-**`IndicatorSpec`** — 지표 하나의 명세. `name`·`params`(예: `{"period": 14}`)로 식별되고, `version`과
-`pinned_impl`은 이견 있는 계산의 채택 구현을 고정하며(재현·정합의 근거), `min_history`는 그 지표가 유효값을 내기
-전에 필요한 최소 캔들 수, `category`는 아래 분류(추세·모멘텀 등), `required_inputs`는 OHLCV 외에 필요한 입력
-채널(시장폭 지표만 해당)이다. `compute_vectorized`는 전 구간을 한 번에 계산하고, `make_state`는 그 지표의 증분
-상태 객체를 만든다.
+#### `IndicatorSpec`
 
-**`IndicatorRegistry`** — 지표 등록·조회와 배치 계산. `get(name, params)`가 명세를 돌려주고, `compute_batch`가 한
-run에서 실제로 계산할 지표 집합만 벡터화로 계산한다. 계산 대상은 `resolve_enabled(mode, ...)`가 run 설정으로
-정한다 — `auto`(활성 전략이 선언한 필요 지표만, 기본)·`explicit`(명시 리스트: 전략 필요분 + 손실원인 탐색용 추가
-지표)·`all`(82종 전량, 전면 스캔용). 요청 지표·파라미터가 등록돼 있고 워밍업(`min_history`)이 확보됐는지, 시장폭
-지표는 별도 입력 채널이 있는지 검증한 뒤 계산한다.
+지표 하나의 명세.
 
-**`IndicatorState`** — 라이브와 같은 증분 계산 경로(캔들 하나당 O(1) 갱신). `seed(candles)`가 워밍업 이력으로 상태를
-채우고, `update(candle)`가 확정 캔들 하나로 한 칸 전진하며, `warmed_up`은 `min_history` 충족 여부다. 이 경로가
-라이브가 실제로 도는 방식이라 벡터화 경로와 값이 같은지 판정하는 기준점이다.
+- **책임** — `name`·`params`(예: `{"period": 14}`)로 지표를 식별하고, 어떻게 계산할지와 언제부터 유효한지를
+  선언한다.
+- **필드 의미**
+    - `version`·`pinned_impl` — 이견 있는 계산의 채택 구현을 고정한다. 재현·정합의 근거다.
+    - `min_history` — 그 지표가 유효값을 내기 전에 필요한 최소 캔들 수.
+    - `category` — 아래 82종 목록의 계열(추세·모멘텀 등).
+    - `required_inputs` — OHLCV 외에 필요한 입력 채널. 시장폭 지표만 해당한다.
+- **메서드 의미**
+    - `compute_vectorized` — 전 구간을 한 번에 계산한다.
+    - `make_state` — 그 지표의 증분 상태 객체를 만든다.
 
-**`contracts`** — look-ahead 배제 계약(모듈 수준). `assert_finalized(candle, T)`는 `candle.close_time ≤ T`를
-런타임 검증해 미래·미확정 캔들이 지표 계산에 들어오는 것을 막고, `drop_unfinalized`는 주간 ATR 같은 리샘플에서
-미확정 마지막 버킷을 떨군다.
+#### `IndicatorRegistry`
 
-**`primitives`** — 공용 계산 단위(모듈 수준). 이동평균 4종(단순·지수·선형가중·Wilder 평활), True Range, 대표
-가격(typical price), 표준편차, 구간 최고·최저, 누적, 변화율, 선형회귀다. 82종 지표는 이 프리미티브 위에서
-조립되며, 중복 계산을 한 곳에 모은다.
+지표 등록·조회와 배치 계산.
 
-**82종 지표 목록(확정).** 표준 골격은 이식 원천 목록만 두었고 "미리 고정하지 않는다"고 했던 지표 집합을 이 절이
-82종으로 확정한다. 세는 규칙은 "시스템·지표 단위"이며(합계 82), 아래가 그 전량이다. 각 지표의 닫힌 형태 계산식은
-지표 계산 명세 표준이 계산 권위로 고정한다(구현까지 유지 참조).
+- **책임** — 등록된 명세를 조회해 주고, 한 run에서 실제로 계산할 지표 집합만 벡터화로 계산한다.
+- **메서드 의미**
+    - `get(name, params)` — 명세를 돌려준다.
+    - `compute_batch` — 확정된 계산 집합만 벡터화로 계산한다.
+    - `resolve_enabled(mode, …)` — 계산 대상을 run 설정으로 정한다.
+- **계산 대상 모드**
+    - `auto`(기본) — 활성 전략이 선언한 필요 지표만 계산한다. 성능 기본값이다.
+    - `explicit` — 명시 리스트를 계산한다. 전략 필요분에 손실원인 탐색용 추가 지표를 더한 집합이다.
+    - `all` — 82종 전량을 계산한다. 전면 스캔용이다.
+- **계산 전 검증**
+    - 요청 지표·파라미터가 등록돼 있는가.
+    - 워밍업(`min_history`)이 확보됐는가.
+    - 시장폭 지표라면 별도 입력 채널이 있는가.
+
+#### `IndicatorState`
+
+라이브와 같은 증분 계산 경로(캔들 하나당 O(1) 갱신).
+
+- **책임** — 라이브가 실제로 도는 계산 방식이라, 벡터화 경로와 값이 같은지 판정하는 기준점이 된다.
+- **메서드 의미**
+    - `seed(candles)` — 워밍업 이력으로 상태를 채운다.
+    - `update(candle)` — 확정 캔들 하나로 한 칸 전진한다.
+- **필드 의미** — `warmed_up`은 `min_history` 충족 여부다.
+
+#### `contracts`
+
+look-ahead 배제 계약(모듈 수준).
+
+- **책임** — 미래·미확정 캔들이 지표 계산에 들어오는 것을 런타임에 막는다.
+- **메서드 의미**
+    - `assert_finalized(candle, T)` — `candle.close_time ≤ T`를 검증한다.
+    - `drop_unfinalized` — 주간 ATR 같은 리샘플에서 미확정 마지막 버킷을 떨군다.
+
+#### `primitives`
+
+공용 계산 단위(모듈 수준).
+
+- **책임** — 82종 지표가 이 위에서 조립되도록 중복 계산을 한 곳에 모은다.
+- **구성** — 이동평균 4종(단순·지수·선형가중·Wilder 평활), True Range, 대표 가격(typical price), 표준편차,
+  구간 최고·최저, 누적, 변화율, 선형회귀.
+
+#### 82종 지표 목록(확정)
+
+표준 골격은 이식 원천 목록만 두었고 "미리 고정하지 않는다"고 했던 지표 집합을 이 절이 82종으로 확정한다. 세는
+규칙은 "시스템·지표 단위"이며(합계 82), 아래가 그 전량이다. 각 지표의 닫힌 형태 계산식은 지표 계산 명세 표준이
+계산 권위로 고정한다(구현까지 유지 참조).
 
 | 계열 | 지표 (개수) |
 |---|---|
@@ -1309,14 +1347,20 @@ run에서 실제로 계산할 지표 집합만 벡터화로 계산한다. 계산
   Bands(기간 20·표준편차 2.0), Stochastic(%K 14·%D 3), ATR 14, 거래량 이동평균 20이다. 82종 구현이 이를 빠짐없이
   덮는다.
 
-**워밍업·seed 규약.** 재귀형 지표(EMA·Wilder 평활·Parabolic SAR·누적합 등 상태를 보유하는 것)는 워밍업 이력으로
-seed한 뒤 확정 캔들로만 갱신한다. 벡터화 경로와 증분 경로의 seed 규칙(초기값 산정·`adjust` 여부·표준편차 분모·
-0 나눗셈 처리)은 지표 계산 명세 표준이 통일하며, 두 경로가 초반 캔들에서도 어긋나지 않게 같은 규칙을 쓴다. 각
-지표의 `min_history`만큼 캔들이 쌓이기 전 값은 유효하지 않다. 실행 드라이버는 평가 구간 시작 전에 `max(전략
-min_history, 지표 최장 워밍업)` 캔들을 별도 프리로드하고 그 구간의 신호는 버린다(§4.4에서 확정).
+#### 워밍업·seed 규약
 
-**지표 계산 플로우(정의서 내부).** 한 run에서 지표 값을 만드는 길은 두 가지이고, 어느 쪽이든 같은 82종 구현·같은
-프리미티브를 거쳐 값이 서로 같아야 한다(일치 테스트로 못박는다). 아래가 두 경로와 그 공통 look-ahead 관문이다.
+- **재귀형 지표의 갱신** — EMA·Wilder 평활·Parabolic SAR·누적합처럼 상태를 보유하는 지표는 워밍업 이력으로
+  seed한 뒤 확정 캔들로만 갱신한다.
+- **두 경로의 seed 통일** — 초기값 산정, `adjust` 여부, 표준편차 분모, 0 나눗셈 처리를 지표 계산 명세 표준이
+  통일한다. 벡터화 경로와 증분 경로가 같은 규칙을 써야 초반 캔들에서도 값이 어긋나지 않는다.
+- **유효 시점** — 각 지표의 `min_history`만큼 캔들이 쌓이기 전 값은 유효하지 않다.
+- **프리로드** — 실행 드라이버는 평가 구간 시작 전에 `max(전략 min_history, 지표 최장 워밍업)` 캔들을 별도
+  프리로드하고, 그 구간의 신호는 버린다(§4.4에서 확정).
+
+#### 지표 계산 플로우
+
+한 run에서 지표 값을 만드는 길은 두 가지이고, 어느 쪽이든 같은 82종 구현·같은 프리미티브를 거쳐 값이 서로 같아야
+한다(일치 테스트로 못박는다). 아래가 두 경로와 그 공통 look-ahead 관문이다.
 
 ```mermaid
 flowchart TD
@@ -1421,55 +1465,85 @@ classDiagram
 > `StrategyRegistry`는 §4.3 `ports`가 정의하는 Adaptee 카탈로그 주입 포트(ABC)다. `Adapter Manager`가 이
 > 포트로만 목록에 접근하므로 `core_lib`은 특정 DB에 직접 의존하지 않는다.
 
-**`StrategyAdapter`** — 전략 판단 계약. 상속시킬 공유 구현이 없으므로 추상 클래스가 아니라 `typing.Protocol`이다
-(구조적 준수만 요구). 세 메서드의 의미는 다음과 같다. `get_metadata()`는 필요 지표(`{name, params}` 목록)·최소
-이력·지원 타임프레임·프로파일을 선언하고, `get_parameter_schema()`는 이 전략의 파라미터 스키마(각 필드의 타입·
-기본값·범위, 잉여 키 금지)를 **선언만** 한다(해석하지 않는다). `analyze(market_data, current_position)`는 Engine이
-push한 사전 계산 지표의 평평한 dict와 현재 포지션을 받아 판단을 반환한다 — 진입·청산 판단이면 `TradingSignal`,
-관망이면 `None`. 반환은 판단뿐이며 수량·주문 방향을 정하지 않는다.
+#### `StrategyAdapter`
 
-- **불변식(계약이 강제).** Adaptee는 **stateless**(호출 간 상태를 보유하지 않음) — 같은 입력은 항상 같은 신호를
-  낸다. 데이터 읽기·결과 저장·캔들 루프를 갖지 않는다(각각 Engine·포트 소관). **미래 데이터를 스스로 당겨오지
-  않는다** — 입력 dict는 Engine이 확정 캔들 경계까지만 채워 주므로 look-ahead는 피드 경계가 통제한다. 입력 dict의
-  형태와 호출 계약은 라이브·백테스트가 동일하다(같은 코드가 두 환경에서 같은 값을 본다).
+전략 판단 계약. 상속시킬 공유 구현이 없으므로 추상 클래스가 아니라 `typing.Protocol`이다(구조적 준수만 요구).
 
-**`Adaptee`** — `StrategyAdapter` Protocol을 구현하는 실제 전략. 진입·청산 엣지와 파라미터 값은 전략 작성자
-소유라 이 설계의 범위 밖이며, 플랫폼은 계약 형태만 정한다. 첫 검증 Adaptee는 트레일링을 제외한 개념의 신규
-구현으로 ATR 기반 고정 손절·익절을 쓴다. 트레일링을 쓰는 전략은 상속이 아니라 `TrailingStopCalculator`의 순수
-함수를 **호출**한다(첫 검증 스코프에서는 유보).
+- **책임** — 전략을 끼우는 자리를 선언한다. 판단만 하고 읽기·저장·루프를 갖지 않는다.
+- **메서드 의미**
+    - `get_metadata()` — 필요 지표(`{name, params}` 목록)·최소 이력·지원 타임프레임·프로파일을 선언한다.
+    - `get_parameter_schema()` — 이 전략의 파라미터 스키마(각 필드의 타입·기본값·범위, 잉여 키 금지)를 선언만
+      한다. 해석하지 않는다.
+    - `analyze(market_data, current_position)` — Engine이 push한 사전 계산 지표의 평평한 dict와 현재 포지션을
+      받아 판단을 반환한다. 진입·청산 판단이면 `TradingSignal`, 관망이면 `None`이며, 반환은 판단뿐이라 수량·주문
+      방향을 정하지 않는다.
+- **계약이 강제하는 불변식**
+    - **stateless** — 호출 간 상태를 보유하지 않는다. 같은 입력은 항상 같은 신호를 낸다.
+    - **판단 전용** — 데이터 읽기·결과 저장·캔들 루프를 갖지 않는다(각각 Engine·포트 소관).
+    - **미래 데이터 자가 인출 금지** — 입력 dict는 Engine이 확정 캔들 경계까지만 채워 주므로, look-ahead는 피드
+      경계가 통제한다.
+    - **라이브·백테스트 동형** — 입력 dict의 형태와 호출 계약이 두 환경에서 같다. 같은 코드가 두 환경에서 같은
+      값을 본다.
 
-**`StrategyConfig`** — 전략 파라미터 config의 해석·검증·직렬화·스키마 노출의 단일 소유. `resolve(schema,
-raw_config)`가 원자재 config(전략 id + 파라미터 값)를 **Adaptee가 선언한 스키마에 대조**해 기본값 병합·잉여 키
-금지(`extra=forbid`)·타입/범위·교차필드 검증을 거쳐 **불변** `ResolvedConfig`로 해석한다. `json_schema(schema)`는
-설정 UI·툴링용 JSON Schema를 노출하고, `serialize`·`version`은 Evidence·카탈로그 기록용 정규화 직렬화와 스키마
-버전을 낸다.
+#### `Adaptee`
 
-- **무순환 설계(스키마를 값으로 받음).** `resolve`·`json_schema`는 Adaptee 인스턴스가 아니라 **스키마 값**을
-  인자로 받는다. Adaptee가 선언한 스키마를 Adapter Manager가 먼저 꺼내 넘겨 주므로, `StrategyConfig`는 스키마
-  타입에만 의존하고 전략 구현을 되짚지 않는다 — 생성(Manager)→해석(Config)→선언(Adaptee) 사이에 순환이 생기지
-  않는다.
-- **경계 불변식.** 스키마 **선언은 Adaptee 소유**이며 `StrategyConfig`가 재정의하지 않는다. 값은 호출자 소유(소스
-  미보유). 파라미터 스윕·실행 설정은 범위 밖(그건 실행 드라이버의 run 설정 소관). 같은 전략 config가 backtest·
-  live·UI에서 **동일하게 검증**되도록 이 한 곳이 해석을 소유한다.
+`StrategyAdapter` Protocol을 구현하는 실제 전략.
 
-**`ResolvedConfig`** — 해석·검증을 마친 불변 config. 생성 후 변경 불가(frozen)이며, 이 객체로 Adaptee를
-인스턴스화한다. `schema_version`을 담아 Evidence 재현 시 어떤 스키마로 해석했는지 확정한다.
+- **책임 경계** — 진입·청산 엣지와 파라미터 값은 전략 작성자 소유라 이 설계의 범위 밖이다. 플랫폼은 계약 형태만
+  정한다.
+- **첫 검증 Adaptee** — 트레일링을 제외한 개념의 신규 구현으로, ATR 기반 고정 손절·익절을 쓴다.
+- **트레일링 사용 방식** — 상속이 아니라 `TrailingStopCalculator`의 순수 함수를 호출한다(첫 검증 스코프에서는
+  유보).
 
-**`Adapter Manager`** — Adaptee의 생성(Factory)·lifecycle과 구현 목록 레지스트리. `create(strategy_id,
-raw_config)`가 생성을 오케스트레이션하고(아래 시퀀스), `activate`·`deactivate`가 lifecycle을, `list_registered`·
-`register`가 signal_db 레지스트리를 다룬다. **레지스트리 DB 접근은 주입된 `StrategyRegistryPort`로만** 하므로
-core-lib은 특정 DB에 직접 의존하지 않는다. 매니저는 전략 결정 로직도 파라미터 검증 로직도 직접 갖지 않는다
-(각각 Adaptee·`StrategyConfig` 소관). backtest Engine과 signal-service 엔진이 동일하게 이 매니저로 Adaptee를
-요청한다.
+#### `StrategyConfig`
 
-**Adaptee 생성·config 해석 시퀀스(정의서 내부).** 이 세 책임(선언·해석·생성)이 어떻게 순서대로 맞물리는지를
-`create` 한 호출로 보인다. 순환 없이 스키마가 값으로 흐르는 것이 핵심이다.
+전략 파라미터 config의 해석·검증·직렬화·스키마 노출의 단일 소유.
+
+- **메서드 의미**
+    - `resolve(schema, raw_config)` — 원자재 config(전략 id + 파라미터 값)를 Adaptee가 선언한 스키마에 대조해
+      불변 `ResolvedConfig`로 해석한다. 검증은 기본값 병합, 잉여 키 금지(`extra=forbid`), 타입·범위, 교차필드를
+      거친다.
+    - `json_schema(schema)` — 설정 UI·툴링용 JSON Schema를 노출한다.
+    - `serialize`·`version` — Evidence·카탈로그 기록용 정규화 직렬화와 스키마 버전을 낸다.
+- **무순환 설계(스키마를 값으로 받음)** — `resolve`·`json_schema`는 Adaptee 인스턴스가 아니라 스키마 값을 인자로
+  받는다. Adaptee가 선언한 스키마를 `Adapter Manager`가 먼저 꺼내 넘겨 주므로 `StrategyConfig`는 스키마 타입에만
+  의존하고 전략 구현을 되짚지 않는다. 생성(Manager)·해석(Config)·선언(Adaptee) 사이에 순환이 생기지 않는다.
+- **경계 불변식**
+    - 스키마 선언은 Adaptee 소유이며 `StrategyConfig`가 재정의하지 않는다.
+    - 값은 호출자 소유다(소스를 갖지 않는다).
+    - 파라미터 스윕·실행 설정은 범위 밖이다(실행 드라이버의 run 설정 소관).
+    - 같은 전략 config가 backtest·live·UI에서 동일하게 검증되도록, 이 한 곳이 해석을 소유한다.
+
+#### `ResolvedConfig`
+
+해석·검증을 마친 불변 config.
+
+- **불변성** — 생성 후 변경 불가(frozen)다. 이 객체로 Adaptee를 인스턴스화한다.
+- **`schema_version`** — Evidence 재현 시 어떤 스키마로 해석했는지 확정한다.
+
+#### `Adapter Manager`
+
+Adaptee의 생성(Factory)·lifecycle과 구현 목록 레지스트리.
+
+- **메서드 의미**
+    - `create(strategy_id, raw_config)` — 생성을 오케스트레이션한다(아래 시퀀스).
+    - `activate`·`deactivate` — Adaptee의 lifecycle을 다룬다.
+    - `list_registered`·`register` — signal_db 레지스트리를 다룬다.
+- **레지스트리 접근** — DB 접근은 주입된 `StrategyRegistry` 포트로만 한다. 그래서 core-lib은 특정 DB에 직접
+  의존하지 않는다.
+- **갖지 않는 것** — 전략 결정 로직도 파라미터 검증 로직도 직접 갖지 않는다(각각 Adaptee·`StrategyConfig` 소관).
+- **공용** — backtest Engine과 signal-service 엔진이 동일하게 이 매니저로 Adaptee를 요청한다.
+
+#### Adaptee 생성·config 해석 시퀀스
+
+선언·해석·생성 세 책임이 어떻게 순서대로 맞물리는지를 `create` 한 호출로 보인다. 순환 없이 스키마가 값으로 흐르는
+것이 핵심이다.
 
 ```mermaid
 sequenceDiagram
     participant E as Engine · signal-service 엔진
     participant AM as Adapter Manager
-    participant REG as StrategyRegistryPort (주입)
+    participant REG as StrategyRegistry (주입)
     participant AD as Adaptee (전략 구현)
     participant SC as StrategyConfig
     E->>AM: create(strategy_id, raw_config)
@@ -1489,20 +1563,33 @@ sequenceDiagram
 소유한다(2·8행). Config가 Adaptee를 되짚지 않으므로 의존은 한 방향(Manager→Config, Manager→Adaptee,
 Config→스키마 타입)으로만 흐른다. 레지스트리 조회는 주입 포트를 거쳐 core-lib이 DB에 묶이지 않는다.
 
-**`StrategyProfile`** — 각 전략이 선언하는 자기 "형태(shape)". 스키마·소비 규칙은 패키지가 소유하고 값은 각
-전략이 소유한다(형태 지표를 보편 통과선으로 못박지 않기 위한 인터페이스). 필드는 전략군(`family ∈
-{trend_following, mean_reversion, breakout, carry, market_making, …}`), 기대 승률 범위·기대 손익비 범위(각
-`[min, max]`), 꼬리 형태(`tail_shape ∈ {right_fat, symmetric, left_fat}`), 보유 지평, 주 지표(`primary_metric`),
-선호 위험조정 지표(`risk_adjusted_pref ∈ {sortino, sharpe, calmar}`), 보존할 수익 구조
-(`profit_structure_to_preserve`), 기대 범위 허용오차(`envelope_tolerance`), 성숙도(`envelope_status ∈
-{provisional, updating, established}`)다. 이 프로파일의 소비(기대 범위 대조·회귀 판정)는 평가 계층(§4.3의
-`eval.profile`)이 하며, 여기서는 스키마만 정의한다. 성숙도가 순환 논리를 막는다 — 아직 확립되지 않은
-(`provisional`) 기대 범위로 신규 전략을 탈락시키지 않고, 확립된(`established`) 전략이 그 형태를 잃은 회귀만
-reject한다.
+#### `StrategyProfile`
 
-**`TrailingStopCalculator`(유보)** — ATR 트레일링의 표준 위치(순수 함수). 첫 검증 스코프의 어떤 전략도 쓰지 않아
-유보하며, 재도입 시 이 단일 표준으로 통합하고 파리티 기준을 확정한다. 표준 위치는 트리에 남지만 이 절의 계약을
-바꾸지 않는다. 고정 손절이 없는 전략이 도입되면 `compute_initial_risk`가 최초 위험(`r0`)을 제공한다.
+각 전략이 선언하는 자기 "형태(shape)".
+
+- **소유 경계** — 스키마·소비 규칙은 패키지가 소유하고 값은 각 전략이 소유한다. 형태 지표를 보편 통과선으로
+  못박지 않기 위한 인터페이스다.
+- **필드의 허용 값**
+    - `family` — 전략군. `{trend_following, mean_reversion, breakout, carry, market_making, …}`.
+    - 기대 승률 범위·기대 손익비 범위 — 각각 `[min, max]`.
+    - `tail_shape` — 꼬리 형태. `{right_fat, symmetric, left_fat}`.
+    - `holding_horizon`·`primary_metric` — 보유 지평과 주 지표.
+    - `risk_adjusted_pref` — 선호 위험조정 지표. `{sortino, sharpe, calmar}`.
+    - `profit_structure_to_preserve` — 보존할 수익 구조.
+    - `envelope_tolerance` — 기대 범위 허용오차.
+    - `envelope_status` — 성숙도. `{provisional, updating, established}`.
+- **소비처** — 기대 범위 대조·회귀 판정은 평가 계층(§4.3.5의 `eval.profile`)이 하고, 여기서는 스키마만 정의한다.
+- **성숙도가 막는 것** — 순환 논리를 막는다. 아직 확립되지 않은(`provisional`) 기대 범위로 신규 전략을 탈락시키지
+  않고, 확립된(`established`) 전략이 그 형태를 잃은 회귀만 reject한다.
+
+#### `TrailingStopCalculator` (유보)
+
+ATR 트레일링의 표준 위치(순수 함수).
+
+- **유보 사유** — 첫 검증 스코프의 어떤 전략도 쓰지 않는다. 재도입 시 이 단일 표준으로 통합하고 파리티 기준을
+  확정한다.
+- **표준 위치 보존** — 표준 위치는 트리에 남지만 이 절의 계약을 바꾸지 않는다.
+- **재도입 시 역할** — 고정 손절이 없는 전략이 도입되면 `compute_initial_risk`가 최초 위험(`r0`)을 제공한다.
 
 ## §4.3 실행·평가 클래스 (+ 판정 플로우)
 
@@ -1565,14 +1652,20 @@ classDiagram
     Normalizer ..> money
 ```
 
-**`Normalizer` — Decimal 단일 변환 관문.** `to_decimal(x)`는 `Decimal(str(x))` + `money`의 `quantize_*`를 **한 번**
-수행한다(`Decimal(float)` 직접 변환 금지 — `float`이 품은 이진 오차가 스탑 가격 끝자리를 뒤집어 캔들 내 트리거
-여부와 결정성 해시를 흔든다). `float`을 곧바로 `Decimal(x)`에 넣지 않고 문자열을 거쳐 의도한 값을 만든다. 모든
-Broker 어댑터의 `submit()`이 이 함수를 통과해야 하며(어댑터별 독자 캐스팅 금지), 우회는 적합성 테스트로 막는다.
-이 지점이 시스템 전체에서 `float`→`Decimal`이 일어나는 **유일한** 곳이다.
+#### `Normalizer`
 
-**`Matcher` — 결정적 체결 규칙(유일 구현).** `fill_timing ∈ {immediate, next_bar}`을 주입형으로 두고 백테스트
-기본은 `next_bar`다. 규칙은 다음과 같다.
+Decimal 단일 변환 관문. 시스템 전체에서 `float`→`Decimal` 변환이 일어나는 유일한 곳이다.
+
+- **메서드 의미** — `to_decimal(x)`가 `Decimal(str(x))`와 `money`의 `quantize_*`를 한 번 수행한다.
+- **`Decimal(float)` 직접 변환 금지** — `float`이 이미 품은 이진 오차가 스탑 가격 끝자리를 뒤집어, 캔들 내 트리거
+  여부와 결정성 해시를 흔들기 때문이다. 문자열을 거쳐 의도한 값을 그대로 만든다.
+- **강제 방법** — 모든 Broker 어댑터의 `submit()`이 이 함수를 통과해야 하며 어댑터별 독자 캐스팅은 금지다. 우회는
+  적합성 테스트로 막는다.
+
+#### `Matcher`
+
+결정적 체결 규칙의 유일 구현. `fill_timing ∈ {immediate, next_bar}`을 주입형으로 두고 백테스트 기본은 `next_bar`다.
+규칙은 다음과 같다.
 
 - **다음 캔들 시가 체결.** 신호는 캔들 `t` 마감에 생성되고 체결은 `t+1` 시가에 슬리피지를 얹어 일어난다(매수 +,
   매도 −). 이것이 `decision_ts < execution_ts`를 만족한다 — 결정 캔들 종가로 체결하지 않는다.
@@ -1590,12 +1683,31 @@ Broker 어댑터의 `submit()`이 이 함수를 통과해야 하며(어댑터별
   마진·손익 정산 → 신규 진입 마진 검사·체결" 순서로 처리한다(마진 가용성은 청산 정산 후 기준).
 - **갭 처리.** `t+1` 시가가 손절·청산 너머면 시가에 체결하고 슬리피지를 가중한다.
 
-**`OrderLifecycle`** — `can_transition`이 허용 전이만 통과시키고 위반을 거부한다. 전이표는 새로 만들지 않고
-`types.Order`의 `VALID_TRANSITIONS`(단일 소유)를 읽어 쓴다 — `execution`은 `types`를 참조하므로 표를 복제하지
-않는다(복제 드리프트 방지). **`PositionBook`** — 체결을 반영해 가중평균 진입가를 갱신하고
-(`weighted_average`), `reduce_only` 실현·마진 반환(`reduce`), Isolated 우선 청산 판정(`check_liquidation`)을 한다.
-**`Accounting`** — `recompute`가 `cash + position = equity` 항등식을 유지하고 `assert_identity`가 이를 검산하며,
-각 비용은 한 번만 차감한다.
+#### `OrderLifecycle`
+
+주문 상태 전이의 문지기.
+
+- **메서드 의미** — `can_transition`이 허용된 전이만 통과시키고 위반을 거부한다.
+- **전이표의 출처** — 표를 새로 만들지 않고 `types.Order`의 `VALID_TRANSITIONS`(단일 소유)를 읽어 쓴다.
+  `execution`이 `types`를 참조하는 방향이라 표를 복제하지 않아도 되고, 그래서 복제 드리프트가 생기지 않는다.
+
+#### `PositionBook`
+
+체결을 반영해 포지션 장부를 갱신한다.
+
+- **메서드 의미**
+    - `weighted_average` — 가중평균 진입가를 갱신한다.
+    - `reduce` — `reduce_only` 실현과 마진 반환을 처리한다.
+    - `check_liquidation` — Isolated를 우선해 청산을 판정한다.
+
+#### `Accounting`
+
+회계 항등식의 소유처.
+
+- **메서드 의미**
+    - `recompute` — `cash + position = equity` 항등식을 유지한다.
+    - `assert_identity` — 그 항등식이 실제로 성립하는지 검산한다.
+- **강제하는 불변식** — 각 비용은 한 번만 차감한다.
 
 ### §4.3.2 `costs` 컴포넌트
 
@@ -1629,21 +1741,39 @@ classDiagram
     Liquidation ..> Position
 ```
 
-각 수식과 규칙(값은 주입 기본값이며 run 설정으로 덮어쓴다).
+아래 수치는 모두 주입 기본값이며 run 설정으로 덮어쓴다.
 
-- **수수료.** `fee = notional × rate`. maker/taker를 구분하고 기본은 taker(회전율 방어). 주입 기본값은 선물 maker
-  `0.0002`(0.02%)·taker `0.0005`(0.05%), 현물 `0.0005`(0.05%)다.
-- **슬리피지.** 표준 목표는 `spread/2 + k·(주문량 / 호가유동성)` 스트레스 모델(왕복 0.1~0.3%)이며, 현행 곱셈 고정
-  bps는 호환 기본값으로만 둔다(선물 진입 `0.0005`·현물 진입 `0.001`·청산 `0.0001`). 매수는 불리하게 더하고
-  매도는 뺀다.
-- **펀딩(이산 정산 표준).** UTC `0/8/16`시 경계를 **보유 상태로 지나는** 포지션에 `notional × rate` 전액을
-  부과한다(경계를 지나지 않으면 실제 펀딩은 0). pro-rata(`×보유시간/8h`)식은 사전 추정용 참고로만 강등한다.
-  정산가는 **정산 경계를 포함하는 최소 가용 TF 캔들의 시가**(없으면 직전 확정 캔들 종가)로 고정하고, 동시각 신규
-  체결은 그 정산을 물지 않는다(경계 직전 보유분만). **과거 실측 rate는 `DataFeed`로 주입**하며, 실측이 없을 때만
-  `CostModel` fallback rate `0.0001`(0.01%)을 쓴다.
-- **청산.** `liq_price = Entry × (1 − 1/leverage + mmr)`(Isolated 우선). 유지증거금률 기본 `0.004`(0.4%, 최저
-  티어). 트리거는 last-price 캔들 극값 판정으로, Binance 강제청산이 mark price(더 평활) 기준인 것에 비해 청산이
-  과대 발생하는 보수 방향 근사다.
+#### `Fee`
+
+- **수식** — `fee = notional × rate`.
+- **rate 구분** — maker와 taker를 구분하고 기본은 taker다(회전율 방어).
+- **주입 기본값** — 선물 maker `0.0002`(0.02%)·taker `0.0005`(0.05%), 현물 `0.0005`(0.05%).
+
+#### `Slippage`
+
+- **표준 수식** — `spread/2 + k·(주문량 / 호가유동성)` 스트레스 모델. 왕복 0.1~0.3%를 목표로 한다.
+- **호환 기본값** — 현행 곱셈 고정 bps는 호환용으로만 둔다. 선물 진입 `0.0005`·현물 진입 `0.001`·청산 `0.0001`.
+- **부호** — 매수는 불리하게 더하고 매도는 뺀다.
+
+#### `Funding`
+
+이산 정산이 표준이다.
+
+- **부과 조건** — UTC `0/8/16`시 경계를 보유 상태로 지나는 포지션에 `notional × rate` 전액을 부과한다. 경계를
+  지나지 않으면 실제 펀딩은 0이다.
+- **pro-rata 강등** — `×보유시간/8h` 식은 사전 추정용 참고로만 쓴다.
+- **정산가** — 정산 경계를 포함하는 최소 가용 TF 캔들의 시가로 고정한다. 그 캔들이 없으면 직전 확정 캔들 종가를
+  쓴다.
+- **동시각 신규 체결** — 그 정산을 물지 않는다. 경계 직전 보유분에만 부과한다.
+- **rate 출처** — 과거 실측 rate를 `DataFeed`로 주입한다. 실측이 없을 때만 `CostModel`의 fallback rate
+  `0.0001`(0.01%)을 쓴다.
+
+#### `Liquidation`
+
+- **수식** — `liq_price = Entry × (1 − 1/leverage + mmr)`. Isolated를 우선한다.
+- **유지증거금률(`mmr`)** — 기본 `0.004`(0.4%, 최저 티어).
+- **트리거와 그 근사** — last-price 캔들 극값으로 판정한다. Binance 강제청산은 mark price 기준이고 mark가 더
+  평활하므로, 이 판정은 청산이 과대 발생하는 보수 방향 근사다.
 
 ### §4.3.3 `sizing` 컴포넌트
 
@@ -1688,28 +1818,59 @@ classDiagram
     }
 ```
 
-각 수식과 규율.
+#### `RiskMoney`
 
-- **보편 사이징(`RiskMoney`).** `수량 = (risk_per_trade × Equity) / 손절거리`이며, 여기서 `1R = 손절거리 × 수량`이
-  성립하고 **`1R ≤ 0.01 × Equity`(거래당 위험 ≤ 계좌 1%)** 를 구속 상한으로 둔다. 손절거리는 변동성 척도(예:
-  `k×ATR`)로 잡는 것이 기본이라 변동성이 큰 시장일수록 수량이 작아져 위험기여도가 균등화된다. 레버리지는 입력이
-  아니라 결과값(`명목가치 = 수량 × 가격`에서 역산, 거래소 한도 안인지 확인). **Equity = cash + 사용 마진 + 미실현
-  손익**(신호 캔들 종가 마크)이며 회계 항등식의 equity와 같은 개념이다. 파산확률이 0.1%를 넘으면 `risk_per_trade`를
-  더 낮춘다.
-- **1R 정의.** `1R = |체결가 − 최초 보호 스탑| × 수량`. 고정 손절이 없는 전략은 트레일링 계산기의 초기 위험
-  `R0 = clamp(1.5×ATR/entry, 0.45%~0.65%) × entry`를 최초 보호 스탑으로 채택하고 `Trade.r0`에 기록한다. 최초
-  스탑을 정의할 수 없는 거래는 R 기반 지표(SQN·기대값·파산확률)에서 제외하고 제외 건수를 Evidence에 기록한다.
-- **터틀 인스턴스(`TurtleUnit`).** 변동성 단위 `N`으로 한 유닛 크기를 잡고(`RiskMoney`의 한 인스턴스), 0.5N마다
-  피라미딩하며 단일 시장 유닛 상한(원조 4유닛)을 둔다 — 전략이 선택 조합한다.
-- **pct 경로(`WalletPct`, 호환).** `position_size_pct`(기본 20%)를 available_balance(마진 잠김·미실현 제외) 기준으로
-  적용한다. 이 경로는 `1R ≤ 1%` 상한을 보장하지 못하므로 run 메타에 **"framework 비준수(호환 모드)" 플래그를
-  의무 기록**한다(원칙과의 관계를 숨기지 않음).
-- **Kelly 상한(`Kelly`).** `f* = p − (1−p)/B`(B=손익비). Full Kelly는 금지하고 **Half/Quarter를 상한**으로
-  한다(`cap(f*, λ)`, `λ ≤ 0.5`) — 추정오차·fat-tail·regime change로 Full Kelly의 실전 낙폭이 파괴적이다.
-- **노출·상관·방향 한도(`ExposureLimit`, 계좌 % 기준).** 단일 시장·상관군·단일 방향의 합산 위험 상한을 둔다(원조
-  터틀 단일 4유닛·상관군 6유닛·방향 12유닛이 한 인스턴스). 단일 심볼 구현에서는 단일 시장 한도만 유효하고 나머지
-  둘은 다중 심볼 확장 시 활성화되지만, 프레임은 세 한도 개념을 항상 소유한다. 상관→1(동반 청산) 스트레스는 파산
-  확률·최대낙폭 몬테카를로에 반드시 포함한다.
+보편 사이징. 거래당 위험을 계좌 비율로 묶는다.
+
+- **수식** — `수량 = (risk_per_trade × Equity) / 손절거리`. 여기서 `1R = 손절거리 × 수량`이 성립한다.
+- **구속 상한** — `1R ≤ 0.01 × Equity`(거래당 위험 ≤ 계좌 1%). 파산확률이 0.1%를 넘으면 `risk_per_trade`를 더
+  낮춘다.
+- **손절거리** — 변동성 척도(예: `k×ATR`)로 잡는 것이 기본이다. 변동성이 큰 시장일수록 수량이 작아져 모든
+  포지션의 위험기여도가 균등화된다.
+- **레버리지** — 입력이 아니라 결과값이다. `명목가치 = 수량 × 가격`에서 역산하며, 거래소 한도 안에 드는지
+  확인한다.
+- **Equity 정의** — `cash + 사용 마진 + 미실현 손익`(신호 캔들 종가 마크). 회계 항등식의 equity와 같은 개념이며,
+  사이징 시점의 값은 `float` 스냅샷이다.
+- **1R 정의**
+    - **기본** — `1R = |체결가 − 최초 보호 스탑| × 수량`.
+    - **고정 손절이 없는 전략** — 트레일링 계산기의 초기 위험 `R0 = clamp(1.5×ATR/entry, 0.45%~0.65%) × entry`를
+      최초 보호 스탑으로 채택하고 `Trade.r0`에 기록한다.
+    - **최초 스탑을 정의할 수 없는 거래** — R 기반 지표(SQN·기대값·파산확률)에서 제외하고, 제외 건수를 Evidence에
+      기록한다.
+
+#### `TurtleUnit`
+
+터틀 사이징 인스턴스. `RiskMoney`의 한 인스턴스이며 전략이 선택해 조합한다.
+
+- **유닛 크기** — 변동성 단위 `N`으로 한 유닛의 크기를 잡는다.
+- **피라미딩** — 0.5N마다 증량한다.
+- **유닛 상한** — 단일 시장의 유닛 상한을 둔다(원조 4유닛).
+
+#### `WalletPct`
+
+pct 방식 사이징(호환 경로).
+
+- **적용** — `position_size_pct`(기본 20%)를 available_balance(마진 잠김·미실현 제외) 기준으로 적용한다.
+- **비준수 플래그 의무** — 이 경로는 `1R ≤ 1%` 상한을 보장하지 못한다. 따라서 run 메타에 "framework 비준수(호환
+  모드)" 플래그를 의무로 기록해, 원칙과의 관계를 숨기지 않는다.
+
+#### `Kelly`
+
+베팅 비중의 상한.
+
+- **수식** — `f* = p − (1−p)/B`(`B`는 손익비).
+- **Full Kelly 금지** — 추정오차·fat-tail·regime change 때문에 실전 낙폭이 파괴적이다.
+- **실전 상한** — Half 또는 Quarter를 상한으로 한다(`cap(f*, λ)`, `λ ≤ 0.5`).
+
+#### `ExposureLimit`
+
+합산 위험의 상한. 계좌 % 기준으로 표현한다.
+
+- **세 단계 한도** — 단일 시장·상관군·단일 방향의 합산 위험 상한을 둔다. 원조 터틀의 단일 4유닛·상관군 6유닛·
+  방향 12유닛이 이 한도의 한 인스턴스다.
+- **단일 심볼 구현의 범위** — 단일 시장 한도만 유효하고 나머지 둘은 다중 심볼 확장 시 활성화된다. 그래도 프레임은
+  세 한도 개념을 항상 소유한다.
+- **상관→1 스트레스** — 동반 청산 시나리오를 파산확률·최대낙폭 몬테카를로에 반드시 포함한다.
 
 ### §4.3.4 `ports` 컴포넌트
 
@@ -1766,23 +1927,57 @@ classDiagram
     Broker ..> Fill
 ```
 
-일곱 포트의 계약과 불변식.
+일곱 포트의 계약과 불변식은 다음과 같다.
 
-- **`DataFeed`** — `candles(symbol, tf, up_to)`는 **`up_to` 이후 캔들을 절대 반환하지 않는다**(look-ahead 구조적
-  배제). `funding`은 과거 실측 펀딩 rate를, `mark_price`는 마크 가격을 그 시점 기준으로 공급한다.
-- **`Broker`** — `submit(order) → Fill`이 체결을 수행한다. 구현 어댑터의 `submit()`은 반드시
-  `execution.normalizer`를 통과해 `float→Decimal` 단일 변환을 달성한다(어댑터별 독자 캐스팅 금지). `open_orders`·
-  `cancel`은 미체결 주문을 다룬다.
-- **`Clock`** — `now`·`advance`가 시뮬 시각을 공급하며 **wall-clock을 쓰지 않는다**(결정성). 난수도 무제어로
-  쓰지 않는다.
-- **`CostModel`** — 비용 값을 주입한다. `fee`·`slippage`·`funding_rate`·`liq_params`(값만 소유, 수식은
-  `costs`가 소유). 부과 규칙·fallback rate만 갖고 과거 실측 펀딩 rate는 `DataFeed`가 소유한다.
-- **`EvidenceSink`** — `record`가 시점별 Entity를 run별 저장소에 적고, `finalize`가 무결성 검사·요약 생성·정규화
-  Evidence 해시(정렬 행의 정규화 직렬화, 파일 바이트 아님·wall-clock 제외)를 산출한다.
-- **`CatalogStore`** — run 메타 카탈로그. `save_prereg`(사전등록)·`register`(run_id 단독 발급)·`upsert_summary`
-  (성과·판정 요약). 라이브·페이퍼는 이 포트를 쓰지 않는다(백테스트 전용).
-- **`StrategyRegistry`** — Adaptee 구현 카탈로그 접근(주입 포트). Adapter Manager가 이 포트로만 목록을 다뤄
-  core-lib이 특정 DB에 직접 의존하지 않는다.
+#### `DataFeed`
+
+- **메서드 의미**
+    - `candles(symbol, tf, up_to)` — `up_to` 이후 캔들을 절대 반환하지 않는다. look-ahead를 구조적으로 배제하는
+      지점이다.
+    - `funding` — 과거 실측 펀딩 rate를 그 시점 기준으로 공급한다.
+    - `mark_price` — 마크 가격을 그 시점 기준으로 공급한다.
+
+#### `Broker`
+
+- **메서드 의미**
+    - `submit(order) → Fill` — 체결을 수행한다.
+    - `open_orders`·`cancel` — 미체결 주문을 다룬다.
+- **강제하는 불변식** — 구현 어댑터의 `submit()`은 반드시 `execution.normalizer`를 통과해 `float→Decimal` 단일
+  변환을 달성한다. 어댑터별 독자 캐스팅은 금지다.
+
+#### `Clock`
+
+- **메서드 의미** — `now`·`advance`가 시뮬 시각을 공급한다.
+- **강제하는 불변식** — wall-clock을 쓰지 않는다(결정성). 난수도 무제어로 쓰지 않는다.
+
+#### `CostModel`
+
+- **책임** — 비용 값을 주입한다. `fee`·`slippage`·`funding_rate`·`liq_params`로 값만 소유하고, 수식은 `costs`가
+  소유한다.
+- **소유 경계** — 부과 규칙과 fallback rate만 갖는다. 과거 실측 펀딩 rate는 `DataFeed`가 소유한다.
+
+#### `EvidenceSink`
+
+- **메서드 의미**
+    - `record` — 시점별 Entity를 run별 저장소에 적는다.
+    - `finalize` — 무결성 검사와 요약을 생성하고 정규화 Evidence 해시를 산출한다.
+- **해시 산출 방식** — 정렬된 행의 정규화 직렬화로 낸다. 파일 바이트가 아니며 wall-clock을 제외한다.
+
+#### `CatalogStore`
+
+run 메타 카탈로그.
+
+- **메서드 의미**
+    - `save_prereg` — 사전등록을 기록한다.
+    - `register` — `run_id`를 단독 발급한다.
+    - `upsert_summary` — 성과·판정 요약을 기록한다.
+- **사용 범위** — 백테스트 전용이라 라이브·페이퍼는 이 포트를 쓰지 않는다.
+
+#### `StrategyRegistry`
+
+Adaptee 구현 카탈로그 접근(주입 포트).
+
+- **책임** — `Adapter Manager`가 이 포트로만 목록을 다루게 해, core-lib이 특정 DB에 직접 의존하지 않게 한다.
 
 ### §4.3.5 `eval` 컴포넌트
 
@@ -1821,8 +2016,10 @@ classDiagram
     Integrity ..> Metrics
 ```
 
-**`Metrics` — 성과 수식 표준(유일 정본).** 아래 수식을 정확히 구현한다(현행 이중 구현 흡수). 모든 손익은 net이고,
-상위 분석은 금액이 아니라 R-multiple(`R = 거래손익 / 1R`)로 계산한다.
+#### `Metrics`
+
+성과 수식의 유일한 표준. 아래 수식을 정확히 구현한다(현행 이중 구현을 흡수한다). 모든 손익은 net이고, 상위 분석은
+금액이 아니라 R-multiple(`R = 거래손익 / 1R`)로 계산한다.
 
 - **승률·손익비.** 승률 `p = N_W / N`, 패율 `q = 1 − p`. 평균 수익 `W̄ = (1/N_W)·Σ_{i∈W} x_i`, 평균 손실
   `L̄ = (1/N_L)·Σ_{i∈L} |x_i|`. 손익비 `B = W̄ / L̄`.
@@ -1845,9 +2042,10 @@ classDiagram
 - **연율화 규약.** equity를 **일간으로 리샘플한 뒤 √365**를 적용한다(`K = 365`). 1시간 등 하위 TF 수익률에 √365를
   직접 적용하지 않는다(계수 선택으로 Sortino가 수 배 달라져 판정이 뒤집힌다). √252(전통 선물)와 혼용 금지.
 
-**`Thresholds`·`Profile` — 통과선과 기대 범위.** 통과선은 형태 무관 구속(모든 전략에 그대로 적용)과 형태 의존
-(전략 프로파일 기대 범위 대조)으로 갈린다. 아래가 확정된 수치다(net·가능하면 OOS·거래 수 `N ≥ 30`, 이상적
-`≥ 100` 전제).
+#### `Thresholds`
+
+통과선의 단일 코드 구현. 통과선은 형태 무관 구속(모든 전략에 그대로 적용)과 형태 의존(전략 프로파일 기대 범위
+대조)으로 갈린다. 아래가 확정된 수치다(net·가능하면 OOS·거래 수 `N ≥ 30`, 이상적 `≥ 100` 전제).
 
 | 지표 | 유형 | 통과선(이하 탈락) | 목표선 | 과최적화 경보 |
 |---|---|---|---|---|
@@ -1867,15 +2065,24 @@ classDiagram
 - **사이징 연동.** MDD가 통과선(30%)을 벗어나면 신호가 아니라 `risk_per_trade`·유닛 한도를 낮춘다. 파산확률이
   `0.1%` 이상이면 같은 레버를 당긴다. 실전 감내 한도는 45%(파산선 60%와 분리), 백테스트 MDD는 하한이라 실전 가정
   `= 백테스트 × 1.5`.
-- **프로파일 성숙도.** 기대 범위 이탈은 기본 warning이며, reject는 `established` 전략이 그 형태를 잃은 회귀에만
-  적용한다(`provisional`·`updating`은 reject하지 않음 — 순환 논리 방지).
 - **과최적화 방어 증거의 출처.** OOS Degradation·확률적 샤프(PSR)/DSR·Walk-Forward·몬테카를로·부트스트랩
   신뢰구간은 단일 run 밖 상위 검증(Harness, §4.4)이 산출하고 Hard Gate A가 소비한다. 표본 외 성과 저하가 표본
   내의 50% 미만이어야 하고(OOS Degradation `< 50%`), 다중검정 보정 후 PSR이 95% 신뢰(`≥ 0.95`)를 넘어야 한다.
   DSR의 정확한 다중검정 보정 셈은 Harness 설계(§4.4)가 소유한다.
 
-**`Integrity` — 무결성 검사.** 판정 전에 여섯 가지를 검산한다. 하나라도 실패하면 `diagnostic_only`로 **멈춰서**
-데이터·기록을 고쳐 재실행한다 — 파이프라인의 유일한 정지다.
+#### `Profile`
+
+프로파일 기대 범위 대조를 소유한다. 기대 범위의 스키마 자체는 §4.2의 `StrategyProfile`이 정의하고, 여기서는 그
+값을 실현값과 대조하는 소비 규칙만 갖는다.
+
+- **이탈 처리** — 기대 범위 이탈은 기본이 warning이다. 단독 탈락 기준이 아니다.
+- **reject 조건** — `established` 전략이 그 형태를 잃은 회귀에만 reject한다. `provisional`·`updating`은 reject하지
+  않는다 — 아직 확립되지 않은 기대 범위로 신규 전략을 탈락시키는 순환 논리를 막기 위해서다.
+
+#### `Integrity`
+
+무결성 검사. 판정 전에 여섯 가지를 검산하며, 하나라도 실패하면 `diagnostic_only`로 **멈춰서** 데이터·기록을 고쳐
+재실행한다 — 파이프라인의 유일한 정지다.
 
 - **회계 항등식** — `cash + position = equity`가 모든 시점에 성립하는가.
 - **시점 순서** — `feature_ts ≤ decision_ts < execution_ts`를 어긴 거래가 없는가(look-ahead 사후 검증).
@@ -1884,8 +2091,10 @@ classDiagram
 - **결정성** — 같은 입력·같은 seed가 같은 정규화 해시를 내는가.
 - **Evidence 완성도** — 판정에 필요한 시점별 기록이 빠짐없이 남았는가.
 
-**판정 파이프라인 플로우(정의서 내부).** 사전등록부터 최종 라우팅까지의 공식 판정 흐름이다. 통과선 미달과 프로파일
-회귀는 종료가 아니라 개선 루프(forensics)로 보내는 것이 핵심이다 — 통과선만으로 전략을 포기하지 않는다.
+#### 판정 파이프라인 플로우
+
+사전등록부터 최종 라우팅까지의 공식 판정 흐름이다. 통과선 미달과 프로파일 회귀는 종료가 아니라 개선
+루프(forensics)로 보내는 것이 핵심이다 — 통과선만으로 전략을 포기하지 않는다.
 
 ```mermaid
 flowchart TD
