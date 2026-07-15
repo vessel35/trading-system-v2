@@ -29,6 +29,32 @@ prose is a SUPPLEMENT for the residue the notation genuinely cannot hold.
   because drawing them was easier to skip). The diagram + its residual prose together are the full,
   self-contained contract — with no overlap and no gap.
 
+## Residual-prose clarity (two rules — the residue must READ, not just list)
+
+The residual prose under each diagram is what a reader actually reads for the why / constraints /
+to-do. These two rules keep it legible. They REFINE the UML-first "prose for residue" split above —
+they do not license restating the diagram (the diagram-restatement prohibition still holds in full).
+
+1. **No bare term-lists — every item must carry its own meaning.** Do not string together bare nouns
+   or identifiers (`A·B·C·D`) the reader cannot decode. Give each item its point — what it is, what it
+   becomes, or what it is for: write `` `Adapter Manager`(생성)·`StrategyConfig`(파라미터 해석) `` , not
+   `manager·config`. This holds inside a table cell too — a cell of undecodable tokens is still a
+   defect. (Do not put diagram node-IDs like `MGR`/`REG` in prose; use the real names.)
+2. **Separate the POINT from the TO-DO — never mix them in a run-on paragraph.** When a passage carries
+   both "what this is / changes" and "what must be done / verified", split them so each is one
+   scannable line, not buried in a paragraph:
+   - a **change / replacement** with several targets → a residual-prose table whose columns name the
+     axes (`대상 · 현행 · 바꾼 뒤 · 확인`). This table describes a mapping no diagram carries, so it is
+     NOT a diagram restatement — but keep it to residual content (never duplicate a diagram's
+     attributes/relationships as a table).
+   - the **actions / gates** that follow → an explicit `해야 할 것` outline, each action its own bullet,
+     kept apart from the descriptive text.
+   - only one or two items → a short topic-labeled outline (개조식) is enough; reserve tables for a
+     GENUINE multi-item side-by-side (a one-row table is a smell — use a sentence or an outline).
+
+   Prefer a topic-labeled outline over a wall of paragraphs: give each note a bold lead-in that names
+   its subject, so the reader sees at a glance what each block is about.
+
 ## Mandatory section order (every design doc)
 
 1. **제약사항·방향 (Constraints & Direction)** — FIRST, before any detail. State ONLY: the binding
