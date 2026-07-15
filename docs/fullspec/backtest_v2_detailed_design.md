@@ -1088,10 +1088,11 @@ classDiagram
     - `price`는 실행가가 아니라 판단 기준가(신호 캔들 종가)다. 실제 체결가는 다음 캔들 시가에서 정해진다.
     - `stop_loss`·`take_profit`은 전략이 제안하는 최초 보호 스탑·목표가이며 NULL을 허용한다.
     - `confidence`는 0~1이다.
-- **방향·행동 도출 규칙(발산 확정)** — 현행 signal-service의 `TradingSignal`은 방향 필드 `signal_type`(BUY=롱/
-  SELL=숏/HOLD)을 갖고 주문 구성에 직접 소비됐다. 신규 타입은 이 방향·수량 결합을 떼고, 신호를 소비하는 실행
-  드라이버(§4.4의 Engine)가 **보호 수준의 유무·기하**와 **`analyze`에 넘긴 `current_position` 문맥**만으로 행동과
-  방향을 도출한다. 세 갈래가 서로 겹치지 않는다.
+- **방향·행동 도출 규칙** — 이 타입에는 방향 필드가 없다. 그래서 방향과 행동은 신호가 아니라 신호를 소비하는
+  실행 드라이버(§4.4의 Engine)가 도출한다. 현행 signal-service의 `TradingSignal`은 방향 필드
+  `signal_type`(BUY=롱/SELL=숏/HOLD)을 갖고 주문 구성에 직접 소비됐지만, 신규 타입은 이 방향·수량 결합을
+  **의도적으로 뗐다**. 도출에 쓰는 것은 **보호 수준의 유무·기하**와 **`analyze`에 넘긴 `current_position` 문맥**
+  둘뿐이며, 아래 세 갈래가 서로 겹치지 않는다.
     - **관망(HOLD)** — `analyze()`가 `None`을 반환하면 아무 행동도 하지 않는다.
     - **청산(EXIT)** — `stop_loss`와 `take_profit`이 둘 다 NULL인 신호는 청산 의도다(보호할 새 포지션이 없기
       때문). 보유 포지션을 전량 청산하고 `ExitReason.SIGNAL_EXIT`로 기록하며, 무포지션이면 무동작이다. 전략이
