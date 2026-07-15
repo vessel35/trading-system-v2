@@ -1167,7 +1167,8 @@ classDiagram
 
 #### `Trade`
 
-체결 완료된 거래 한 건(`Decimal`). 현행 `ClosedTrade`를 계승하되 최초 위험 `r0`를 새 필드로 더한다.
+체결 완료된 거래 한 건(`Decimal`). 현행 `ClosedTrade`가 갖고 있던 필드를 그대로 가져오고, 최초 위험 `r0`를 새
+필드로 더한다(상속이 아니라 필드를 옮겨 온 것이다).
 
 - **책임** — 한 거래의 진입부터 청산까지를 확정된 사실로 남겨, R 기반 상위 분석과 포렌식의 원천이 된다.
 - **`r0`(최초 위험, 신규 필드)**
@@ -1183,27 +1184,85 @@ classDiagram
     - `signal_confidence` — 금액이 아니라 판단 메타데이터(포렌식용)라 이 Decimal 타입 안에서 유일하게 `float`다.
       금액 경로가 아니므로 Decimal 관문과 무관하다.
 
-#### 열거형
+> 아래 여덟 ENUM의 **출처**는 둘로 갈린다. 여섯(`OrderType`·`OrderSide`·`OrderStatus`·`PositionSide`·
+> `MarginType`·`MarketType`)은 현행 wallet-service의 값 타입 정의에 있는 멤버를 **값 그대로** 쓴다(새로 정의하지
+> 않는다). `SignalType`은 현행 signal-service의 값을 그대로 쓰되 쓰임을 지속 계층으로 좁힌다. `ExitReason`만
+> 현행에 없어 **새로 만든다.**
 
-여섯은 현행 값을 계승하고, 둘은 신규·전용이다.
+#### `OrderType` (ENUM)
 
-- **계승(현행 값 그대로)**
-    - `OrderType` — 시장가·지정가·스탑·익절·트레일링스탑.
-    - `OrderSide` — 주문 방향(BUY/SELL).
-    - `OrderStatus` — 활성 3종·종료 5종에 `is_terminal()`·`is_active()` 판별을 더한다.
-    - `PositionSide` — LONG/SHORT/BOTH.
-    - `MarginType` — CROSS/ISOLATED.
-    - `MarketType` — SPOT/FUTURES.
-- **`ExitReason`(신규)** — 청산 사유를 구분한다.
-    - `STOP_LOSS`·`TAKE_PROFIT` — 보호 수준 도달.
-    - `TRAILING_STOP` — 트레일링 재도입 대비.
-    - `LIQUIDATION` — 강제청산. 거래소(라이브)가 집행했거나 매처(백테스트·페이퍼)가 검출한 것이며, 전략이
-      신호한 것이 아니다(§4.3.2).
-    - `SIGNAL_EXIT` — 전략 청산 신호(위 도출 규칙의 EXIT 갈래).
-    - `REVERSAL` — 반대 진입에 따른 청산.
-    - `END_OF_DATA` — 구간 종료 강제 청산.
-- **`SignalType`(지속 계층 전용)** — BUY/SELL/HOLD. `TradingSignal`의 필드가 아니며, 라이브 드라이버가 위 도출
-  규칙으로 값을 정해 signal_db 적재·enqueue에만 쓴다(백테스트 판단 경로는 이 열거형을 쓰지 않는다).
+주문의 종류. 현행 값 그대로다.
+
+- `MARKET` — 시장가 주문.
+- `LIMIT` — 지정가 주문.
+- `STOP_MARKET` — 스탑 가격에 닿으면 시장가로 나가는 손절 주문.
+- `TAKE_PROFIT_MARKET` — 목표가에 닿으면 시장가로 나가는 익절 주문.
+- `TRAILING_STOP_MARKET` — 트레일링 스탑 주문. 트레일링 재도입에 대비해 값만 남긴다(§4.2에서 유보).
+
+#### `OrderSide` (ENUM)
+
+주문의 방향. 현행 값 그대로다.
+
+- `BUY` — 매수.
+- `SELL` — 매도.
+
+이것은 **실행 계층의 주문 방향**이며 전략의 판단 방향과 다르다. `TradingSignal`은 방향 필드를 갖지 않고, 이 값은
+실행 드라이버가 보호 수준의 기하로 도출한다.
+
+#### `OrderStatus` (ENUM)
+
+주문의 상태. 현행 값 그대로이며, 상태 사이의 허용 전이는 `Order.VALID_TRANSITIONS`가 단독으로 소유한다.
+
+- **활성 상태 셋** — `NEW`(접수됨)·`PARTIALLY_FILLED`(일부 체결)·`PENDING_CANCEL`(취소 요청 대기).
+- **종료 상태 다섯** — `FILLED`(전량 체결)·`CANCELLED`(취소됨)·`EXPIRED`(만료)·`REJECTED`(거래소 거부)·
+  `FAILED`(실패). 종료 상태에서 나가는 전이는 없다.
+- **판별 메서드** — `is_terminal()`은 종료 상태인지를, `is_active()`는 활성 상태인지를 돌려준다.
+
+#### `PositionSide` (ENUM)
+
+포지션의 방향. 현행 값 그대로이며, 거래소의 포지션 모드와 짝을 이룬다.
+
+- `LONG`·`SHORT` — 헤지 모드에서 롱·숏 포지션을 따로 들 때의 방향.
+- `BOTH` — 단방향 모드의 포지션. 이 모드는 심볼당 포지션이 하나라 방향을 따로 구분하지 않는다.
+
+#### `MarginType` (ENUM)
+
+증거금 방식. 현행 값 그대로다.
+
+- `CROSS` — 교차 증거금. 계좌 잔고 전체가 증거금이 된다.
+- `ISOLATED` — 격리 증거금. 해당 포지션에 배정한 증거금만 위험에 놓인다. 청산가 산정은 이쪽을 우선 구현한다
+  (§4.3.2).
+
+#### `MarketType` (ENUM)
+
+시장 구분. 현행 값 그대로다.
+
+- `SPOT` — 현물.
+- `FUTURES` — 무기한 선물. 첫 검증 대상이다.
+
+#### `ExitReason` (ENUM)
+
+포지션이 어떤 사유로 청산됐는지. 현행에 대응 ENUM이 없어 **새로 만든다.**
+
+- `STOP_LOSS` — 손절가 도달.
+- `TAKE_PROFIT` — 목표가 도달.
+- `TRAILING_STOP` — 트레일링 스탑 도달. 트레일링 재도입에 대비해 값만 남긴다.
+- `LIQUIDATION` — 강제청산. 거래소(라이브)가 집행했거나 매처(백테스트·페이퍼)가 검출한 것이며, 전략이 신호한
+  것이 아니다(§4.3.2).
+- `SIGNAL_EXIT` — 전략이 낸 청산 신호(위 방향·행동 도출 규칙의 EXIT 갈래).
+- `REVERSAL` — 반대 진입 때문에 먼저 청산된 경우.
+- `END_OF_DATA` — 백테스트 구간이 끝나 강제로 정리한 경우.
+
+#### `SignalType` (ENUM)
+
+신호의 방향. 현행 signal-service의 값 그대로이나, 쓰임을 **지속 계층 전용**으로 좁힌다.
+
+- `BUY` — 롱 의도.
+- `SELL` — 숏 의도.
+- `HOLD` — 관망.
+
+`TradingSignal`의 필드가 **아니다.** 라이브 드라이버가 위 방향·행동 도출 규칙으로 값을 정해 signal_db 적재·
+enqueue에만 쓰며, 백테스트 판단 경로는 이 ENUM을 쓰지 않는다.
 
 ### §4.1.2 `indicators` 컴포넌트
 
@@ -1689,7 +1748,7 @@ Decimal 단일 변환 관문. 시스템 전체에서 `float`→`Decimal` 변환�
 - **캔들 내 트리거(`resolve_triggers`).** 손절·트레일링·익절·청산 채널·강제청산의 캔들 내 발동을 판정한다. 첫
   검증 스코프에서는 전략 TF 캔들 수준의 보수 판정이고(1분 하위 집행 피드는 유보), 1분 트리거 walk와 그 파리티
   허용 편차는 Engine 설계(§4.4)에서 확정한다. 어떤 포지션도 자기 체결 캔들 이전으로 소급 검사하지 않는다
-  (`skip_first_sl_check` 계승).
+  (현행 엔진이 `skip_first_sl_check`로 부르던 것과 같은 규칙이다).
 - **동시 도달 우선순위(보수적 최악 경로, OHLC-locked).** 같은 캔들에서 손절과 익절이 모두 범위 안이면 **손절
   우선**(익절 우선으로 구현하면 승률·PF가 계통적으로 부풀려진다). 손절과 강제청산이 겹치면, 정상 설정에서는
   손절가가 청산가보다 안쪽이라 **손절 우선**(청산 미발생)이고, 손절가가 청산가 바깥인 설정 오류만 청산 처리하며
