@@ -1046,82 +1046,133 @@ classDiagram
     TradingSignal ..> MarketType
 ```
 
-**`Candle`** — 세 실행 모드가 공유하는 통합 캔들(현행 원천 없음, 신규). `crypto_data`의 확정 OHLCV 한 행과 1:1
-대응한다. 판단 경로라 가격·거래량은 `float`다. `symbol`·`exchange`·`timeframe`은 문자열(예: `exchange="BINANCE"`,
-`timeframe="1h"`), `quote_volume`·`trade_count`는 널 허용(선택 입력). `validate()`가 다음 **캔들 검증 불변식**을
-타입 계층에서 강제한다: 한 시계열 안에서 `open_time`은 엄격히 증가(중복·역행 금지), `close_time = open_time +
-timeframe`, `high ≥ max(open, close)`, `low ≤ min(open, close)`, 모든 가격 `> 0`, `volume ≥ 0`. 결측 캔들(gap)은
-채우지 않고 표시만 한다(무기한 선물은 24시간 거래라 실제 gap은 데이터 결함 신호). 이 검증이 look-ahead 배제의
-데이터 층 근거다 — 진행 중(미확정) 캔들은 애초에 이 타입으로 만들어지지 않는다.
+**`Candle`** — 세 실행 모드가 공유하는 통합 캔들. 현행에 대응 값 타입이 없어 신규로 만든다.
 
-**`money`** — 금액 정밀도 상수와 양자화 함수의 단일 정의처(모듈 수준 유틸리티). 양자화 스케일은 가격·수량 8자리
-(`Q_PRICE`·`Q_AMOUNT`), 퍼센트 2자리(`Q_PERCENT`), 비율·수수료율 4자리(`Q_RATIO`·`Q_FEE_RATE`)이며, 모든
-`quantize_*`는 은행가 반올림(`ROUND_HALF_EVEN`)을 쓴다. 이 함수들은 Decimal 단일 변환 관문(§4.3의
-`execution.normalizer`)이 `Decimal(str(x))` 직후에 호출하는 유일한 양자화 지점이다.
+- **책임** — `crypto_data`의 확정 OHLCV 한 행과 1:1 대응하는 순수 값. 계산·입출력을 갖지 않는다.
+- **필드 제약·널 허용**
+    - `symbol`·`exchange`·`timeframe`은 문자열이다(예: `exchange="BINANCE"`, `timeframe="1h"`).
+    - 가격·거래량은 판단 경로라 `float`다.
+    - `quote_volume`·`trade_count`만 널을 허용한다(선택 입력). 나머지는 필수다.
+- **검증(`validate()`)** — 아래를 타입 계층에서 강제해, 깨진 캔들이 애초에 만들어지지 않게 한다.
+    - 한 시계열 안에서 `open_time`은 엄격히 증가한다(중복·역행 금지).
+    - `close_time = open_time + timeframe`.
+    - `high ≥ max(open, close)`, `low ≤ min(open, close)`.
+    - 모든 가격 `> 0`, `volume ≥ 0`.
+- **결측 캔들(gap) 처리** — 채우지 않고 표시만 한다. 무기한 선물은 24시간 거래라 실제 gap은 데이터 결함 신호다.
+- **강제하는 불변식** — look-ahead 배제의 데이터 층 근거. 진행 중(미확정) 캔들은 이 타입으로 만들어지지 않는다.
 
-**`TradingSignal`** — 전략 `analyze()`의 반환형이자 **판단 전용** 타입(판단 경로라 `float`). 필드는 판단의 근거와
-전략이 제안하는 보호 수준뿐이며, **주문 방향(`OrderSide`)·수량 필드를 갖지 않는다.** `price`는 실행가가 아니라
-판단 기준가(신호 캔들 종가)이고, `stop_loss`·`take_profit`은 전략이 제안하는 최초 보호 스탑·목표가(널 허용),
-`confidence`는 0~1이다.
+**`money`** — 금액 정밀도 상수와 양자화 함수의 단일 정의처(모듈 수준 유틸리티).
 
-- **방향·행동 도출 규칙(발산 확정).** 현행 signal-service의 `TradingSignal`은 방향 필드 `signal_type`(BUY=롱/
+- **책임** — Decimal 금액의 자릿수와 반올림 방식을 한 곳에서 정의한다. 다른 어떤 모듈도 자릿수를 자체 정의하지
+  않는다.
+- **양자화 스케일**
+    - 가격·수량 8자리 — `Q_PRICE`·`Q_AMOUNT`.
+    - 퍼센트 2자리 — `Q_PERCENT`.
+    - 비율·수수료율 4자리 — `Q_RATIO`·`Q_FEE_RATE`.
+- **반올림 방식** — 모든 `quantize_*`가 은행가 반올림(`ROUND_HALF_EVEN`)을 쓴다.
+- **유일한 호출 지점** — Decimal 단일 변환 관문(§4.3의 `execution.normalizer`)이 `Decimal(str(x))` 직후에
+  호출하는 유일한 양자화 지점이다.
+
+**`TradingSignal`** — 전략 `analyze()`의 반환형이자 판단 전용 타입.
+
+- **책임** — 판단의 근거와 전략이 제안하는 보호 수준만 담는다. 주문 방향(`OrderSide`)·수량 필드를 갖지
+  않는다 — 수량은 사이징(§4.3.3)이, 주문 방향·라우팅은 실행 계층(§4.3.1)이 소유한다.
+- **필드 제약·널 허용**
+    - 판단 경로라 값은 `float`다.
+    - `price`는 실행가가 아니라 판단 기준가(신호 캔들 종가)다. 실제 체결가는 다음 캔들 시가에서 정해진다.
+    - `stop_loss`·`take_profit`은 전략이 제안하는 최초 보호 스탑·목표가이며 널을 허용한다.
+    - `confidence`는 0~1이다.
+- **방향·행동 도출 규칙(발산 확정)** — 현행 signal-service의 `TradingSignal`은 방향 필드 `signal_type`(BUY=롱/
   SELL=숏/HOLD)을 갖고 주문 구성에 직접 소비됐다. 신규 타입은 이 방향·수량 결합을 떼고, 신호를 소비하는 실행
-  드라이버(§4.4의 Engine)가 신호의 **보호 수준 유무·기하**와 **`analyze`에 넘긴 `current_position` 문맥**만으로
-  행동과 방향을 도출한다. 규칙은 다음과 같이 완결된다 — 세 갈래가 서로 겹치지 않는다.
-    - **관망(HOLD).** `analyze()`가 `None`을 반환하면 아무 행동도 하지 않는다.
-    - **청산(EXIT).** `stop_loss`와 `take_profit`이 **둘 다 null**인 신호는 청산 의도다 — 보호할 새 포지션이
-      없기 때문이다. 보유 포지션을 전량 청산하고 `ExitReason.SIGNAL_EXIT`로 기록하며, 무포지션이면 무동작이다.
-      이것이 전략이 방향 없이도 "관망이 아니라 지금 평평하게 나가라"를 표현하는 유일한 경로다(리버설과 구분된다).
-    - **진입·리버설(ENTER/REVERSE).** `stop_loss` 또는 `take_profit` 중 **하나 이상이 non-null**인 신호는 진입
-      의도다. 진입 신호는 최소 하나의 보호 수준을 가져야 하며(사이징이 손절거리를 요구한다), 둘 다 null이면 위
-      청산 규칙으로 해석된다. 방향은 보호 수준의 기하로 도출한다 — `stop_loss`가 있으면 `price`보다 낮을 때 롱·
-      높을 때 숏이고, `stop_loss`가 null이면 `take_profit`이 `price`보다 높을 때 롱·낮을 때 숏이다(고정 손절이
-      없는 전략은 §4.3.3의 트레일링 R0를 최초 보호 스탑으로 채택하므로 결국 스탑 기하가 존재한다). 최종 행동은
-      `current_position`으로 갈린다 — 무포지션이면 신규 진입, 반대 방향 보유면 리버설(청산 후 반대 진입, §4.3.1의
-      리버설 순서), 같은 방향 보유면 추가 진입 후보로 노출 한도 검사를 거친다(기본은 재확인=무동작, 피라미딩
-      활성 시에만 증량).
-  이 도출은 신호가 아니라 실행 드라이버(§4.4)가 소유하므로 신호는 순수 판단으로 남는다. 방향 열거형
-  `SignalType`(BUY/SELL/HOLD)은 이 타입의 필드가 아니라, 라이브 경로가 signal_db에 신호를 적재·enqueue할 때
-  드라이버가 위 규칙으로 도출해 쓰는 지속 계층 전용 값으로만 남긴다(아래 다이어그램에 지속 계층 전용 열거형으로
-  표시).
-- **statelessness.** 이 타입은 순수 값이며 계산·IO를 갖지 않는다. Adaptee가 상태를 갖지 않는다는 불변식과 맞물려,
-  같은 입력은 항상 같은 신호를 만든다.
+  드라이버(§4.4의 Engine)가 **보호 수준의 유무·기하**와 **`analyze`에 넘긴 `current_position` 문맥**만으로 행동과
+  방향을 도출한다. 세 갈래가 서로 겹치지 않는다.
+    - **관망(HOLD)** — `analyze()`가 `None`을 반환하면 아무 행동도 하지 않는다.
+    - **청산(EXIT)** — `stop_loss`와 `take_profit`이 둘 다 null인 신호는 청산 의도다(보호할 새 포지션이 없기
+      때문). 보유 포지션을 전량 청산하고 `ExitReason.SIGNAL_EXIT`로 기록하며, 무포지션이면 무동작이다. 전략이
+      방향 없이도 "관망이 아니라 지금 평평하게 나가라"를 표현하는 유일한 경로이며, 리버설과 구분된다.
+    - **진입·리버설(ENTER/REVERSE)** — `stop_loss` 또는 `take_profit` 중 하나 이상이 non-null인 신호는 진입
+      의도다. 진입 신호는 최소 하나의 보호 수준을 가져야 하고(사이징이 손절거리를 요구한다), 둘 다 null이면 위
+      청산 규칙으로 해석된다.
+        - **방향** — `stop_loss`가 있으면 `price`보다 낮을 때 롱·높을 때 숏. `stop_loss`가 null이면
+          `take_profit`이 `price`보다 높을 때 롱·낮을 때 숏(고정 손절이 없는 전략은 §4.3.3의 트레일링 R0를 최초
+          보호 스탑으로 채택하므로 결국 스탑 기하가 존재한다).
+        - **최종 행동** — `current_position`으로 갈린다. 무포지션이면 신규 진입, 반대 방향 보유면 리버설(청산 후
+          반대 진입, §4.3.1의 리버설 순서), 같은 방향 보유면 추가 진입 후보로 노출 한도 검사를 거친다(기본은
+          재확인이라 무동작, 피라미딩 활성 시에만 증량).
+    - **소유** — 이 도출은 신호가 아니라 실행 드라이버(§4.4)가 수행하므로 신호는 순수 판단으로 남는다.
+- **`SignalType`의 자리** — 방향 열거형 `SignalType`(BUY/SELL/HOLD)은 이 타입의 필드가 아니다. 라이브 경로가
+  signal_db에 신호를 적재·enqueue할 때 드라이버가 위 규칙으로 도출해 쓰는 지속 계층 전용 값으로만 남긴다(위
+  다이어그램에 독립 열거형으로 표시).
+- **강제하는 불변식(statelessness)** — 순수 값이며 계산·입출력을 갖지 않는다. Adaptee가 상태를 갖지 않는다는
+  불변식과 맞물려, 같은 입력은 항상 같은 신호를 만든다.
 
-**`Order`** — 주문과 그 상태 기계(체결 경로라 `Decimal`). `VALID_TRANSITIONS`는 허용된 상태 전이만 담은 클래스 상수
-(정적)로, 활성 상태 `NEW`·`PARTIALLY_FILLED`·`PENDING_CANCEL`에서 종료 상태 `FILLED`·`CANCELLED`·`EXPIRED`·
-`REJECTED`·`FAILED`로만 전이하고 종료 상태에서는 나가는 전이가 없다. `mark_as_filled`·`mark_as_partially_filled`·
-`mark_as_cancelled`는 이 표를 위반하는 전이를 거부한다. `remaining_quantity() = quantity − filled_quantity`.
-생성 시 검증: 문자열을 열거형으로 강제, `quantity > 0`, `reduce_only`와 `close_position`은 상호 배타(둘 다 참일 수
-없음).
+**`Order`** — 주문과 그 상태 기계(체결 경로라 `Decimal`).
 
-**`Fill`** — 체결 사실을 명시하는 신규 타입(현행 없음, `Decimal`). `Broker.submit(order)`의 반환형으로, 한 번의
-체결에서 확정된 체결가·수량·수수료·슬리피지·유동성 구분(`liquidity ∈ {maker, taker}`)·시각을 담는다. 청산·손절
-등으로 발생한 체결이면 `exit_reason`을 채운다(진입 체결이면 널). `reduce_only`는 이 체결이 포지션을 줄이는지
-표시한다. `Order` 상태 전이만으로 체결을 표현하던 현행과 달리, 체결을 독립 타입으로 분리해 `position_book`·
-`accounting`이 명시적으로 소비한다.
+- **책임** — 주문의 상태를 소유하고, 허용되지 않는 상태 전이를 거부한다.
+- **상태 기계(`VALID_TRANSITIONS`)** — 허용된 전이만 담은 클래스 상수(정적). 이 표가 문서 전체의 단일 소유처이며,
+  `execution.OrderLifecycle`이 표를 복제하지 않고 이를 읽어 쓴다(§4.3.1).
+    - **활성 상태** — `NEW`·`PARTIALLY_FILLED`·`PENDING_CANCEL`.
+    - **종료 상태** — `FILLED`·`CANCELLED`·`EXPIRED`·`REJECTED`·`FAILED`. 종료 상태에서 나가는 전이는 없다.
+- **메서드 의미**
+    - `mark_as_filled`·`mark_as_partially_filled`·`mark_as_cancelled` — 위 표를 위반하는 전이를 거부한다.
+    - `remaining_quantity()` — `quantity − filled_quantity`.
+- **생성 시 검증**
+    - 문자열을 열거형으로 강제한다.
+    - `quantity > 0`.
+    - `reduce_only`와 `close_position`은 상호 배타다(둘 다 참일 수 없다).
 
-**`Position`** — 포지션과 회계 근거(`Decimal`). 생성·갱신 시 `total_cost ≈ quantity × average_price`를 허용오차
-`0.01` 안에서 강제한다. `liquidation_price`는 **저장 필드**이며, 청산가 수식은 타입 계층이 아니라
-`costs.Liquidation`(§4.3.2)이 단일 소유하고 `position_book`이 계산 결과를 이 필드에 세팅한다 — 타입은 청산가를
-스스로 계산하지 않아 의존 방향이 한 방향으로 유지되고 수식 복제가 생기지 않는다. `update_price`(마크 가격 갱신·
-미실현 재계산)·`add_quantity`(가중평균 진입)·`reduce_quantity`(reduce_only 실현·마진 반환)가 장부를 갱신하고,
-`cash + position = equity` 항등식의 `position` 값을 제공한다.
+**`Fill`** — 체결 사실을 명시하는 신규 타입(현행 없음, `Decimal`).
 
-**`Trade`** — 체결 완료된 거래 한 건(`Decimal`). 현행 `ClosedTrade`를 계승하되 **최초 위험 `r0`를 새 필드로
-추가**한다(성형). `r0 = |entry_price − 최초 보호 스탑| × entry_quantity`이며(§4.3 사이징의 1R과 같은 정의),
-R-multiple 기반 상위 분석(SQN·기대값·파산확률)의 분모가 된다. 최초 스탑을 정의할 수 없는 거래는 `r0`를 널로 두고
-R 기반 지표에서 제외한다(§4.3). `net_pnl`은 `gross_pnl`에서 `total_fee`·`slippage`·`funding_cost`와 청산 페널티를
-차감한 net이며, `source_type ∈ {live, paper, backtest}`, `backtest_run_id`가 그 거래의 run을 가리킨다.
-`signal_confidence`는 금액이 아니라 판단 메타데이터(포렌식용)라 이 Decimal 타입 안에서 유일하게 `float`로 남긴다
-— 금액 경로가 아니므로 Decimal 관문과 무관하다.
+- **책임** — `Broker.submit(order)`의 반환형으로, 한 번의 체결에서 확정된 사실을 담는다. `Order` 상태 전이만으로
+  체결을 표현하던 현행과 달리 체결을 독립 타입으로 분리해, `position_book`·`accounting`이 명시적으로 소비한다.
+- **필드 제약·널 허용**
+    - `liquidity ∈ {maker, taker}` — 수수료율을 가르는 구분.
+    - `exit_reason` — 청산·손절 등으로 발생한 체결에만 채우고, 진입 체결이면 널이다.
+    - `reduce_only` — 이 체결이 포지션을 줄이는지 표시한다.
 
-**열거형.** `OrderType`(시장가·지정가·스탑·익절·트레일링스탑), `OrderSide`(BUY/SELL), `OrderStatus`(활성 3종·종료
-5종 + `is_terminal()`·`is_active()` 판별), `PositionSide`(LONG/SHORT/BOTH), `MarginType`(CROSS/ISOLATED),
-`MarketType`(SPOT/FUTURES)는 현행 값을 계승한다. `ExitReason`은 신규로, 청산 사유를 `STOP_LOSS`·`TAKE_PROFIT`·
-`TRAILING_STOP`(트레일링 재도입 대비)·`LIQUIDATION`·`SIGNAL_EXIT`(전략 청산 신호 — 위 도출 규칙의 EXIT 갈래)·
-`REVERSAL`(반대 진입)·`END_OF_DATA`(구간 종료 강제 청산)로 구분한다. `SignalType`(BUY/SELL/HOLD)은 지속 계층
-전용 열거형이다 — `TradingSignal`의 필드가 아니라 위 방향·행동 도출 규칙으로 라이브 드라이버가 signal_db 적재·
-enqueue 시에만 쓴다(백테스트 판단 경로는 이 열거형을 쓰지 않는다).
+**`Position`** — 포지션과 회계 근거(`Decimal`).
+
+- **책임** — 포지션 장부를 소유하고, `cash + position = equity` 항등식의 `position` 값을 제공한다.
+- **검증** — 생성·갱신 시 `total_cost ≈ quantity × average_price`를 허용오차 `0.01` 안에서 강제한다.
+- **`liquidation_price`는 저장 필드** — 청산가 수식은 타입 계층이 아니라 `costs.Liquidation`(§4.3.2)이 단일
+  소유하고, `position_book`이 계산 결과를 이 필드에 세팅한다. 타입이 청산가를 스스로 계산하지 않아 의존 방향이 한
+  방향으로 유지되고 수식 복제가 생기지 않는다.
+- **메서드 의미**
+    - `update_price` — 마크 가격 갱신과 미실현 손익 재계산.
+    - `add_quantity` — 가중평균 진입가 갱신.
+    - `reduce_quantity` — `reduce_only` 실현과 마진 반환.
+
+**`Trade`** — 체결 완료된 거래 한 건(`Decimal`). 현행 `ClosedTrade`를 계승하되 최초 위험 `r0`를 새 필드로 더한다.
+
+- **책임** — 한 거래의 진입부터 청산까지를 확정된 사실로 남겨, R 기반 상위 분석과 포렌식의 원천이 된다.
+- **`r0`(최초 위험, 신규 필드)**
+    - **정의** — `r0 = |entry_price − 최초 보호 스탑| × entry_quantity`. §4.3.3 사이징의 1R과 같은 정의다.
+    - **용도** — R-multiple 기반 상위 분석(SQN·기대값·파산확률)의 분모.
+    - **널 허용** — 최초 스탑을 정의할 수 없는 거래는 `r0`를 널로 두고 R 기반 지표에서 제외한다(§4.3.5).
+- **필드 제약**
+    - `net_pnl` — `gross_pnl`에서 `total_fee`·`slippage`·`funding_cost`와 청산 페널티를 차감한 net이다.
+    - `source_type ∈ {live, paper, backtest}`이고, `backtest_run_id`가 그 거래의 run을 가리킨다.
+    - `signal_confidence` — 금액이 아니라 판단 메타데이터(포렌식용)라 이 Decimal 타입 안에서 유일하게 `float`다.
+      금액 경로가 아니므로 Decimal 관문과 무관하다.
+
+**열거형** — 여섯은 현행 값을 계승하고, 둘은 신규·전용이다.
+
+- **계승(현행 값 그대로)**
+    - `OrderType` — 시장가·지정가·스탑·익절·트레일링스탑.
+    - `OrderSide` — 주문 방향(BUY/SELL).
+    - `OrderStatus` — 활성 3종·종료 5종에 `is_terminal()`·`is_active()` 판별을 더한다.
+    - `PositionSide` — LONG/SHORT/BOTH.
+    - `MarginType` — CROSS/ISOLATED.
+    - `MarketType` — SPOT/FUTURES.
+- **`ExitReason`(신규)** — 청산 사유를 구분한다.
+    - `STOP_LOSS`·`TAKE_PROFIT` — 보호 수준 도달.
+    - `TRAILING_STOP` — 트레일링 재도입 대비.
+    - `LIQUIDATION` — 강제청산.
+    - `SIGNAL_EXIT` — 전략 청산 신호(위 도출 규칙의 EXIT 갈래).
+    - `REVERSAL` — 반대 진입에 따른 청산.
+    - `END_OF_DATA` — 구간 종료 강제 청산.
+- **`SignalType`(지속 계층 전용)** — BUY/SELL/HOLD. `TradingSignal`의 필드가 아니며, 라이브 드라이버가 위 도출
+  규칙으로 값을 정해 signal_db 적재·enqueue에만 쓴다(백테스트 판단 경로는 이 열거형을 쓰지 않는다).
 
 ### §4.1.2 `indicators` 컴포넌트
 
