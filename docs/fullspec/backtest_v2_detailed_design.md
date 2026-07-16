@@ -1494,13 +1494,13 @@ look-ahead 배제 계약(모듈 수준).
 
 ```mermaid
 flowchart TD
-    CFG["run 설정 지표 모드<br/>auto · explicit · all"] --> RESOLVE["IndicatorRegistry.resolve_enabled<br/>계산할 지표 집합 확정"]
+    CFG["run 설정: 계산 대상 모드<br/>auto · explicit · all"] --> RESOLVE["IndicatorRegistry.resolve_enabled<br/>계산할 지표 집합 확정"]
     RESOLVE --> MODE{"계산 방식"}
     MODE -->|"벡터화 기본"| VEC["compute_batch<br/>전 구간 1회 계산 · 시각별 캐싱<br/>백테스트 실행이 씀"]
     MODE -->|"증분 라이브 동형"| INC["IndicatorState.seed 워밍업<br/>확정 캔들마다 update O(1)<br/>라이브·페이퍼(signal-service)가 씀"]
     VEC --> GATE["contracts.assert_finalized<br/>close_time ≤ 판단 시각 T"]
     INC --> GATE
-    GATE --> OUT["시각 t 지표 값<br/>Engine이 analyze에 push"]
+    GATE --> OUT["시각 t 지표 값<br/>전략 판단에 입력"]
     VEC -. 일치 테스트 .-> INC
 ```
 
