@@ -301,7 +301,7 @@ services/core-lib/
     types/                           # [컴포넌트] 도메인 값 타입·금액 정밀도의 단일 정의처
       candle.py                      #   통합 캔들 타입(신규): symbol·exchange·timeframe·open_time·close_time·o·h·l·c·v·quote_volume?·trade_count?; 캔들 검증 불변식 강제
       signal.py                      #   TradingSignal(판단 전용, 방향·수량 필드 없음)·SignalType — 신호 표준 승격
-      order.py                       #   Order(주문·상태기계)
+      order.py                       #   Order(주문·State Machine)
       position.py                    #   Position(포지션·가중평균·청산가)
       trade.py                       #   Trade(체결 완료 거래; r0=최초 위험 추가)
       fill.py                        #   Fill(체결 사실 명시 타입, 신규)
@@ -1117,10 +1117,10 @@ classDiagram
 
 #### `Order`
 
-주문과 그 상태 기계(체결 경로라 `Decimal`).
+주문과 그 State Machine(체결 경로라 `Decimal`).
 
 - **책임** — 주문의 상태를 소유하고, 허용되지 않는 상태 전이를 거부한다.
-- **상태 기계(`VALID_TRANSITIONS`)** — 허용된 전이만 담은 클래스 상수(정적). 이 표가 문서 전체의 단일 소유처이며,
+- **State Machine(`VALID_TRANSITIONS`)** — 허용된 전이만 담은 클래스 상수(정적). 이 표가 문서 전체의 단일 소유처이며,
   `execution.OrderLifecycle`이 표를 복제하지 않고 이를 읽어 쓴다(§4.3.1).
     - **활성 상태** — `NEW`·`PARTIALLY_FILLED`·`PENDING_CANCEL`.
     - **종료 상태** — `FILLED`·`CANCELLED`·`EXPIRED`·`REJECTED`·`FAILED`. 종료 상태에서 나가는 전이는 없다.
