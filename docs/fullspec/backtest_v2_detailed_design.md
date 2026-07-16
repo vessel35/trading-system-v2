@@ -843,6 +843,10 @@ Ehlers 필터 계수, Wilder 평활 상수, T3 볼륨 팩터)만은 그 양이 �
 어느 속성이 어느 쪽인지는 다이어그램의 타입 표기가 그대로 보여 주므로 아래 클래스 정의서는 이를 되풀이하지 않고,
 경계를 벗어나는 예외만 그 클래스에서 밝힌다.
 
+값 타입이 ENUM을 필드로 쓰는 것은 속성 타입(예: `+OrderType order_type`)이 이미 보여 주므로 다이어그램에 별도
+의존 화살표를 겹쳐 긋지 않는다. 화살표로 남긴 관계는 속성 타입만으로는 드러나지 않는 것뿐이다 — 네 금액 타입이
+`money`의 양자화를 거친다는 의존(`..> money : quantize`)이 그것이다.
+
 ```mermaid
 classDiagram
     direction LR
@@ -1036,25 +1040,10 @@ classDiagram
         SELL
         HOLD
     }
-    Order ..> OrderType
-    Order ..> OrderSide
-    Order ..> OrderStatus
-    Order ..> MarketType
-    Order ..> PositionSide
-    Order ..> money
-    Fill ..> OrderSide
-    Fill ..> PositionSide
-    Fill ..> ExitReason
-    Fill ..> money
-    Position ..> PositionSide
-    Position ..> MarginType
-    Position ..> MarketType
-    Position ..> money
-    Trade ..> OrderSide
-    Trade ..> MarketType
-    Trade ..> ExitReason
-    Trade ..> money
-    TradingSignal ..> MarketType
+    Order ..> money : quantize
+    Fill ..> money : quantize
+    Position ..> money : quantize
+    Trade ..> money : quantize
 ```
 
 #### `Candle`
