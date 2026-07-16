@@ -803,7 +803,8 @@ flowchart TD
 - **책임** — 무엇을 소유·수행하고 무엇을 하지 않는가(경계), 그리고 왜 이 설계인가.
 - **상속관계** — 구현·실현·추상 관계(Protocol 구현, ABC 등). 없으면 "없음".
 - **필드** — 속성·상수의 잔여: 제약·기본값·NULL·검증. 속성이 없으면 "없음".
-- **메서드** — 각 메서드·수식의 의미. 메서드가 없으면 "없음".
+- **메서드** — 각 메서드를 한 줄에 하나씩 하위 항목으로 `` `이름` : 설명 `` 형태로 적는다(여러 이름을 한 줄에
+  몰아넣지 않는다). 메서드가 없으면 "없음".
 - **불변식** — 이 클래스가 강제·보존하는 불변식. 지킬 것이 없으면 "없음".
 
 ENUM은 값이 아니라 멤버 목록이 본질이라 이 표준을 따르지 않고, 한 줄 요약 + 멤버(뜻 포함) + (있으면) 판별
@@ -1070,12 +1071,13 @@ classDiagram
 - **상속관계** — 없음(독립 값 타입).
 - **필드** — `symbol`·`exchange`·`timeframe`은 문자열이고(예: `exchange="BINANCE"`, `timeframe="1h"`),
   `quote_volume`·`trade_count`만 NULL을 허용한다(선택 입력, 나머지 필수).
-- **메서드** — `validate()`가 아래를 타입 계층에서 강제해 깨진 캔들이 애초에 만들어지지 않게 한다. 결측
-  캔들(gap)은 채우지 않고 표시만 한다(무기한 선물은 24시간 거래라 실제 gap은 데이터 결함 신호).
-    - 한 시계열 안에서 `open_time`은 엄격히 증가한다(중복·역행 금지).
-    - `close_time = open_time + timeframe`.
-    - `high ≥ max(open, close)`, `low ≤ min(open, close)`.
-    - 모든 가격 `> 0`, `volume ≥ 0`.
+- **메서드**
+    - `validate()` : 아래를 타입 계층에서 강제해 깨진 캔들이 애초에 만들어지지 않게 한다. 결측 캔들(gap)은
+      채우지 않고 표시만 한다(무기한 선물은 24시간 거래라 실제 gap은 데이터 결함 신호)
+        - 한 시계열 안에서 `open_time`은 엄격히 증가한다(중복·역행 금지).
+        - `close_time = open_time + timeframe`.
+        - `high ≥ max(open, close)`, `low ≤ min(open, close)`.
+        - 모든 가격 `> 0`, `volume ≥ 0`.
 - **불변식** — look-ahead 배제의 데이터 층 근거다. 진행 중(미확정) 캔들은 이 타입으로 만들어지지 않는다.
 
 #### `money`
@@ -1086,8 +1088,9 @@ classDiagram
 - **상속관계** — 없음(모듈).
 - **필드** — 양자화 스케일 상수. 가격·수량 8자리(`Q_PRICE`·`Q_AMOUNT`), 퍼센트 2자리(`Q_PERCENT`), 비율·
   수수료율 4자리(`Q_RATIO`·`Q_FEE_RATE`).
-- **메서드** — 모든 `quantize_*`가 은행가 반올림(`ROUND_HALF_EVEN`)을 쓴다. 이 함수들은 Decimal 단일 변환
-  관문(§4.3의 `execution.normalizer`)이 `Decimal(str(x))` 직후에 호출하는 유일한 양자화 지점이다.
+- **메서드**
+    - `quantize_*` : 은행가 반올림(`ROUND_HALF_EVEN`)으로 양자화. Decimal 단일 변환 관문(§4.3의
+      `execution.normalizer`)이 `Decimal(str(x))` 직후에 호출하는 유일한 양자화 지점
 - **불변식** — 없음(자릿수 규약을 정의만 하고, 강제는 `normalizer`가 관문에서 한다).
 
 #### `TradingSignal`
@@ -1142,8 +1145,9 @@ classDiagram
   (`execution.OrderLifecycle`은 복제하지 않고 이를 읽어 쓴다, §4.3.1 — 두 곳에 두면 한쪽만 고쳐져 규칙이 갈린다).
   생성 시 검증: 문자열을 열거형으로 강제, `quantity > 0`, `reduce_only`와 `close_position`은 상호 배타(둘 다 참일
   수 없음).
-- **메서드** — `mark_as_filled`·`mark_as_partially_filled`·`mark_as_cancelled`는 위 표를 위반하는 전이를
-  거부하고, `remaining_quantity()`는 `quantity − filled_quantity`.
+- **메서드**
+    - `mark_as_filled`·`mark_as_partially_filled`·`mark_as_cancelled` : 위 표를 위반하는 전이를 거부
+    - `remaining_quantity()` : `quantity − filled_quantity`
 - **불변식** — 종료 상태(`FILLED`·`CANCELLED`·`EXPIRED`·`REJECTED`·`FAILED`)에서 나가는 전이는 없다.
 
 #### `Fill`
@@ -1174,8 +1178,10 @@ classDiagram
   단독 소유하고 `position_book`이 계산 결과를 세팅한다 — 타입이 청산가를 스스로 계산하지 않아 의존 방향이 한
   방향으로 유지되고 수식 복제가 없다. 검증: 생성·갱신 시 `total_cost ≈ quantity × average_price`를 허용오차
   `0.01` 안에서 강제한다.
-- **메서드** — `update_price`(마크 가격 갱신·미실현 손익 재계산)·`add_quantity`(가중평균 진입가 갱신)·
-  `reduce_quantity`(`reduce_only` 실현·마진 반환).
+- **메서드**
+    - `update_price` : 마크 가격 갱신. 미실현 손익 재계산
+    - `add_quantity` : 가중평균 진입가 갱신
+    - `reduce_quantity` : `reduce_only` 실현. 마진 반환
 - **불변식** — 없음(회계 항등식 자체는 `accounting`이 강제한다).
 
 #### `Trade`
@@ -1355,19 +1361,19 @@ classDiagram
     - `min_history` — 그 지표가 유효값을 내기 전에 필요한 최소 캔들 수.
     - `category` — 아래 등록 지표 목록의 계열(추세·모멘텀 등).
     - `required_inputs` — OHLCV 외에 필요한 입력 채널. 시장폭 지표만 해당한다.
-- **메서드 의미**
-    - `compute_vectorized` — 전 구간을 한 번에 계산한다.
-    - `make_state` — 그 지표의 증분 상태 객체를 만든다.
+- **메서드**
+    - `compute_vectorized` : 전 구간을 한 번에 계산한다.
+    - `make_state` : 그 지표의 증분 상태 객체를 만든다.
 
 #### `IndicatorRegistry`
 
 지표 등록·조회와 배치 계산.
 
 - **책임** — 등록된 명세를 조회해 주고, 한 run에서 실제로 계산할 지표 집합만 벡터화로 계산한다.
-- **메서드 의미**
-    - `get(name, params)` — 명세를 돌려준다.
-    - `compute_batch` — 확정된 계산 집합만 벡터화로 계산한다.
-    - `resolve_enabled(mode, …)` — 계산 대상을 run 설정으로 정한다.
+- **메서드**
+    - `get(name, params)` : 명세를 돌려준다.
+    - `compute_batch` : 확정된 계산 집합만 벡터화로 계산한다.
+    - `resolve_enabled(mode, …)` : 계산 대상을 run 설정으로 정한다.
 - **계산 대상 모드**
     - `auto`(기본) — 활성 전략이 선언한 필요 지표만 계산한다. 성능 기본값이다.
     - `explicit` — 명시 리스트를 계산한다. 전략 필요분에 손실원인 탐색용 추가 지표를 더한 집합이다.
@@ -1382,9 +1388,9 @@ classDiagram
 라이브와 같은 증분 계산 경로(캔들 하나당 O(1) 갱신).
 
 - **책임** — 라이브가 실제로 도는 계산 방식이라, 벡터화 경로와 값이 같은지 판정하는 기준점이 된다.
-- **메서드 의미**
-    - `seed(candles)` — 워밍업 이력으로 상태를 채운다.
-    - `update(candle)` — 확정 캔들 하나로 한 칸 전진한다.
+- **메서드**
+    - `seed(candles)` : 워밍업 이력으로 상태를 채운다.
+    - `update(candle)` : 확정 캔들 하나로 한 칸 전진한다.
 - **필드 의미** — `warmed_up`은 `min_history` 충족 여부다.
 
 #### `contracts`
@@ -1392,9 +1398,9 @@ classDiagram
 look-ahead 배제 계약(모듈 수준).
 
 - **책임** — 미래·미확정 캔들이 지표 계산에 들어오는 것을 런타임에 막는다.
-- **메서드 의미**
-    - `assert_finalized(candle, T)` — `candle.close_time ≤ T`를 검증한다.
-    - `drop_unfinalized` — 주간 ATR 같은 리샘플에서 미확정 마지막 버킷을 떨군다.
+- **메서드**
+    - `assert_finalized(candle, T)` : `candle.close_time ≤ T`를 검증한다.
+    - `drop_unfinalized` : 주간 ATR 같은 리샘플에서 미확정 마지막 버킷을 떨군다.
 
 #### `primitives`
 
@@ -1558,11 +1564,11 @@ classDiagram
 전략 판단 계약. 상속시킬 공유 구현이 없으므로 추상 클래스가 아니라 `typing.Protocol`이다(구조적 준수만 요구).
 
 - **책임** — 전략을 끼우는 자리를 선언한다. 판단만 하고 읽기·저장·루프를 갖지 않는다.
-- **메서드 의미**
-    - `get_metadata()` — 필요 지표(`{name, params}` 목록)·최소 이력·지원 타임프레임·프로파일을 선언한다.
-    - `get_parameter_schema()` — 이 전략의 파라미터 스키마(각 필드의 타입·기본값·범위, 잉여 키 금지)를 선언만
+- **메서드**
+    - `get_metadata()` : 필요 지표(`{name, params}` 목록)·최소 이력·지원 타임프레임·프로파일을 선언한다.
+    - `get_parameter_schema()` : 이 전략의 파라미터 스키마(각 필드의 타입·기본값·범위, 잉여 키 금지)를 선언만
       한다. 해석하지 않는다.
-    - `analyze(market_data, current_position)` — Engine이 push한 사전 계산 지표의 평평한 dict와 현재 포지션을
+    - `analyze(market_data, current_position)` : Engine이 push한 사전 계산 지표의 평평한 dict와 현재 포지션을
       받아 판단을 반환한다. 진입·청산 판단이면 `TradingSignal`, 관망이면 `None`이며, 반환은 판단뿐이라 수량·주문
       방향을 정하지 않는다.
 - **계약이 강제하는 불변식**
@@ -1587,12 +1593,12 @@ classDiagram
 
 전략 파라미터 config의 해석·검증·직렬화·스키마 노출의 단일 소유.
 
-- **메서드 의미**
-    - `resolve(schema, raw_config)` — 원자재 config(전략 id + 파라미터 값)를 Adaptee가 선언한 스키마에 대조해
+- **메서드**
+    - `resolve(schema, raw_config)` : 원자재 config(전략 id + 파라미터 값)를 Adaptee가 선언한 스키마에 대조해
       불변 `ResolvedConfig`로 해석한다. 검증은 기본값 병합, 잉여 키 금지(`extra=forbid`), 타입·범위, 교차필드를
       거친다.
-    - `json_schema(schema)` — 설정 UI·툴링용 JSON Schema를 노출한다.
-    - `serialize`·`version` — Evidence·카탈로그 기록용 정규화 직렬화와 스키마 버전을 낸다.
+    - `json_schema(schema)` : 설정 UI·툴링용 JSON Schema를 노출한다.
+    - `serialize`·`version` : Evidence·카탈로그 기록용 정규화 직렬화와 스키마 버전을 낸다.
 - **무순환 설계(스키마를 값으로 받음)** — `resolve`·`json_schema`는 Adaptee 인스턴스가 아니라 스키마 값을 인자로
   받는다. Adaptee가 선언한 스키마를 `Adapter Manager`가 먼저 꺼내 넘겨 주므로 `StrategyConfig`는 스키마 타입에만
   의존하고 전략 구현을 되짚지 않는다. 생성(Manager)·해석(Config)·선언(Adaptee) 사이에 순환이 생기지 않는다.
@@ -1613,10 +1619,10 @@ classDiagram
 
 Adaptee의 생성(Factory)·lifecycle과 구현 목록 레지스트리.
 
-- **메서드 의미**
-    - `create(strategy_id, raw_config)` — 생성을 오케스트레이션한다(아래 시퀀스).
-    - `activate`·`deactivate` — Adaptee의 lifecycle을 다룬다.
-    - `list_registered`·`register` — signal_db 레지스트리를 다룬다.
+- **메서드**
+    - `create(strategy_id, raw_config)` : 생성을 오케스트레이션한다(아래 시퀀스).
+    - `activate`·`deactivate` : Adaptee의 lifecycle을 다룬다.
+    - `list_registered`·`register` : signal_db 레지스트리를 다룬다.
 - **레지스트리 접근** — DB 접근은 주입된 `StrategyRegistry` 포트로만 한다. 그래서 core-lib은 특정 DB에 직접
   의존하지 않는다.
 - **갖지 않는 것** — 전략 결정 로직도 파라미터 검증 로직도 직접 갖지 않는다(각각 Adaptee·`StrategyConfig` 소관).
@@ -1739,7 +1745,9 @@ classDiagram
 
 Decimal 단일 변환 관문. 시스템 전체에서 `float`→`Decimal` 변환이 일어나는 유일한 곳이다.
 
-- **메서드 의미** — `to_decimal(x)`가 `Decimal(str(x))`와 `money`의 `quantize_*`를 한 번 수행한다.
+- **메서드**
+    - `to_decimal(x)` : `Decimal(str(x))`와 `money`의 `quantize_*`를 한 번 수행
+    - `normalize_order(order)` : 주문의 float 수치를 이 관문으로 태워 Decimal 주문으로 정규화
 - **`Decimal(float)` 직접 변환 금지** — `float`이 이미 품은 이진 오차가 스탑 가격 끝자리를 뒤집어, 캔들 내 트리거
   여부와 결정성 해시를 흔들기 때문이다. 문자열을 거쳐 의도한 값을 그대로 만든다.
 - **강제 방법** — 모든 Broker 어댑터의 `submit()`이 이 함수를 통과해야 하며 어댑터별 독자 캐스팅은 금지다. 우회는
@@ -1770,7 +1778,8 @@ Decimal 단일 변환 관문. 시스템 전체에서 `float`→`Decimal` 변환�
 
 주문 상태 전이의 문지기.
 
-- **메서드 의미** — `can_transition`이 허용된 전이만 통과시키고 위반을 거부한다.
+- **메서드**
+    - `can_transition` : 허용된 전이만 통과시키고 위반을 거부
 - **전이표의 출처** — 표를 새로 만들지 않고 `types.Order`의 `VALID_TRANSITIONS`(단일 소유)를 읽어 쓴다.
   `execution`이 `types`를 참조하는 방향이라 표를 복제하지 않아도 되고, 그래서 복제 드리프트가 생기지 않는다.
 
@@ -1778,18 +1787,18 @@ Decimal 단일 변환 관문. 시스템 전체에서 `float`→`Decimal` 변환�
 
 체결을 반영해 포지션 장부를 갱신한다.
 
-- **메서드 의미**
-    - `weighted_average` — 가중평균 진입가를 갱신한다.
-    - `reduce` — `reduce_only` 실현과 마진 반환을 처리한다.
-    - `check_liquidation` — Isolated를 우선해 청산을 판정한다.
+- **메서드**
+    - `weighted_average` : 가중평균 진입가를 갱신한다.
+    - `reduce` : `reduce_only` 실현과 마진 반환을 처리한다.
+    - `check_liquidation` : Isolated를 우선해 청산을 판정한다.
 
 #### `Accounting`
 
 회계 항등식의 소유처.
 
-- **메서드 의미**
-    - `recompute` — `cash + position = equity` 항등식을 유지한다.
-    - `assert_identity` — 그 항등식이 실제로 성립하는지 검산한다.
+- **메서드**
+    - `recompute` : `cash + position = equity` 항등식을 유지한다.
+    - `assert_identity` : 그 항등식이 실제로 성립하는지 검산한다.
 - **강제하는 불변식** — 각 비용은 한 번만 차감한다.
 
 ### §4.3.2 `costs` 컴포넌트
@@ -2024,23 +2033,25 @@ classDiagram
 
 #### `DataFeed`
 
-- **메서드 의미**
-    - `candles(symbol, tf, up_to)` — `up_to` 이후 캔들을 절대 반환하지 않는다. look-ahead를 구조적으로 배제하는
+- **메서드**
+    - `candles(symbol, tf, up_to)` : `up_to` 이후 캔들을 절대 반환하지 않는다. look-ahead를 구조적으로 배제하는
       지점이다.
-    - `funding` — 과거 실측 펀딩 rate를 그 시점 기준으로 공급한다.
-    - `mark_price` — 마크 가격을 그 시점 기준으로 공급한다.
+    - `funding` : 과거 실측 펀딩 rate를 그 시점 기준으로 공급한다.
+    - `mark_price` : 마크 가격을 그 시점 기준으로 공급한다.
 
 #### `Broker`
 
-- **메서드 의미**
-    - `submit(order) → Fill` — 체결을 수행한다.
-    - `open_orders`·`cancel` — 미체결 주문을 다룬다.
+- **메서드**
+    - `submit(order) → Fill` : 체결을 수행한다.
+    - `open_orders`·`cancel` : 미체결 주문을 다룬다.
 - **강제하는 불변식** — 구현 어댑터의 `submit()`은 반드시 `execution.normalizer`를 통과해 `float→Decimal` 단일
   변환을 달성한다. 어댑터별 독자 캐스팅은 금지다.
 
 #### `Clock`
 
-- **메서드 의미** — `now`·`advance`가 시뮬 시각을 공급한다.
+- **메서드**
+    - `now` : 현재 시뮬 시각을 돌려줌
+    - `advance` : 시계를 다음 시점으로 옮김
 - **강제하는 불변식** — wall-clock을 쓰지 않는다(결정성). 난수도 무제어로 쓰지 않는다.
 
 #### `CostModel`
@@ -2051,19 +2062,19 @@ classDiagram
 
 #### `EvidenceSink`
 
-- **메서드 의미**
-    - `record` — 시점별 Entity를 run별 저장소에 적는다.
-    - `finalize` — 무결성 검사와 요약을 생성하고 정규화 Evidence 해시를 산출한다.
+- **메서드**
+    - `record` : 시점별 Entity를 run별 저장소에 적는다.
+    - `finalize` : 무결성 검사와 요약을 생성하고 정규화 Evidence 해시를 산출한다.
 - **해시 산출 방식** — 정렬된 행의 정규화 직렬화로 낸다. 파일 바이트가 아니며 wall-clock을 제외한다.
 
 #### `CatalogStore`
 
 run 메타 카탈로그.
 
-- **메서드 의미**
-    - `save_prereg` — 사전등록을 기록한다.
-    - `register` — `run_id`를 단독 발급한다.
-    - `upsert_summary` — 성과·판정 요약을 기록한다.
+- **메서드**
+    - `save_prereg` : 사전등록을 기록한다.
+    - `register` : `run_id`를 단독 발급한다.
+    - `upsert_summary` : 성과·판정 요약을 기록한다.
 - **사용 범위** — 백테스트 전용이라 라이브·페이퍼는 이 포트를 쓰지 않는다.
 
 #### `StrategyRegistry`
