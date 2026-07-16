@@ -1726,8 +1726,9 @@ sequenceDiagram
     participant REG as StrategyRegistry (주입)
     participant AD as Adaptee (전략 구현)
     participant SC as StrategyConfig
+    Note over E: strategy_id는 run 설정이 이미 고른 값이다.<br/>가용 전략 목록을 훑는 조회 StrategyRegistry.list는<br/>그 앞의 선택·등록 흐름이라 이 시퀀스에 넣지 않는다.
     E->>AM: create(strategy_id, raw_config)
-    AM->>REG: get(strategy_id) — 구현 카탈로그 조회
+    AM->>REG: get(strategy_id) — 카탈로그에서 이 id 하나만 조회
     REG-->>AM: Adaptee 클래스 식별
     AM->>AD: get_parameter_schema() — 스키마 선언 조회
     AD-->>AM: ParameterSchema (값)
@@ -1739,9 +1740,13 @@ sequenceDiagram
     AM-->>E: Adaptee
 ```
 
-읽는 법: 스키마는 Adaptee가 선언하고(3~4행), Config는 그 스키마 값을 받아 해석하며(5~7행), Manager가 생성을
-소유한다(2·8행). Config가 Adaptee를 되짚지 않으므로 의존은 한 방향(Manager→Config, Manager→Adaptee,
-Config→스키마 타입)으로만 흐른다. 레지스트리 조회는 주입 포트를 거쳐 core-lib이 DB에 묶이지 않는다.
+읽는 법: `strategy_id`는 이 시퀀스가 시작되기 전에 정해진다 — 사용자·run 설정이 등록된 전략 목록을 먼저 조회해
+(`Adapter Manager.list_registered()`, 내부적으로 `StrategyRegistry.list()`) 하나를 고른 값이다. 그래서 `create`는
+이미 아는 id로 `get(strategy_id)`를 불러 카탈로그에서 그 하나만 가져온다. 무엇이 있는지 훑는 목록 조회는 선택·등록
+흐름이라 이 생성 시퀀스에서는 의도적으로 뺐다. 그다음 스키마는 Adaptee가 선언하고, Config는 그 스키마 값을 받아
+해석하며, Manager가 생성을 소유한다. Config가 Adaptee를 되짚지 않으므로 의존은 한 방향으로만 흐른다 — Manager가
+Config와 Adaptee를 부르고, Config는 스키마 타입에만 의존한다. 레지스트리 조회는 주입 포트를 거쳐 core-lib이 DB에
+묶이지 않는다.
 
 #### `StrategyProfile`
 
