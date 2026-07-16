@@ -307,7 +307,7 @@ services/core-lib/
       fill.py                        #   Fill(체결 사실 명시 타입, 신규)
       enums.py                       #   OrderStatus/Side/Type·PositionSide·MarginType·MarketType·ExitReason(신규)
       money.py                       #   ZERO·Q_PRICE/AMOUNT/PERCENT/RATIO/FEE_RATE·quantize_*(ROUND_HALF_EVEN) — 금액 정밀도 상수
-    indicators/                      # [컴포넌트] 공용 계산 프리미티브 + 지표 표준(벡터화·증분 두 경로)
+    indicators/                      # [컴포넌트] 공용 계산 프리미티브 + 지표 표준(벡터화·증분 두 계산 방식)
       primitives.py                  #   공용 계산 단위: sma·ema·wma·rma·tr·tp·stdev·hh·ll·cumulative·roc·linreg
       trend.py                       #   추세·이동평균 지표군
       momentum.py                    #   모멘텀 지표군
@@ -529,7 +529,7 @@ flowchart TD
 | 컴포넌트 | 책임 | 인터페이스 경계 (공개 표면 · 하지 않음) | 구성 (§2 트리) |
 |---|---|---|---|
 | `types` | 세 실행 모드가 공유하는 값 타입·금액 정밀도의 유일한 정의처 | 공개: `Candle`·`TradingSignal`(판단 전용, 수량·방향 필드 없음)·`Order`·`Position`·`Trade`(`r0` 포함)·`Fill`·enums·`money`(ZERO·Q_*·quantize_*). 하지 않음: 계산·IO 없음; 캔들 검증 불변식(시각 단조·`high ≥ max(open,close)`·`low ≤ min(open,close)`)을 타입 계층에서 강제 | `types/`의 candle·signal·order·position·trade·fill·enums·money |
-| `indicators` | 공용 프리미티브 + 지표 표준(벡터화·증분 두 경로). 계약은 등록된 지표를 **공통 방식으로 관리**하는 것이며 지표 개수가 아니다(목록·단위는 §4.1) | 공개: `registry.get(name, params)`·`compute_batch(candles, enabled_set)`·`IndicatorState.update(candle)`·`contracts.assert_finalized`. 하지 않음: 확정 캔들만 입력(`close_time ≤ 판단 시각`); 계산은 float64(Decimal 변환은 `execution` 관문 소관); 계산 대상은 run 설정이 결정 | `indicators/`의 primitives·지표군 9파일·donchian·registry·contracts |
+| `indicators` | 공용 프리미티브 + 지표 표준(벡터화·증분 두 계산 방식). 계약은 등록된 지표를 **공통 방식으로 관리**하는 것이며 지표 개수가 아니다(목록·단위는 §4.1) | 공개: `registry.get(name, params)`·`compute_batch(candles, enabled_set)`·`IndicatorState.update(candle)`·`contracts.assert_finalized`. 하지 않음: 확정 캔들만 입력(`close_time ≤ 판단 시각`); 계산은 float64(Decimal 변환은 `execution` 관문 소관); 계산 대상은 run 설정이 결정 | `indicators/`의 primitives·지표군 9파일·donchian·registry·contracts |
 | `StrategyAdapter` | 전략을 끼우는 판단 계약(Strategy 패턴)의 선언 | 공개: `StrategyAdapter`(`typing.Protocol`) — `get_metadata()`·`get_parameter_schema()`·`analyze(market_data, position?) → TradingSignal`; metadata에 `required_indicators`·`min_history`·`timeframe`·프로파일 선언. 하지 않음: 판단만(읽기·저장·루프 없음); Adaptee는 stateless; 미래 데이터 자가 인출 없음(look-ahead는 Engine 피드 경계가 통제); 파라미터 스키마는 선언만(해석은 `StrategyConfig`); 진입·청산 엣지는 각 Adaptee 소유(범위 밖); 트레일링은 순수 함수 호출(상속 아님·유보) | `strategy/base.py`·`profile.py`·`trailing/`(유보) |
 | `sizing` | 거래당 위험 규율과 사이징 인스턴스 | 공개: `risk_money.size(equity, stop_distance, risk_per_trade ≤ 1%)`·`turtle_unit`·`wallet_pct.size`(호환)·`kelly.cap`. 하지 않음: 엣지 창조 없음(엣지는 진입 신호); `1R = |체결가 − 최초 보호 스탑| × 수량`이고 `1R ≤ 1%`; pct 경로는 보장 실패 시 비준수 플래그 의무 | `sizing/`의 risk_money·turtle_unit·wallet_pct·kelly |
 | `costs` | net 손익 4개 비용 수식 표준(값은 주입) | 공개: `fee.calc`·`slippage.apply`·`funding.settle`·`liquidation.price/is_triggered`. 하지 않음: 비용 값 미보유(전량 `CostModel` 주입); 펀딩은 이산 정산(UTC 경계, 정산가 = 경계 포함 최소 가용 TF 캔들 시가); 청산은 Isolated 우선·보수 방향 | `costs/`의 fee·slippage·funding·liquidation |
@@ -1287,11 +1287,14 @@ enqueue에만 쓰며, 백테스트 판단 경로는 이 ENUM을 쓰지 않는다
 ### §4.1.2 `indicators` 컴포넌트
 
 지표의 유일 구현처다. 다이어그램은 지표 명세 `IndicatorSpec`, 등록·조회 `IndicatorRegistry`, 증분 상태
-`IndicatorState`, look-ahead 계약 `contracts`, 공용 프리미티브 `primitives`와 그 관계를 담는다. 한 지표는 벡터화
-경로(`compute_vectorized`)와 증분 경로(`IndicatorState.update`) 두 가지를 가지며, 둘의 값은 일치해야 한다.
+`IndicatorState`, look-ahead 계약 `contracts`, 공용 프리미티브 `primitives`와 그 관계를 담는다. 한 지표는 같은 값을 내는 두 가지 계산
+방식을 가진다. **벡터화 방식**(`compute_vectorized`)은 전 구간을 한 번에 계산하며, 백테스트 실행이 성능을 위해
+쓰는 기본 방식이다. **증분 방식**(`IndicatorState.update`)은 확정 캔들 하나마다 O(1)로 갱신하며, 라이브·페이퍼
+(signal-service)가 실제로 도는 방식이다. 두 방식의 값은 일치해야 한다 — 백테스트가 쓰는 벡터화 값이 라이브가
+쓰는 증분 값과 어긋나면 안 되며, 이를 일치 테스트로 못박는다.
 
 **이 컴포넌트가 고정하는 것은 지표 목록이 아니라 관리 방식이다.** 어떤 지표든 예외 없이 같은 길을 지난다 —
-`IndicatorSpec`으로 `registry`에 등록되고, 벡터화·증분 두 경로를 갖고, 확정 캔들 계약(`close_time ≤ 판단 시각`)을
+`IndicatorSpec`으로 `registry`에 등록되고, 벡터화·증분 두 계산 방식을 갖고, 확정 캔들 계약(`close_time ≤ 판단 시각`)을
 통과하고, 같은 프리미티브 위에서 조립되며, 같은 seed·워밍업 규약을 따른다. 그래서 **지표를 더하거나 빼는 일은
 registry 항목이 늘고 주는 것일 뿐 이 설계를 바꾸지 않는다.** 아래 목록은 지금까지 수집한 것이고 그 개수는 현재
 상태일 뿐이니, 개수를 계약으로 읽으면 안 된다.
@@ -1362,7 +1365,7 @@ classDiagram
     - `category` — 아래 등록 지표 목록의 계열(추세·모멘텀 등).
     - `required_inputs` — OHLCV 외에 필요한 입력 채널. 시장폭 지표만 해당한다.
 - **메서드**
-    - `compute_vectorized` : 전 구간을 한 번에 계산한다.
+    - `compute_vectorized` : 전 구간을 한 번에 계산한다(백테스트 실행이 쓰는 벡터화 방식).
     - `make_state` : 그 지표의 증분 상태 객체를 만든다.
 
 #### `IndicatorRegistry`
@@ -1385,9 +1388,10 @@ classDiagram
 
 #### `IndicatorState`
 
-라이브와 같은 증분 계산 경로(캔들 하나당 O(1) 갱신).
+라이브·페이퍼(signal-service)가 실제로 도는 증분 계산 방식(캔들 하나당 O(1) 갱신).
 
-- **책임** — 라이브가 실제로 도는 계산 방식이라, 벡터화 경로와 값이 같은지 판정하는 기준점이 된다.
+- **책임** — 라이브가 실제로 도는 계산 방식이라, 벡터화 방식과 값이 같은지 판정하는 기준점이 된다. 백테스트는 이
+  방식을 기준점 삼아 벡터화 값을 대조한다.
 - **메서드**
     - `seed(candles)` : 워밍업 이력으로 상태를 채운다.
     - `update(candle)` : 확정 캔들 하나로 한 칸 전진한다.
@@ -1451,31 +1455,32 @@ look-ahead 배제 계약(모듈 수준).
 
 - **재귀형 지표의 갱신** — EMA·Wilder 평활·Parabolic SAR·누적합처럼 상태를 보유하는 지표는 워밍업 이력으로
   seed한 뒤 확정 캔들로만 갱신한다.
-- **두 경로의 seed 통일** — 초기값 산정, `adjust` 여부, 표준편차 분모, 0 나눗셈 처리를 지표 계산 명세 표준이
-  통일한다. 벡터화 경로와 증분 경로가 같은 규칙을 써야 초반 캔들에서도 값이 어긋나지 않는다.
+- **두 방식의 seed 통일** — 초기값 산정, `adjust` 여부, 표준편차 분모, 0 나눗셈 처리를 지표 계산 명세 표준이
+  통일한다. 벡터화 방식과 증분 방식이 같은 규칙을 써야 초반 캔들에서도 값이 어긋나지 않는다.
 - **유효 시점** — 각 지표의 `min_history`만큼 캔들이 쌓이기 전 값은 유효하지 않다.
 - **프리로드** — 실행 드라이버는 평가 구간 시작 전에 `max(전략 min_history, 지표 최장 워밍업)` 캔들을 별도
   프리로드하고, 그 구간의 신호는 버린다(§4.4에서 확정).
 
 #### 지표 계산 플로우
 
-한 run에서 지표 값을 만드는 길은 두 가지이고, 어느 쪽이든 같은 지표 구현·같은 프리미티브를 거쳐 값이 서로 같아야
-한다(일치 테스트로 못박는다). 아래가 두 경로와 그 공통 look-ahead 관문이다.
+한 run에서 지표 값을 만드는 방식은 두 가지이고, 어느 쪽이든 같은 지표 구현·같은 프리미티브를 거쳐 값이 서로 같아야
+한다(일치 테스트로 못박는다). 아래가 두 방식과 그 공통 look-ahead 관문이다.
 
 ```mermaid
 flowchart TD
     CFG["run 설정 지표 모드<br/>auto · explicit · all"] --> RESOLVE["IndicatorRegistry.resolve_enabled<br/>계산할 지표 집합 확정"]
-    RESOLVE --> MODE{"계산 경로"}
-    MODE -->|"벡터화 기본"| VEC["compute_batch<br/>전 구간 1회 계산 · 시각별 캐싱"]
-    MODE -->|"증분 라이브 동형"| INC["IndicatorState.seed 워밍업<br/>확정 캔들마다 update O(1)"]
+    RESOLVE --> MODE{"계산 방식"}
+    MODE -->|"벡터화 기본"| VEC["compute_batch<br/>전 구간 1회 계산 · 시각별 캐싱<br/>백테스트 실행이 씀"]
+    MODE -->|"증분 라이브 동형"| INC["IndicatorState.seed 워밍업<br/>확정 캔들마다 update O(1)<br/>라이브·페이퍼(signal-service)가 씀"]
     VEC --> GATE["contracts.assert_finalized<br/>close_time ≤ 판단 시각 T"]
     INC --> GATE
     GATE --> OUT["시각 t 지표 값<br/>Engine이 analyze에 push"]
     VEC -. 일치 테스트 .-> INC
 ```
 
-읽는 법: 계산 집합은 run 설정이 정하고(전량이 아니라 필요분), 두 경로 중 벡터화가 기본이며 증분이 라이브와 동형인
-검증 기준점이다. 두 경로 모두 `contracts`의 확정 캔들 계약(`close_time ≤ T`)을 통과해야 하며, 이 관문이 미래
+읽는 법: 계산 집합은 run 설정이 정하고(전량이 아니라 필요분), 두 방식 중 **벡터화가 백테스트 실행의 기본 방식**
+(전 구간 1회 계산·캐싱으로 성능 확보)이고, **증분이 라이브·페이퍼(signal-service)가 실제로 도는 방식**이자 벡터화
+값을 대조하는 검증 기준점이다. 두 방식 모두 `contracts`의 확정 캔들 계약(`close_time ≤ T`)을 통과해야 하며, 이 관문이 미래
 데이터 참조를 구조적으로 막는다. 계산은 전부 `float`이고 Decimal 변환은 이 컴포넌트 밖 체결 관문에서만 일어난다.
 
 ## §4.2 전략 클래스 (+ config 해석 시퀀스)
