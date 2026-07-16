@@ -1443,22 +1443,24 @@ look-ahead 배제 계약(모듈 수준).
 | 사이클·Ehlers (4) | MAMA/FAMA, Center of Gravity Oscillator, Roofing Filter, Sinewave/Instantaneous Trendline |
 | 기타 시스템 (6) | Parabolic SAR, Ichimoku Kinko Hyo, Elder Ray, Elder Impulse System, TD Sequential, Woodies CCI |
 
-목록에 대한 규칙은 다음과 같다.
+이 목록에 적용되는 규칙은 네 가지다. 각 항목은 **굵은 제목**과 그 뒤의 설명으로 되어 있다.
 
-- **등록 단위 — 무엇이 `registry`의 한 항목인가.** 개수가 아니라 이 **단위**가 계약이다. 지표 하나, 또는
-  DMI/ADX·Ichimoku처럼 여러 값을 한 묶음으로 내는 지표 시스템 하나가 한 항목이며, 표에 적힌 이름이 곧 등록
-  이름이다. 같은 지표라도 단위를 다르게 잡으면 항목 수가 달라진다 — DMI/ADX를 구성요소 넷(`+DI`·`−DI`·`ADX`·
-  `ADXR`)으로 펼치거나 MACD와 히스토그램을 나누면 늘고, Bollinger Bands를 밴드 하나로 묶고 `%B`·`BandWidth`를
-  파생으로 빼면 준다. 지표가 늘거나 줄어도 이 단위 규칙은 그대로 적용한다.
-- **의도적 제외.** Wilder의 Swing Index·ASI·CSI·Volatility Stop은 무기한 시장 적용성이 낮아 넣지 않는다(Swing
-  Index·ASI의 "limit move" 파라미터가 무기한 시장에 정의되지 않고, Volatility Stop은 Chandelier Exit로 사실상
-  대체된다). 필요 시 별도 추가한다.
-- **시장폭 3종은 조건부 활성.** McClellan Oscillator·Summation·TRIN은 등락종목수·거래량 같은 별도 입력 채널이
-  있어야 계산되며, 단일 심볼 OHLCV만으로는 입력이 없어 비활성 처리한다(`required_inputs`에 그 채널을 선언하고,
-  없으면 `compute_batch`가 건너뛴다).
-- **첫 검증 전략 커버리지.** 첫 파이프라인 검증 전략이 요구하는 최소 집합은 EMA 9/21/55/200, RSI 14, Bollinger
-  Bands(기간 20·표준편차 2.0), Stochastic(%K 14·%D 3), ATR 14, 거래량 이동평균 20이다. 현재 목록이 이를 빠짐없이
-  덮는다. 목록이 바뀌더라도 이 커버리지는 유지해야 한다.
+- **등록 단위** — `registry`에 등록되는 한 항목이 무엇인지를 정하는 규칙이다. 계약은 지표 개수가 아니라 이
+  단위다. 한 항목은 지표 하나이거나, DMI/ADX·Ichimoku처럼 여러 값을 한 묶음으로 내는 지표 시스템 하나다. 표에
+  적힌 이름이 그대로 등록 이름이 된다. 단위를 어떻게 끊느냐에 따라 항목 수는 달라진다. 예를 들어 DMI/ADX를 네 값
+  (`+DI`·`−DI`·`ADX`·`ADXR`)으로 펼치면 항목이 늘고, Bollinger Bands를 밴드 하나로 묶고 `%B`·`BandWidth`를 파생
+  으로 빼면 항목이 준다. 지표가 늘거나 줄어도 이 단위 규칙은 그대로 적용한다.
+- **의도적 제외** — 목록에 넣지 않기로 한 지표다. Wilder의 Swing Index·ASI·CSI와 Volatility Stop은 무기한 선물
+  시장에 잘 맞지 않아 제외한다. Swing Index와 ASI는 "limit move"(하루 가격 변동 상한) 파라미터에 기대는데 무기한
+  선물에는 그런 상한이 없고, Volatility Stop은 이미 넣은 Chandelier Exit로 사실상 대체된다. 나중에 필요해지면 그때
+  따로 추가한다.
+- **시장폭 지표의 조건부 활성** — 켜는 데 별도 조건이 붙는 지표다. McClellan Oscillator·Summation·TRIN 세 지표는
+  등락 종목 수나 시장 전체 거래량 같은 별도 입력 채널이 있어야 계산된다. 단일 심볼의 OHLCV만으로는 그 입력이 없어
+  비활성으로 둔다. 구현은 `required_inputs`에 필요한 채널을 선언하고, 그 채널이 없으면 `compute_batch`가 해당
+  지표를 건너뛴다.
+- **첫 검증 전략 커버리지** — 첫 파이프라인 검증에 쓰는 전략이 반드시 필요로 하는 최소 지표 집합이다. EMA
+  9/21/55/200, RSI 14, Bollinger Bands(기간 20·표준편차 2.0), Stochastic(%K 14·%D 3), ATR 14, 거래량 이동평균
+  20이 여기 든다. 현재 목록이 이들을 빠짐없이 덮는다. 목록이 바뀌더라도 이 집합만은 계속 유지해야 한다.
 
 #### 워밍업·seed 규약
 
