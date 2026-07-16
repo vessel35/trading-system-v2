@@ -1572,7 +1572,7 @@ classDiagram
         +Mapping params
         +str schema_version
     }
-    class AdapterManager {
+    class AdapterManager["Adapter Manager"] {
         +create(str, dict) StrategyAdapter
         +activate(str) None
         +deactivate(str) None
@@ -1597,6 +1597,17 @@ classDiagram
         <<reserved>>
         +compute_initial_risk(float, float) float
         +update(TrailingState, list~Candle~) float
+    }
+    class FieldSpec {
+        +str type
+        +object default
+        +tuple range
+        +bool required
+    }
+    class TrailingState {
+        <<reserved>>
+        +float current_stop
+        +float extreme_price
     }
     Adaptee ..|> StrategyAdapter
     Adaptee ..> TrailingStopCalculator
@@ -1679,6 +1690,15 @@ classDiagram
       기본은 금지다.
 - **메서드** — 없음(순수 값).
 - **불변식** — 없음.
+
+#### `FieldSpec`
+
+- **개요** — `ParameterSchema.fields`의 값 타입. 파라미터 한 개의 허용 형태 명세.
+- **책임** — 한 파라미터의 타입·기본값·허용 범위·필수 여부를 담아 `StrategyConfig.resolve`의 검증 기준이 된다.
+- **상속관계** — 없음(값 타입).
+- **필드** — `type`(파라미터 타입), `default`(기본값), `range`(허용 범위 `[min, max]` 등), `required`(필수 여부).
+- **메서드** — 없음(순수 값).
+- **불변식** — 없음(검증은 `StrategyConfig.resolve`가 수행한다).
 
 #### `StrategyConfig`
 
@@ -1799,6 +1819,15 @@ Config와 Adaptee를 부르고, Config는 스키마 타입에만 의존한다. �
     - `compute_initial_risk` : 최초 위험 `r0`를 계산해 제공한다(고정 손절이 없는 전략의 최초 보호 스탑).
     - `update` : 트레일링 상태와 확정 캔들로 갱신된 스탑 수준을 낸다.
 - **불변식** — 없음(유보 상태라 이 절의 계약을 바꾸지 않는다).
+
+#### `TrailingState` (유보)
+
+- **개요** — `TrailingStopCalculator`가 캔들 사이에 들고 가는 트레일링 상태(유보).
+- **책임** — 갱신에 필요한 직전 스탑 수준과 유리 방향 극값을 보유한다. `TrailingStopCalculator`와 함께 유보 상태다.
+- **상속관계** — 없음(값 타입).
+- **필드** — `current_stop`(현재 트레일링 스탑 수준), `extreme_price`(진입 후 유리 방향 극값).
+- **메서드** — 없음(순수 값).
+- **불변식** — 없음(유보 상태라 계약을 확정하지 않는다).
 
 ## §4.3 실행·평가 클래스 (+ 판정 플로우)
 
@@ -2323,6 +2352,41 @@ classDiagram
     class Decision {
         +decide(GateResult, object) DecisionResult
     }
+    class MetricSet {
+        <<result>>
+        +float pf
+        +float sortino
+        +float calmar_or_mar
+        +float sqn
+        +float mdd
+        +float ror
+        +float sharpe
+        +float win_rate
+        +float payoff
+        +float expectancy_r
+    }
+    class IntegrityResult {
+        <<result>>
+        +bool passed
+        +list~str~ failed_checks
+    }
+    class GateResult {
+        <<result>>
+        +bool passed
+        +str stage
+        +list~str~ failed
+        +str verdict
+    }
+    class EnvelopeResult {
+        <<result>>
+        +str status
+        +list~str~ deviated
+    }
+    class DecisionResult {
+        <<result>>
+        +str route
+        +str rationale
+    }
     HardGate ..> Profile
     HardGate ..> Metrics
     Decision ..> HardGate
@@ -2456,6 +2520,56 @@ classDiagram
     - `decide(gate_result, prereg)` : 사전등록 기준과 대조해 최종 라우팅(`DecisionResult`)을 낸다.
 - **불변식** — `promote`만 Live로 가고 `partial_keep`·`retest`는 개선 루프로 보낸다. `abandon`(종료)은 엣지를
   구분할 수 없다고 확정될 때만 낸다.
+
+#### `MetricSet`
+
+- **개요** — `Metrics.compute`가 내는, 한 run의 성과 지표 묶음.
+- **책임** — 통과선 판정·프로파일 대조·최종 판정이 소비하는 성과 지표 값을 담는다. 각 값의 계산식 자체는 `Metrics`가
+  정의한다.
+- **상속관계** — 없음(결과 값 타입).
+- **필드** — 통과선 표에 나오는 지표 값들(Profit Factor·Sortino·Calmar/MAR·SQN·MDD·Risk of Ruin·Sharpe·승률·
+  Payoff)과 R 기준 기대값(`expectancy_r`). 각 값의 정의·단위·경계는 `Metrics`를 따른다.
+- **메서드** — 없음(순수 값).
+- **불변식** — 모든 손익 지표는 net 기준이다(`Metrics`가 강제).
+
+#### `IntegrityResult`
+
+- **개요** — `Integrity.check`가 내는 무결성 검사 결과.
+- **책임** — 여섯 검사의 통과 여부와 실패 항목을 담아, 하나라도 실패면 파이프라인을 `diagnostic_only`로 멈추는 근거가
+  된다.
+- **상속관계** — 없음(결과 값 타입).
+- **필드** — `passed`(전체 통과 여부), `failed_checks`(실패한 검사 이름 목록 — 회계 항등식·시점 순서·비용 1회·net·
+  결정성·완성도 중).
+- **메서드** — 없음(순수 값).
+- **불변식** — `passed`가 거짓이면 Hard Gate·Decision으로 넘어가지 않는다.
+
+#### `GateResult`
+
+- **개요** — `Thresholds.is_pass`·`HardGate.judge`가 내는 게이트 판정 결과.
+- **책임** — 통과 여부와, 어느 단계(A/B)에서 무엇이 미달·회귀했는지를 담는다.
+- **상속관계** — 없음(결과 값 타입).
+- **필드** — `passed`(통과 여부), `stage`(Hard Gate A/B), `failed`(미달 통과선 목록), `verdict`(`pass`·
+  `not_promotable`·`established 회귀` 중).
+- **메서드** — 없음(순수 값).
+- **불변식** — 미달·회귀 판정은 종료가 아니라 개선 루프(forensics)로 가는 경로를 뜻한다(`HardGate` 참조).
+
+#### `EnvelopeResult`
+
+- **개요** — `Profile.check_envelope`가 내는 프로파일 기대 범위 대조 결과.
+- **책임** — 실현 지표가 프로파일 기대 범위 안인지, 이탈했는지를 담는다.
+- **상속관계** — 없음(결과 값 타입).
+- **필드** — `status`(`in_range`·`warning`·`reject` 중), `deviated`(이탈한 형태 지표 목록).
+- **메서드** — 없음(순수 값).
+- **불변식** — 이탈은 기본이 `warning`이고, `reject`는 `established` 전략의 회귀에만 붙는다(`Profile` 참조).
+
+#### `DecisionResult`
+
+- **개요** — `Decision.decide`가 내는 최종 라우팅 결과.
+- **책임** — 사전등록 기준 대조 결과를 담아 다음 행선지를 정한다.
+- **상속관계** — 없음(결과 값 타입).
+- **필드** — `route`(`promote`·`partial_keep`·`retest`·`abandon` 중), `rationale`(판정 근거).
+- **메서드** — 없음(순수 값).
+- **불변식** — `promote`만 Live로 가고 `abandon`은 엣지 구분 불가가 확정될 때만 나온다(`Decision` 참조).
 
 #### 판정 파이프라인 플로우
 
