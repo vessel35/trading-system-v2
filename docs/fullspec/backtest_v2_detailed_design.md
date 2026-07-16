@@ -528,7 +528,7 @@ flowchart TD
 
 | 컴포넌트 | 책임 | 인터페이스 경계 (공개 표면 · 하지 않음) | 구성 (§2 트리) |
 |---|---|---|---|
-| `types` | 세 실행 모드가 공유하는 값 타입·금액 정밀도의 유일한 정의처 | 공개: `Candle`·`TradingSignal`(판단 전용, 수량·방향 필드 없음)·`Order`·`Position`·`Trade`(`r0` 포함)·`Fill`·enums·`money`(ZERO·Q_*·quantize_*). 하지 않음: 계산·IO 없음; 캔들 검증 불변식(시각 단조·`high ≥ max(open,close)`·`low ≤ min(open,close)`)을 타입 계층에서 강제 | `types/`의 candle·signal·order·position·trade·fill·enums·money |
+| `types` | 세 실행 모드가 공유하는 값 타입·금액 정밀도의 유일한 정의처 | 공개: `Candle`·`TradingSignal`(판단 전용, 수량·방향 필드 없음)·`Order`·`Position`·`Trade`(`r0` 포함)·`Fill`·enums·`money`(ZERO·Q_*·quantize_*). 하지 않음: 계산·IO 없음; 캔들 검증(한 캔들 내부 `high ≥ max(open,close)`·`low ≤ min(open,close)`는 타입 계층, 시계열 단조는 적재 층이 강제) | `types/`의 candle·signal·order·position·trade·fill·enums·money |
 | `indicators` | 공용 프리미티브 + 지표 표준(벡터화·증분 두 계산 방식). 계약은 등록된 지표를 **공통 방식으로 관리**하는 것이며 지표 개수가 아니다(목록·단위는 §4.1) | 공개: `registry.get(name, params)`·`compute_batch(candles, enabled_set)`·`IndicatorState.update(candle)`·`contracts.assert_finalized`. 하지 않음: 확정 캔들만 입력(`close_time ≤ 판단 시각`); 계산은 float64(Decimal 변환은 `execution` 관문 소관); 계산 대상은 run 설정이 결정 | `indicators/`의 primitives·지표군 9파일·donchian·registry·contracts |
 | `StrategyAdapter` | 전략을 끼우는 판단 계약(Strategy 패턴)의 선언 | 공개: `StrategyAdapter`(`typing.Protocol`) — `get_metadata()`·`get_parameter_schema()`·`analyze(market_data, position?) → TradingSignal`; metadata에 `required_indicators`·`min_history`·`timeframe`·프로파일 선언. 하지 않음: 판단만(읽기·저장·루프 없음); Adaptee는 stateless; 미래 데이터 자가 인출 없음(look-ahead는 Engine 피드 경계가 통제); 파라미터 스키마는 선언만(해석은 `StrategyConfig`); 진입·청산 엣지는 각 Adaptee 소유(범위 밖); 트레일링은 순수 함수 호출(상속 아님·유보) | `strategy/base.py`·`profile.py`·`trailing/`(유보) |
 | `sizing` | 거래당 위험 규율과 사이징 인스턴스 | 공개: `risk_money.size(equity, stop_distance, risk_per_trade ≤ 1%)`·`turtle_unit`·`wallet_pct.size`(호환)·`kelly.cap`. 하지 않음: 엣지 창조 없음(엣지는 진입 신호); `1R = |체결가 − 최초 보호 스탑| × 수량`이고 `1R ≤ 1%`; pct 경로는 보장 실패 시 비준수 플래그 의무 | `sizing/`의 risk_money·turtle_unit·wallet_pct·kelly |
@@ -848,8 +848,8 @@ Ehlers 필터 계수, Wilder 평활 상수, T3 볼륨 팩터)만은 그 양이 �
 
 ### §4.1.1 `types` 컴포넌트
 
-값 타입의 단일 정의처다. 다이어그램은 값 타입 여섯(`Candle`·`TradingSignal`·`Order`·`Fill`·`Position`·`Trade`),
-금액 정밀도 유틸리티 `money`, ENUM 여덟과 그 관계를 담는다.
+값 타입의 단일 정의처다. 다이어그램은 값 타입 일곱(`Candle`·`TradingSignal`·`Order`·`OrderRequest`·`Fill`·
+`Position`·`Trade`), 금액 정밀도 유틸리티 `money`, ENUM 여덟과 그 관계를 담는다.
 
 **타입마다 수치 정밀도가 갈리는 이유.** 값이 어느 경로에 놓이느냐가 그 타입의 정밀도를 정한다.
 
@@ -2693,7 +2693,7 @@ run의 형태 무관 통과선과 프로파일 대조만 판정한다.
 | §3.1·§3.2·§3.3 트레일링·1분 피드 표기 | 트레일링·1분 집행 피드 유보를 구조에 반영(표준 위치 보존, 재도입·파리티는 §4에서) |
 | 문서 구성(읽기 지도) | top-down 단일 문서(구조→행위, DB는 ERD로 분리, 정의 우선) |
 | §4 서문, §4.1 float·Decimal 경계 | Decimal 단일 변환 관문(판단 경로 float·체결 경로 Decimal의 경계를 타입에 각인) |
-| §4.1 `types` | 단일 표준 값 타입·금액 정밀도(단일 정의처) · 캔들 검증 불변식(시각 단조·`high≥max(o,c)`·`low≤min(o,c)`·`price>0`·`volume≥0`을 타입 계층에서 강제) · 신호 판단 전용(방향·수량 필드 없음) |
+| §4.1 `types` | 단일 표준 값 타입·금액 정밀도(단일 정의처) · 캔들 검증(한 캔들 내부 `close_time=open_time+timeframe`·`high≥max(o,c)`·`low≤min(o,c)`·`price>0`·`volume≥0`은 타입 계층, 시계열 단조 `open_time` 엄격 증가는 적재 층이 강제) · 신호 판단 전용(방향·수량 필드 없음) |
 | §4.1 `indicators` | 지표는 공유 라이브러리에서 공통 방식으로 단 한 번 구현·DRY(계약은 관리 방식이며 개수가 아님 — 목록 증감은 registry 항목 증감) · look-ahead 구조적 배제(확정 캔들 전용 계약 `close_time ≤ T`) · 벡터화·증분 일치 · 시장폭 조건부 활성 · 워밍업 seed 규약 |
 | §4.2 전략 클래스 | 전략 판단 계약(`StrategyAdapter` — Adaptee는 판단 전용·stateless, look-ahead는 Engine이 통제) · 책임 분리(스키마 선언은 Adaptee, 해석은 `StrategyConfig`, 생성은 `Adapter Manager`) · config 불변·무순환 · 전략 프로파일 스키마 |
 | §4.3 `execution` | Decimal 단일 변환 관문(`normalizer` 한 곳, 모든 Broker `submit` 통과) · 시점 순서(next-bar, `decision_ts < execution_ts`) · 동시 도달 손절 우선(OHLC-locked) · 회계 항등식 `cash+position=equity`·비용 1회 차감 |
