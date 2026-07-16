@@ -350,7 +350,7 @@ services/core-lib/
       normalizer.py                  #   float→Decimal 단일 변환·quantize 관문(공유 코드) — 모든 Broker 어댑터의 submit()이 이 함수를 통과(어댑터별 독자 캐스팅 금지); 우회는 적합성 테스트로 차단(불변식: 단일·동일 캐스트)
     ports/                           # [컴포넌트] 환경별 관심사의 어댑터 경계(전부 ABC; 구현은 서비스가 주입) — 표준 포트 6종 + Adaptee 레지스트리 접근 포트 = 7종을 둔다; 목록 완결성·시그니처·구현 계약은 §3.2에서 확정
       data_feed.py                   #   DataFeed ABC: candles(up_to 경계)·funding·mark_price
-      broker.py                      #   Broker ABC: submit(order)→Fill·open_orders·cancel — 추상 계약만 선언(ports는 types만 참조, execution 미참조). Decimal 단일 변환은 구현 어댑터가 submit()에서 core_lib.execution.normalizer(공유)를 통과해 달성
+      broker.py                      #   Broker ABC: submit(request:OrderRequest)→Fill·open_orders·cancel — 추상 계약만 선언(ports는 types만 참조, execution 미참조). Decimal 단일 변환은 구현 어댑터가 submit()에서 core_lib.execution.normalizer(공유)를 통과해 달성
       clock.py                       #   Clock ABC: now·advance(wall-clock 금지)
       cost_model.py                  #   CostModel ABC: fee·slippage·funding_rate·liq_params(값 주입)
       evidence_sink.py               #   EvidenceSink ABC: record(entity)·finalize(run)
@@ -854,7 +854,8 @@ Ehlers 필터 계수, Wilder 평활 상수, T3 볼륨 팩터)만은 그 양이 �
 **타입마다 수치 정밀도가 갈리는 이유.** 값이 어느 경로에 놓이느냐가 그 타입의 정밀도를 정한다.
 
 - **판단 경로는 `float`** — 지표를 계산하고 전략이 판단하는 길이다. 값이 많고 자주 계산되며 끝자리 오차가 판단을
-  뒤집지 않으므로 빠른 `float`를 쓴다. `Candle`·`TradingSignal`이 여기 있다.
+  뒤집지 않으므로 빠른 `float`를 쓴다. `Candle`·`TradingSignal`과, 체결 관문 이전의 float 주문 요청
+  `OrderRequest`가 여기 있다.
 - **체결·금액 경로는 `Decimal`** — 실제로 돈이 오가고 장부에 남는 길이다. 끝자리 오차가 체결 여부와 잔고를 바꾸므로
   오차 없는 `Decimal`을 쓴다. `Order`·`Fill`·`Position`·`Trade`가 여기 있다.
 - **경계는 한 지점뿐** — 두 경로를 잇는 유일한 변환 지점이 `Broker.submit()` 안의 `normalizer`다(§4.3.1). 그래서
@@ -935,6 +936,19 @@ classDiagram
         +mark_as_partially_filled(Decimal, Decimal) None
         +mark_as_cancelled() None
         +remaining_quantity() Decimal
+    }
+    class OrderRequest {
+        +str symbol
+        +OrderSide side
+        +OrderType order_type
+        +float quantity
+        +Optional~float~ price
+        +Optional~float~ stop_price
+        +MarketType market_type
+        +PositionSide position_side
+        +bool reduce_only
+        +bool close_position
+        +str time_in_force
     }
     class Fill {
         +str order_id
@@ -1072,13 +1086,17 @@ classDiagram
 - **필드** — `symbol`·`exchange`·`timeframe`은 문자열이고(예: `exchange="BINANCE"`, `timeframe="1h"`),
   `quote_volume`·`trade_count`만 NULL을 허용한다(선택 입력, 나머지 필수).
 - **메서드**
-    - `validate()` : 아래를 타입 계층에서 강제해 깨진 캔들이 애초에 만들어지지 않게 한다. 결측 캔들(gap)은
-      채우지 않고 표시만 한다(무기한 선물은 24시간 거래라 실제 gap은 데이터 결함 신호)
-        - 한 시계열 안에서 `open_time`은 엄격히 증가한다(중복·역행 금지).
+    - `validate()` : 한 캔들 안에서 성립해야 하는 것만 타입 계층에서 강제해 깨진 캔들이 애초에 만들어지지 않게
+      한다(인스턴스 단위 검사).
         - `close_time = open_time + timeframe`.
         - `high ≥ max(open, close)`, `low ≤ min(open, close)`.
         - 모든 가격 `> 0`, `volume ≥ 0`.
-- **불변식** — look-ahead 배제의 데이터 층 근거다. 진행 중(미확정) 캔들은 이 타입으로 만들어지지 않는다.
+- **불변식**
+    - look-ahead 배제의 데이터 층 근거다. 진행 중(미확정) 캔들은 이 타입으로 만들어지지 않는다.
+    - **시계열 단조성은 적재 층이 강제한다** — 한 시계열 안에서 `open_time`이 엄격히 증가한다(중복·역행 금지)는
+      캔들 하나만으로 검사할 수 없는 시퀀스 조건이라, `OHLCV 수집기`·`DataFeed` 어댑터가 확정 캔들을 순서대로
+      적재하며 보장한다. 결측 캔들(gap)은 채우지 않고 표시만 한다(무기한 선물은 24시간 거래라 실제 gap은 데이터
+      결함 신호).
 
 #### `money`
 
@@ -1116,7 +1134,9 @@ classDiagram
           §4.3.3의 트레일링 R0를 최초 보호 스탑으로 채택하므로 결국 스탑 기하가 존재한다). 최종 행동은
           `current_position`으로 갈린다 — 무포지션이면 신규 진입, 반대 방향 보유면 리버설(청산 후 반대 진입,
           §4.3.1의 리버설 순서), 같은 방향 보유면 추가 진입 후보로 노출 한도 검사를 거친다(기본은 재확인이라
-          무동작, 피라미딩 활성 시에만 증량).
+          무동작, 피라미딩 활성 시에만 증량). 이 절이 고정하는 것은 방향 없는 신호를 방향·행동으로 읽는 **계약**
+          이며, `current_position` 문맥에 따른 최종 행동 선택과 노출 한도 검사의 상세 실행 흐름은 §4.4 Engine이
+          소유·확정한다.
     - **`SignalType`의 자리** — 방향 열거형 `SignalType`(BUY/SELL/HOLD)은 이 타입의 필드가 아니다. 라이브 경로가
       signal_db에 신호를 적재·enqueue할 때 드라이버가 위 규칙으로 도출해 쓰는 지속 계층 전용 값으로만 남긴다.
 - **상속관계** — 없음(독립 값 타입).
@@ -1150,13 +1170,29 @@ classDiagram
     - `remaining_quantity()` : `quantity − filled_quantity`
 - **불변식** — 종료 상태(`FILLED`·`CANCELLED`·`EXPIRED`·`REJECTED`·`FAILED`)에서 나가는 전이는 없다.
 
+#### `OrderRequest`
+
+- **개요** — 체결 관문 이전의 **float 주문 요청**. 사이징이 낸 float 수량으로 구성해 `Broker.submit()`에 넘기는
+  입력이며, 아직 Decimal이 아니다.
+- **책임** — 무엇을·얼마나·어느 방향으로 체결할지의 의도를 float 수치로 담는다. `Broker.submit()`이 이를 받아 내부
+  에서 `execution.normalizer`로 `Order`(Decimal)로 변환하므로, float→Decimal 단일 변환 관문이 이 타입과 `Order`
+  사이의 경계에 놓인다. 주문 생애 상태(체결량·수수료·상태·전이표)는 갖지 않는다 — 그것은 변환 뒤 `Order`가
+  소유한다.
+- **상속관계** — 없음(독립 값 타입, float 경로).
+- **필드** — `quantity`·`price`·`stop_price`는 float다(관문 이전이라 Decimal이 아니다). `price`·`stop_price`는
+  지정가·스탑 주문에만 있어 NULL을 허용한다. 나머지(`symbol`·`side`·`order_type`·`market_type`·`position_side`·
+  `reduce_only`·`close_position`·`time_in_force`)는 Decimal 여부와 무관한 식별·구분 값이다.
+- **메서드** — 없음(순수 값).
+- **불변식** — 이 타입의 수치는 모두 float이며, `Broker.submit()` 안의 `normalizer`를 지나기 전에는 어떤 금액
+  경로에도 들어가지 않는다(Decimal 단일 변환 관문).
+
 #### `Fill`
 
 - **개요** — 체결 사실을 명시하는 타입. 현행에 대응 타입이 없어 새로 만든다.
 - **책임** — 한 번의 체결에서 확정된 사실을 담는다. `Order` 상태 전이만으로 체결을 표현하던 현행과 달리 체결을
   독립 타입으로 분리해 `position_book`·`accounting`이 명시적으로 소비한다. 우리가 낸 주문의 체결과, 우리가 내지
   않은 강제청산이 **모두** 이 타입으로 들어온다 — 회계 경로를 하나로 유지하기 위해서다(주문 체결은
-  `Broker.submit(order)`의 반환형, 강제청산은 백테스트·페이퍼는 `Matcher`가·라이브는 거래소 통지를 받은 wallet
+  `Broker.submit()`의 반환형, 강제청산은 백테스트·페이퍼는 `Matcher`가·라이브는 거래소 통지를 받은 wallet
   라이브 인프라가 만든다; 출처·수렴 규약은 §4.3.2).
 - **상속관계** — 없음(독립 값 타입).
 - **필드**
@@ -1877,7 +1913,7 @@ classDiagram
     class Normalizer {
         <<module>>
         +to_decimal(float) Decimal
-        +normalize_order(Order) Order
+        +normalize_order(OrderRequest) Order
     }
     Matcher ..> OrderLifecycle
     Matcher ..> Normalizer
@@ -1894,7 +1930,8 @@ classDiagram
 - **필드** — 없음(모듈).
 - **메서드**
     - `to_decimal(x)` : `Decimal(str(x))`와 `money`의 `quantize_*`를 한 번 수행한다.
-    - `normalize_order(order)` : 주문의 float 수치를 이 관문으로 태워 Decimal 주문으로 정규화한다.
+    - `normalize_order(request)` : float 주문 요청(`OrderRequest`)의 수치를 이 관문으로 태워 Decimal `Order`로
+      정규화한다. 이 변환이 float 경로와 Decimal 경로를 잇는 유일한 지점이다.
 - **불변식**
     - **`Decimal(float)` 직접 변환 금지** — `float`이 이미 품은 이진 오차가 스탑 가격 끝자리를 뒤집어 캔들 내 트리거
       여부와 결정성 해시를 흔들기 때문이다. 문자열을 거쳐 의도한 값을 그대로 만든다.
@@ -1909,16 +1946,18 @@ classDiagram
 - **상속관계** — 없음(모듈).
 - **필드** — 없음(모듈. 소급 검사 금지 정책 상수는 `PositionBook.skip_first_sl_check`가 소유).
 - **메서드**
-    - `match` : 주문을 `t+1` 시가에 슬리피지를 얹어 체결한다(매수 +, 매도 −). `t+1` 시가가 손절·청산 너머인 갭이면
-      시가에 체결하고 슬리피지를 가중한다. 같은 캔들 종가에서 청산 신호와 반대 진입이 함께 나오면 `t+1` 시가에서
-      기존 포지션 청산 체결·정산을 먼저 하고 그 뒤 신규 진입 마진 검사·체결을 처리한다(리버설 순서. 마진 가용성은
-      청산 정산 후 기준).
+    - `match(order, candle, history, cost_model, fill_timing)` : 주문을 `t+1` 시가에 슬리피지를 얹어 체결한다
+      (매수 +, 매도 −). 마지막 인자 `fill_timing`은 `immediate`·`next_bar` 중 하나이며 백테스트 기본은 `next_bar`
+      다. `t+1` 시가가 손절·청산 너머인 갭이면 시가에 체결하고 슬리피지를 가중한다. 같은 캔들 종가에서 청산 신호와
+      반대 진입이 함께 나오면 `t+1` 시가에서 기존 포지션 청산 체결·정산을 먼저 하고 그 뒤 신규 진입 마진 검사·체결을
+      처리한다(리버설 순서. 마진 가용성은 청산 정산 후 기준).
     - `resolve_triggers` : 손절·트레일링·익절·청산 채널·강제청산의 캔들 내 발동을 판정한다. 첫 검증 스코프에서는
       전략 TF 캔들 수준의 보수 판정이고(1분 하위 집행 피드는 유보), 1분 트리거 walk와 그 파리티 허용 편차는 Engine
       설계(§4.4)에서 확정한다. 어떤 포지션도 자기 체결 캔들 이전으로 소급 검사하지 않는다(`PositionBook`의
       `skip_first_sl_check`와 같은 규칙).
     - `recompute_qty_and_stop` : 수량과 최초 보호 스탑을 신호 캔들 종가가 아니라 실제 체결가 기준으로 재산정한다.
-      갭으로 마진이 부족하면 주문 거부가 아니라 수량 절삭 후 Evidence에 기록한다.
+      갭으로 마진이 부족하면 주문 거부가 아니라 수량 절삭 후 Evidence에 기록한다. 반환은 `(재산정 수량, 재산정 최초
+      보호 스탑)` tuple이다.
 - **불변식**
     - **체결은 결정보다 나중(next-bar)** — 신호는 캔들 `t` 마감에 나고 체결은 `t+1` 시가라 `decision_ts <
       execution_ts`를 만족한다. 결정 캔들 종가로 체결하지 않는다.
@@ -1949,9 +1988,11 @@ classDiagram
   부르던 규칙과 같다.
 - **메서드**
     - `apply` : 체결 하나를 장부에 반영한다(진입·증량·감량·청산 반영의 진입점).
-    - `weighted_average` : 가중평균 진입가를 갱신한다.
+    - `weighted_average` : 체결을 반영해 가중평균 진입가를 갱신한다. 평균가 계산 자체는 값 타입
+      `Position.add_quantity`가 소유하고, 이 메서드는 어느 포지션에 적용할지의 장부 조율만 한다.
     - `reduce` : `reduce_only` 실현과 마진 반환을 처리한다.
-    - `check_liquidation` : Isolated를 우선해 청산을 판정한다.
+    - `check_liquidation` : Isolated를 우선해 청산을 판정한다 — 발동 비교 자체는 `costs.Liquidation.is_triggered`에
+      위임하고(수식·비교 복제 방지) 이 메서드는 장부 차원의 적용만 한다.
 - **불변식** — 없음(회계 항등식 `cash + position = equity`는 `Accounting`이 강제한다).
 
 #### `Accounting`
@@ -2044,9 +2085,13 @@ classDiagram
 - **상속관계** — 없음(모듈).
 - **필드** — 없음(모듈. 유지증거금률 `mmr` 기본 `0.004`(0.4%, 최저 티어)는 주입 기본값).
 - **메서드**
-    - `price(entry, leverage, mmr)` : `liq_price = Entry × (1 − 1/leverage + mmr)`. Isolated를 우선한다.
-    - `is_triggered(position, price)` : last-price 캔들 극값으로 청산 발동을 판정한다. Binance 강제청산은 mark
-      price 기준이고 mark가 더 평활하므로, 이 판정은 청산이 과대 발생하는 보수 방향 근사다.
+    - `price(entry, leverage, mmr)` : Isolated 우선. 롱은 `liq_price = Entry × (1 − 1/leverage + mmr)`,
+      숏은 부호를 뒤집어 `liq_price = Entry × (1 + 1/leverage − mmr)`다(가격이 진입 반대 방향으로 갈 때 청산되므로
+      롱은 아래로, 숏은 위로 청산가가 놓인다).
+    - `is_triggered(position, price)` : 청산 발동을 판정하는 **단일 소유처**다. last-price 캔들 극값을 청산가와
+      대조하는 순수 비교이며, `PositionBook.check_liquidation`과 `Matcher.resolve_triggers`는 판정을 자체 구현하지
+      않고 이 함수를 호출한다(비교 로직 복제 방지). Binance 강제청산은 mark price 기준이고 mark가 더 평활하므로,
+      이 판정은 청산이 과대 발생하는 보수 방향 근사다.
 - **불변식**
     - **강제청산 출처는 환경마다 다르고 종착점은 하나다.** 이 수식이 쓰이는 자리가 환경에 따라 갈리므로, 구현자는
       아래를 혼동하면 안 된다.
@@ -2056,6 +2101,9 @@ classDiagram
           받아 정리할 뿐이다. wallet의 라이브 인프라(거래소 이벤트 수신)가 그 통지를 같은 모양의
           `Fill(exit_reason=LIQUIDATION)`으로 만들어 넘긴다. 여기서 이 수식은 청산을 *일으키는* 데 쓰이지 않고,
           진입 전 가드레일(손절가가 청산가보다 안쪽인지 검사)과 사후 대사(거래소 실측 청산가와 대조)에만 쓴다.
+          거래소 이벤트 수신 경로·누락 이벤트 복구·실측 청산가 사후 대사 **절차**는 이 절이 소유하지 않고 채택
+          설계(부록)에서 확정한다 — 이 절은 계약(아래 수렴점과 위 수식)만 고정하고 라이브 수신 메커니즘은 의도적으로
+          비워 둔다.
         - **수렴점** — 두 출처 모두 `Fill(exit_reason=LIQUIDATION)`으로 모여 `position_book`·`accounting`이
           동일하게 소비하고, 거래에는 `Trade.liquidated = TRUE`로 남는다. 그래서 청산을 누가 일으켰든 회계·손익
           경로는 환경과 무관하게 하나다. 이 수렴이 성립하므로 거래소 사건을 받기 위한 별도 포트 메서드는 두지
@@ -2069,8 +2117,9 @@ classDiagram
 
 거래당 위험을 계좌의 정해진 비율로 묶는 생존 사이징. 엣지는 진입 신호에서 오며, 손절·익절 배치로 기대값을
 창조하지 않는다. **사이징은 판단 경로라 전부 `float`로 계산한다** — Equity 스냅샷·손절거리(예: `k×ATR`)·산출
-수량이 모두 `float`이다. 이 `float` 수량은 주문 요청으로 `Broker.submit()`에 전달되고, 거기서 `execution`의
-`normalizer`가 `float→Decimal` 단일 변환을 수행한 뒤의 `Order`·`Fill`이 `Decimal`이다. 사이징 자체는
+수량이 모두 `float`이다. 이 `float` 수량은 **주문 요청 `OrderRequest`**(§4.1.1, float 타입)로 담겨
+`Broker.submit()`에 전달되고, 거기서 `execution`의 `normalizer`가 `OrderRequest`를 받아 `float→Decimal` 단일
+변환을 수행해 낸 `Order`·`Fill`이 `Decimal`이다. 사이징 자체는
 `normalizer`를 호출하지 않는다(변환은 오직 체결 관문). 사이징의 Equity 스냅샷(신호 캔들 종가 마크, `float`)과
 회계 계층의 Decimal Equity(체결 후 장부 항등식)는 같은 개념을 두 정밀도로 본 것이다.
 
@@ -2080,7 +2129,7 @@ classDiagram
     class RiskMoney {
         <<module>>
         +size(float, float, float) float
-        +one_r(float, float) float
+        +one_r(float, float, float) float
         +equity(float, float, float) float
     }
     class TurtleUnit {
@@ -2120,7 +2169,8 @@ classDiagram
       `1R = 손절거리 × 수량`이 성립한다. 손절거리는 변동성 척도(예: `k×ATR`)로 잡는 것이 기본이라, 변동성이 큰
       시장일수록 수량이 작아져 모든 포지션의 위험기여도가 균등화된다. 레버리지는 `명목가치 = 수량 × 가격`에서
       역산하며 거래소 한도 안에 드는지 확인한다.
-    - `one_r(entry, stop)` : `1R = |체결가 − 최초 보호 스탑| × 수량`으로 최초 위험을 계산한다. 두 예외가 있다 —
+    - `one_r(entry, stop, quantity)` : `1R = |체결가 − 최초 보호 스탑| × 수량`으로 최초 위험을 계산한다(수량을
+      인자로 받아야 곱이 성립하며, 이 값이 곧 `Trade.r0`다). 두 예외가 있다 —
       고정 손절이 없는 전략은 트레일링 계산기의 초기 위험 `R0 = clamp(1.5×ATR/entry, 0.45%~0.65%) × entry`를
       최초 보호 스탑으로 채택해 `Trade.r0`에 기록하고, 최초 스탑을 아예 정의할 수 없는 거래는 R 기반 지표
       (SQN·기대값·파산확률)에서 제외하고 그 건수를 Evidence에 기록한다.
@@ -2196,7 +2246,7 @@ classDiagram
     }
     class Broker {
         <<abstract>>
-        +submit(Order) Fill
+        +submit(OrderRequest) Fill
         +open_orders() list~Order~
         +cancel(str) None
     }
@@ -2253,11 +2303,12 @@ classDiagram
 - **상속관계** — 추상 기반 클래스(ABC). 서비스별 구현 어댑터가 이를 상속·구현한다.
 - **필드** — 없음(추상 계약).
 - **메서드**
-    - `submit(order)` : 체결을 수행하고 `Fill`을 돌려준다.
+    - `submit(request)` : float 주문 요청(`OrderRequest`)을 받아 내부에서 `execution.normalizer`로 Decimal `Order`
+      로 변환한 뒤 체결해 `Fill`을 돌려준다. float→Decimal 단일 변환 관문이 바로 이 안이다.
     - `open_orders()` : 미체결 주문 목록을 돌려준다.
     - `cancel(id)` : 미체결 주문을 취소한다.
-- **불변식** — 구현 어댑터의 `submit()`은 반드시 `execution.normalizer`를 통과해 `float→Decimal` 단일 변환을
-  달성한다. 어댑터별 독자 캐스팅은 금지다.
+- **불변식** — 구현 어댑터의 `submit()`은 반드시 `execution.normalizer`를 통과해 `OrderRequest`(float)를 `Order`
+  (Decimal)로 만드는 `float→Decimal` 단일 변환을 달성한다. 어댑터별 독자 캐스팅은 금지다.
 
 #### `Clock`
 
@@ -2336,6 +2387,7 @@ classDiagram
         +annualize(Series) float
     }
     class Integrity {
+        <<module>>
         +check(object) IntegrityResult
     }
     class Thresholds {
@@ -2344,12 +2396,15 @@ classDiagram
         +is_pass(MetricSet) GateResult
     }
     class Profile {
+        <<module>>
         +check_envelope(StrategyProfile, MetricSet) EnvelopeResult
     }
     class HardGate {
+        <<module>>
         +judge(MetricSet, Thresholds, StrategyProfile) GateResult
     }
     class Decision {
+        <<module>>
         +decide(GateResult, object) DecisionResult
     }
     class MetricSet {
@@ -2364,6 +2419,8 @@ classDiagram
         +float win_rate
         +float payoff
         +float expectancy_r
+        +float ulcer
+        +float kelly
     }
     class IntegrityResult {
         <<result>>
@@ -2450,7 +2507,7 @@ classDiagram
 | Sharpe | 참고(단독 탈락 금지) | — | `≥ 1.0` | `> 2.5` 검증 |
 | 승률(Win Rate) | 형태 의존(프로파일 대조) | — | 프로파일 기대 범위 | — |
 | Payoff Ratio | 형태 의존(프로파일 대조) | — | 프로파일 기대 범위 | `> 5` + 극저승률 |
-| 과최적화 방어(OOS·PSR) | 형태 무관 구속 | OOS Degradation `≥ 50%` · PSR `< 0.95` | OOS Degradation `< 50%` · PSR `≥ 0.95` | — |
+| 과최적화 방어(OOS·PSR) | 형태 무관 구속(§4.4 Harness가 적용) | OOS Degradation `≥ 50%` · PSR `< 0.95` | OOS Degradation `< 50%` · PSR `≥ 0.95` | — |
 
 - **메서드**
     - `universal()` : 형태 무관 통과선 수치(위 표의 확정값)를 돌려준다.
@@ -2459,18 +2516,21 @@ classDiagram
     - **사이징 연동** — MDD가 통과선(30%)을 벗어나면 신호가 아니라 `risk_per_trade`·유닛 한도를 낮춘다. 파산확률이
       `0.1%` 이상이면 같은 레버를 당긴다. 실전 감내 한도는 45%(파산선 60%와 분리)이고, 백테스트 MDD는 하한이라
       실전 가정 `= 백테스트 × 1.5`다.
-    - **과최적화 방어 증거의 출처** — OOS Degradation·확률적 샤프(PSR)/DSR·Walk-Forward·몬테카를로·부트스트랩
-      신뢰구간은 단일 run 밖 상위 검증(Harness, §4.4)이 산출하고 Hard Gate A가 소비한다. 표본 외 성과 저하가 표본
-      내의 50% 미만이어야 하고(OOS Degradation `< 50%`), 다중검정 보정 후 PSR이 95% 신뢰(`≥ 0.95`)를 넘어야
-      한다. DSR의 정확한 다중검정 보정 셈은 Harness 설계(§4.4)가 소유한다.
+    - **과최적화 방어는 Harness(§4.4)가 적용한다(단일 run 밖).** OOS Degradation·확률적 샤프(PSR)/DSR·Walk-Forward·
+      몬테카를로·부트스트랩 신뢰구간은 여러 run·분할에 걸친 교차검증이라, 단일 run 지표만 담는 `MetricSet`으로는
+      계산할 수 없다. 그래서 이 게이트는 `eval.HardGate`·`is_pass`가 아니라 Harness(§4.4)가 산출·적용하며 위 표의
+      '과최적화 방어' 행도 그 자리에서 강제된다. 통과 기준은 표본 외 성과 저하가 표본 내의 50% 미만
+      (OOS Degradation `< 50%`)이고 다중검정 보정 후 PSR이 95% 신뢰(`≥ 0.95`)를 넘는 것이며, DSR의 정확한 다중검정
+      보정 셈도 Harness 설계(§4.4)가 소유한다. `eval` 계층은 단일 run의 형태 무관 통과선(PF·Sortino·Calmar·SQN·MDD·
+      RoR)과 프로파일 대조만 판정한다.
 
 #### `Profile`
 
 - **개요** — 프로파일 기대 범위 대조를 소유하는 곳.
 - **책임** — 프로파일 기대 범위를 실현값과 대조한다. 기대 범위의 스키마 자체는 §4.2의 `StrategyProfile`이 정의하고,
   여기서는 그 값을 실현값과 대조하는 소비 규칙만 갖는다.
-- **상속관계** — 없음.
-- **필드** — 없음.
+- **상속관계** — 없음(모듈).
+- **필드** — 없음(모듈).
 - **메서드**
     - `check_envelope(profile, metric_set)` : 프로파일 기대 범위와 실현 지표를 대조해 `EnvelopeResult`를 낸다.
 - **불변식**
@@ -2482,9 +2542,10 @@ classDiagram
 
 - **개요** — 판정 전 무결성 검사(판정 3단계의 첫 단계).
 - **책임** — 판정 전에 여섯 가지를 검산하며, 하나라도 실패하면 `diagnostic_only`로 **멈춰서** 데이터·기록을 고쳐
-  재실행한다 — 파이프라인의 유일한 정지다.
-- **상속관계** — 없음.
-- **필드** — 없음.
+  재실행한다 — 파이프라인의 유일한 정지다. 지표의 벡터화↔증분 일치는 run-time 검사가 아니라 §4.1.2의 빌드-타임
+  일치 테스트가 담당하므로 이 여섯 검사에는 넣지 않는다.
+- **상속관계** — 없음(모듈).
+- **필드** — 없음(모듈).
 - **메서드**
     - `check(evidence)` : 아래 여섯 가지를 검산해 `IntegrityResult`를 낸다.
         - **회계 항등식** — `cash + position = equity`가 모든 시점에 성립하는가.
@@ -2501,9 +2562,11 @@ classDiagram
 - **개요** — 판정 3단계의 두 번째. 형태 무관 통과선(A)과 프로파일 기대 범위(B)로 전략을 거른다.
 - **책임** — 무결성을 통과한 run을 두 관문으로 판정한다. Hard Gate A는 형태 무관 통과선(`Thresholds`)으로, Hard
   Gate B는 프로파일 기대 범위(`Profile`)로 판정한다. Hard Gate A 미달(`not_promotable`)과 B의 `established` 회귀
-  파손은 모두 개선 루프(forensics)로 보낸다 — 통과선만으로 전략을 포기하지 않는다.
-- **상속관계** — 없음.
-- **필드** — 없음.
+  파손은 모두 개선 루프(forensics)로 보낸다 — 통과선만으로 전략을 포기하지 않는다. 과최적화 방어(OOS·PSR·WFA·MC)는
+  단일 run 밖 교차검증이라 이 클래스가 아니라 Harness(§4.4)가 적용하며, 이 클래스는 단일 run 지표(`MetricSet`)의
+  형태 무관 통과선과 프로파일 대조만 판정한다.
+- **상속관계** — 없음(모듈).
+- **필드** — 없음(모듈).
 - **메서드**
     - `judge(metric_set, thresholds, profile)` : Hard Gate A(형태 무관 통과선)와 B(프로파일 기대 범위)를 차례로
       적용해 `GateResult`를 낸다. A의 통과선 수치는 `Thresholds`의 표가 정본이다.
@@ -2514,8 +2577,8 @@ classDiagram
 - **개요** — 판정 3단계의 마지막. 사전등록 기준으로 최종 라우팅한다.
 - **책임** — Hard Gate를 모두 통과한 run을 사전등록의 Primary Metric·성공/실패 기준과 대조해
   `promote`·`partial_keep`·`retest`·`abandon`으로 라우팅한다.
-- **상속관계** — 없음.
-- **필드** — 없음.
+- **상속관계** — 없음(모듈).
+- **필드** — 없음(모듈).
 - **메서드**
     - `decide(gate_result, prereg)` : 사전등록 기준과 대조해 최종 라우팅(`DecisionResult`)을 낸다.
 - **불변식** — `promote`만 Live로 가고 `partial_keep`·`retest`는 개선 루프로 보낸다. `abandon`(종료)은 엣지를
@@ -2528,7 +2591,8 @@ classDiagram
   정의한다.
 - **상속관계** — 없음(결과 값 타입).
 - **필드** — 통과선 표에 나오는 지표 값들(Profit Factor·Sortino·Calmar/MAR·SQN·MDD·Risk of Ruin·Sharpe·승률·
-  Payoff)과 R 기준 기대값(`expectancy_r`). 각 값의 정의·단위·경계는 `Metrics`를 따른다.
+  Payoff), R 기준 기대값(`expectancy_r`), 그리고 통과선에는 없지만 `Metrics.compute`가 함께 내는 정보값 `ulcer`·
+  `kelly`(포렌식·참고용). 각 값의 정의·단위·경계는 `Metrics`를 따른다.
 - **메서드** — 없음(순수 값).
 - **불변식** — 모든 손익 지표는 net 기준이다(`Metrics`가 강제).
 
@@ -2580,7 +2644,7 @@ classDiagram
 flowchart TD
     PRE["사전등록<br/>약점 · Primary Metric · 성공/실패 기준"] --> INT{"Integrity Check<br/>회계 · 시점 · 비용1회 · net · 결정성 · 완성도"}
     INT -->|"실패"| DIAG["diagnostic_only — 유일한 정지<br/>데이터·기록 고쳐 재실행"]
-    INT -->|"통과"| HGA{"Hard Gate A 전략 평가 기준값<br/>PF≥1.3 · SQN≥1.6 · Sortino≥1.0 · Calmar≥0.8<br/>MDD≤30% · RoR&lt;0.1% · N≥30 · 과최적화 방어"}
+    INT -->|"통과"| HGA{"Hard Gate A 전략 평가 기준값<br/>PF≥1.3 · SQN≥1.6 · Sortino≥1.0 · Calmar≥0.8<br/>MDD≤30% · RoR&lt;0.1% · N≥30<br/>+ 과최적화 방어(Harness §4.4 적용)"}
     HGA -->|"미달 = not_promotable"| FOR["Outcome Forensics<br/>왜 벌고 잃나 → 원인 규명"]
     HGA -->|"통과"| HGB{"Hard Gate B 프로파일 기대 범위<br/>승률 · 손익비 vs 전략 선언 범위"}
     HGB -->|"established 회귀 파손"| FOR
@@ -2594,7 +2658,9 @@ flowchart TD
 읽는 법: 정지는 무결성 실패(`diagnostic_only`) 하나뿐이다. Hard Gate A 미달과 B의 established 회귀 파손은 모두
 forensics로 가 개선 루프를 돌고, 둘 다 통과한 run만 Decision이 사전등록 기준으로 `promote`·`partial_keep`·
 `retest`·`abandon`으로 라우팅한다. `abandon`(종료)은 엣지를 구분할 수 없다고 판정될 때만 나온다. Hard Gate A의
-숫자는 위 통과선 표가 정본이고, 성과 집중도·비용 민감도 등 일부는 설정으로 조정된다.
+숫자는 위 통과선 표가 정본이고, 성과 집중도·비용 민감도 등 일부는 설정으로 조정된다. 단, 과최적화 방어(OOS·PSR·
+WFA·MC)는 여러 run·분할에 걸친 교차검증이라 `eval`이 아니라 Harness(§4.4)가 산출·적용하며, `eval.HardGate`는 단일
+run의 형태 무관 통과선과 프로파일 대조만 판정한다.
 
 ---
 
