@@ -1592,9 +1592,12 @@ classDiagram
 
 #### `StrategyAdapter`
 
-전략 판단 계약. 상속시킬 공유 구현이 없으므로 추상 클래스가 아니라 `typing.Protocol`이다(구조적 준수만 요구).
-
-- **책임** — 전략을 끼우는 자리를 선언한다. 판단만 하고 읽기·저장·루프를 갖지 않는다.
+- **개요** — 플랫폼이 소유하는 "전략을 끼우는 자리", 즉 전략 판단 계약(`typing.Protocol`).
+- **책임** — 전략을 끼우는 자리를 선언한다. 판단만 하고 데이터 읽기·결과 저장·캔들 루프를 갖지 않는다(각각
+  Engine·포트 소관).
+- **상속관계** — `typing.Protocol`이다. 상속시킬 공유 구현이 없어 추상 클래스(ABC)로 두지 않고 구조적 준수만
+  요구하며, `Adaptee`가 이 계약을 실현한다.
+- **필드** — 없음(계약만 정하는 Protocol이라 보유 속성이 없다).
 - **메서드**
     - `get_metadata()` : 이 전략이 선언해 둔 메타데이터 — 필요 지표(`{name, params}` 목록)·최소 이력·지원
       타임프레임·프로파일 — 를 반환한다. 값을 새로 만드는 게 아니라 Adaptee가 선언한 것을 그대로 넘겨준다.
@@ -1604,7 +1607,7 @@ classDiagram
     - `analyze(market_data, current_position)` : Engine이 push한 사전 계산 지표의 평평한 dict와 현재 포지션을
       받아 판단을 반환한다. 진입·청산 판단이면 `TradingSignal`, 관망이면 `None`이며, 반환은 판단뿐이라 수량·주문
       방향을 정하지 않는다.
-- **계약이 강제하는 불변식**
+- **불변식**
     - **stateless** — 호출 간 상태를 보유하지 않는다. 같은 입력은 항상 같은 신호를 낸다.
     - **판단 전용** — 데이터 읽기·결과 저장·캔들 루프를 갖지 않는다(각각 Engine·포트 소관).
     - **미래 데이터 자가 인출 금지** — 입력 dict는 Engine이 확정 캔들 경계까지만 채워 주므로, look-ahead는 피드
@@ -1614,18 +1617,26 @@ classDiagram
 
 #### `Adaptee`
 
-`StrategyAdapter` Protocol을 구현하는 실제 전략.
-
-- **책임 경계** — 진입·청산 엣지와 파라미터 값은 전략 작성자 소유라 이 설계의 범위 밖이다. 플랫폼은 계약 형태만
-  정한다.
-- **첫 검증 Adaptee** — 트레일링을 제외한 개념의 신규 구현으로, ATR 기반 고정 손절·익절을 쓴다.
-- **트레일링 사용 방식** — 상속이 아니라 `TrailingStopCalculator`의 순수 함수를 호출한다(첫 검증 스코프에서는
-  유보).
+- **개요** — `StrategyAdapter` Protocol을 실현하는 실제 전략.
+- **책임** — 진입·청산 엣지와 파라미터 값을 소유한다. 이 둘은 전략 작성자 소유라 이 설계의 범위 밖이고, 플랫폼은
+  계약 형태만 정한다. 첫 검증 Adaptee는 트레일링을 제외한 개념의 신규 구현으로 ATR 기반 고정 손절·익절을 쓴다.
+- **상속관계** — `StrategyAdapter` Protocol을 실현(realize)한다. 트레일링은 상속이 아니라
+  `TrailingStopCalculator`의 순수 함수를 호출한다(첫 검증 스코프에서는 유보).
+- **필드** — 없음(전략별 파라미터 값은 각 구현이 불변 `ResolvedConfig`로 주입받으며, 이 설계가 필드로 고정하지
+  않는다).
+- **메서드**
+    - `get_metadata` : 이 전략이 선언한 `StrategyMetadata`를 반환한다(계약은 `StrategyAdapter` 참조).
+    - `get_parameter_schema` : 이 전략의 `ParameterSchema`를 반환한다.
+    - `analyze` : 이 전략의 진입·청산 판단을 수행한다. 이 판단 로직 자체가 전략 작성자 소유(범위 밖)의 핵심이다.
+- **불변식** — `StrategyAdapter`의 불변식(stateless·판단 전용·미래 데이터 자가 인출 금지·두 환경 동형)을 그대로
+  진다. 특히 stateless라 같은 입력은 같은 신호를 내고, 주입된 `ResolvedConfig`는 실행 중 바뀌지 않는다.
 
 #### `StrategyMetadata`
 
-`get_metadata()`가 반환하는 값으로, 전략이 자기 구동에 필요하다고 선언한 요건 묶음이다.
-
+- **개요** — `get_metadata()`가 반환하는, 전략이 자기 구동에 필요하다고 선언한 요건 묶음.
+- **책임** — 전략이 요구하는 지표·최소 이력·타임프레임·형태를 담아 Engine과 평가 계층에 전달한다. 값을 만들지 않고
+  선언을 실어 나른다.
+- **상속관계** — 없음(독립 값 타입).
 - **필드**
     - `required_indicators` — 이 전략이 요구하는 지표 목록이다. 각 항목은 지표 이름과 파라미터의 쌍 `{name, params}`
       이며(예: EMA 200이면 `name`은 `ema`, `params`는 `{"period": 200}`), Engine이 이 선언만큼 지표를 계산해
@@ -1634,56 +1645,74 @@ classDiagram
       최장 워밍업과 함께 큰 쪽을 취한다.
     - `supported_timeframes` — 이 전략이 도는 캔들 주기 목록이다(예: `["1h", "4h"]`).
     - `profile` — 이 전략의 형태 선언 `StrategyProfile`이다(아래 정의). 기대 범위 대조·회귀 판정의 근거가 된다.
+- **메서드** — 없음(순수 값).
+- **불변식** — 없음.
 
 #### `ParameterSchema`
 
-`get_parameter_schema()`가 반환하는 값으로, 이 전략이 받는 파라미터의 허용 형태 선언이다. `StrategyConfig.resolve`가
-이 선언에 raw_config를 대조해 검증한다.
-
+- **개요** — `get_parameter_schema()`가 반환하는, 이 전략이 받는 파라미터의 허용 형태 선언.
+- **책임** — 허용 파라미터의 형태(이름·타입·기본값·범위·잉여 키 금지 여부)를 담는다. `StrategyConfig.resolve`가 이
+  선언에 raw_config를 대조해 검증하며, 이 타입 스스로는 검증하지 않는다.
+- **상속관계** — 없음(독립 값 타입).
 - **필드**
     - `fields` — 파라미터 이름별 명세(`FieldSpec`) 맵이다. 각 `FieldSpec`은 그 파라미터의 타입·기본값·허용 범위를
       담는다.
     - `extra_forbidden` — 선언되지 않은 잉여 키를 금지할지 여부다. `resolve`의 `extra=forbid` 검증이 이 값을 따르며
       기본은 금지다.
+- **메서드** — 없음(순수 값).
+- **불변식** — 없음.
 
 #### `StrategyConfig`
 
-전략 파라미터 config의 해석·검증·직렬화·스키마 노출의 단일 소유.
-
+- **개요** — 전략 파라미터 config의 해석·검증·직렬화·스키마 노출을 단독 소유하는 곳.
+- **책임** — raw_config(전략 id + 파라미터 값)를 Adaptee가 선언한 스키마에 대조해 불변 `ResolvedConfig`로
+  해석·검증하고, 설정 UI·툴링용 JSON Schema와 Evidence·카탈로그용 정규화 직렬화·스키마 버전을 낸다. 스키마
+  선언(Adaptee 소유)도 전략 결정 로직도 갖지 않는다. 같은 전략 config가 backtest·live·UI에서 동일하게 검증되도록
+  해석을 이 한 곳에 모은다.
+    - **무순환 설계(스키마를 값으로 받음)** — `resolve`·`json_schema`는 Adaptee 인스턴스가 아니라 스키마 값을
+      인자로 받는다. Adaptee가 선언한 스키마를 `Adapter Manager`가 먼저 꺼내 넘겨 주므로 `StrategyConfig`는 스키마
+      타입에만 의존하고 전략 구현을 되짚지 않는다. 생성(Manager)·해석(Config)·선언(Adaptee) 사이에 순환이 생기지
+      않는다.
+- **상속관계** — 없음(독립 클래스).
+- **필드** — 없음(해석 함수의 모음이라 보유 속성이 없다).
 - **메서드**
-    - `resolve(schema, raw_config)` : 원자재 config(전략 id + 파라미터 값)를 Adaptee가 선언한 스키마에 대조해
-      불변 `ResolvedConfig`로 해석한다. 검증은 기본값 병합, 잉여 키 금지(`extra=forbid`), 타입·범위, 교차필드를
-      거친다.
+    - `resolve(schema, raw_config)` : raw_config를 Adaptee가 선언한 스키마에 대조해 불변 `ResolvedConfig`로
+      해석한다. 검증은 기본값 병합, 잉여 키 금지(`extra=forbid`), 타입·범위, 교차필드를 거친다.
     - `json_schema(schema)` : 설정 UI·툴링용 JSON Schema를 노출한다.
-    - `serialize`·`version` : Evidence·카탈로그 기록용 정규화 직렬화와 스키마 버전을 낸다.
-- **무순환 설계(스키마를 값으로 받음)** — `resolve`·`json_schema`는 Adaptee 인스턴스가 아니라 스키마 값을 인자로
-  받는다. Adaptee가 선언한 스키마를 `Adapter Manager`가 먼저 꺼내 넘겨 주므로 `StrategyConfig`는 스키마 타입에만
-  의존하고 전략 구현을 되짚지 않는다. 생성(Manager)·해석(Config)·선언(Adaptee) 사이에 순환이 생기지 않는다.
-- **경계 불변식**
+    - `serialize` : Evidence·카탈로그 기록용 정규화 직렬화를 낸다.
+    - `version` : 스키마 버전을 낸다.
+- **불변식**
     - 스키마 선언은 Adaptee 소유이며 `StrategyConfig`가 재정의하지 않는다.
     - 값은 호출자 소유다(소스를 갖지 않는다).
     - 파라미터 스윕·실행 설정은 범위 밖이다(실행 드라이버의 run 설정 소관).
-    - 같은 전략 config가 backtest·live·UI에서 동일하게 검증되도록, 이 한 곳이 해석을 소유한다.
 
 #### `ResolvedConfig`
 
-해석·검증을 마친 불변 config.
-
-- **불변성** — 생성 후 변경 불가(frozen)다. 이 객체로 Adaptee를 인스턴스화한다.
-- **`schema_version`** — Evidence 재현 시 어떤 스키마로 해석했는지 확정한다.
+- **개요** — 해석·검증을 마친 불변 config.
+- **책임** — 검증을 통과한 전략 파라미터를 불변으로 담아 Adaptee 인스턴스화의 입력이 된다.
+- **상속관계** — 없음(독립 값 타입).
+- **필드** — `schema_version`은 Evidence 재현 시 어떤 스키마로 해석했는지 확정한다(`strategy_id`는 전략 식별자,
+  `params`는 해석된 파라미터 매핑으로 자명).
+- **메서드** — 없음(순수 값).
+- **불변식** — 생성 후 변경 불가(frozen)다. 이 불변성 덕에 이 객체로 인스턴스화한 Adaptee가 같은 config를 계속
+  본다.
 
 #### `Adapter Manager`
 
-Adaptee의 생성(Factory)·lifecycle과 구현 목록 레지스트리.
-
+- **개요** — Adaptee의 생성(Factory)·lifecycle과 구현 목록 레지스트리를 다루는 곳.
+- **책임** — `create`로 생성을 오케스트레이션하고(스키마를 조회해 해석한 뒤 인스턴스화하는 아래 시퀀스) lifecycle과
+  레지스트리를 다룬다. 전략 결정 로직도 파라미터 검증 로직도 직접 갖지 않는다(각각 Adaptee·`StrategyConfig` 소관).
+  backtest Engine과 signal-service 엔진이 동일하게 이 매니저로 Adaptee를 요청한다.
+- **상속관계** — 없음.
+- **필드** — 없음.
 - **메서드**
     - `create(strategy_id, raw_config)` : 생성을 오케스트레이션한다(아래 시퀀스).
-    - `activate`·`deactivate` : Adaptee의 lifecycle을 다룬다.
-    - `list_registered`·`register` : signal_db 레지스트리를 다룬다.
-- **레지스트리 접근** — DB 접근은 주입된 `StrategyRegistry` 포트로만 한다. 그래서 core-lib은 특정 DB에 직접
+    - `activate` : Adaptee를 활성화한다.
+    - `deactivate` : Adaptee를 비활성화한다.
+    - `list_registered` : signal_db 레지스트리의 등록 목록을 조회한다.
+    - `register` : signal_db 레지스트리에 등록한다.
+- **불변식** — 레지스트리 DB 접근은 주입된 `StrategyRegistry` 포트로만 한다. 그래서 core-lib은 특정 DB에 직접
   의존하지 않는다.
-- **갖지 않는 것** — 전략 결정 로직도 파라미터 검증 로직도 직접 갖지 않는다(각각 Adaptee·`StrategyConfig` 소관).
-- **공용** — backtest Engine과 signal-service 엔진이 동일하게 이 매니저로 Adaptee를 요청한다.
 
 #### Adaptee 생성·config 해석 시퀀스
 
@@ -1716,31 +1745,37 @@ Config→스키마 타입)으로만 흐른다. 레지스트리 조회는 주입 
 
 #### `StrategyProfile`
 
-각 전략이 선언하는 자기 "형태(shape)".
-
-- **소유 경계** — 스키마·소비 규칙은 패키지가 소유하고 값은 각 전략이 소유한다. 형태 지표를 보편 통과선으로
-  못박지 않기 위한 인터페이스다.
-- **필드의 허용 값**
+- **개요** — 각 전략이 선언하는 자기 "형태(shape)".
+- **책임** — 전략의 형태 지표(전략군·기대 승률/손익비 범위·꼬리 형태·보유 지평·선호 지표·보존할 수익 구조·성숙도)를
+  선언한다. 스키마·소비 규칙은 패키지가 소유하고 값은 각 전략이 소유한다 — 형태 지표를 보편 통과선으로 못박지 않기
+  위한 인터페이스다. 기대 범위 대조·회귀 판정은 여기서 하지 않고 평가 계층(§4.3.5의 `eval.profile`)이 하며, 이
+  타입은 스키마만 정의한다.
+- **상속관계** — 없음(독립 값 타입).
+- **필드**
     - `family` — 전략군. `{trend_following, mean_reversion, breakout, carry, market_making, …}`.
-    - 기대 승률 범위·기대 손익비 범위 — 각각 `[min, max]`.
+    - `expected_win_rate`·`expected_payoff` — 기대 승률 범위·기대 손익비 범위. 각각 `[min, max]`.
     - `tail_shape` — 꼬리 형태. `{right_fat, symmetric, left_fat}`.
     - `holding_horizon`·`primary_metric` — 보유 지평과 주 지표.
     - `risk_adjusted_pref` — 선호 위험조정 지표. `{sortino, sharpe, calmar}`.
     - `profit_structure_to_preserve` — 보존할 수익 구조.
     - `envelope_tolerance` — 기대 범위 허용오차.
     - `envelope_status` — 성숙도. `{provisional, updating, established}`.
-- **소비처** — 기대 범위 대조·회귀 판정은 평가 계층(§4.3.5의 `eval.profile`)이 하고, 여기서는 스키마만 정의한다.
-- **성숙도가 막는 것** — 순환 논리를 막는다. 아직 확립되지 않은(`provisional`) 기대 범위로 신규 전략을 탈락시키지
-  않고, 확립된(`established`) 전략이 그 형태를 잃은 회귀만 reject한다.
+    - `id`·`bar` — 프로파일 식별자와 봉 주기.
+- **메서드** — 없음(순수 값/스키마).
+- **불변식** — `envelope_status`(성숙도)가 순환 논리를 막는다. 아직 확립되지 않은(`provisional`) 기대 범위로 신규
+  전략을 탈락시키지 않고, 확립된(`established`) 전략이 그 형태를 잃은 회귀만 reject한다.
 
 #### `TrailingStopCalculator` (유보)
 
-ATR 트레일링의 표준 위치(순수 함수).
-
-- **유보 사유** — 첫 검증 스코프의 어떤 전략도 쓰지 않는다. 재도입 시 이 단일 표준으로 통합하고 파리티 기준을
-  확정한다.
-- **표준 위치 보존** — 표준 위치는 트리에 남지만 이 절의 계약을 바꾸지 않는다.
-- **재도입 시 역할** — 고정 손절이 없는 전략이 도입되면 `compute_initial_risk`가 최초 위험(`r0`)을 제공한다.
+- **개요** — ATR 트레일링의 표준 위치(순수 함수). 첫 검증 스코프에서는 유보.
+- **책임** — 고정 손절이 없는 전략에 트레일링 스탑과 최초 위험(`r0`)을 순수 함수로 제공한다. 첫 검증 스코프의 어떤
+  전략도 쓰지 않아 유보하며, 재도입 시 이 단일 표준으로 통합하고 파리티 기준을 확정한다.
+- **상속관계** — 없음(순수 함수 모음. 전략은 상속이 아니라 이 함수를 호출한다).
+- **필드** — 없음(순수 함수).
+- **메서드**
+    - `compute_initial_risk` : 최초 위험 `r0`를 계산해 제공한다(고정 손절이 없는 전략의 최초 보호 스탑).
+    - `update` : 트레일링 상태와 확정 캔들로 갱신된 스탑 수준을 낸다.
+- **불변식** — 없음(유보 상태라 이 절의 계약을 바꾸지 않는다).
 
 ## §4.3 실행·평가 클래스 (+ 판정 플로우)
 
