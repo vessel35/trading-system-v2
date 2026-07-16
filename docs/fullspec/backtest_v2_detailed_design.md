@@ -788,7 +788,12 @@ flowchart TD
 이 절은 §3의 컴포넌트를 클래스 층위로 내린다. 컴포넌트마다 클래스 다이어그램을 하나씩 두고, 구조는 전부
 다이어그램이 담는다 — 클래스와 속성·타입, 메서드 시그니처(인자·반환), 관계(상속·합성·의존), 스테레오타입까지.
 정의서는 다이어그램이 담지 못하는 잔여만 보탠다 — 속성마다 제약·기본값·NULL 허용·검증, 메서드의 의미, 클래스의
-책임, 그 클래스가 강제하는 불변식. 시퀀스·플로우는 별도 장이 아니라 그 행위를 소유한 클래스 정의서 안에 둔다.
+책임, 그 클래스가 강제하는 불변식.
+
+**의존 화살표를 그리는 기준.** 화살표는 시그니처만으로는 드러나지 않는 관계 — 내부 호출·주입·위임, 상속·합성,
+공통 유틸 의존(예: `money` 양자화) — 만 그린다. 어떤 타입이 메서드의 **파라미터나 반환**으로 이미 시그니처에
+적혀 있으면 그 의존은 화살표로 겹쳐 긋지 않는다(다이어그램이 같은 말을 두 번 하지 않게 한다). 그래서 어떤
+다이어그램은 화살표가 적거나 없을 수 있는데, 이는 관계가 없어서가 아니라 시그니처가 이미 담고 있어서다. 시퀀스·플로우는 별도 장이 아니라 그 행위를 소유한 클래스 정의서 안에 둔다.
 
 이 절이 확정하는 것은 공유 라이브러리 `core-lib`의 클래스이고, 세 묶음으로 나뉜다.
 
@@ -841,11 +846,9 @@ Ehlers 필터 계수, Wilder 평활 상수, T3 볼륨 팩터)만은 그 양이 �
   그 관문 **앞에서** 만들어지는 타입은 `float`, **뒤에서** 만들어지는 타입은 `Decimal`이다.
 
 어느 속성이 어느 쪽인지는 다이어그램의 타입 표기가 그대로 보여 주므로 아래 클래스 정의서는 이를 되풀이하지 않고,
-경계를 벗어나는 예외만 그 클래스에서 밝힌다.
-
-값 타입이 ENUM을 필드로 쓰는 것은 속성 타입(예: `+OrderType order_type`)이 이미 보여 주므로 다이어그램에 별도
-의존 화살표를 겹쳐 긋지 않는다. 화살표로 남긴 관계는 속성 타입만으로는 드러나지 않는 것뿐이다 — 네 금액 타입이
-`money`의 양자화를 거친다는 의존(`..> money : quantize`)이 그것이다.
+경계를 벗어나는 예외만 그 클래스에서 밝힌다. 값 타입이 ENUM을 필드로 쓰는 의존도 속성 타입(예:
+`+OrderType order_type`)이 이미 보여 주므로 화살표를 겹치지 않고, 그래서 이 다이어그램의 화살표는 네 금액 타입이
+`money`의 양자화를 거친다는 의존(`..> money : quantize`) 넷뿐이다.
 
 ```mermaid
 classDiagram
@@ -1330,13 +1333,9 @@ classDiagram
         +linreg(Series, int) Series
     }
     IndicatorRegistry o-- IndicatorSpec
-    IndicatorSpec ..> IndicatorState : make_state
     IndicatorSpec ..> primitives
     IndicatorState ..> primitives
-    IndicatorSpec ..> Candle
-    IndicatorState ..> Candle
     IndicatorRegistry ..> contracts
-    contracts ..> Candle
 ```
 
 #### `IndicatorSpec`
@@ -1539,16 +1538,10 @@ classDiagram
         +update(TrailingState, list~Candle~) float
     }
     Adaptee ..|> StrategyAdapter
-    Adaptee ..> TradingSignal
     Adaptee ..> TrailingStopCalculator
-    StrategyAdapter ..> StrategyMetadata
-    StrategyAdapter ..> ParameterSchema
     StrategyMetadata *-- StrategyProfile
-    AdapterManager ..> StrategyAdapter : create
     AdapterManager ..> StrategyConfig : delegate resolve
     AdapterManager ..> StrategyRegistry : injected
-    StrategyConfig ..> ParameterSchema
-    StrategyConfig ..> ResolvedConfig : produce
 ```
 
 > `StrategyRegistry`는 §4.3 `ports`가 정의하는 Adaptee 카탈로그 주입 포트(ABC)다. `Adapter Manager`가 이
@@ -1732,12 +1725,7 @@ classDiagram
     }
     Matcher ..> OrderLifecycle
     Matcher ..> Normalizer
-    Matcher ..> CostModel
-    Matcher ..> Fill
     OrderLifecycle ..> Order
-    PositionBook ..> Position
-    PositionBook ..> Fill
-    Accounting ..> Position
     Normalizer ..> money
 ```
 
@@ -1825,9 +1813,6 @@ classDiagram
         +is_triggered(Position, Decimal) bool
     }
     Fee ..> money
-    Slippage ..> CostModel
-    Funding ..> Position
-    Liquidation ..> Position
 ```
 
 아래 수치는 모두 주입 기본값이며 run 설정으로 덮어쓴다.
@@ -2027,9 +2012,6 @@ classDiagram
         +list() list~dict~
         +register(str, dict) None
     }
-    DataFeed ..> Candle
-    Broker ..> Order
-    Broker ..> Fill
 ```
 
 일곱 포트의 계약과 불변식은 다음과 같다.
@@ -2114,7 +2096,6 @@ classDiagram
     class Decision {
         +decide(GateResult, object) DecisionResult
     }
-    HardGate ..> Thresholds
     HardGate ..> Profile
     HardGate ..> Metrics
     Decision ..> HardGate
