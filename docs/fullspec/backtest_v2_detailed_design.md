@@ -1622,6 +1622,30 @@ classDiagram
 - **트레일링 사용 방식** — 상속이 아니라 `TrailingStopCalculator`의 순수 함수를 호출한다(첫 검증 스코프에서는
   유보).
 
+#### `StrategyMetadata`
+
+`get_metadata()`가 반환하는 값으로, 전략이 자기 구동에 필요하다고 선언한 요건 묶음이다.
+
+- **필드**
+    - `required_indicators` — 이 전략이 요구하는 지표 목록이다. 각 항목은 지표 이름과 파라미터의 쌍 `{name, params}`
+      이며(예: EMA 200이면 `name`은 `ema`, `params`는 `{"period": 200}`), Engine이 이 선언만큼 지표를 계산해
+      `analyze`에 넘긴다.
+    - `min_history` — 판단을 시작하기 전에 필요한 최소 캔들 수다. Engine이 워밍업 프리로드 길이를 정할 때 지표의
+      최장 워밍업과 함께 큰 쪽을 취한다.
+    - `supported_timeframes` — 이 전략이 도는 캔들 주기 목록이다(예: `["1h", "4h"]`).
+    - `profile` — 이 전략의 형태 선언 `StrategyProfile`이다(아래 정의). 기대 범위 대조·회귀 판정의 근거가 된다.
+
+#### `ParameterSchema`
+
+`get_parameter_schema()`가 반환하는 값으로, 이 전략이 받는 파라미터의 허용 형태 선언이다. `StrategyConfig.resolve`가
+이 선언에 raw_config를 대조해 검증한다.
+
+- **필드**
+    - `fields` — 파라미터 이름별 명세(`FieldSpec`) 맵이다. 각 `FieldSpec`은 그 파라미터의 타입·기본값·허용 범위를
+      담는다.
+    - `extra_forbidden` — 선언되지 않은 잉여 키를 금지할지 여부다. `resolve`의 `extra=forbid` 검증이 이 값을 따르며
+      기본은 금지다.
+
 #### `StrategyConfig`
 
 전략 파라미터 config의 해석·검증·직렬화·스키마 노출의 단일 소유.
@@ -1820,6 +1844,9 @@ Decimal 단일 변환 관문. 시스템 전체에서 `float`→`Decimal` 변환�
 
 체결을 반영해 포지션 장부를 갱신한다.
 
+- **필드** — `skip_first_sl_check`는 "어떤 포지션도 자기 체결 캔들 이전으로 소급해 손절을 검사하지 않는다"는 규칙을
+  담은 클래스 상수(TRUE)다. 규칙의 실제 판정은 `Matcher.resolve_triggers`가 수행하며, 현행 엔진이 같은 이름으로
+  부르던 규칙과 같다.
 - **메서드**
     - `weighted_average` : 가중평균 진입가를 갱신한다.
     - `reduce` : `reduce_only` 실현과 마진 반환을 처리한다.
