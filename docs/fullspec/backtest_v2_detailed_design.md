@@ -209,13 +209,13 @@ core-lib은 특정 DB에 묶이지 않는다. 이 방식은 현행 signal-servic
 
 **서비스 정의**
 
-| 요소 | 유형 | 책임 | 경계 (하지 않음) | 소비 (→ §1.1) | 패키징 |
-|---|---|---|---|---|---|
-| `core-lib` | 설치형 공유 패키지 | 도메인 표준(값 타입·금액 정밀도·지표·전략 판단 계약·사이징·비용·실행 수식·성과 평가·판정·포트 경계·Adaptee 생성/파라미터 해석)의 유일한 구현처 | 실행 드라이버 아님(캔들 루프·읽기·저장·wall-clock·IO 없음); 특정 DB 직접 의존 없음(레지스트리도 주입 포트 경유); 서비스 코드 import 안 함 | 없음 — 의존 그래프의 바닥(내부 계층 방향은 §2.1 의존 다이어그램) | monorepo `services/core-lib/`; 단일 설치형 패키지 `core_lib`(하이픈 없음 → 네임스페이스 충돌·`sys.path` 조작 제거); backtest는 editable·실거래 signal/wallet은 버전 고정으로 설치 |
-| `backtest-service` | 신규 서비스 | 도메인 로직을 `core_lib`에서만 가져오는(다른 서비스 import 안 함) 결정적 실행 드라이버·입출력 오케스트레이터(사전등록·채번·워밍업 프리로드·캔들 루프·데이터 피드 push·체결·2계층 저장·상위 검증) | 전략 판단·지표·사이징·비용·실행 규칙 자체 미보유(전부 `core_lib` 호출); 라이브 인프라(큐·폴링·HTTP·상태 복구) 없음; 전략 파라미터 스키마·검증 미소유(run 설정만 소유) | `core-lib`(import); `crypto_data`·Evidence SQLite·`backtest_db`·`signal_db`(전부 포트 경유) | monorepo `services/backtest-service/`; core-lib editable 의존; 독립 배포; 포트의 backtest 구현(어댑터) 소유 |
-| `signal-service` | 기존 서비스 (유지·채택) | 확정 캔들마다 지표 증분(O(1)) 직접 계산 + Adapter Manager로 Adaptee 생성·판단 호출 → `wallet-service` 큐로 신호 전달 | 이 설계 단계 미변경(채택 단계에서만 내부 구현→`core_lib` 치환, 동작 불변); 판정 루프 안 돎(라이브 Evidence는 연구 피드백만) | 채택 후 `core-lib`(import); `crypto_data`(읽기·지표 계산); `signal_db` | monorepo `services/signal-service/`(채택 시 이관); 독립 배포; 실거래는 core-lib 버전 고정; 채택 전 기존 리포가 프로덕션·이식 원천; 채택은 무중단 re-export shim |
-| `wallet-service` | 기존 서비스 (유지·채택) | 신호 큐 소비 → 사이징·실행·비용 호출로 체결·리스크·킬스위치; 체결·포지션·회계를 자기 운영 DB에 기록 | 이 설계 단계 미변경(채택 단계에서 체결 시점 즉시→다음 캔들 시가 전환, 회귀 ~1279건 필요); 라이브 인프라 백테스트로 미이관 | 채택 후 `core-lib`(import); `wallet_db` | monorepo `services/wallet-service/`(채택 시 이관); 독립 배포; 실거래는 core-lib 버전 고정; 채택 전 기존 리포가 프로덕션·이식 원천; 채택은 re-export shim |
-| `OHLCV 수집기` | 내부 컴포넌트 | 거래소 확정 캔들 OHLCV를 `crypto_data`에 적재(확정 캔들마다 1행·무조건) | 지표 미생성(계산은 signal·backtest가 `core_lib`로); 진행 중 캔들 미적재(look-ahead 방지의 데이터 층 근거); 단일 심볼 Binance 선물만(Upbit 현물 범위 밖) | 거래소 REST·WebSocket(입력); `crypto_data`(쓰기); `config_db`(활성 심볼 읽기) | 외부 collector의 리포 내부 이관분; 과거 구간은 기존 backfill 재사용 + `crypto_data` 보존 연장(예: 2000일) |
+| 요소                 | 유형             | 책임                                                                                                                           | 경계 (하지 않음)                                                                                                       | 소비 (→ §1.1)                                                                           | 패키징                                                                                                                                         |
+| ------------------ | -------------- | ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `core-lib`         | 설치형 공유 패키지     | 도메인 표준(값 타입·금액 정밀도·지표·전략 판단 계약·사이징·비용·실행 수식·성과 평가·판정·포트 경계·Adaptee 생성/파라미터 해석)의 유일한 구현처                                      | 실행 드라이버 아님(캔들 루프·읽기·저장·wall-clock·IO 없음); 특정 DB 직접 의존 없음(레지스트리도 주입 포트 경유); 서비스 코드 import 안 함                     | 없음 — 의존 그래프의 바닥(내부 계층 방향은 §2.1 의존 다이어그램)                                              | monorepo `services/core-lib/`; 단일 설치형 패키지 `core_lib`(하이픈 없음 → 네임스페이스 충돌·`sys.path` 조작 제거); backtest는 editable·실거래 signal/wallet은 버전 고정으로 설치 |
+| `backtest-service` | 신규 서비스         | 도메인 로직을 `core_lib`에서만 가져오는(다른 서비스 import 안 함) 결정적 실행 드라이버·입출력 오케스트레이터(사전등록·채번·워밍업 preload·캔들 루프·데이터 피드 push·체결·2계층 저장·상위 검증) | 전략 판단·지표·사이징·비용·실행 규칙 자체 미보유(전부 `core_lib` 호출); 라이브 인프라(큐·폴링·HTTP·상태 복구) 없음; 전략 파라미터 스키마·검증 미소유(run 설정만 소유)      | `core-lib`(import); `crypto_data`·Evidence SQLite·`backtest_db`·`signal_db`(전부 포트 경유) | monorepo `services/backtest-service/`; core-lib editable 의존; 독립 배포; 포트의 backtest 구현(어댑터) 소유                                                 |
+| `signal-service`   | 기존 서비스 (유지·채택) | 확정 캔들마다 지표 증분(O(1)) 직접 계산 + Adapter Manager로 Adaptee 생성·판단 호출 → `wallet-service` 큐로 신호 전달                                    | 이 설계 단계 미변경(채택 단계에서만 내부 구현→`core_lib` 치환, 동작 불변); 판정 루프 안 돎(라이브 Evidence는 연구 피드백만)                               | 채택 후 `core-lib`(import); `crypto_data`(읽기·지표 계산); `signal_db`                         | monorepo `services/signal-service/`(채택 시 이관); 독립 배포; 실거래는 core-lib 버전 고정; 채택 전 기존 리포가 프로덕션·이식 원천; 채택은 무중단 re-export shim                    |
+| `wallet-service`   | 기존 서비스 (유지·채택) | 신호 큐 소비 → 사이징·실행·비용 호출로 체결·리스크·킬스위치; 체결·포지션·회계를 자기 운영 DB에 기록                                                                 | 이 설계 단계 미변경(채택 단계에서 체결 시점 즉시→다음 캔들 시가 전환, 회귀 ~1279건 필요); 라이브 인프라 백테스트로 미이관                                       | 채택 후 `core-lib`(import); `wallet_db`                                                  | monorepo `services/wallet-service/`(채택 시 이관); 독립 배포; 실거래는 core-lib 버전 고정; 채택 전 기존 리포가 프로덕션·이식 원천; 채택은 re-export shim                        |
+| `OHLCV 수집기`        | 내부 컴포넌트        | 거래소 확정 캔들 OHLCV를 `crypto_data`에 적재(확정 캔들마다 1행·무조건)                                                                           | 지표 미생성(계산은 signal·backtest가 `core_lib`로); 진행 중 캔들 미적재(look-ahead 방지의 데이터 층 근거); 단일 심볼 Binance 선물만(Upbit 현물 범위 밖) | 거래소 REST·WebSocket(입력); `crypto_data`(쓰기); `config_db`(활성 심볼 읽기)                      | 외부 collector의 리포 내부 이관분; 과거 구간은 기존 backfill 재사용 + `crypto_data` 보존 연장(예: 2000일)                                                             |
 
 **저장소 정의**
 
@@ -622,7 +622,7 @@ flowchart TD
 | 컴포넌트 | 책임 | core_lib 소비 지점 | 구성 (§2 트리) |
 |---|---|---|---|
 | `ConfigLayer` | 백테스트 run 설정(OHLCV·funding 소스/구간·`CostModel` 값·거래소 규칙·실행/리스크·파라미터 스윕·지표 계산 모드·프로파일 선택)의 pydantic 스키마·검증 후 Engine 주입 | 전략 파라미터 스키마·검증은 소유하지 않고 선택값(전략 id·파라미터 값·symbol·timeframe)만 담아 `Adapter Manager`로 넘긴다 — 해석·검증은 `StrategyConfig` 소관(같은 config가 backtest·라이브에서 동일 검증) | `config/run_config.py` |
-| `Engine` | 도메인 로직을 `core_lib`에서만 가져오는(다른 서비스 import 안 함) 결정적 캔들 루프·입출력 오케스트레이터: 사전등록·채번·워밍업 프리로드·피드 push·체결·2계층 저장·finalize·eval 호출; 워밍업 구간 신호 discard, 동일 입력·seed → 동일 Evidence | `Adapter Manager`로 Adaptee 생성, `StrategyAdapter`의 `analyze` 호출, `sizing`으로 수량 산정, `execution`으로 포지션 장부·회계, `costs.funding.settle`로 경계 펀딩 정산, `eval`로 판정; 데이터·체결·시계·기록은 전부 포트 어댑터 경유하고, 비용도 값(rate·fallback)은 CostModel·DataFeed 포트에서 받되 정산 수식 `costs`는 Engine이 직접 호출한다(체결 규칙 자체는 Broker 어댑터가 `execution.matcher` 소비) | `engine/engine.py` |
+| `Engine` | 도메인 로직을 `core_lib`에서만 가져오는(다른 서비스 import 안 함) 결정적 캔들 루프·입출력 오케스트레이터: 사전등록·채번·워밍업 preload·피드 push·체결·2계층 저장·finalize·eval 호출; 워밍업 구간 신호 discard, 동일 입력·seed → 동일 Evidence | `Adapter Manager`로 Adaptee 생성, `StrategyAdapter`의 `analyze` 호출, `sizing`으로 수량 산정, `execution`으로 포지션 장부·회계, `costs.funding.settle`로 경계 펀딩 정산, `eval`로 판정; 데이터·체결·시계·기록은 전부 포트 어댑터 경유하고, 비용도 값(rate·fallback)은 CostModel·DataFeed 포트에서 받되 정산 수식 `costs`는 Engine이 직접 호출한다(체결 규칙 자체는 Broker 어댑터가 `execution.matcher` 소비) | `engine/engine.py` |
 | `Harness` | 단일 run 밖 상위 검증(표본 내/외 분리·워크포워드·몬테카를로·확률적 샤프·파라미터 스윕) 오케스트레이션, 카탈로그로 run 집합 비교 | `eval`로 집계 판정, `CatalogStore` 어댑터로 `backtest_db` 읽기; 개별 run 구동은 `Engine` 재사용(스윕 run_id는 Engine이 카탈로그 시퀀스로 단독 발급) | `harness/harness.py` |
 
 **포트 목록 확정 (7종).** 무엇을 포트로 뺄지 표준은 미리 정하지 않았다. 그 목록을 여기서 확정한다.
@@ -785,10 +785,13 @@ flowchart TD
 
 # §4 클래스 다이어그램 + 정의서 (컴포넌트별)
 
-이 절은 §3의 컴포넌트를 클래스 층위로 내린다. 컴포넌트마다 클래스 다이어그램을 하나씩 두고, 구조는 전부
-다이어그램이 담는다 — 클래스와 속성·타입, 메서드 시그니처(인자·반환), 관계(상속·합성·의존), 스테레오타입까지.
-정의서는 다이어그램이 담지 못하는 잔여만 보탠다 — 속성마다 제약·기본값·NULL 허용·검증, 메서드의 의미, 클래스의
-책임, 그 클래스가 강제하는 불변식.
+이 절은 §3의 컴포넌트를 클래스 층위로 내린다. 컴포넌트마다 클래스 다이어그램을 하나씩 둔다. **한 클래스의 구조는
+전부 그 클래스 다이어그램이 담는다** — 클래스와 그 속성·타입, 메서드 시그니처(인자·반환), 관계(상속·합성·의존),
+스테레오타입까지 다이어그램에 있다. 그래서 **어떤 클래스의 전체 필드(속성) 목록은 그 다이어그램이 정본**이다.
+정의서는 다이어그램이 담지 못하는 잔여만 보탠다 — 속성의 제약·기본값·NULL 허용·검증, 메서드의 의미, 클래스의
+책임, 그 클래스가 강제하는 불변식이 그 잔여다. 따라서 정의서의 '필드' 항목은 속성 목록이 아니라 그중 부연이 필요한
+것만 적은 것이니, 한 클래스에 무슨 속성이 있는지는 그 클래스 다이어그램을 봐야 한다(예: `Candle`의 시가·종가·시각
+필드는 정의서가 아니라 §4.1.1 `Candle` 다이어그램에 있다).
 
 **의존 화살표를 그리는 기준.** 화살표는 시그니처만으로는 드러나지 않는 관계 — 내부 호출·주입·위임, 상속·합성,
 공통 유틸 의존(예: `money` 양자화) — 만 그린다. 어떤 타입이 메서드의 **파라미터나 반환**으로 이미 시그니처에
@@ -802,7 +805,8 @@ flowchart TD
 - **개요** — 한 줄로 "무엇인가".
 - **책임** — 무엇을 소유·수행하고 무엇을 하지 않는가(경계), 그리고 왜 이 설계인가.
 - **상속관계** — 구현·실현·추상 관계(Protocol 구현, ABC 등). 없으면 "없음".
-- **필드** — 속성·상수의 잔여: 제약·기본값·NULL·검증. 속성이 없으면 "없음".
+- **필드** — 속성 목록이 아니라 잔여다. 전체 속성·타입은 다이어그램이 담고, 여기서는 그 속성들의 제약·기본값·NULL
+  허용·검증만 보탠다. 다이어그램에 속성이 있어도 덧붙일 잔여가 없으면 그 속성은 여기 적지 않는다. 속성이 없으면 "없음".
 - **메서드** — 각 메서드를 한 줄에 하나씩 하위 항목으로 `` `이름` : 설명 `` 형태로 적는다(여러 이름을 한 줄에
   몰아넣지 않는다). 메서드가 없으면 "없음".
 - **불변식** — 이 클래스가 강제·보존하는 불변식. 지킬 것이 없으면 "없음".
@@ -1538,8 +1542,8 @@ classDiagram
 - **두 방식의 seed 통일** — 초기값 산정, `adjust` 여부, 표준편차 분모, 0 나눗셈 처리를 지표 계산 명세 표준이
   통일한다. 벡터화 방식과 증분 방식이 같은 규칙을 써야 초반 캔들에서도 값이 어긋나지 않는다.
 - **유효 시점** — 각 지표의 `min_history`만큼 캔들이 쌓이기 전 값은 유효하지 않다.
-- **프리로드** — 실행 드라이버는 평가 구간 시작 전에 `max(전략 min_history, 지표 최장 워밍업)` 캔들을 별도
-  프리로드하고, 그 구간의 신호는 버린다(§4.4에서 확정).
+- **preload** — 실행 드라이버는 평가 구간 시작 전에 `max(전략 min_history, 지표 최장 워밍업)` 캔들을 별도
+  preload하고, 그 구간의 신호는 버린다(§4.4에서 확정).
 
 #### 지표 계산 플로우
 
@@ -1706,7 +1710,7 @@ classDiagram
     - `required_indicators` — 이 전략이 요구하는 지표 목록이다. 각 항목은 지표 이름과 파라미터의 쌍 `{name, params}`
       이며(예: EMA 200이면 `name`은 `ema`, `params`는 `{"period": 200}`), Engine이 이 선언만큼 지표를 계산해
       `analyze`에 넘긴다.
-    - `min_history` — 판단을 시작하기 전에 필요한 최소 캔들 수다. Engine이 워밍업 프리로드 길이를 정할 때 지표의
+    - `min_history` — 판단을 시작하기 전에 필요한 최소 캔들 수다. Engine이 워밍업 preload 길이를 정할 때 지표의
       최장 워밍업과 함께 큰 쪽을 취한다.
     - `supported_timeframes` — 이 전략이 도는 캔들 주기 목록이다(예: `["1h", "4h"]`).
     - `profile` — 이 전략의 형태 선언 `StrategyProfile`이다(아래 정의). 기대 범위 대조·회귀 판정의 근거가 된다.
@@ -1802,14 +1806,14 @@ sequenceDiagram
     participant SC as StrategyConfig
     Note over E: strategy_id는 run 설정이 이미 고른 값이다.<br/>가용 전략 목록을 훑는 조회 StrategyRegistry.list는<br/>그 앞의 선택·등록 흐름이라 이 시퀀스에 넣지 않는다.
     E->>AM: create(strategy_id, raw_config)
-    AM->>REG: get(strategy_id) — 카탈로그에서 이 id 하나만 조회
+    AM->>REG: get(strategy_id)
     REG-->>AM: Adaptee 클래스 식별
-    AM->>AD: get_parameter_schema() — 스키마 선언 조회
+    AM->>AD: get_parameter_schema()
     AD-->>AM: ParameterSchema (값)
     AM->>SC: resolve(schema, raw_config)
     Note over SC: 기본값 병합 · extra=forbid · 타입/범위 · 교차필드 검증
     SC-->>AM: ResolvedConfig (불변)
-    AM->>AD: 인스턴스화(ResolvedConfig)
+    AM->>AD: __init__(ResolvedConfig)
     AD-->>AM: StrategyAdapter 인스턴스
     AM-->>E: Adaptee
 ```
@@ -2662,40 +2666,71 @@ forensics로 가 개선 루프를 돌고, 둘 다 통과한 run만 Decision이 �
 WFA·MC)는 여러 run·분할에 걸친 교차검증이라 `eval`이 아니라 Harness(§4.4)가 산출·적용하며, `eval.HardGate`는 단일
 run의 형태 무관 통과선과 프로파일 대조만 판정한다.
 
-## §4.4 실행 드라이버 클래스 — Engine·입력 어댑터·설정·Harness (+ 캔들 루프·1분 집행 시퀀스)
+## §4.4 backtest-service 클래스 — Engine·포트 어댑터·설정·Harness (+ 캔들 루프·1분 집행 시퀀스)
 
-**이 계층이 하는 일.** §4.1~§4.3은 세 실행 모드가 공유하는 `core-lib`의 도메인 클래스를 확정했다. §4.4는 그
-표준 위에 얹히는 유일한 신규 실행 드라이버 `backtest-service`의 클래스를 확정한다. `Engine`은 확정 캔들을 시간
-순서로 돌리며 지표 갱신·전략 판단·사이징·체결·저장·판정을 오케스트레이션하고, 도메인 로직은 전부 `core-lib`에서만
-가져온다(다른 서비스는 import하지 않는다). 환경에 따라 값·방식이 갈리는 다섯 관심사 — 데이터 공급·체결·시각·비용값·
-전략 목록 — 는 `ports`의 추상 계약(§4.3.4)을 실체화한 backtest 어댑터가 맡고, `Engine`은 그 어댑터를 주입받아
-쓴다. `ConfigLayer`(`RunConfig`)는 run 설정을 검증해 `Engine`에 주입하고, `Harness`는 단일 run 밖의 상위 검증
-(표본 내/외 분리·워크포워드·몬테카를로·확률적 샤프·파라미터 스윕)을 오케스트레이션한다. 출력 두 어댑터
-(`EvidenceSink`·`CatalogStore` 구현)는 다음 절(§4.5)이 확정한다.
+**이 절의 자리.** §4.1~§4.3은 세 실행 모드가 공유하는 `core-lib`의 도메인 클래스를 확정했다. `core-lib`는 계산
+방법만 담을 뿐 스스로 돌지 않는다. §4.4는 그 표준을 **실제로 돌리는 유일한 신규 서비스 `backtest-service`**의
+클래스를 확정한다 — 한 번의 백테스트 run을 시작에서 끝까지 구동하는 부품들이다. run의 결과를 저장하는 출력 두
+어댑터(`EvidenceSink`·`CatalogStore` 구현)는 다음 절(§4.5)이 맡는다.
 
-**여기서 강제·확정하는 불변식.** 이 절이 새로 소유하는 규칙은 세 가지 순서 규칙과 세 가지 결정성 규칙이다. 앞의
-셋은 캔들 루프의 순서 그 자체가 look-ahead를 막는 장치라는 데서 나오고, 뒤의 셋은 같은 입력이 같은 Evidence를
-내야 한다는 데서 나온다.
+**무엇으로 이뤄지나(큰 것부터).** `backtest-service`는 네 부품으로 이뤄지고, 모두 `Engine`을 가운데 두고 한 번의
+run을 굴리는 데 협력한다.
 
-- **캔들 두 순간의 고정 순서** — 한 확정 캔들 `t`를 여는 순간(시가)과 닫는 순간(종가)으로 나눠, 지난 캔들이 남긴
-  체결·트리거를 시가에 처리하고 이번 캔들의 판단을 종가에 한다. 이 순서를 바꾸면 look-ahead가 생긴다.
-- **결정 < 체결(next-bar)** — 신호는 캔들 `t` 종가에 만들지만 체결은 `t+1` 시가에만 일어난다. `decision_ts <
-  execution_ts`. 결정에 쓴 캔들로 체결하지 않는다. `core-lib`의 `execution.matcher`(§4.3.1)가 이 규칙을 소유하고,
-  `Engine`은 종가에 만든 주문 요청을 다음 시가까지 들고 있다가 그때 `Broker.submit()`을 호출해 순서를 강제한다.
-- **캔들 내 트리거는 1분 집행 피드를 시간 순서로** — 손절·트레일링·익절·청산 채널·강제청산의 캔들 내 발동은 전략
-  TF 캔들의 고저가 아니라 `t` 구간의 1분 하위 캔들을 시간 순서로 훑어 판정하고, 어떤 포지션도 자기 체결 캔들
-  이전으로 소급 검사하지 않는다. 이 1분 트리거 walk와 트레일링 파리티 허용 편차를 이 절이 확정하되, 첫 검증
-  스코프는 이를 소비하는 전략(트레일링 단독 출구 전략)이 없어 재유보하며 보수적 TF 캔들 판정을 기본으로 둔다
-  (아래 `Engine`의 트리거 walk 규약).
-- **동시 도달 손절 우선(보수적 최악 경로)** — 같은 하위 캔들에서 손절과 익절이 모두 범위 안이면 손절 우선이다.
-  이 우선순위 자체는 `execution.matcher.resolve_triggers`(§4.3.1)가 소유하고, `Engine`은 그 판정을 1분 경로로
-  구동만 한다.
-- **워밍업 프리로드 후 discard** — 평가 구간 시작 전에 `max(전략 min_history, 지표 최장 워밍업)` 캔들을 별도
-  프리로드해 지표를 워밍업하고, 그 프리로드 구간에서 만들어진 신호는 버린다. 유효하지 않은 워밍업 값으로 진입·
-  청산을 판단하지 않기 위해서다.
-- **결정성(wall-clock 금지·단일 seed·동일 Evidence)** — 시각은 `Clock` 어댑터가 시뮬 캔들 시각으로만 공급하고
-  wall-clock·무제어 난수를 쓰지 않는다. 몬테카를로·부트스트랩은 고정 seed다. 같은 입력·같은 seed는 같은 정규화
-  Evidence 해시를 내야 한다.
+- **`Engine` — 중심 구동부.** 확정 캔들을 시간 순서로 돌리며 지표 갱신·전략 판단·사이징·체결·저장·판정을 정해진
+  순서로 호출한다. 도메인 로직은 하나도 갖지 않고 전부 `core-lib`을 불러 쓰며(다른 서비스는 import하지 않는다),
+  `Engine`이 소유하는 것은 "무엇을 어떤 순서로 언제 부르는가"라는 실행 순서뿐이다.
+- **포트 어댑터 다섯 — 인프라 경계.** 환경(백테스트·페이퍼·라이브)에 따라 구현이 갈리는 다섯 외부 의존성 —
+  데이터 공급·체결·시각·비용값·전략 목록 — 을 도메인 바깥으로 격리한다. 각각 `ports`의 추상 계약(§4.3.4)을
+  backtest용으로 구현한 어댑터이고, `Engine`은 그 구현이 아니라 포트 추상에 의존하며(의존성 역전) 어댑터를
+  의존성 주입으로 받아 쓴다.
+- **설정(`ConfigLayer`의 `RunConfig`) — run 준비.** run 설정(구간·심볼·비용값·계산 모드·트리거 세밀도 등)을
+  검증해 `Engine`에 주입한다. 전략 파라미터 검증은 여기 두지 않고 `core-lib`에 맡겨, 같은 설정이 backtest와
+  라이브에서 같은 검증을 받게 한다.
+- **`Harness` — 상위 반복 검증.** 단일 run 밖의 과최적화 방어(표본 내/외 분리·워크포워드·몬테카를로·확률적 샤프·
+  파라미터 스윕)를 오케스트레이션한다. 개별 run은 `Engine`을 재사용해 돌린다.
+
+**이 절이 새로 정하는 불변식.** 여기서 새로 정하는 규칙은 성격에 따라 세 가지로 나뉜다. 세 규칙 모두 코드 전반에
+거는 막연한 원칙이 아니라, 각각 정해진 한 자리에만 적용된다. 첫째, **캔들 루프 순서 규칙**은 `Engine`이 캔들을
+처리하는 순서에 관한 것으로, 정해진 순서를 지켜 미래 데이터를 미리 보는 look-ahead를 막는다. 둘째, **유효성 규칙**은
+평가를 시작하는 워밍업 구간에 관한 것으로, 지표가 충분히 쌓여 믿을 수 있는 값이 된 뒤에만 판단하게 한다. 셋째,
+**결정성 규칙**은 실행할 때마다 달라질 수 있는 시각과 난수에 관한 것으로, 그 둘을 고정해 같은 입력이면 언제나 같은
+결과가 나오게 한다.
+
+- **캔들 루프 순서 규칙** — `Engine`의 캔들 루프(`step_open`·`step_close`·`walk_triggers`, §4.4.1)가 지키는 캔들
+  처리 순서다. 이 순서 자체가 look-ahead를 막고, 각 체결·트리거의 atomic 규칙은 `core-lib`의 `execution.matcher`
+  (§4.3.1)가 소유한다.
+    - **캔들 두 순간의 고정 순서** — 한 확정 캔들 `t`를 여는 순간(open_time)과 닫는 순간(close_time)으로 나눠, 지난
+      캔들이 남긴 체결·트리거를 여는 순간에, 이번 캔들의 판단을 닫는 순간에 한다. 이 순서를 바꾸면 look-ahead가
+      생긴다.
+    - **결정 < 체결(next-bar)** — 신호는 캔들 `t` 종가에 만들지만 체결은 `t+1` 시가에만 일어난다(`decision_ts <
+      execution_ts`, 결정에 쓴 캔들로 체결하지 않는다). `core-lib`의 `execution.matcher`(§4.3.1)가 이 규칙을
+      소유하고, `Engine`은 종가에 만든 주문 요청을 다음 시가까지 들고 있다가 그때 `Broker.submit()`을 호출해
+      순서를 강제한다.
+    - **캔들 내 트리거는 1분 집행 피드를 시간 순서로** — 손절·트레일링·익절·청산 채널·강제청산의 캔들 내 발동은
+      전략 TF 캔들의 고저가 아니라 `t` 구간의 1분 하위 캔들을 시간 순서로 훑어 판정하고, 어떤 포지션도 자기 체결
+      하위 캔들 이전으로 소급 검사하지 않는다. 이 1분 트리거 walk와 트레일링 파리티 허용 편차를 이 절이 확정하되,
+      첫 검증 스코프는 이를 소비하는 전략(트레일링 단독 출구 전략)이 없어 재유보하고 보수적 TF 캔들 판정을 기본으로
+      둔다(아래 `Engine`의 트리거 walk 규약).
+    - **동시 도달 손절 우선(보수적 최악 경로)** — 같은 하위 캔들에서 손절과 익절이 모두 범위 안이면 손절 우선이다.
+      이 우선순위는 `execution.matcher.resolve_triggers`(§4.3.1)가 소유하고 `Engine`은 그 판정을 구동만 한다.
+- **유효성 규칙** — `Engine.preload`(§4.4.1)가 평가 구간 시작 전 워밍업에서만 적용한다. 지표가 덜 쌓인 워밍업
+  값으로는 진입·청산을 판단하지 않는다.
+    - **preload는 캔들을 데우고, discard는 그 구간의 신호만 버린다** — preload와 discard는 서로 다른 것을 다룬다.
+      지표(예: EMA 200)는 앞선 캔들이 충분히 쌓여야 믿을 값이 되므로, 평가 구간 시작 **이전**의 실제 과거 캔들
+      `max(전략 min_history, 지표 최장 워밍업)`개를 미리 흘려보내 지표를 데운다(캔들 preload). 반면 버리는 것은 그
+      preload 구간에서 나온 **신호**다 — 그 구간은 평가 대상 기간이 아니라 지표를 데우려고 둔 것이기 때문이다.
+      그래서 평가 구간은 첫 캔들부터 이미 데워진 지표로 판단한다. preload 없이 평가 구간 안에서 데우면 앞쪽 워밍업
+      길이만큼의 캔들이 유효하지 않은 값이 되어 그만큼 평가 구간을 잃는다.
+- **결정성 규칙** — 코드 전체가 아니라 세 지점에만 적용한다. 시각은 `BacktestClock`(§4.4.2)이, 난수 고정 seed는
+  몬테카를로·부트스트랩을 도는 `Harness`(§4.4.4)가, 재현 확인용 정규화 Evidence 해시는 `BacktestEvidenceSink.finalize`
+  (§4.5)가 맡는다.
+    - **시각과 난수만 고정하면 된다** — 캔들 루프·지표·체결은 난수 없는 순수 계산이라 같은 입력이면 저절로 같은
+      값이 나온다. 그래서 실행마다 달라질 수 있는 곳은 시각과 난수 둘뿐이다. 시각은 실제 시각(wall-clock) 대신 시뮬
+      캔들 시각만 쓴다. 난수는 몬테카를로·부트스트랩에서만 쓰는데, 난수 생성기에 고정 seed를 주면 매번 똑같은 난수
+      순서가 재현되므로(seed가 같으면 뽑히는 값도 같다) 그 seed를 고정해 둔다. 고정 seed는 한 run이 만드는 수천
+      표본 묶음을 run마다 똑같이 재현할 뿐 표본 수를 줄이지 않으므로, 여러 표본의 분포로 위험을 보는 몬테카를로의
+      목적은 그대로다(표본 추출에서 오는 불확실성은 부트스트랩 신뢰구간이 따로 정량화한다). 이 둘만 고정하면 같은
+      입력·같은 seed는 언제나 같은 정규화 Evidence 해시를 낸다.
 
 ### §4.4.1 `Engine` 컴포넌트 (+ 캔들 루프·1분 트리거 walk 시퀀스)
 
@@ -2759,7 +2794,7 @@ classDiagram
 #### `Engine`
 
 - **개요** — 확정 캔들을 시간 순서로 돌리는 결정적 실행 드라이버이자 입출력 오케스트레이터.
-- **책임** — 사전등록·채번·워밍업 프리로드·피드 push·전략 판단·사이징·체결·2계층 저장·finalize·판정 호출을
+- **책임** — 사전등록·채번·워밍업 preload·피드 push·전략 판단·사이징·체결·2계층 저장·finalize·판정 호출을
   한 흐름으로 엮는다. 도메인 로직(전략·지표·사이징·비용 수식·체결 규칙·평가)은 소유하지 않고 전부 `core-lib`을
   호출해 쓰며, 데이터·체결·시각·기록·전략 목록은 전부 주입된 포트 어댑터로만 접근한다. 캔들 루프의 두 순간 순서와
   1분 트리거 walk의 순서를 소유한다(순서 자체가 look-ahead 방지 장치라 `Engine`이 소유해야 한다).
@@ -2775,21 +2810,21 @@ classDiagram
       구조로 강제하며, `step_open`이 이 목록을 담긴 순서대로 체결한 뒤 비운다(이중 체결 방지).
 - **메서드**
     - `run(config)` : run 하나를 처음부터 끝까지 구동해 `RunResult`를 낸다. 사전등록 기록과 `run_id` 발급으로 열고
-      (§4.5의 저장 시퀀스), 프리로드→캔들 루프→finalize 순으로 진행한다.
-    - `preload()` : 평가 구간 시작 전에 `max(전략 min_history, 지표 최장 워밍업)` 캔들을 `DataFeed`로 별도 프리로드
+      (§4.5의 저장 시퀀스), preload→캔들 루프→finalize 순으로 진행한다.
+    - `preload()` : 평가 구간 시작 전에 `max(전략 min_history, 지표 최장 워밍업)` 캔들을 `DataFeed`로 별도 preload
       해 지표 상태를 워밍업한다. 이 구간에서 만들어진 신호는 버린다(discard). 반환은 워밍업에 쓴 캔들 목록이다.
     - `step_open(t)` : 캔들 `t`가 열리는 순간의 일. `Clock`이 `t` 시가에 있을 때 호출된다. `pending`의 주문을 담긴
       순서대로 `Broker.submit`해 `t` 시가에 체결하고 각 체결마다 `position_book.apply`·`accounting.recompute`로 장부·
       항등식을 갱신하며 Execution·Position·Portfolio/PnL을 기록한 뒤 `pending`을 비운다. 리버설이면 청산 주문을 먼저
       체결·정산한 다음 진입 주문을 체결하므로 진입의 마진 가용성은 청산 정산 후 계좌 상태 기준이 된다(리버설의 두
-      체결 순서는 `Engine`이 이 순서로 소유하고, 각 체결의 원자 규칙·마진 부족 시 수량 절삭은 `matcher`가 소유한다).
+      체결 순서는 `Engine`이 이 순서로 소유하고, 각 체결의 atomic 규칙·마진 부족 시 수량 절삭은 `matcher`가 소유한다).
       그다음 `t` 구간의 1분 하위 캔들에 대해 `walk_triggers`로 기존 포지션의 손절·트레일링·익절·청산·강제청산을
       판정하고, UTC 정산 경계를 지나면 `costs.funding.settle`로 펀딩을 부과한다.
     - `step_close(t)` : 캔들 `t`가 닫히는 순간의 일. `Clock`이 `t` 종가로 전진한 뒤 호출된다. `DataFeed`로 `up_to =
       t.close`까지만 받아 지표를 갱신하고 Feature/Indicator Snapshot을 기록한 뒤, `Adaptee.analyze(market_data[t],
       current_position)`로 `TradingSignal`을 받아 Signal·Decision을 기록한다. 진입·청산 신호면 `sizing`으로 수량을
       산출하고 `ExposureLimit`으로 한도를 검사한 뒤 float 주문 요청 `OrderRequest`를 만들어 `pending`에 넣는다(체결은
-      다음 `step_open`). 프리로드 구간이면 여기서 만든 신호·주문은 버린다.
+      다음 `step_open`). preload 구간이면 여기서 만든 신호·주문은 버린다.
     - `walk_triggers(position, subcandles)` : `t` 구간의 1분 하위 캔들을 시간 순서로 훑어 첫 발동을 찾는다. 대상은
       포지션의 체결 시점 이후 하위 캔들이다 — 체결 하위 캔들 이전은 소급 검사하지 않고, 방금 체결된 포지션은 자기
       체결 하위 캔들 다음 하위 캔들부터 검사 대상이다(legacy `skip_first_sl_check`와 같은 취지). 각 하위 캔들에서
@@ -2806,7 +2841,7 @@ classDiagram
       일이 구조적으로 불가능하다.
     - **`decision_ts < execution_ts`** — 신호는 `step_close`에서, 체결은 다음 `step_open`에서 일어난다. `pending`의
       한 칸 지연이 이 순서를 강제한다.
-    - **워밍업 프리로드 구간 신호 discard** — 프리로드 구간의 신호·주문은 성과에 반영하지 않는다.
+    - **워밍업 preload 구간 신호 discard** — preload 구간의 신호·주문은 성과에 반영하지 않는다.
     - **결정성** — 시각은 `Clock`만 공급하고 wall-clock·무제어 난수를 쓰지 않는다. 같은 입력·같은 seed는 같은
       정규화 Evidence 해시를 낸다.
 
@@ -2820,46 +2855,72 @@ sequenceDiagram
     participant DF as DataFeed (어댑터)
     participant AD as Adaptee (core-lib)
     participant EX as execution (core-lib)
+    participant CST as costs (core-lib)
+    participant SIZ as sizing (core-lib)
     participant EV as EvidenceSink (어댑터)
-    Note over CLK,EV: 캔들 t — 여는 순간(시가). 지난 캔들이 남긴 일을 처리한다.
-    CLK->>ENG: now() = t 시가
-    loop pending 주문을 담긴 순서대로 (리버설이면 청산 → 진입)
-        ENG->>BR: submit(order) — t 시가 체결(next-bar)
-        BR->>EX: matcher.match + normalizer(float→Decimal 단일 변환)
+    Note over CLK,EV: 캔들 t의 여는 순간(open_time). 지난 캔들이 남긴 일을 처리한다.
+    ENG->>CLK: now()
+    CLK-->>ENG: t 시가
+    loop pending 주문마다 (리버설이면 청산→진입 순서)
+        ENG->>BR: submit(request)
+        BR->>EX: normalizer.normalize_order(request)
+        EX-->>BR: Order
+        BR->>EX: matcher.match(order, candle, history, cost_model, fill_timing)
+        EX-->>BR: Fill
         BR-->>ENG: Fill
-        ENG->>EX: position_book.apply · accounting.recompute
-        ENG->>EV: record(Execution · Position · Portfolio/PnL)
+        ENG->>EX: position_book.apply(fill)
+        ENG->>EX: accounting.recompute(cash, position)
+        ENG->>EV: record(Execution·Position·Portfolio/PnL)
     end
-    ENG->>ENG: pending 비움(이중 체결 방지)
-    ENG->>DF: candles(symbol, "1m", up_to=t.close) — t 구간 하위 캔들
-    ENG->>ENG: walk_triggers(position, 1m 하위 캔들) — 시간 순서, 체결 하위 캔들 다음부터
-    alt 트리거 발동(손절 우선)
-        ENG->>EX: matcher.resolve_triggers(cost_model) → Fill(exit_reason)
-        ENG->>EX: position_book.apply · accounting.recompute
-        ENG->>EV: record(Execution · Trade · Position)
+    Note over ENG: pending 클리어(이중 체결 방지)
+    ENG->>DF: candles(symbol, "1m", up_to=t.close)
+    DF-->>ENG: 1m 하위 캔들 목록
+    ENG->>EX: matcher.resolve_triggers(position, subcandles, cost_model)
+    EX-->>ENG: Fill 또는 None
+    alt 트리거 발동 (동시 도달 손절 우선)
+        ENG->>EX: position_book.apply(fill)
+        ENG->>EX: accounting.recompute(cash, position)
+        ENG->>EV: record(Execution·Trade·Position)
     end
-    ENG->>ENG: UTC 0/8/16 경계 통과 시 costs.funding.settle
-    Note over CLK,EV: 캔들 t — 닫는 순간(종가). 캔들이 확정됐으니 판단한다.
-    CLK->>ENG: advance() → now() = t 종가
-    ENG->>DF: candles(symbol, tf, up_to=t.close) — 미래 미노출
+    opt UTC 0/8/16 경계 통과
+        ENG->>CST: funding.settle(position, rate, price)
+    end
+    Note over CLK,EV: 캔들 t의 닫는 순간(close_time). 캔들이 확정됐으니 판단한다.
+    ENG->>CLK: advance()
+    ENG->>CLK: now()
+    CLK-->>ENG: t 종가
+    ENG->>DF: candles(symbol, tf, up_to=t.close)
+    DF-->>ENG: 확정 캔들 목록(미래 미노출)
     ENG->>EV: record(Feature/Indicator Snapshot)
     ENG->>AD: analyze(market_data[t], current_position)
-    AD-->>ENG: TradingSignal (또는 None)
-    ENG->>EV: record(Signal · Decision)
-    alt 진입·청산 신호
-        ENG->>ENG: sizing.size + ExposureLimit 한도 검사 → OrderRequest(float)
-        ENG->>ENG: pending ← OrderRequest (체결은 다음 t+1 시가)
+    AD-->>ENG: TradingSignal 또는 None
+    ENG->>EV: record(Signal·Decision)
+    opt 진입·청산 신호
+        ENG->>SIZ: risk_money.size(risk_per_trade, equity, stop_distance)
+        SIZ-->>ENG: quantity
+        ENG->>SIZ: exposure_limit.single_market(exposures, cap)
+        SIZ-->>ENG: bool
+        Note over ENG: OrderRequest(float) 생성 후 pending에 보관(다음 t+1 시가 체결)
         ENG->>EV: record(Outcome Bucket 후보)
     end
     Note over CLK,EV: t+1로 넘어가 같은 순서를 반복한다.
 ```
 
-읽는 법: 한 캔들에는 두 순간이 있고 `Engine`은 그 사이에서 `Clock`을 전진시킨다. 여는 순간에는 지난 캔들이 남긴
-일 — 직전 종가에 산출된 주문의 시가 체결과, 기존 포지션의 1분 트리거 검사, 정산 경계 펀딩 — 만 한다. 닫는 순간에는
-이번 캔들이 확정됐으니 지표를 `t`까지만 갱신하고 전략이 판단하며, 진입·청산이면 주문을 만들되 `pending`에 넣어 체결을
-다음 시가로 미룬다. 그래서 신호(종가)와 체결(다음 시가)이 절대 같은 캔들에 겹치지 않는다. 데이터·체결·기록은 전부
-어댑터를 거치고, `Engine`은 순서만 소유한다. `analyze`가 `None`을 내면 주문을 만들지 않고, 프리로드 구간이면 이
-종가 블록에서 만든 것은 버린다.
+읽는 법: 여기서 '두 순간'은 한 캔들 `t`가 가진 두 시각을 말한다. 하나는 캔들이 열리는 시각
+`Candle.open_time`이고, 다른 하나는 캔들이 닫히는 시각 `Candle.close_time`이다. 둘 다 시각(`datetime`)이며, 가격인
+시가·종가는 별도 필드 `Candle.open`·`Candle.close`다. `Engine`은 이 두 시각을 차례로 지나며 그때마다 `Clock`을
+전진시킨다.
+
+여는 순간(`Candle.open_time`)에는 지난 캔들이 남긴 일만 처리한다. 직전 종가에 산출해 둔 주문을 이 시가에 체결하고,
+기존 포지션의 손절·익절·청산 트리거가 발동했는지 검사하며, 펀딩 정산 경계를 지났으면 펀딩을 부과한다.
+
+닫는 순간(`Candle.close_time`)에는 캔들이 확정됐으니 이제 판단한다. 지표를 `t`까지만 갱신하고, 전략이 그 시점
+데이터로 신호를 내며, 진입·청산 신호면 주문을 만든다. 다만 그 주문은 바로 체결하지 않고 `pending`에 넣어 체결을
+다음 캔들 시가로 미룬다.
+
+그래서 신호는 종가에, 체결은 다음 시가에 일어나 둘이 절대 같은 캔들에 겹치지 않는다(look-ahead 방지). 데이터·체결·
+기록은 전부 포트 어댑터를 거치고, `Engine`은 순서만 소유한다. `analyze`가 `None`을 내면 주문을 만들지 않고, preload
+구간이면 이 종가에서 만든 신호·주문은 버린다.
 
 `walk_triggers`가 1분 하위 캔들을 훑는 순서와 발동 우선순위를 보인다.
 
@@ -2906,9 +2967,9 @@ flowchart TD
   캔들 말미가 아니라 정산 경계를 포함하는 하위 캔들에서 트리거 판정과 같은 시간 순서로 처리해 경계 직전 청산이
   펀딩을 건너뛰지 않게 한다.
 
-### §4.4.2 입력·실행 어댑터 (`DataFeed`·`Broker`·`Clock`·`CostModel`·`StrategyRegistry` 구현)
+### §4.4.2 입력·실행 포트 어댑터 (`DataFeed`·`Broker`·`Clock`·`CostModel`·`StrategyRegistry` 구현)
 
-`core-lib.ports`의 다섯 입력·실행 관심사 ABC를 backtest용으로 실체화한 어댑터. 저장(출력) 두 어댑터
+`core-lib.ports`의 다섯 입력·실행 포트(§4.3.4 ABC)를 backtest용으로 구현한 어댑터. 저장(출력) 두 포트 어댑터
 (`EvidenceSink`·`CatalogStore` 구현)는 §4.5가 확정한다. 다이어그램은 다섯 구체 어댑터와 그들이 실현하는 ABC,
 그리고 소비하는 `core-lib` 계산 모듈을 담는다. ABC와 `execution`·`costs`는 이미 정의된 참조 노드다.
 
@@ -2990,7 +3051,7 @@ classDiagram
   `execution.matcher.match`(§4.3.1)를 소비하며, `submit()`은 반드시 `execution.normalizer`를 통과해 float→Decimal
   단일 변환을 달성한다(어댑터 자체 캐스팅 금지). 기존 포지션의 캔들 내 트리거 판정(`resolve_triggers`)은 이 어댑터가
   아니라 `Engine`이 순수 `matcher`를 직접 호출해 수행하므로(환경 무관 로직은 포트를 거치지 않는다) 여기 두지 않고,
-  리버설의 두 체결 순서도 `Engine`이 소유한다(이 어댑터는 주문 하나의 원자 체결만 맡는다).
+  리버설의 두 체결 순서도 `Engine`이 소유한다(이 어댑터는 주문 하나의 atomic 체결만 맡는다).
 - **상속관계** — `Broker`(§4.3.4 ABC)를 실현한다.
 - **필드**
     - `cost_model` — 주입된 `CostModel` 어댑터. 체결에 수수료·슬리피지를 얹을 때 값의 출처다.
@@ -3000,7 +3061,7 @@ classDiagram
       `matcher.match`로 다음 캔들 시가에 체결해 `Fill`을 낸다(매수 슬리피지 +, 매도 −). 갭이면 시가 체결에 슬리피지를
       가중하고, 갭으로 마진이 부족하면 `matcher.recompute_qty_and_stop`으로 수량을 절삭한다(주문 거부가 아니라 절삭).
       리버설(청산+반대 진입)의 두 체결 순서와 청산 정산 후 마진 기준은 `Engine`이 청산 주문을 먼저 `submit`한 뒤 진입
-      주문을 `submit`하는 순서로 소유하며, 이 `submit`은 그중 주문 하나의 원자 체결만 맡는다.
+      주문을 `submit`하는 순서로 소유하며, 이 `submit`은 그중 주문 하나의 atomic 체결만 맡는다.
     - `open_orders()` : 미체결 주문 목록을 돌려준다.
     - `cancel(id)` : 미체결 주문을 취소한다.
 - **불변식** — `submit()`은 반드시 `execution.normalizer`를 통과한다(어댑터 독자 캐스팅 금지, 적합성 테스트로 강제).
@@ -3265,24 +3326,30 @@ sequenceDiagram
     participant CS as BacktestCatalogStore
     participant EV as BacktestEvidenceSink
     participant EVAL as eval (core-lib)
-    Note over ENG,EVAL: run 시작 — 채번·사전등록·파일 개설
-    ENG->>CS: register(run_meta) — backtest_db 시퀀스로 run_id 단독 발급
+    Note over ENG,EVAL: run 시작. 채번·사전등록·파일을 개설한다.
+    ENG->>CS: register(run_meta)
     CS-->>ENG: run_id
-    ENG->>EV: bind(run_id) — BT_<date>_<seq>_<name>.sqlite 개설
+    ENG->>EV: bind(run_id)
     EV-->>ENG: path
-    ENG->>EV: record(Backtest Run 로컬 사본 · Source Data Snapshot)
-    ENG->>CS: save_prereg(가설·주요 지표·성공/실패 기준)
-    Note over ENG,EVAL: run 진행 — 시점별 상세 적재(캔들 루프 매 순간)
+    ENG->>EV: record(Backtest Run 로컬 사본·Source Data Snapshot)
+    ENG->>CS: save_prereg(prereg)
+    Note over ENG,EVAL: run 진행. 시점별 상세를 캔들 루프 매 순간 적재한다.
     loop 각 확정 캔들
-        ENG->>EV: record(Feature/Indicator Snapshot · Signal · Decision · Execution · Trade · Position · Portfolio/PnL · Outcome Bucket)
+        ENG->>EV: record(Feature/Indicator Snapshot·Signal·Decision·Execution·Trade·Position·Portfolio/PnL·Outcome Bucket)
     end
-    Note over ENG,EVAL: finalize — 무결성·요약·해시·판정·메타 upsert
-    ENG->>EV: finalize(run_id) — 무결성 검사 · 차트 요약 · 정규화 Evidence 해시
+    Note over ENG,EVAL: finalize. 무결성·요약·해시·판정·메타를 upsert한다.
+    ENG->>EV: finalize(run_id)
     EV-->>ENG: evidence_hash
-    ENG->>EVAL: metrics · integrity · hard_gate · decision (판정 3단계)
-    EVAL-->>ENG: MetricSet · DecisionResult
-    ENG->>CS: upsert_summary(요약 · 판정 · evidence 경로 · 해시 · 무결성 상태)
-    ENG->>ENG: RunResult(run_id · path · hash · integrity_status · metrics · decision) 반환
+    ENG->>EVAL: integrity.check(evidence)
+    EVAL-->>ENG: IntegrityResult
+    ENG->>EVAL: metrics.compute(trades, equity)
+    EVAL-->>ENG: MetricSet
+    ENG->>EVAL: hard_gate.judge(metricset, thresholds, profile)
+    EVAL-->>ENG: GateResult
+    ENG->>EVAL: decision.decide(gateresult, prereg)
+    EVAL-->>ENG: DecisionResult
+    ENG->>CS: upsert_summary(summary)
+    Note over ENG: run()이 RunResult(run_id, path, hash, integrity_status, metrics, decision) 반환
 ```
 
 읽는 법: run은 채번으로 연다 — `CatalogStore`가 `backtest_db` 시퀀스로 `run_id`를 단독 발급해야 그 id로 SQLite
@@ -3332,13 +3399,13 @@ sequenceDiagram
 | §4.3 `sizing` | 생존 사이징 1R≤1% · Kelly 상한(Quarter~Half) · 노출·상관·방향 한도 · pct 경로 framework 비준수 플래그 |
 | §4.3 `ports` | 환경 차이는 포트로만 주입(7 ABC, 구현은 서비스) · look-ahead(`up_to` 경계) · wall-clock 금지 |
 | §4.3 `eval` | 성과 수식 표준 1곳·연율화 규약(일간 리샘플 후 √365) · 판정 3단계(무결성→Hard Gate→Decision) · 통과선 정본(형태 무관 구속/형태 의존)·프로파일 성숙도 |
-| §4.4 `Engine`·캔들 루프·1분 트리거 walk | 캔들 두 순간의 고정 순서가 look-ahead 방지(시가=지난 캔들 정산·트리거, 종가=이번 캔들 판단) · 시점 순서 `decision_ts < execution_ts`(종가 신호·다음 시가 체결, `pending` 한 칸 지연) · 캔들 내 트리거는 1분 집행 피드를 시간 순서로(동시 도달 손절 우선, 소급 금지) · 트레일링·1분 파리티 허용 편차 확정(거래별 상대 편차 `max(1 tick, 5bp)`·부호 평균 편차 `1bp`·소비 전략 없어 재유보) · 워밍업 프리로드 후 신호 discard · 결정성(Clock 주입·wall-clock 금지·동일 입력·seed→동일 Evidence) |
-| §4.4 입력·실행 어댑터(`BacktestDataFeed`·`BacktestBroker`·`BacktestClock`·`BacktestCostModel`·`BacktestStrategyRegistry`) | 환경 차이는 포트로만 주입(5 입력·실행 ABC의 backtest 구현) · look-ahead 구조적 배제(`DataFeed` `up_to` 경계) · Decimal 단일 변환 관문(`Broker.submit`이 `execution.normalizer` 통과, 어댑터 캐스팅 금지) · wall-clock 금지(`Clock`) · 비용은 값만 주입(수식은 `costs`, 실측 펀딩은 `DataFeed`) · 전략 목록 접근은 주입 포트(backtest 읽기 전용) |
+| §4.4 `Engine`·캔들 루프·1분 트리거 walk | 캔들 두 순간의 고정 순서가 look-ahead 방지(시가=지난 캔들 정산·트리거, 종가=이번 캔들 판단) · 시점 순서 `decision_ts < execution_ts`(종가 신호·다음 시가 체결, `pending` 한 칸 지연) · 캔들 내 트리거는 1분 집행 피드를 시간 순서로(동시 도달 손절 우선, 소급 금지) · 트레일링·1분 파리티 허용 편차 확정(거래별 상대 편차 `max(1 tick, 5bp)`·부호 평균 편차 `1bp`·소비 전략 없어 재유보) · 워밍업 preload 후 신호 discard · 결정성(Clock 주입·wall-clock 금지·동일 입력·seed→동일 Evidence) |
+| §4.4 입력·실행 포트 어댑터(`BacktestDataFeed`·`BacktestBroker`·`BacktestClock`·`BacktestCostModel`·`BacktestStrategyRegistry`) | 환경 차이는 포트로만 주입(5 입력·실행 포트 ABC의 backtest 구현) · look-ahead 구조적 배제(`DataFeed` `up_to` 경계) · Decimal 단일 변환 관문(`Broker.submit`이 `execution.normalizer` 통과, 어댑터 캐스팅 금지) · wall-clock 금지(`Clock`) · 비용은 값만 주입(수식은 `costs`, 실측 펀딩은 `DataFeed`) · 전략 목록 접근은 주입 포트(backtest 읽기 전용) |
 | §4.4 `ConfigLayer`(`RunConfig`) | 같은 config가 backtest·라이브에서 동일 검증(전략 파라미터 스키마·검증은 `StrategyConfig` 단일 소유, 여기서 재정의 금지) · `fill_timing` 기본 `next_bar` · 지표 계산 모드(auto/explicit/all)·트리거 세밀도(tf_candle/m1_subcandle) run 설정화 |
 | §4.4 `Harness` | 과최적화 방어를 여러 run으로 산출(표본 내/외 분리·워크포워드·몬테카를로·확률적 샤프·파라미터 스윕) — 단일 run `eval`이 아니라 Harness가 산출해 Hard Gate가 소비 · 고정 seed(결정성) · 스윕 `run_id`는 Engine이 카탈로그 시퀀스로 단독 발급 |
 | §4.5 `BacktestEvidenceSink` | 연구 데이터·운영 DB 분리(무거운 시점별 상세는 run별 SQLite, 파일 하나로 자기완결) · 결정성 해시=정렬 행의 정규화 직렬화(파일 바이트 아님·wall-clock 제외) · 스키마는 데이터베이스 설계(§5)가 확정, 이 절은 쓰기 계약만 |
 | §4.5 `BacktestCatalogStore` | 연구 데이터·운영 DB 분리(가벼운 메타만 전용 `backtest_db`) · `run_id` 단독 발급(채번 경합·파일명 충돌 차단) · 백테스트 전용(라이브·페이퍼 미사용) · 서비스 경계는 값 ID 참조(FK 미강제) · 스키마는 데이터베이스 설계(§5)가 확정, 이 절은 쓰기 계약만 |
 
-> 이 문서는 core-lib 클래스 뷰(§4.1~§4.3)와 실행 드라이버 클래스 뷰(§4.4~§4.5, Engine·입력 어댑터·설정·Harness와
+> 이 문서는 core-lib 클래스 뷰(§4.1~§4.3)와 backtest-service 클래스 뷰(§4.4~§4.5, Engine·포트 어댑터·설정·Harness와
 > 출력 저장 어댑터를 그 캔들 루프·1분 트리거 walk·run 저장 시퀀스와 함께)까지 확정했다. 이후 데이터베이스 설계(§5)가
 > 각 DB의 ERD·필드를, 부록이 채택·대사·회귀 절차를 이 뼈대에 매단다.
