@@ -212,7 +212,7 @@ core-lib은 특정 DB에 묶이지 않는다. 이 방식은 현행 signal-servic
 | 요소                 | 유형             | 책임                                                                                                                           | 경계 (하지 않음)                                                                                                       | 소비 (→ §1.1)                                                                           | 패키징                                                                                                                                         |
 | ------------------ | -------------- | ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | `core-lib`         | 설치형 공유 패키지     | 도메인 표준(값 타입·금액 정밀도·지표·전략 판단 계약·사이징·비용·실행 수식·성과 평가·판정·포트 경계·Adaptee 생성/파라미터 해석)의 유일한 구현처                                      | 실행 드라이버 아님(캔들 루프·읽기·저장·wall-clock·IO 없음); 특정 DB 직접 의존 없음(레지스트리도 주입 포트 경유); 서비스 코드 import 안 함                     | 없음 — 의존 그래프의 바닥(내부 계층 방향은 §2.1 의존 다이어그램)                                              | monorepo `services/core-lib/`; 단일 설치형 패키지 `core_lib`(하이픈 없음 → 네임스페이스 충돌·`sys.path` 조작 제거); backtest는 editable·실거래 signal/wallet은 버전 고정으로 설치 |
-| `backtest-service` | 신규 서비스         | 도메인 로직을 `core_lib`에서만 가져오는(다른 서비스 import 안 함) 결정적 실행 드라이버·입출력 오케스트레이터(사전등록·채번·워밍업 preload·캔들 루프·데이터 피드 push·체결·2계층 저장·상위 검증) | 전략 판단·지표·사이징·비용·실행 규칙 자체 미보유(전부 `core_lib` 호출); 라이브 인프라(큐·폴링·HTTP·상태 복구) 없음; 전략 파라미터 스키마·검증 미소유(run 설정만 소유)      | `core-lib`(import); `crypto_data`·Evidence SQLite·`backtest_db`·`signal_db`(전부 포트 경유) | monorepo `services/backtest-service/`; core-lib editable 의존; 독립 배포; 포트의 backtest 구현(어댑터) 소유                                                 |
+| `backtest-service` | 신규 서비스         | 도메인 로직을 `core_lib`에서만 가져오는(다른 서비스 import 안 함) 결정적 실행 드라이버·입출력 오케스트레이터(사전등록·run_id 발급·워밍업 preload·캔들 루프·데이터 피드 push·체결·2계층 저장·상위 검증) | 전략 판단·지표·사이징·비용·실행 규칙 자체 미보유(전부 `core_lib` 호출); 라이브 인프라(큐·폴링·HTTP·상태 복구) 없음; 전략 파라미터 스키마·검증 미소유(run 설정만 소유)      | `core-lib`(import); `crypto_data`·Evidence SQLite·`backtest_db`·`signal_db`(전부 포트 경유) | monorepo `services/backtest-service/`; core-lib editable 의존; 독립 배포; 포트의 backtest 구현(어댑터) 소유                                                 |
 | `signal-service`   | 기존 서비스 (유지·채택) | 확정 캔들마다 지표 증분(O(1)) 직접 계산 + Adapter Manager로 Adaptee 생성·판단 호출 → `wallet-service` 큐로 신호 전달                                    | 이 설계 단계 미변경(채택 단계에서만 내부 구현→`core_lib` 치환, 동작 불변); 판정 루프 안 돎(라이브 Evidence는 연구 피드백만)                               | 채택 후 `core-lib`(import); `crypto_data`(읽기·지표 계산); `signal_db`                         | monorepo `services/signal-service/`(채택 시 이관); 독립 배포; 실거래는 core-lib 버전 고정; 채택 전 기존 리포가 프로덕션·이식 원천; 채택은 무중단 re-export shim                    |
 | `wallet-service`   | 기존 서비스 (유지·채택) | 신호 큐 소비 → 사이징·실행·비용 호출로 체결·리스크·킬스위치; 체결·포지션·회계를 자기 운영 DB에 기록                                                                 | 이 설계 단계 미변경(채택 단계에서 체결 시점 즉시→다음 캔들 시가 전환, 회귀 ~1279건 필요); 라이브 인프라 백테스트로 미이관                                       | 채택 후 `core-lib`(import); `wallet_db`                                                  | monorepo `services/wallet-service/`(채택 시 이관); 독립 배포; 실거래는 core-lib 버전 고정; 채택 전 기존 리포가 프로덕션·이식 원천; 채택은 re-export shim                        |
 | `OHLCV 수집기`        | 내부 컴포넌트        | 거래소 확정 캔들 OHLCV를 `crypto_data`에 적재(확정 캔들마다 1행·무조건)                                                                           | 지표 미생성(계산은 signal·backtest가 `core_lib`로); 진행 중 캔들 미적재(look-ahead 방지의 데이터 층 근거); 단일 심볼 Binance 선물만(Upbit 현물 범위 밖) | 거래소 REST·WebSocket(입력); `crypto_data`(쓰기); `config_db`(활성 심볼 읽기)                      | 외부 collector의 리포 내부 이관분; 과거 구간은 기존 backfill 재사용 + `crypto_data` 보존 연장(예: 2000일)                                                             |
@@ -622,7 +622,7 @@ flowchart TD
 | 컴포넌트 | 책임 | core_lib 소비 지점 | 구성 (§2 트리) |
 |---|---|---|---|
 | `ConfigLayer` | 백테스트 run 설정(OHLCV·funding 소스/구간·`CostModel` 값·거래소 규칙·실행/리스크·파라미터 스윕·지표 계산 모드·프로파일 선택)의 pydantic 스키마·검증 후 Engine 주입 | 전략 파라미터 스키마·검증은 소유하지 않고 선택값(전략 id·파라미터 값·symbol·timeframe)만 담아 `Adapter Manager`로 넘긴다 — 해석·검증은 `StrategyConfig` 소관(같은 config가 backtest·라이브에서 동일 검증) | `config/run_config.py` |
-| `Engine` | 도메인 로직을 `core_lib`에서만 가져오는(다른 서비스 import 안 함) 결정적 캔들 루프·입출력 오케스트레이터: 사전등록·채번·워밍업 preload·피드 push·체결·2계층 저장·finalize·eval 호출; 워밍업 구간 신호 discard, 동일 입력·seed → 동일 Evidence | `Adapter Manager`로 Adaptee 생성, `StrategyAdapter`의 `analyze` 호출, `sizing`으로 수량 산정, `execution`으로 포지션 장부·회계, `costs.funding.settle`로 경계 펀딩 정산, `eval`로 판정; 데이터·체결·시계·기록은 전부 포트 어댑터 경유하고, 비용도 값(rate·fallback)은 CostModel·DataFeed 포트에서 받되 정산 수식 `costs`는 Engine이 직접 호출한다(체결 규칙 자체는 Broker 어댑터가 `execution.matcher` 소비) | `engine/engine.py` |
+| `Engine` | 도메인 로직을 `core_lib`에서만 가져오는(다른 서비스 import 안 함) 결정적 캔들 루프·입출력 오케스트레이터: 사전등록·run_id 발급·워밍업 preload·피드 push·체결·2계층 저장·finalize·eval 호출; 워밍업 구간 신호 discard, 동일 입력·seed → 동일 Evidence | `Adapter Manager`로 Adaptee 생성, `StrategyAdapter`의 `analyze` 호출, `sizing`으로 수량 산정, `execution`으로 포지션 장부·회계, `costs.funding.settle`로 경계 펀딩 정산, `eval`로 판정; 데이터·체결·시계·기록은 전부 포트 어댑터 경유하고, 비용도 값(rate·fallback)은 CostModel·DataFeed 포트에서 받되 정산 수식 `costs`는 Engine이 직접 호출한다(체결 규칙 자체는 Broker 어댑터가 `execution.matcher` 소비) | `engine/engine.py` |
 | `Harness` | 단일 run 밖 상위 검증(표본 내/외 분리·워크포워드·몬테카를로·확률적 샤프·파라미터 스윕) 오케스트레이션, 카탈로그로 run 집합 비교 | `eval`로 집계 판정, `CatalogStore` 어댑터로 `backtest_db` 읽기; 개별 run 구동은 `Engine` 재사용(스윕 run_id는 Engine이 카탈로그 시퀀스로 단독 발급) | `harness/harness.py` |
 
 **포트 목록 확정 (7종).** 무엇을 포트로 뺄지 표준은 미리 정하지 않았다. 그 목록을 여기서 확정한다.
@@ -2794,7 +2794,7 @@ classDiagram
 #### `Engine`
 
 - **개요** — 확정 캔들을 시간 순서로 돌리는 결정적 실행 드라이버이자 입출력 오케스트레이터.
-- **책임** — 사전등록·채번·워밍업 preload·피드 push·전략 판단·사이징·체결·2계층 저장·finalize·판정 호출을
+- **책임** — 사전등록·run_id 발급·워밍업 preload·피드 push·전략 판단·사이징·체결·2계층 저장·finalize·판정 호출을
   한 흐름으로 엮는다. 도메인 로직(전략·지표·사이징·비용 수식·체결 규칙·평가)은 소유하지 않고 전부 `core-lib`을
   호출해 쓰며, 데이터·체결·시각·기록·전략 목록은 전부 주입된 포트 어댑터로만 접근한다. 캔들 루프의 두 순간 순서와
   1분 트리거 walk의 순서를 소유한다(순서 자체가 look-ahead 방지 장치라 `Engine`이 소유해야 한다).
@@ -3201,7 +3201,7 @@ classDiagram
 - **개요** — 단일 run 밖 상위 검증 오케스트레이터.
 - **책임** — 표본 내/외 분리·워크포워드·몬테카를로·확률적 샤프·파라미터 스윕을 여러 run으로 산출하고 카탈로그로
   비교한다. 개별 run은 `Engine`을 재사용하며, 스윕 run들의 `run_id`는 각 `Engine`이 카탈로그 시퀀스로 단독 발급한다
-  (채번 경합·파일명 충돌 차단). 산출한 과최적화 방어 증거는 단일 run의 Hard Gate가 소비한다.
+  (run_id 발급 경합·파일명 충돌 차단). 산출한 과최적화 방어 증거는 단일 run의 Hard Gate가 소비한다.
 - **상속관계** — 없음.
 - **필드** — `catalog`는 주입된 `CatalogStore` 어댑터로, run 집합을 `backtest_db`에서 비교·집계할 때 읽는다.
 - **메서드**
@@ -3231,7 +3231,7 @@ ER 다이어그램으로 확정한다 — 이 절은 각 클래스가 그 스키
 - **결정성 Evidence 해시** — Evidence 해시는 SQLite 파일 바이트가 아니라 정렬된 행의 정규화 직렬화(wall-clock 제외)로
   낸다. 같은 입력·같은 seed의 두 run이 같은 해시를 내야 한다.
 - **`run_id` 단독 발급** — `run_id`는 `CatalogStore`가 `backtest_db` 시퀀스로 단독 발급해 SQLite 파일명에 넣는다
-  (병렬 스윕의 채번 경합·파일명 충돌 차단).
+  (병렬 스윕의 run_id 발급 경합·파일명 충돌 차단).
 - **카탈로그는 백테스트 전용** — `CatalogStore`는 backtest만 쓰고 라이브·페이퍼는 쓰지 않는다.
 - **연구 데이터·운영 DB 분리** — 무거운 상세는 run별 SQLite에, 가벼운 메타만 전용 `backtest_db`에 둔다(운영
   `wallet_db`·`signal_db`에 넣지 않는다).
@@ -3312,7 +3312,7 @@ classDiagram
       공식 평가에서 근거 부족으로 제외된다. 상태 값·컬럼은 데이터베이스 설계(§5)가 확정하고, 이 스캔·전이 행위는
       이 메서드가 소유한다.
 - **불변식**
-    - **`run_id` 단독 발급** — `run_id`는 이 클래스가 `backtest_db` 시퀀스로 단독 발급한다(채번 경합·파일명 충돌
+    - **`run_id` 단독 발급** — `run_id`는 이 클래스가 `backtest_db` 시퀀스로 단독 발급한다(run_id 발급 경합·파일명 충돌
       차단).
     - **백테스트 전용** — 라이브·페이퍼는 이 포트를 쓰지 않는다.
     - **서비스 경계** — 다른 서비스 참조는 값 타입 ID로만 하고 FK를 강제하지 않는다(요약·사전등록·태그는 `run_id`로
@@ -3326,7 +3326,7 @@ sequenceDiagram
     participant CS as BacktestCatalogStore
     participant EV as BacktestEvidenceSink
     participant EVAL as eval (core-lib)
-    Note over ENG,EVAL: run 시작. 채번·사전등록·파일을 개설한다.
+    Note over ENG,EVAL: run 시작. run_id 발급·사전등록·파일을 개설한다.
     ENG->>CS: register(run_meta)
     CS-->>ENG: run_id
     ENG->>EV: bind(run_id)
@@ -3352,13 +3352,15 @@ sequenceDiagram
     Note over ENG: run()이 RunResult(run_id, path, hash, integrity_status, metrics, decision) 반환
 ```
 
-읽는 법: run은 채번으로 연다 — `CatalogStore`가 `backtest_db` 시퀀스로 `run_id`를 단독 발급해야 그 id로 SQLite
-파일 이름을 지어 병렬 스윕에서도 파일명이 겹치지 않는다. 그다음 사전등록을 먼저 적어(결과를 알기 전에 선언) 사후
-합리화를 막는다. run이 도는 동안 시점별 상세는 전부 `EvidenceSink`가 SQLite에 적고, 가벼운 메타만 나중에
-`CatalogStore`가 `backtest_db`에 남긴다. finalize에서 `EvidenceSink`가 무결성·요약·정규화 해시를 만들고, `eval`이
-판정 3단계를 돌린 뒤, `CatalogStore`가 요약·판정과 Evidence 경로·해시·무결성 상태를 메타에 upsert한다. 그래서
-상세는 SQLite에, 검색·비교용 요약은 `backtest_db`에 남아 두 계층이 정합한다. 각 저장소의 실제 필드·타입은 여기서
-정하지 않고 데이터베이스 설계(§5)가 ERD로 확정한다.
+읽는 법: 한 run은 자기 번호(`run_id`)부터 발급받는 것으로 시작한다. `CatalogStore`가 `backtest_db`의 시퀀스에서
+겹치지 않는 `run_id`를 하나 발급하는데, 이 번호가 가장 먼저 있어야 그 번호로 SQLite 파일 이름을 지을 수 있고,
+그래야 여러 run을 동시에 돌리는 병렬 스윕에서도 파일명이 서로 겹치지 않는다. 번호를 받은 다음에는 사전등록을 먼저
+적는다. 결과를 알기 전에 가설·기준을 선언해 두어, 나중에 결과를 보고 말을 바꾸는 사후 합리화를 막기 위해서다. run이
+도는 동안 시점별 상세는 전부 `EvidenceSink`가 SQLite에 적고, 가벼운 메타만 나중에 `CatalogStore`가 `backtest_db`에
+남긴다. finalize에서는 `EvidenceSink`가 무결성 검사·요약·정규화 해시를 만들고, `eval`이 판정 3단계를 돌린 뒤,
+`CatalogStore`가 요약·판정과 Evidence 경로·해시·무결성 상태를 메타에 기록한다. 그래서 무거운 상세는 SQLite에,
+검색·비교용 요약은 `backtest_db`에 남아 두 계층이 정합한다. 각 저장소의 실제 필드·타입은 여기서 정하지 않고
+데이터베이스 설계(§5)가 ERD로 확정한다.
 
 ---
 
@@ -3404,7 +3406,7 @@ sequenceDiagram
 | §4.4 `ConfigLayer`(`RunConfig`) | 같은 config가 backtest·라이브에서 동일 검증(전략 파라미터 스키마·검증은 `StrategyConfig` 단일 소유, 여기서 재정의 금지) · `fill_timing` 기본 `next_bar` · 지표 계산 모드(auto/explicit/all)·트리거 세밀도(tf_candle/m1_subcandle) run 설정화 |
 | §4.4 `Harness` | 과최적화 방어를 여러 run으로 산출(표본 내/외 분리·워크포워드·몬테카를로·확률적 샤프·파라미터 스윕) — 단일 run `eval`이 아니라 Harness가 산출해 Hard Gate가 소비 · 고정 seed(결정성) · 스윕 `run_id`는 Engine이 카탈로그 시퀀스로 단독 발급 |
 | §4.5 `BacktestEvidenceSink` | 연구 데이터·운영 DB 분리(무거운 시점별 상세는 run별 SQLite, 파일 하나로 자기완결) · 결정성 해시=정렬 행의 정규화 직렬화(파일 바이트 아님·wall-clock 제외) · 스키마는 데이터베이스 설계(§5)가 확정, 이 절은 쓰기 계약만 |
-| §4.5 `BacktestCatalogStore` | 연구 데이터·운영 DB 분리(가벼운 메타만 전용 `backtest_db`) · `run_id` 단독 발급(채번 경합·파일명 충돌 차단) · 백테스트 전용(라이브·페이퍼 미사용) · 서비스 경계는 값 ID 참조(FK 미강제) · 스키마는 데이터베이스 설계(§5)가 확정, 이 절은 쓰기 계약만 |
+| §4.5 `BacktestCatalogStore` | 연구 데이터·운영 DB 분리(가벼운 메타만 전용 `backtest_db`) · `run_id` 단독 발급(run_id 발급 경합·파일명 충돌 차단) · 백테스트 전용(라이브·페이퍼 미사용) · 서비스 경계는 값 ID 참조(FK 미강제) · 스키마는 데이터베이스 설계(§5)가 확정, 이 절은 쓰기 계약만 |
 
 > 이 문서는 core-lib 클래스 뷰(§4.1~§4.3)와 backtest-service 클래스 뷰(§4.4~§4.5, Engine·포트 어댑터·설정·Harness와
 > 출력 저장 어댑터를 그 캔들 루프·1분 트리거 walk·run 저장 시퀀스와 함께)까지 확정했다. 이후 데이터베이스 설계(§5)가
