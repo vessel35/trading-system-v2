@@ -1229,7 +1229,8 @@ classDiagram
     - `gap_filled` — 다음 캔들 시가가 보호 수준 너머로 열려(갭) 시가에 체결됐으면 TRUE. 갭만큼 불리한 것은
       슬리피지가 아니라 시장이 그렇게 열린 것이라 기준가에 이미 반영되며, 갭이었다는 사실은 이 플래그로만 남는다.
     - `qty_truncated` — 갭으로 마진이 부족해 수량을 깎아 체결했으면 TRUE(주문 거부가 아니라 절삭이라는 사실의
-      기록). 두 플래그 모두 `Matcher`만 아는 사실이라 체결에 실어 Evidence까지 전달한다.
+      기록). 두 플래그 모두 `Matcher`만 아는 사실이라 체결에 실어 Evidence까지 전달하며, **기본값은 FALSE**라 갭·
+      절삭 개념이 없는 라이브·페이퍼의 체결 생성 경로는 변경 없이 유지된다.
 - **메서드** — 없음(순수 값).
 - **불변식** — 없음.
 
@@ -2576,7 +2577,9 @@ classDiagram
 - **개요** — 판정 전 무결성 검사(판정 3단계의 첫 단계).
 - **책임** — 판정 전에 여섯 가지를 검산하며, 하나라도 실패하면 `diagnostic_only`로 **멈춰서** 데이터·기록을 고쳐
   재실행한다 — 파이프라인의 유일한 정지다. 지표의 벡터화↔증분 일치는 run-time 검사가 아니라 §4.1.2의 빌드-타임
-  일치 테스트가 담당하므로 이 여섯 검사에는 넣지 않는다.
+  일치 테스트가 담당하므로 이 여섯 검사에는 넣지 않는다. 트리거 세밀도가 1분 하위 캔들인 run에서는 일곱 번째
+  검사(트레일링 파리티)가 조건부로 더해진다 — 비교 대상이 파일 밖(라이브 경로)이라 실행 시점에 산출해 기록하는
+  검사이며(§4.4의 파리티 규약), 실패는 다른 검사와 동일하게 정지시킨다.
 - **상속관계** — 없음(모듈).
 - **필드** — 없음(모듈).
 - **메서드**
@@ -2853,21 +2856,29 @@ classDiagram
       판정하고(발동하면 신호 없는 판단으로 Decision(`signal_id` 비움)과 Execution·Trade를 기록한다), UTC 정산 경계를
       지나면 `costs.funding.settle`로 펀딩을 부과한다.
     - `step_close(t)` : 캔들 `t`가 닫히는 순간의 일. `Clock`이 `t` 종가로 전진한 뒤 호출된다. `DataFeed`로 `up_to =
-      t.close`까지만 받아 지표를 갱신하고 Feature/Indicator Snapshot을 기록한 뒤, `Adaptee.analyze(market_data[t],
+      t.close`까지만 받아 지표를 갱신하고 Feature/Indicator Snapshot과 캔들 종가로 마킹한 Position·Portfolio/PnL
+      행(캔들당 1회)을 기록한 뒤, `Adaptee.analyze(market_data[t],
       current_position)`로 `TradingSignal`을 받아 Signal·Decision을 기록한다. 진입·청산 신호면 `sizing`으로 수량을
       산출하고 `ExposureLimit`으로 한도를 검사한 뒤 float 주문 요청 `OrderRequest`를 만들어 `pending`에 넣는다(체결은
       다음 `step_open`). preload 구간이면 여기서 만든 신호·주문은 버린다. 진입 후보는 노출 한도 등에 막힌 경우까지
-      Candidate Event로, 사전 선언 규칙이 잡은 놓친 기회는 Missed Opportunity로 함께 기록하고, 캔들 종가로 마킹한
-      Position·Portfolio/PnL 행을 캔들당 한 번 적는다.
+      Candidate Event로, 사전 선언 규칙이 잡은 놓친 기회는 Missed Opportunity로 함께 기록한다.
     - `walk_triggers(position, subcandles)` : `t` 구간의 1분 하위 캔들을 시간 순서로 훑어 첫 발동을 찾는다. 대상은
       포지션의 체결 시점 이후 하위 캔들이다 — 체결 하위 캔들 이전은 소급 검사하지 않고, 방금 체결된 포지션은 자기
       체결 하위 캔들 다음 하위 캔들부터 검사 대상이다(legacy `skip_first_sl_check`와 같은 취지). 각 하위 캔들에서
       `Engine`이 `execution.matcher.resolve_triggers`(§4.3.1)를 `cost_model`과 함께 직접 호출해 손절·익절·청산을
       판정하며(트리거 판정은 환경 무관 순수 로직이라 포트를 거치지 않는다), 같은 하위 캔들 안 동시 도달은 손절
-      우선이다. 첫 발동 하위 캔들의 `Fill`을 돌려주고 없으면 `None`이다. 아래 트리거 walk 규약이 활성/유보 조건을
+      우선이다. 첫 발동 하위 캔들의 `Fill`을 돌려주고 없으면 `None`이다. **시각 부여 규약** — 트리거 판단의
+      `decision_ts`와 기록되는 발동 하위 캔들 시각(`trigger_subcandle_ts`)은 그 하위 캔들의 **여는 시각**, 체결의
+      `execution_ts`는 같은 하위 캔들의 **닫는 시각**이다(1분 뒤라 `decision_ts < execution_ts` 엄격 부등이 항상
+      성립하고, 구현마다 관례가 갈려 해시가 흔들리는 일을 막는다). TF 캔들 판정 모드(`tf_candle`)에서는 판단 = 그
+      TF 캔들의 여는 시각, 체결 = 닫는 시각이고 하위 캔들 시각은 비운다. 아래 트리거 walk 규약이 활성/유보 조건을
       정한다.
     - `finalize()` : 캔들 루프 종료 후 열린 포지션을 마지막 확정 캔들 종가로 강제 정리해
-      `Fill(exit_reason=END_OF_DATA)`로 남긴다(그래서 정상 종료 run에 미청산 거래 행이 남지 않는다). 그다음
+      `Fill(exit_reason=END_OF_DATA)`로 남긴다(그래서 정상 종료 run에 미청산 거래 행이 남지 않는다). 이 정리도
+      별도 경로가 아니라 여느 청산처럼 `OrderRequest(reduce_only=TRUE, close_position=TRUE)`를 `Broker.submit`으로
+      태워 Decimal 단일 변환 관문을 지나며, 기준가는 마지막 확정 캔들 종가이고 수수료·슬리피지는 일반 청산과
+      동일하게 부과된다("비용 0 가정" 금지). 이 체결만은 대응 판단(Decision) 없이 남는 유일한 체결이다. 마지막 격자
+      행(포지션·자산곡선)은 정리 전 상태이고, 종료 자산(final_equity)은 정리 반영 후 값이다. 그다음
       `EvidenceSink.finalize`로 결정적 파생(차트 요약·손실/급등 구간·결과 유형 분류·조건 서명·조건별 기대값)과
       무결성 검사·정규화 Evidence 해시를 만들고, `eval`의 성과 산출·판정 3단계를 호출한 뒤 `CatalogStore`에
       요약·판정·해시를 기록한다(§4.5의 저장 시퀀스. Evidence 경로는 `bind` 직후 이미 기록돼 있다). 반환은
@@ -3239,7 +3250,7 @@ classDiagram
     }
     class Engine { }
     Harness ..> Engine : N run 드라이브
-    Harness ..> HardGate : 과최적화 게이트 적용
+    Harness ..> Thresholds : 과최적화 통과선 참조·적용
 ```
 
 > `HardGate`는 §4.3.5가 정의한다. 과최적화 방어(표본 내/외·PSR·워크포워드·몬테카를로)는 여러 run·분할에 걸친
@@ -3339,8 +3350,9 @@ classDiagram
     - `path` — 이 run의 SQLite 파일 경로(`run_id`로 이름 붙인 `BT_<date>_<seq>_<name>.sqlite`).
     - `sqlite` — 그 파일에 대한 쓰기 연결.
 - **메서드**
-    - `bind(run_id)` : `run_id`로 SQLite 파일 이름을 짓고 열어 경로를 돌려준다. 이후 `record`가 이 파일에 적으며,
-      Evidence 경로는 이 시점에 run 인덱스에 기록된다(finalize를 기다리지 않는다 — 크래시 잔여도 파일 위치가 남는다).
+    - `bind(run_id)` : `run_id`로 SQLite 파일 이름을 짓고 열어 경로를 돌려준다. 이후 `record`가 이 파일에 적는다.
+      경로 자체는 `run_id`의 순수 함수라 `register`가 발급과 동시에 이미 run 인덱스에 채웠고, `bind`는 그 이름으로
+      파일을 연다(크래시 잔여도 파일 위치가 남는다).
     - `record(entity)` : 시점별 Entity 하나를 run SQLite에 적는다. run 진행 중 여러 번 호출된다.
     - `finalize(run_id)` : 결정적 파생(차트 요약·손실/급등 구간·결과 유형 분류·조건 서명·조건별 기대값)과 무결성
       검사를 만들고 정규화 Evidence 해시를 산출해 돌려준다.
@@ -3368,7 +3380,11 @@ classDiagram
     - `save_prereg(prereg)` : run 실행 전에 선언한 가설·주요 지표·성공/실패 기준을 기록한다(사후 합리화를 막는
       감사 기준).
     - `register(run_meta)` : `run_id`를 `backtest_db` 시퀀스로 단독 발급하고 run 인덱스 헤더를 연다. 반환은
-      발급된 `run_id`다.
+      발급된 `run_id`다. `run_meta`는 재현 입력 전부를 담는다 — 전략 신원 사본(`strategy_name`·`strategy_version`,
+      레지스트리 조회), `StrategyConfig`가 해석을 마친 확정 파라미터(`params_json`)와 스키마 버전, 실행 코드
+      버전(`engine_version`·`core_lib_version`), 그리고 Engine이 재현 입력을 카탈로그 규칙(§5.2.2)으로 직렬화해 낸
+      `config_hash`. **그래서 config 해석은 register보다 먼저다.** Evidence 경로는 `run_id`의 순수 함수
+      (`<run_id>.sqlite` 상대 경로)라 발급과 동시에 register가 채운다.
     - `upsert_summary(summary)` : 성과·판정 요약을 run 인덱스·요약·태그에 upsert한다(+ Evidence 해시·무결성 상태.
       경로는 `bind` 직후 이미 기록돼 있다). run을 열지 않고 순위·필터·집계에 쓰도록 SQLite 상세에서 산출한 값을
       복제한다.
@@ -3430,8 +3446,10 @@ sequenceDiagram
 남긴다. finalize에서는 `EvidenceSink`가 결정적 파생(차트 요약·손실/급등 구간·결과 유형 분류·조건 서명·조건별 기대값)과
 무결성 검사·정규화 해시를 만들고, `eval`이 판정 3단계를 돌린 뒤,
 `CatalogStore`가 요약·판정과 Evidence 경로·해시·무결성 상태를 메타에 기록한다. 그래서 무거운 상세는 SQLite에,
-검색·비교용 요약은 `backtest_db`에 남아 두 계층이 정합한다. 각 저장소의 실제 필드·타입은 여기서 정하지 않고
-데이터베이스 설계(§5)가 ERD로 확정한다.
+검색·비교용 요약은 `backtest_db`에 남아 두 계층이 정합한다. 판정 1단계의 무결성 결과는 sink의 finalize가 기록한
+검사 행이 정본이며, Engine의 `integrity.check` 소비는 같은 순수 검사를 그 기록 위에서 확인하는 것이라 결과가 다를
+수 없다 — 다르면 그 자체가 결정성 결함이다. 각 저장소의 실제 필드·타입은 여기서 정하지 않고 데이터베이스
+설계(§5)가 ERD로 확정한다.
 
 ---
 
