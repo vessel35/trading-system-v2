@@ -976,6 +976,8 @@ classDiagram
         +datetime timestamp
         +bool reduce_only
         +Optional~ExitReason~ exit_reason
+        +bool gap_filled
+        +bool qty_truncated
     }
     class Position {
         +Optional~str~ wallet_id
@@ -1224,6 +1226,10 @@ classDiagram
     - `liquidity ∈ {maker, taker}` — 수수료율을 가르는 구분. 강제청산은 시장가로 집행되므로 taker.
     - `exit_reason` — 청산·손절 등으로 발생한 체결에만 채우고, 진입 체결이면 NULL.
     - `reduce_only` — 이 체결이 포지션을 줄이는지 표시한다. 강제청산은 항상 TRUE.
+    - `gap_filled` — 다음 캔들 시가가 보호 수준 너머로 열려(갭) 시가에 체결됐으면 TRUE. 갭만큼 불리한 것은
+      슬리피지가 아니라 시장이 그렇게 열린 것이라 기준가에 이미 반영되며, 갭이었다는 사실은 이 플래그로만 남는다.
+    - `qty_truncated` — 갭으로 마진이 부족해 수량을 깎아 체결했으면 TRUE(주문 거부가 아니라 절삭이라는 사실의
+      기록). 두 플래그 모두 `Matcher`만 아는 사실이라 체결에 실어 Evidence까지 전달한다.
 - **메서드** — 없음(순수 값).
 - **불변식** — 없음.
 
@@ -2199,7 +2205,8 @@ classDiagram
       인자로 받아야 곱이 성립하며, 이 값이 곧 `Trade.r0`다). 두 예외가 있다 —
       고정 손절이 없는 전략은 트레일링 계산기의 초기 위험 `R0 = clamp(1.5×ATR/entry, 0.45%~0.65%) × entry`를
       최초 보호 스탑으로 채택해 `Trade.r0`에 기록하고, 최초 스탑을 아예 정의할 수 없는 거래는 R 기반 지표
-      (SQN·기대값·파산확률)에서 제외하고 그 건수를 Evidence에 기록한다.
+      (SQN·기대값·파산확률)에서 제외하고 그 건수를 카탈로그 요약의 제외 건수(`r_excluded_count`)에 남긴다
+      (Evidence에서는 최초 위험 `r0`가 NULL인 거래 수로 파생된다).
     - `equity(cash, used_margin, unrealized)` : `cash + 사용 마진 + 미실현 손익`(신호 캔들 종가 마크). 회계
       항등식의 equity와 같은 개념이며, 사이징 시점의 값은 `float` 스냅샷이다.
 - **불변식** — 거래당 위험 `1R ≤ 0.01 × Equity`(계좌 1%)를 넘지 않는다. 파산확률이 0.1%를 넘으면
@@ -2639,7 +2646,7 @@ classDiagram
 - **책임** — 통과 여부와, 어느 단계(A/B)에서 무엇이 미달·회귀했는지를 담는다.
 - **상속관계** — 없음(결과 값 타입).
 - **필드** — `passed`(통과 여부), `stage`(Hard Gate A/B), `failed`(미달 통과선 목록), `verdict`(`pass`·
-  `not_promotable`·`established 회귀` 중).
+  `not_promotable`·`established_regression` 중 — 저장 문자열은 카탈로그 요약의 `gate_verdict`와 동일하다).
 - **메서드** — 없음(순수 값).
 - **불변식** — 미달·회귀 판정은 종료가 아니라 개선 루프(forensics)로 가는 경로를 뜻한다(`HardGate` 참조).
 
@@ -2837,16 +2844,21 @@ classDiagram
       해 지표 상태를 워밍업한다. 이 구간에서 만들어진 신호는 버린다(discard). 반환은 워밍업에 쓴 캔들 목록이다.
     - `step_open(t)` : 캔들 `t`가 열리는 순간의 일. `Clock`이 `t` 시가에 있을 때 호출된다. `pending`의 주문을 담긴
       순서대로 `Broker.submit`해 `t` 시가에 체결하고 각 체결마다 `position_book.apply`·`accounting.recompute`로 장부·
-      항등식을 갱신하며 Execution·Position·Portfolio/PnL을 기록한 뒤 `pending`을 비운다. 리버설이면 청산 주문을 먼저
+      항등식을 갱신하며 Execution을 기록한 뒤 `pending`을 비운다(포지션·자산곡선 행은 체결마다가 아니라 캔들마다
+      종가 마킹 시점에 한 번 적는다 — 기록 격자 규약은 데이터베이스 설계 §5 소유). 체결로 거래가 열리거나 닫히면 그
+      시점의 지표·국면을 Trade Feature Snapshot(진입·청산과 보유 중 최대 불리/유리 편차 시점)으로 함께 남긴다. 리버설이면 청산 주문을 먼저
       체결·정산한 다음 진입 주문을 체결하므로 진입의 마진 가용성은 청산 정산 후 계좌 상태 기준이 된다(리버설의 두
       체결 순서는 `Engine`이 이 순서로 소유하고, 각 체결의 atomic 규칙·마진 부족 시 수량 절삭은 `matcher`가 소유한다).
       그다음 `t` 구간의 1분 하위 캔들에 대해 `walk_triggers`로 기존 포지션의 손절·트레일링·익절·청산·강제청산을
-      판정하고, UTC 정산 경계를 지나면 `costs.funding.settle`로 펀딩을 부과한다.
+      판정하고(발동하면 신호 없는 판단으로 Decision(`signal_id` 비움)과 Execution·Trade를 기록한다), UTC 정산 경계를
+      지나면 `costs.funding.settle`로 펀딩을 부과한다.
     - `step_close(t)` : 캔들 `t`가 닫히는 순간의 일. `Clock`이 `t` 종가로 전진한 뒤 호출된다. `DataFeed`로 `up_to =
       t.close`까지만 받아 지표를 갱신하고 Feature/Indicator Snapshot을 기록한 뒤, `Adaptee.analyze(market_data[t],
       current_position)`로 `TradingSignal`을 받아 Signal·Decision을 기록한다. 진입·청산 신호면 `sizing`으로 수량을
       산출하고 `ExposureLimit`으로 한도를 검사한 뒤 float 주문 요청 `OrderRequest`를 만들어 `pending`에 넣는다(체결은
-      다음 `step_open`). preload 구간이면 여기서 만든 신호·주문은 버린다.
+      다음 `step_open`). preload 구간이면 여기서 만든 신호·주문은 버린다. 진입 후보는 노출 한도 등에 막힌 경우까지
+      Candidate Event로, 사전 선언 규칙이 잡은 놓친 기회는 Missed Opportunity로 함께 기록하고, 캔들 종가로 마킹한
+      Position·Portfolio/PnL 행을 캔들당 한 번 적는다.
     - `walk_triggers(position, subcandles)` : `t` 구간의 1분 하위 캔들을 시간 순서로 훑어 첫 발동을 찾는다. 대상은
       포지션의 체결 시점 이후 하위 캔들이다 — 체결 하위 캔들 이전은 소급 검사하지 않고, 방금 체결된 포지션은 자기
       체결 하위 캔들 다음 하위 캔들부터 검사 대상이다(legacy `skip_first_sl_check`와 같은 취지). 각 하위 캔들에서
@@ -2854,9 +2866,12 @@ classDiagram
       판정하며(트리거 판정은 환경 무관 순수 로직이라 포트를 거치지 않는다), 같은 하위 캔들 안 동시 도달은 손절
       우선이다. 첫 발동 하위 캔들의 `Fill`을 돌려주고 없으면 `None`이다. 아래 트리거 walk 규약이 활성/유보 조건을
       정한다.
-    - `finalize()` : 캔들 루프 종료 후 `EvidenceSink.finalize`로 무결성 검사·요약·정규화 Evidence 해시를 만들고,
-      `eval`의 성과 산출·판정 3단계를 호출한 뒤 `CatalogStore`에 요약·판정·Evidence 경로·해시를 기록한다(§4.5의
-      저장 시퀀스). 반환은 `RunResult`다.
+    - `finalize()` : 캔들 루프 종료 후 열린 포지션을 마지막 확정 캔들 종가로 강제 정리해
+      `Fill(exit_reason=END_OF_DATA)`로 남긴다(그래서 정상 종료 run에 미청산 거래 행이 남지 않는다). 그다음
+      `EvidenceSink.finalize`로 결정적 파생(차트 요약·손실/급등 구간·결과 유형 분류·조건 서명·조건별 기대값)과
+      무결성 검사·정규화 Evidence 해시를 만들고, `eval`의 성과 산출·판정 3단계를 호출한 뒤 `CatalogStore`에
+      요약·판정·해시를 기록한다(§4.5의 저장 시퀀스. Evidence 경로는 `bind` 직후 이미 기록돼 있다). 반환은
+      `RunResult`다.
 - **불변식**
     - **캔들 두 순간의 고정 순서가 look-ahead를 막는다** — `step_open`(지난 캔들 정산·트리거)과 `step_close`(이번
       캔들 판단)의 순서는 바꿀 수 없다. 판단은 종가에, 체결은 다음 시가에 일어나므로 결정에 쓴 캔들로 체결·검사하는
@@ -2892,7 +2907,7 @@ sequenceDiagram
         BR-->>ENG: Fill
         ENG->>EX: position_book.apply(fill)
         ENG->>EX: accounting.recompute(cash, position)
-        ENG->>EV: record(Execution·Position·Portfolio/PnL)
+        ENG->>EV: record(Execution)
     end
     Note over ENG: pending 클리어(이중 체결 방지)
     ENG->>DF: candles(symbol, "1m", up_to=t.close)
@@ -2902,7 +2917,7 @@ sequenceDiagram
     alt 트리거 발동 (동시 도달 손절 우선)
         ENG->>EX: position_book.apply(fill)
         ENG->>EX: accounting.recompute(cash, position)
-        ENG->>EV: record(Execution·Trade·Position)
+        ENG->>EV: record(Decision — 신호 없는 트리거 판단·Execution·Trade)
     end
     opt UTC 0/8/16 경계 통과
         ENG->>CST: funding.settle(position, rate, price)
@@ -2913,7 +2928,7 @@ sequenceDiagram
     CLK-->>ENG: t 종가
     ENG->>DF: candles(symbol, tf, up_to=t.close)
     DF-->>ENG: 확정 캔들 목록(미래 미노출)
-    ENG->>EV: record(Feature/Indicator Snapshot)
+    ENG->>EV: record(Feature/Indicator Snapshot·Position·Portfolio/PnL — 캔들당 1회 격자)
     ENG->>AD: analyze(market_data[t], current_position)
     AD-->>ENG: TradingSignal 또는 None
     ENG->>EV: record(Signal·Decision)
@@ -2923,7 +2938,7 @@ sequenceDiagram
         ENG->>SIZ: exposure_limit.single_market(exposures, cap)
         SIZ-->>ENG: bool
         Note over ENG: OrderRequest(float) 생성 후 pending에 보관(다음 t+1 시가 체결)
-        ENG->>EV: record(Outcome Bucket 후보)
+        ENG->>EV: record(Candidate Event — 노출 한도 등에 막힌 후보 포함)
     end
     Note over CLK,EV: t+1로 넘어가 같은 순서를 반복한다.
 ```
@@ -3144,13 +3159,21 @@ classDiagram
     direction LR
     class RunConfig {
         <<pydantic>>
+        +str run_name
         +str strategy_id
         +dict params
         +str symbol
+        +str exchange
         +str timeframe
+        +str market_type
         +str data_source
         +datetime start
         +datetime end
+        +Decimal initial_capital
+        +int seed
+        +str sizing_method
+        +Optional~float~ risk_per_trade
+        +Optional~float~ position_size_pct
         +dict cost_values
         +str indicator_mode
         +str trigger_feed
@@ -3175,6 +3198,11 @@ classDiagram
       담기만 한다.
     - `symbol`·`timeframe` — 대상 심볼과 전략 TF. 첫 검증 스코프 기본은 `BTC` 성격의 단일 심볼·전략별 TF다.
     - `data_source`·`start`·`end` — OHLCV·펀딩 원천과 평가 구간.
+    - `run_name`·`exchange`·`market_type` — run 이름(파일명 안전 문자)과 대상 거래소·시장 종류. run 인덱스가 재현에
+      요구하는 신원 값들이다.
+    - `initial_capital`·`seed` — 시작 자본과 난수 seed. 같은 입력·같은 seed가 같은 결과를 낸다는 결정성의 입력이다.
+    - `sizing_method`·`risk_per_trade`·`position_size_pct` — 수량 산출 방식(`risk_based` 기본, `pct`는 호환)과 그
+      방식의 비율 값. 위험 기반이면 `risk_per_trade`(0.01 이하)만 채우고, 비율 방식이면 `position_size_pct`만 채운다.
     - `cost_values` — `CostModel` 시작 기본값을 덮어쓰는 run별 비용 값(수수료·mmr·펀딩 fallback·슬리피지 등).
     - `indicator_mode` — 지표 계산 대상. `{auto, explicit, all}` 중이며 기본은 `auto`(활성 전략 필요 지표만).
     - `trigger_feed` — 캔들 내 트리거 세밀도. `{tf_candle, m1_subcandle}` 중이며 기본은 `tf_candle`(첫 검증 스코프의
@@ -3211,19 +3239,20 @@ classDiagram
     }
     class Engine { }
     Harness ..> Engine : N run 드라이브
-    Harness ..> HardGate : 집계 증거 소비
+    Harness ..> HardGate : 과최적화 게이트 적용
 ```
 
-> `HardGate`는 §4.3.5가 정의한다. `Harness`가 만든 표본 내/외·PSR·워크포워드·몬테카를로 증거를 단일 run 판정의
-> Hard Gate가 소비한다(과최적화 방어는 여러 run·분할에 걸친 교차검증이라 단일 run `eval`이 아니라 `Harness`가
-> 산출한다).
+> `HardGate`는 §4.3.5가 정의한다. 과최적화 방어(표본 내/외·PSR·워크포워드·몬테카를로)는 여러 run·분할에 걸친
+> 교차검증이라 단일 run `eval`이 아니라 `Harness`가 산출하고 **적용도 `Harness`가 한다** — §4.3.5의
+> `eval.HardGate`는 단일 run의 형태 무관 통과선·프로파일 대조만 판정하며 이 집계 증거를 받을 입력이 없다.
 
 #### `Harness`
 
 - **개요** — 단일 run 밖 상위 검증 오케스트레이터.
 - **책임** — 표본 내/외 분리·워크포워드·몬테카를로·확률적 샤프·파라미터 스윕을 여러 run으로 산출하고 카탈로그로
   비교한다. 개별 run은 `Engine`을 재사용하며, 스윕 run들의 `run_id`는 각 `Engine`이 카탈로그 시퀀스로 단독 발급한다
-  (run_id 발급 경합·파일명 충돌 차단). 산출한 과최적화 방어 증거는 단일 run의 Hard Gate가 소비한다.
+  (run_id 발급 경합·파일명 충돌 차단). 산출한 과최적화 방어 증거는 `Harness`가 스스로 게이트로 적용한다(단일 run의 `eval.HardGate`는 이 증거를 받지
+  않는다).
 - **상속관계** — 없음.
 - **필드** — `catalog`는 주입된 `CatalogStore` 어댑터로, run 집합을 `backtest_db`에서 비교·집계할 때 읽는다.
 - **메서드**
@@ -3288,22 +3317,33 @@ classDiagram
 
 - **개요** — `EvidenceSink`(§4.3.4)의 backtest 구현. run별 SQLite에 시점별 상세를 적고 무결성·요약·해시를 낸다.
 - **책임** — run 하나의 무거운 시점별 상세를 run별 SQLite 파일 하나에 적어 파일만으로 자기완결이게 하고,
-  `finalize`에서 무결성 검사·차트 요약을 만들고 정규화 Evidence 해시를 산출한다. 적는 Entity는 시점별 상세 전부다 —
-  Backtest Run 로컬 사본·Source Data Snapshot·Feature/Indicator Definition·Feature/Indicator Snapshot·Signal·
-  Decision·Execution·Funding Settlement·Trade·Position·Portfolio/PnL·Outcome Bucket·Integrity Check·Chart
-  Summary, 그리고 개선 실험용 확장 Entity(Candidate Event·Trade Feature Snapshot·Condition Signature·Conditional
-  Expectancy·Missed Opportunity·Drawdown/Runup Episode·Finding/Claim). Funding Settlement은 펀딩 정산 경계를
-  지날 때마다 보유 포지션당 한 건을 적어, 펀딩이 경계마다 한 번만 부과됐음을 기록으로 검산할 수 있게 한다(비용
-  1회 차감 불변식). 이 Entity들의 필드·타입은 여기서 나열하지 않고 데이터베이스 설계(§5)가 ERD로 확정한다 — 이
-  클래스는 그 스키마에 무엇을 쓰는가의 계약만 갖는다.
+  `finalize`에서 결정적 파생과 무결성 검사를 만들어 정규화 Evidence 해시를 산출한다. 적는 Entity는 두 묶음으로
+  갈린다(기록 주체·시점 규약은 데이터베이스 설계 §5 소유).
+    - **실행 중(사실)** — Backtest Run 로컬 사본·Source Data Snapshot·Feature/Indicator Definition·
+      Feature/Indicator Snapshot·Signal·Decision·Execution·Funding Settlement·Trade·Position·Portfolio/PnL과,
+      실행 중에만 알 수 있는 확장 사실 셋 — Candidate Event(막힌 진입 후보 포함)·Trade Feature Snapshot(진입·청산·
+      최대 편차 시점의 지표·국면)·Missed Opportunity(사전 선언 규칙이 있는 run에서만). Funding Settlement은 펀딩
+      정산 경계를 지날 때마다 보유 포지션당 한 건을 적어, 펀딩이 경계마다 한 번만 부과됐음을 기록으로 검산할 수
+      있게 한다(비용 1회 차감 불변식).
+    - **finalize(결정적 파생)** — Chart Summary·Drawdown/Runup Episode·Outcome Bucket·(run 설정에 표준 조건 어휘
+      판이 주어진 경우) Condition Signature·Conditional Expectancy·Integrity Check. 고정 규칙으로 원본 기록에서
+      다시 만들 수 있는 값만 적고 해석은 넣지 않는다.
+    - **Finding/Claim은 적지 않는다** — 어느 구간에서 왜 성공·실패했는가의 규명과 해결책 도출은 별도 분석·개선
+      시스템의 책임이고, 이 시스템의 책임은 그 분석이 이 기록만으로 가능하도록 남기는 데까지다. 그 해석의 산출을
+      담는 Finding/Claim은 finalize 이후 외부 시스템이 적는 사후 주석층이라 이 어댑터는 스키마 자리만 만든다
+      (기록 주체·해시 제외 규약은 §5).
+  이 Entity들의 필드·타입은 여기서 나열하지 않고 데이터베이스 설계(§5)가 ERD로 확정한다 — 이 클래스는 그 스키마에
+  무엇을 쓰는가의 계약만 갖는다.
 - **상속관계** — `EvidenceSink`(§4.3.4 ABC)를 실현한다.
 - **필드**
     - `path` — 이 run의 SQLite 파일 경로(`run_id`로 이름 붙인 `BT_<date>_<seq>_<name>.sqlite`).
     - `sqlite` — 그 파일에 대한 쓰기 연결.
 - **메서드**
-    - `bind(run_id)` : `run_id`로 SQLite 파일 이름을 짓고 열어 경로를 돌려준다. 이후 `record`가 이 파일에 적는다.
+    - `bind(run_id)` : `run_id`로 SQLite 파일 이름을 짓고 열어 경로를 돌려준다. 이후 `record`가 이 파일에 적으며,
+      Evidence 경로는 이 시점에 run 인덱스에 기록된다(finalize를 기다리지 않는다 — 크래시 잔여도 파일 위치가 남는다).
     - `record(entity)` : 시점별 Entity 하나를 run SQLite에 적는다. run 진행 중 여러 번 호출된다.
-    - `finalize(run_id)` : 무결성 검사와 차트 요약을 만들고 정규화 Evidence 해시를 산출해 돌려준다.
+    - `finalize(run_id)` : 결정적 파생(차트 요약·손실/급등 구간·결과 유형 분류·조건 서명·조건별 기대값)과 무결성
+      검사를 만들고 정규화 Evidence 해시를 산출해 돌려준다.
 - **불변식**
     - **결정성 해시** — 해시는 정렬된 행의 정규화 직렬화로 내며 파일 바이트가 아니고 wall-clock을 제외해 결정적이다.
       이 절이 소유하는 것은 이 성질(정렬된 행·정규화 직렬화·wall-clock 제외 = 결정성 불변식)까지이고, 정렬 기준·
@@ -3318,7 +3358,7 @@ classDiagram
 
 - **개요** — `CatalogStore`(§4.3.4)의 backtest 구현. `backtest_db`에 사전등록·`run_id`·요약을 적는다.
 - **책임** — run 시작 전 사전등록을 기록하고 `run_id`를 `backtest_db` 시퀀스로 단독 발급하며, `finalize` 시 run
-  인덱스·요약·태그를 upsert한다(+ Evidence 경로·해시·무결성 상태). 적는 대상은 `backtest_db`의 카탈로그 Entity —
+  인덱스·요약·태그를 upsert한다(+ Evidence 해시·무결성 상태. 경로는 `bind` 직후 이미 기록돼 있다). 적는 대상은 `backtest_db`의 카탈로그 Entity —
   `backtest_run`·`backtest_summary`·`backtest_prereg`·`backtest_tag` — 이고, 이 Entity들의 필드·타입·제약은 여기서
   정하지 않고 데이터베이스 설계(§5)가 ERD로 확정한다. 이 클래스는 그 스키마에 대한 쓰기 계약만 갖는다. 크래시로
   해시가 미확정인 run은 다음 기동에서 크래시 잔여 상태로 마킹해 공식 평가에서 제외한다.
@@ -3329,8 +3369,9 @@ classDiagram
       감사 기준).
     - `register(run_meta)` : `run_id`를 `backtest_db` 시퀀스로 단독 발급하고 run 인덱스 헤더를 연다. 반환은
       발급된 `run_id`다.
-    - `upsert_summary(summary)` : 성과·판정 요약을 run 인덱스·요약·태그에 upsert한다(+ Evidence 경로·해시·무결성
-      상태). run을 열지 않고 순위·필터·집계에 쓰도록 SQLite 상세에서 산출한 값을 복제한다.
+    - `upsert_summary(summary)` : 성과·판정 요약을 run 인덱스·요약·태그에 upsert한다(+ Evidence 해시·무결성 상태.
+      경로는 `bind` 직후 이미 기록돼 있다). run을 열지 않고 순위·필터·집계에 쓰도록 SQLite 상세에서 산출한 값을
+      복제한다.
     - `reconcile_orphaned()` : 서비스 기동 시(스윕이면 `Harness`가 시작 전) 호출해, `register`는 됐으나 finalize
       해시가 확정되지 못한 채 남은 run(크래시 잔여)을 훑어 상태를 크래시 잔여로 전이하고 진단을 남긴다. 이 run들은
       공식 평가에서 근거 부족으로 제외된다. 상태 값·컬럼은 데이터베이스 설계(§5)가 확정하고, 이 스캔·전이 행위는
@@ -3359,12 +3400,14 @@ sequenceDiagram
     ENG->>CS: save_prereg(prereg)
     Note over ENG,EVAL: run 진행. 시점별 상세를 캔들 루프 매 순간 적재한다.
     loop 각 확정 캔들
-        ENG->>EV: record(Feature/Indicator Snapshot·Signal·Decision·Execution·Trade·Position·Portfolio/PnL·Outcome Bucket)
+        ENG->>EV: record(Feature/Indicator Snapshot·Position·Portfolio/PnL — 캔들당 1회 격자)
+        ENG->>EV: record(Signal·Decision — 판단 시)
+        ENG->>EV: record(Execution·Trade·Candidate Event·Trade Feature Snapshot·Missed Opportunity — 발생 시)
         opt 펀딩 정산 경계를 지나면
             ENG->>EV: record(Funding Settlement — 보유 포지션당 한 건)
         end
     end
-    Note over ENG,EVAL: finalize. 무결성·요약·해시·판정·메타를 upsert한다.
+    Note over ENG,EVAL: finalize. 결정적 파생(차트 요약·손실/급등 구간·결과 유형 분류·조건 서명·조건별 기대값)과 무결성·해시를 만들고 판정·메타를 upsert한다.
     ENG->>EV: finalize(run_id)
     EV-->>ENG: evidence_hash
     ENG->>EVAL: integrity.check(evidence)
@@ -3384,7 +3427,8 @@ sequenceDiagram
 그래야 여러 run을 동시에 돌리는 병렬 스윕에서도 파일명이 서로 겹치지 않는다. 번호를 받은 다음에는 사전등록을 먼저
 적는다. 결과를 알기 전에 가설·기준을 선언해 두어, 나중에 결과를 보고 말을 바꾸는 사후 합리화를 막기 위해서다. run이
 도는 동안 시점별 상세는 전부 `EvidenceSink`가 SQLite에 적고, 가벼운 메타만 나중에 `CatalogStore`가 `backtest_db`에
-남긴다. finalize에서는 `EvidenceSink`가 무결성 검사·요약·정규화 해시를 만들고, `eval`이 판정 3단계를 돌린 뒤,
+남긴다. finalize에서는 `EvidenceSink`가 결정적 파생(차트 요약·손실/급등 구간·결과 유형 분류·조건 서명·조건별 기대값)과
+무결성 검사·정규화 해시를 만들고, `eval`이 판정 3단계를 돌린 뒤,
 `CatalogStore`가 요약·판정과 Evidence 경로·해시·무결성 상태를 메타에 기록한다. 그래서 무거운 상세는 SQLite에,
 검색·비교용 요약은 `backtest_db`에 남아 두 계층이 정합한다. 각 저장소의 실제 필드·타입은 여기서 정하지 않고
 데이터베이스 설계(§5)가 ERD로 확정한다.
@@ -3431,7 +3475,7 @@ sequenceDiagram
 | §4.4 `Engine`·캔들 루프·1분 트리거 walk | 캔들 두 순간의 고정 순서가 look-ahead 방지(시가=지난 캔들 정산·트리거, 종가=이번 캔들 판단) · 시점 순서 `decision_ts < execution_ts`(종가 신호·다음 시가 체결, `pending` 한 칸 지연) · 캔들 내 트리거는 1분 집행 피드를 시간 순서로(동시 도달 손절 우선, 소급 금지) · 트레일링·1분 파리티 허용 편차 확정(거래별 상대 편차 `max(1 tick, 5bp)`·부호 평균 편차 `1bp`·소비 전략 없어 재유보) · 워밍업 preload 후 신호 discard · 결정성(Clock 주입·wall-clock 금지·동일 입력·seed→동일 Evidence) |
 | §4.4 입력·실행 포트 어댑터(`BacktestDataFeed`·`BacktestBroker`·`BacktestClock`·`BacktestCostModel`·`BacktestStrategyRegistry`) | 환경 차이는 포트로만 주입(5 입력·실행 포트 ABC의 backtest 구현) · look-ahead 구조적 배제(`DataFeed` `up_to` 경계) · Decimal 단일 변환 관문(`Broker.submit`이 `execution.normalizer` 통과, 어댑터 캐스팅 금지) · wall-clock 금지(`Clock`) · 비용은 값만 주입(수식은 `costs`, 실측 펀딩은 `DataFeed`) · 전략 목록 접근은 주입 포트(backtest 읽기 전용) |
 | §4.4 `ConfigLayer`(`RunConfig`) | 같은 config가 backtest·라이브에서 동일 검증(전략 파라미터 스키마·검증은 `StrategyConfig` 단일 소유, 여기서 재정의 금지) · `fill_timing` 기본 `next_bar` · 지표 계산 모드(auto/explicit/all)·트리거 세밀도(tf_candle/m1_subcandle) run 설정화 |
-| §4.4 `Harness` | 과최적화 방어를 여러 run으로 산출(표본 내/외 분리·워크포워드·몬테카를로·확률적 샤프·파라미터 스윕) — 단일 run `eval`이 아니라 Harness가 산출해 Hard Gate가 소비 · 고정 seed(결정성) · 스윕 `run_id`는 Engine이 카탈로그 시퀀스로 단독 발급 |
+| §4.4 `Harness` | 과최적화 방어를 여러 run으로 산출(표본 내/외 분리·워크포워드·몬테카를로·확률적 샤프·파라미터 스윕) — 단일 run `eval`이 아니라 Harness가 산출·적용(단일 run `eval.HardGate`는 이 증거를 받지 않음) · 고정 seed(결정성) · 스윕 `run_id`는 Engine이 카탈로그 시퀀스로 단독 발급 |
 | §4.5 `BacktestEvidenceSink` | 연구 데이터·운영 DB 분리(무거운 시점별 상세는 run별 SQLite, 파일 하나로 자기완결) · 결정성 해시=정렬 행의 정규화 직렬화(파일 바이트 아님·wall-clock 제외) · 스키마는 데이터베이스 설계(§5)가 확정, 이 절은 쓰기 계약만 |
 | §4.5 `BacktestCatalogStore` | 연구 데이터·운영 DB 분리(가벼운 메타만 전용 `backtest_db`) · `run_id` 단독 발급(run_id 발급 경합·파일명 충돌 차단) · 백테스트 전용(라이브·페이퍼 미사용) · 서비스 경계는 값 ID 참조(FK 미강제) · 스키마는 데이터베이스 설계(§5)가 확정, 이 절은 쓰기 계약만 |
 
