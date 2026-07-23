@@ -501,3 +501,32 @@ def test_writer_contract_columns_match_section_5_3_7(
     assert WRITER_CONTRACT_COLUMNS["FundingSettlement"] <= _table_columns(
         evidence_db, "FUNDING_SETTLEMENT"
     )
+
+
+def test_finding_claim_requires_explicit_nonempty_evidence_references(
+    evidence_db: sqlite3.Connection,
+) -> None:
+    """Keep the M7 claim guard satisfiable by removing its invalid empty default."""
+    _insert_run(evidence_db)
+    columns = {
+        str(row[1]): row
+        for row in evidence_db.execute('SELECT * FROM pragma_table_info("FINDING_CLAIM")')
+    }
+    assert columns["evidence_ref_json"][4] is None
+    with pytest.raises(sqlite3.IntegrityError, match="NOT NULL"):
+        evidence_db.execute(
+            """
+            INSERT INTO FINDING_CLAIM (finding_id, run_id, claim)
+            VALUES (1, ?, 'unsupported claim')
+            """,
+            (RUN_ID,),
+        )
+    with pytest.raises(sqlite3.IntegrityError, match="CHECK"):
+        evidence_db.execute(
+            """
+            INSERT INTO FINDING_CLAIM (
+                finding_id, run_id, claim, evidence_ref_json
+            ) VALUES (2, ?, 'unsupported claim', '[]')
+            """,
+            (RUN_ID,),
+        )

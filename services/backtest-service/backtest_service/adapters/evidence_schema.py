@@ -695,7 +695,7 @@ CREATE TABLE IF NOT EXISTS FINDING_CLAIM (
     finding_id INTEGER PRIMARY KEY,
     run_id TEXT NOT NULL REFERENCES BACKTEST_RUN_LOCAL(run_id),
     claim TEXT NOT NULL,
-    evidence_ref_json TEXT NOT NULL DEFAULT '[]'
+    evidence_ref_json TEXT NOT NULL
         CHECK (evidence_ref_json <> '[]'),
     confidence TEXT NOT NULL DEFAULT 'low'
         CHECK (confidence IN ('low', 'medium', 'high')),

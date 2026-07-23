@@ -9,6 +9,8 @@ description = "Deterministic backtest orchestration service."
 requires-python = ">=3.12"
 dependencies = [
     "core-lib>=0.1.0",
+    "psycopg[binary]>=3.2",
+    "pydantic>=2.10",
 ]
 
 [project.optional-dependencies]
@@ -26,7 +28,16 @@ include = ["backtest_service*"]
 core-lib = { path = "../core-lib", editable = true }
 
 [tool.pytest.ini_options]
-addopts = ["--import-mode=importlib", "--strict-config", "--strict-markers"]
+addopts = [
+    "--import-mode=importlib",
+    "--strict-config",
+    "--strict-markers",
+    "-m",
+    "not integration",
+]
+markers = [
+    "integration: uses the local development PostgreSQL instance",
+]
 testpaths = ["tests"]
 
 [tool.ruff]
