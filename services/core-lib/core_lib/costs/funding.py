@@ -1,6 +1,6 @@
-"""Define discrete funding settlement formulas at boundary-candle open."""
+"""Define discrete funding settlement formulas and crossed UTC boundaries."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from core_lib.types import Position, PositionSide
@@ -30,3 +30,31 @@ def is_boundary(at: datetime) -> bool:
         and utc_at.second == 0
         and utc_at.microsecond == 0
     )
+
+
+def boundaries_between(
+    start_exclusive: datetime,
+    end_inclusive: datetime,
+) -> tuple[datetime, ...]:
+    """Return every UTC 00:00/08:00/16:00 boundary in ``(start, end]``."""
+    if (
+        start_exclusive.tzinfo is None
+        or start_exclusive.utcoffset() is None
+        or end_inclusive.tzinfo is None
+        or end_inclusive.utcoffset() is None
+    ):
+        raise ValueError("funding boundary timestamps must be timezone-aware")
+    start = start_exclusive.astimezone(UTC)
+    end = end_inclusive.astimezone(UTC)
+    if end < start:
+        raise ValueError("funding boundary interval end must not precede start")
+
+    day = datetime(start.year, start.month, start.day, tzinfo=UTC)
+    result: list[datetime] = []
+    while day <= end:
+        for hour in (0, 8, 16):
+            boundary = day + timedelta(hours=hour)
+            if start < boundary <= end:
+                result.append(boundary)
+        day += timedelta(days=1)
+    return tuple(result)

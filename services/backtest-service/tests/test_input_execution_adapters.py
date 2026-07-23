@@ -101,6 +101,14 @@ def test_data_feed_resamples_complete_1m_rows_and_enforces_up_to() -> None:
     assert "public.ohlcv_futures" in query
     assert params == ("BTCUSDT", "binance", base + timedelta(minutes=5))
 
+    minute_candles = feed.candles(
+        "BTCUSDT",
+        "1m",
+        base + timedelta(minutes=5),
+    )
+    assert len(minute_candles) == 5
+    assert len(connection.calls) == 1
+
 
 @pytest.mark.parametrize("bad_row", ["missing", "null_volume"])
 def test_data_feed_discards_and_counts_bad_buckets(

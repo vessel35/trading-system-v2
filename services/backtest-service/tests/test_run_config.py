@@ -80,6 +80,21 @@ def test_reserved_m1_feed_fails_loudly_instead_of_falling_back() -> None:
         RunConfig.model_validate(raw)
 
 
+def test_explicit_indicator_mode_requires_a_well_formed_nonempty_selection() -> None:
+    with pytest.raises(ValidationError, match="requires explicit_indicators"):
+        RunConfig.model_validate({**_raw_config(), "indicator_mode": "explicit"})
+    config = RunConfig.model_validate(
+        {
+            **_raw_config(),
+            "indicator_mode": "explicit",
+            "explicit_indicators": [{"name": "EMA", "params": {"period": 9}}],
+        }
+    )
+    assert config.explicit_indicators == [
+        {"name": "EMA", "params": {"period": 9}}
+    ]
+
+
 def test_extra_run_keys_are_forbidden() -> None:
     raw = {**_raw_config(), "strategy_parameter_schema": {"forbidden": True}}
     with pytest.raises(ValidationError, match="Extra inputs"):

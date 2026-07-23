@@ -9,6 +9,7 @@ from core_lib.costs import (
     apply_slippage,
     calculate_fee,
     effective_slippage_rate,
+    funding_boundaries_between,
     is_funding_boundary,
     is_liquidation_triggered,
     liquidation_price,
@@ -141,6 +142,24 @@ def test_funding_is_discrete_at_utc_boundaries_and_directional() -> None:
         rate,
         Decimal("100"),
     ) == Decimal("-0.01750000")
+
+
+def test_funding_boundaries_cover_coarse_intervals_without_double_charging() -> None:
+    start = datetime(2026, 1, 1, 7, tzinfo=UTC)
+    assert funding_boundaries_between(
+        start,
+        datetime(2026, 1, 2, 16, tzinfo=UTC),
+    ) == (
+        datetime(2026, 1, 1, 8, tzinfo=UTC),
+        datetime(2026, 1, 1, 16, tzinfo=UTC),
+        datetime(2026, 1, 2, 0, tzinfo=UTC),
+        datetime(2026, 1, 2, 8, tzinfo=UTC),
+        datetime(2026, 1, 2, 16, tzinfo=UTC),
+    )
+    assert funding_boundaries_between(
+        datetime(2026, 1, 1, 8, tzinfo=UTC),
+        datetime(2026, 1, 1, 8, tzinfo=UTC),
+    ) == ()
 
 
 def test_liquidation_price_and_trigger_are_conservative_by_side() -> None:

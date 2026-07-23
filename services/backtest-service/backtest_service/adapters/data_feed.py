@@ -96,6 +96,10 @@ class BacktestDataFeed(DataFeed):
         self._connection = connection
         self._exchange = exchange
         self._dropped_bucket_count = 0
+        self._source_cache: dict[
+            tuple[str, datetime],
+            tuple[Sequence[object], ...],
+        ] = {}
 
     @property
     def dropped_bucket_count(self) -> int:
@@ -106,10 +110,16 @@ class BacktestDataFeed(DataFeed):
         """Resample 1m source rows and expose only buckets closed by ``up_to``."""
         boundary = _utc(up_to, name="up_to")
         duration = _timeframe_duration(tf)
-        rows = self._connection.execute(
-            _CANDLES_SQL,
-            (symbol, self._exchange, boundary),
-        ).fetchall()
+        cache_key = (symbol, boundary)
+        rows = self._source_cache.get(cache_key)
+        if rows is None:
+            rows = tuple(
+                self._connection.execute(
+                    _CANDLES_SQL,
+                    (symbol, self._exchange, boundary),
+                ).fetchall()
+            )
+            self._source_cache[cache_key] = rows
         if not rows:
             return []
 

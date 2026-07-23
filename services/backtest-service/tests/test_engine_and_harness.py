@@ -11,6 +11,7 @@ from typing import ClassVar, cast
 
 import pytest
 from backtest_service.adapters.broker import BacktestBroker
+from backtest_service.adapters.catalog_store import DeterminismReference
 from backtest_service.adapters.clock import BacktestClock
 from backtest_service.adapters.cost_model import BacktestCostModel
 from backtest_service.adapters.evidence_sink import BacktestEvidenceSink
@@ -40,19 +41,21 @@ _BASE = datetime(2026, 1, 1, 1, tzinfo=UTC)
 
 
 def _candles() -> list[Candle]:
-    prices = (
+    preload = tuple((100.0, 101.0, 99.0, 100.0) for _ in range(9))
+    evaluation = (
         (100.0, 102.0, 99.0, 100.0),
         (101.0, 104.0, 95.0, 103.0),
         (104.0, 106.0, 96.0, 105.0),
         (106.0, 108.0, 97.0, 107.0),
     )
+    prices = preload + evaluation
     return [
         Candle(
             symbol="BTCUSDT",
             exchange="binance",
             timeframe="1h",
-            open_time=_BASE + timedelta(hours=index),
-            close_time=_BASE + timedelta(hours=index + 1),
+            open_time=_BASE - timedelta(hours=9) + timedelta(hours=index),
+            close_time=_BASE - timedelta(hours=9) + timedelta(hours=index + 1),
             open=open_price,
             high=high,
             low=low,
@@ -68,15 +71,40 @@ def _candles() -> list[Candle]:
 class _Feed(DataFeed):
     def __init__(self, candles: list[Candle]) -> None:
         self._candles = list(candles)
+        self.candle_calls = 0
 
     def candles(self, symbol: str, tf: str, up_to: datetime) -> list[Candle]:
         assert symbol == "BTCUSDT"
+        self.candle_calls += 1
+        if tf == "1m":
+            return []
         assert tf == "1h"
         return [candle for candle in self._candles if candle.close_time <= up_to]
 
     def funding(self, symbol: str, at: datetime) -> Decimal:
         del symbol, at
         raise LookupError("no boundary funding in this fixture")
+
+    def mark_price(self, symbol: str, at: datetime) -> Decimal:
+        del symbol, at
+        return Decimal("100")
+
+
+class _DailyFeed(DataFeed):
+    def __init__(self, candles: list[Candle]) -> None:
+        self._candles = candles
+
+    def candles(self, symbol: str, tf: str, up_to: datetime) -> list[Candle]:
+        assert symbol == "BTCUSDT"
+        if tf == "1m":
+            return []
+        assert tf == "1d"
+        return [candle for candle in self._candles if candle.close_time <= up_to]
+
+    def funding(self, symbol: str, at: datetime) -> Decimal:
+        assert symbol == "BTCUSDT"
+        assert at.hour in {0, 8, 16}
+        return Decimal("0.001")
 
     def mark_price(self, symbol: str, at: datetime) -> Decimal:
         del symbol, at
@@ -92,7 +120,7 @@ class _Strategy:
     @classmethod
     def get_metadata(cls) -> StrategyMetadata:
         return StrategyMetadata(
-            required_indicators=[],
+            required_indicators=[{"name": "EMA", "params": {"period": 9}}],
             min_history=1,
             supported_timeframes=["1h"],
             profile=StrategyProfile(
@@ -124,7 +152,7 @@ class _Strategy:
         candles = market_data["candles"]
         assert isinstance(candle, Candle)
         assert isinstance(candles, list)
-        if len(candles) == 1 and current_position is None:
+        if candle.open_time == _BASE and current_position is None:
             return TradingSignal(
                 symbol=candle.symbol,
                 timestamp=candle.close_time,
@@ -137,7 +165,7 @@ class _Strategy:
                 reason="fixture-entry",
                 metadata={"fixture": True},
             )
-        if len(candles) == 3 and current_position is not None:
+        if candle.open_time == _BASE + timedelta(hours=2) and current_position is not None:
             return TradingSignal(
                 symbol=candle.symbol,
                 timestamp=candle.close_time,
@@ -172,10 +200,82 @@ class _StrategyCatalog(StrategyRegistry):
         raise PermissionError("read-only fixture")
 
 
+class _DailyStrategy(_Strategy):
+    @classmethod
+    def get_metadata(cls) -> StrategyMetadata:
+        metadata = super().get_metadata()
+        metadata.supported_timeframes = ["1d"]
+        return metadata
+
+    def analyze(
+        self,
+        market_data: dict[str, object],
+        current_position: Position | None,
+    ) -> TradingSignal | None:
+        candle = market_data["candle"]
+        assert isinstance(candle, Candle)
+        evaluation_start = datetime(2026, 1, 1, tzinfo=UTC)
+        if candle.open_time == evaluation_start and current_position is None:
+            return TradingSignal(
+                symbol=candle.symbol,
+                timestamp=candle.close_time,
+                confidence=0.8,
+                price=candle.close,
+                stop_loss=90.0,
+                take_profit=130.0,
+                market_type=MarketType.FUTURES,
+                leverage=1,
+                reason="daily-entry",
+                metadata={"fixture": True},
+            )
+        if (
+            candle.open_time == evaluation_start + timedelta(days=1)
+            and current_position is not None
+        ):
+            return TradingSignal(
+                symbol=candle.symbol,
+                timestamp=candle.close_time,
+                confidence=0.8,
+                price=candle.close,
+                stop_loss=None,
+                take_profit=None,
+                market_type=MarketType.FUTURES,
+                leverage=1,
+                reason="daily-exit",
+                metadata={"fixture": True},
+            )
+        return None
+
+
+class _DailyStrategyCatalog(StrategyRegistry):
+    def get(self, strategy_id: str) -> dict[str, object]:
+        assert strategy_id == "daily-fixture"
+        return {
+            "strategy_id": strategy_id,
+            "class_name": _DailyStrategy.__name__,
+            "module_path": _DailyStrategy.__module__,
+            "is_active": True,
+            "is_deprecated": False,
+        }
+
+    def list(self) -> list[dict[str, object]]:
+        return [self.get("daily-fixture")]
+
+    def register(self, strategy_id: str, meta: dict[str, object]) -> None:
+        del strategy_id, meta
+        raise PermissionError("read-only fixture")
+
+
 def _manager() -> AdapterManager:
     plugins = InProcessStrategyRegistry()
     plugins.register("engine-fixture", _Strategy)
     return AdapterManager(_StrategyCatalog(), plugins)
+
+
+def _daily_manager() -> AdapterManager:
+    plugins = InProcessStrategyRegistry()
+    plugins.register("daily-fixture", _DailyStrategy)
+    return AdapterManager(_DailyStrategyCatalog(), plugins)
 
 
 class _Catalog(CatalogStore):
@@ -184,13 +284,18 @@ class _Catalog(CatalogStore):
         self.events: list[str] = []
         self.preregs: list[object] = []
         self.summaries: list[object] = []
+        self.runs: dict[str, Mapping[str, object]] = {}
+        self.force_config_mismatch = False
+        self.comparison_hash_override: str | None = None
 
     def register(self, run: object) -> str:
         assert isinstance(run, Mapping)
         self.events.append("register")
         sequence = self.next_sequence
         self.next_sequence += 1
-        return f"BT_20260101_{sequence:06d}_{run['run_name']}"
+        run_id = f"BT_20260101_{sequence:06d}_{run['run_name']}"
+        self.runs[run_id] = dict(run)
+        return run_id
 
     def save_prereg(self, prereg: object) -> None:
         self.events.append("prereg")
@@ -203,6 +308,29 @@ class _Catalog(CatalogStore):
     def reconcile_orphaned(self) -> int:
         self.events.append("reconcile")
         return 0
+
+    def determinism_reference(
+        self,
+        run_id: str,
+        config_hash: str,
+    ) -> DeterminismReference:
+        current_matches = (
+            self.runs[run_id]["config_hash"] == config_hash
+            and not self.force_config_mismatch
+        )
+        for summary in reversed(self.summaries):
+            assert isinstance(summary, Mapping)
+            previous_id = summary["run_id"]
+            if (
+                previous_id != run_id
+                and self.runs[str(previous_id)]["config_hash"] == config_hash
+            ):
+                return DeterminismReference(
+                    current_matches,
+                    str(previous_id),
+                    self.comparison_hash_override or str(summary["evidence_hash"]),
+                )
+        return DeterminismReference(current_matches, None, None)
 
 
 class _Broker(BacktestBroker):
@@ -277,21 +405,93 @@ def _engine(
     root: Path,
     catalog: _Catalog,
     brokers: list[_Broker],
+    feeds: list[_Feed] | None = None,
+    sinks: list[BacktestEvidenceSink] | None = None,
 ) -> Engine:
     candles = _candles()
     schedule = [candles[0].open_time, *(candle.close_time for candle in candles)]
     costs = BacktestCostModel(_config().cost_values)
     broker = _Broker(costs)
     brokers.append(broker)
+    feed = _Feed(candles)
+    if feeds is not None:
+        feeds.append(feed)
+    sink = BacktestEvidenceSink(root)
+    if sinks is not None:
+        sinks.append(sink)
     return Engine(
-        _Feed(candles),
+        feed,
         broker,
         BacktestClock(schedule),
         costs,
-        BacktestEvidenceSink(root),
+        sink,
         catalog,
         _manager(),
         prereg=_prereg(),
+    )
+
+
+def _daily_engine(
+    root: Path,
+    catalog: _Catalog,
+    sinks: list[BacktestEvidenceSink],
+) -> tuple[Engine, RunConfig]:
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    history_start = start - timedelta(days=9)
+    candles = [
+        Candle(
+            symbol="BTCUSDT",
+            exchange="binance",
+            timeframe="1d",
+            open_time=history_start + timedelta(days=index),
+            close_time=history_start + timedelta(days=index + 1),
+            open=100.0,
+            high=105.0,
+            low=95.0,
+            close=100.0,
+            volume=100.0,
+            quote_volume=10_000.0,
+            trade_count=10,
+        )
+        for index in range(12)
+    ]
+    schedule = [candles[0].open_time, *(candle.close_time for candle in candles)]
+    config = RunConfig(
+        run_name="daily",
+        strategy_id="daily-fixture",
+        params={},
+        symbol="BTCUSDT",
+        exchange="binance",
+        timeframe="1d",
+        market_type="futures",
+        data_source="fixture",
+        start=start,
+        end=start + timedelta(days=3),
+        initial_capital=Decimal("10000"),
+        risk_per_trade=0.01,
+        cost_values={
+            "futures_taker_fee_rate": Decimal("0"),
+            "futures_entry_slippage_rate": Decimal("0"),
+            "exit_slippage_rate": Decimal("0"),
+            "funding_fallback_rate": Decimal("0"),
+        },
+        profile_ref="engine-profile",
+    )
+    costs = BacktestCostModel(config.cost_values)
+    sink = BacktestEvidenceSink(root)
+    sinks.append(sink)
+    return (
+        Engine(
+            _DailyFeed(candles),
+            _Broker(costs),
+            BacktestClock(schedule),
+            costs,
+            sink,
+            catalog,
+            _daily_manager(),
+            prereg=_prereg(),
+        ),
+        config,
     )
 
 
@@ -300,7 +500,8 @@ def test_engine_orders_configure_before_submit_and_persists_timing(
 ) -> None:
     catalog = _Catalog()
     brokers: list[_Broker] = []
-    result = _engine(tmp_path, catalog, brokers).run(_config())
+    feeds: list[_Feed] = []
+    result = _engine(tmp_path, catalog, brokers, feeds).run(_config())
 
     broker = brokers[0]
     assert broker.call_order == ["configure", "submit", "configure", "submit"]
@@ -336,7 +537,28 @@ def test_engine_orders_configure_before_submit_and_persists_timing(
         assert connection.execute(
             "SELECT COUNT(*) FROM DRAWDOWN_RUNUP_EPISODE"
         ).fetchone()[0] >= 1
+        assert connection.execute(
+            "SELECT COUNT(*) FROM INDICATOR_DEFINITION"
+        ).fetchone() == (1,)
+        assert connection.execute(
+            "SELECT COUNT(*) FROM INDICATOR_SNAPSHOT"
+        ).fetchone() == (4,)
+        assert connection.execute(
+            """
+            SELECT COUNT(*)
+            FROM TRADE_FEATURE_SNAPSHOT
+            WHERE features_json <> '{}'
+            """
+        ).fetchone() == (4,)
+        assert connection.execute(
+            """
+            SELECT COUNT(*)
+            FROM SOURCE_DATA_SNAPSHOT
+            WHERE source_kind = 'funding'
+            """
+        ).fetchone() == (1,)
     assert result.integrity_status == "passed"
+    assert feeds[0].candle_calls == 2
     assert catalog.events == ["register", "prereg", "summary"]
 
 
@@ -355,6 +577,192 @@ def test_engine_hash_parity_uses_different_catalog_run_ids(tmp_path: Path) -> No
             "SELECT run_id FROM BACKTEST_RUN_LOCAL"
         ).fetchone() == (first.run_id,)
     assert first.evidence_hash == second.evidence_hash
+    with sqlite3.connect(first.evidence_path) as connection:
+        detail = connection.execute(
+            """
+            SELECT detail_json
+            FROM INTEGRITY_CHECK
+            WHERE check_name = 'deterministic'
+            """
+        ).fetchone()[0]
+        assert '"status":"no_comparison_target"' in detail
+    with sqlite3.connect(second.evidence_path) as connection:
+        detail = connection.execute(
+            """
+            SELECT detail_json
+            FROM INTEGRITY_CHECK
+            WHERE check_name = 'deterministic'
+            """
+        ).fetchone()[0]
+        assert '"status":"matched"' in detail
+
+
+def test_deterministic_check_fails_on_catalog_config_or_previous_hash_mismatch(
+    tmp_path: Path,
+) -> None:
+    catalog = _Catalog()
+    brokers: list[_Broker] = []
+    first = _engine(tmp_path / "one", catalog, brokers).run(_config())
+    assert first.integrity_status == "passed"
+
+    catalog.comparison_hash_override = "f" * 64
+    second = _engine(tmp_path / "two", catalog, brokers).run(_config())
+    assert second.integrity_status == "diagnostic_only"
+    with sqlite3.connect(second.evidence_path) as connection:
+        passed, detail = connection.execute(
+            """
+            SELECT passed, detail_json
+            FROM INTEGRITY_CHECK
+            WHERE check_name = 'deterministic'
+            """
+        ).fetchone()
+        assert passed == 0
+        assert '"status":"mismatched"' in detail
+
+    catalog.comparison_hash_override = None
+    catalog.force_config_mismatch = True
+    third = _engine(tmp_path / "three", catalog, brokers).run(_config())
+    assert third.integrity_status == "diagnostic_only"
+    with sqlite3.connect(third.evidence_path) as connection:
+        detail = connection.execute(
+            """
+            SELECT detail_json
+            FROM INTEGRITY_CHECK
+            WHERE check_name = 'deterministic'
+            """
+        ).fetchone()[0]
+        assert '"catalog_config_matches":false' in detail
+
+
+def test_integrity_audit_is_fail_closed_for_grid_indicator_source_and_slippage(
+    tmp_path: Path,
+) -> None:
+    catalog = _Catalog()
+    brokers: list[_Broker] = []
+    sinks: list[BacktestEvidenceSink] = []
+    _engine(tmp_path, catalog, brokers, sinks=sinks).run(_config())
+    sink = sinks[0]
+
+    sink.connection.execute(
+        "UPDATE EXECUTION SET slippage = 100 WHERE execution_id = 1"
+    )
+    sink.connection.execute(
+        """
+        UPDATE TRADE
+        SET slippage = 100, net_pnl = net_pnl - 100
+        WHERE trade_id = 1
+        """
+    )
+    sink.connection.execute(
+        """
+        DELETE FROM INDICATOR_SNAPSHOT
+        WHERE snapshot_seq = (SELECT min(snapshot_seq) FROM INDICATOR_SNAPSHOT)
+        """
+    )
+    sink.connection.execute(
+        "DELETE FROM SOURCE_DATA_SNAPSHOT WHERE source_kind = 'funding'"
+    )
+    sink.connection.execute(
+        """
+        DELETE FROM PORTFOLIO_PNL
+        WHERE equity_seq = (SELECT max(equity_seq) FROM PORTFOLIO_PNL)
+        """
+    )
+    sink.connection.commit()
+
+    audit = sink.audit(require_eval_decision=True)
+    assert audit["cost_once"] is False
+    assert audit["evidence_complete"] is False
+    details = sink.integrity_details
+    assert details["cost_once"]["slippage_failure_count"] == 1
+    complete = details["evidence_complete"]
+    assert complete["grid_failures"]
+    assert complete["indicator_failures"]
+    assert complete["source_failures"]
+
+
+def test_indicator_mode_changes_selection_and_longest_history_owns_warmup(
+    tmp_path: Path,
+) -> None:
+    catalog = _Catalog()
+    brokers: list[_Broker] = []
+    missing_required = RunConfig.model_validate(
+        {
+            **_config().model_dump(),
+            "indicator_mode": "explicit",
+            "explicit_indicators": [
+                {"name": "EMA", "params": {"period": 21}},
+            ],
+        }
+    )
+    with pytest.raises(ValueError, match="must include every strategy-required"):
+        _engine(tmp_path / "missing", catalog, brokers).run(missing_required)
+
+    explicit = RunConfig.model_validate(
+        {
+            **_config().model_dump(),
+            "indicator_mode": "explicit",
+            "explicit_indicators": [
+                {"name": "EMA", "params": {"period": 9}},
+                {"name": "EMA", "params": {"period": 21}},
+            ],
+        }
+    )
+    with pytest.raises(ValueError, match="requires 21"):
+        _engine(tmp_path / "explicit", catalog, brokers).run(explicit)
+
+    all_indicators = RunConfig.model_validate(
+        {**_config().model_dump(), "indicator_mode": "all"}
+    )
+    with pytest.raises(ValueError, match="requires 200"):
+        _engine(tmp_path / "all", catalog, brokers).run(all_indicators)
+
+
+def test_coarse_candle_funding_charges_every_crossed_boundary_with_payment_sign(
+    tmp_path: Path,
+) -> None:
+    catalog = _Catalog()
+    sinks: list[BacktestEvidenceSink] = []
+    engine, config = _daily_engine(tmp_path, catalog, sinks)
+
+    result = engine.run(config)
+
+    with sqlite3.connect(result.evidence_path) as connection:
+        settlements = connection.execute(
+            """
+            SELECT settled_at, payment_amount, settle_price_source
+            FROM FUNDING_SETTLEMENT
+            ORDER BY settled_at
+            """
+        ).fetchall()
+        funding_cost = connection.execute(
+            "SELECT funding_cost FROM TRADE"
+        ).fetchone()[0]
+        assert len(settlements) == 3
+        assert all(payment < 0 for _, payment, _ in settlements)
+        assert -sum(payment for _, payment, _ in settlements) == funding_cost
+        assert {source for _, _, source in settlements} == {
+            "boundary_open",
+            "prev_close",
+        }
+        assert connection.execute(
+            """
+            SELECT passed
+            FROM INTEGRITY_CHECK
+            WHERE check_name = 'cost_once'
+            """
+        ).fetchone() == (1,)
+
+    sink = sinks[0]
+    sink.connection.execute(
+        """
+        DELETE FROM FUNDING_SETTLEMENT
+        WHERE settlement_id = (SELECT min(settlement_id) FROM FUNDING_SETTLEMENT)
+        """
+    )
+    sink.connection.commit()
+    assert sink.audit(require_eval_decision=True)["cost_once"] is False
+    assert sink.integrity_details["cost_once"]["funding_failure_count"] == 1
 
 
 def _metrics(pf: float) -> MetricSet:

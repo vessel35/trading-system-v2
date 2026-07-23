@@ -33,7 +33,7 @@ def _local_values(run_seq: int) -> dict[str, object]:
         "timeframe": "1h",
         "market_type": "futures",
         "period_start": start,
-        "period_end": start + timedelta(days=2),
+        "period_end": start + timedelta(hours=1),
         "warmup_candles": 20,
         "indicator_mode": "auto",
         "trigger_feed": "tf_candle",
@@ -90,6 +90,69 @@ def _finalize(
     local_values = _local_values(run_seq)
     local_values.update({} if local_overrides is None else local_overrides)
     sink.record(EvidenceRecord("BACKTEST_RUN_LOCAL", local_values))
+    sink.record(
+        EvidenceRecord(
+            "SOURCE_DATA_SNAPSHOT",
+            {
+                "snapshot_id": 1,
+                "source_kind": "ohlcv",
+                "source_ref": "fixture",
+                "symbol": "BTCUSDT",
+                "exchange": "binance",
+                "timeframe": "1h",
+                "range_start": datetime(2026, 1, 1, tzinfo=UTC),
+                "range_end": datetime(2026, 1, 1, 1, tzinfo=UTC),
+                "row_count": 1,
+                "content_hash": "b" * 64,
+            },
+        )
+    )
+    sink.record(
+        EvidenceRecord(
+            "SOURCE_DATA_SNAPSHOT",
+            {
+                "snapshot_id": 2,
+                "source_kind": "funding",
+                "source_ref": "fixture",
+                "symbol": "BTCUSDT",
+                "exchange": "binance",
+                "timeframe": None,
+                "range_start": datetime(2026, 1, 1, tzinfo=UTC),
+                "range_end": datetime(2026, 1, 1, 1, tzinfo=UTC),
+                "row_count": 0,
+                "content_hash": "c" * 64,
+            },
+        )
+    )
+    sink.record(
+        EvidenceRecord(
+            "INDICATOR_DEFINITION",
+            {
+                "indicator_key": "ema:period=9",
+                "indicator_name": "EMA",
+                "params_json": {"period": 9},
+                "impl_version": "1.0.0",
+                "pinned_impl": True,
+                "min_history": 9,
+                "computation_mode": "incremental",
+                "enabled_reason": "auto",
+            },
+        )
+    )
+    sink.record(
+        EvidenceRecord(
+            "INDICATOR_SNAPSHOT",
+            {
+                "snapshot_seq": 1,
+                "indicator_key": "ema:period=9",
+                "feature_ts": datetime(2026, 1, 1, 1, tzinfo=UTC),
+                "candle_open_time": datetime(2026, 1, 1, tzinfo=UTC),
+                "candle_close_time": datetime(2026, 1, 1, 1, tzinfo=UTC),
+                "value": 100.0,
+                "is_warmup": False,
+            },
+        )
+    )
     sink.record(EvidenceRecord("PORTFOLIO_PNL", _portfolio_values()))
     sink.set_eval_decision(
         encode_eval_decision(
@@ -142,6 +205,7 @@ def test_hash_ignores_only_instance_identity_and_keeps_logical_decision(
         tmp_path / "two",
         "BT_20260102_1234567_determinism",
         1_234_567,
+        local_overrides={"run_name": "human-label"},
     )
     changed, changed_hash = _finalize(
         tmp_path / "three",
@@ -219,6 +283,9 @@ def _run_meta() -> dict[str, object]:
         "strategy_name": "FakeBreakout",
         "strategy_version": "1.0.0",
         "params_json": {"period": 20},
+        "resolved_indicators_json": [
+            {"name": "EMA", "params": {"period": 9}, "version": "1.0.0"}
+        ],
         "params_schema_version": "1.0.0",
         "symbol": "BTCUSDT",
         "exchange": "binance",

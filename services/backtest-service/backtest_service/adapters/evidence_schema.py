@@ -76,10 +76,16 @@ HASH_TABLES: Final = tuple(
 HASH_GLOBAL_EXCLUDED_COLUMNS: Final = frozenset({"run_id", "backtest_run_id"})
 HASH_EXCLUDED_COLUMNS: Final = MappingProxyType(
     {
-        "BACKTEST_RUN_LOCAL": frozenset({"run_seq", "created_at"}),
+        "BACKTEST_RUN_LOCAL": frozenset({"run_seq", "run_name", "created_at"}),
         "INTEGRITY_CHECK": frozenset({"checked_at"}),
         "FINDING_CLAIM": frozenset({"created_at"}),
     }
+)
+# The deterministic check depends on the external catalog's previous run.  Its
+# row is the sole row-level exclusion; all input-derived integrity rows remain
+# part of the logical Evidence hash.
+HASH_EXCLUDED_ROWS: Final = MappingProxyType(
+    {"INTEGRITY_CHECK": ("check_name <> 'deterministic'",)}
 )
 ENTITY_SORT_KEYS: Final = MappingProxyType(
     {
@@ -230,6 +236,9 @@ CREATE TABLE IF NOT EXISTS SOURCE_DATA_SNAPSHOT (
         OR (fallback_used = 1 AND fallback_count > 0)
     )
 ) STRICT;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_source_data_snapshot_kind_timeframe
+    ON SOURCE_DATA_SNAPSHOT(source_kind, symbol, ifnull(timeframe, ''));
 
 CREATE TABLE IF NOT EXISTS INDICATOR_DEFINITION (
     indicator_key TEXT PRIMARY KEY,
@@ -394,6 +403,24 @@ CREATE TABLE IF NOT EXISTS FUNDING_SETTLEMENT (
         CHECK (settle_price_source IN ('boundary_open', 'prev_close')),
     position_notional INTEGER NOT NULL CHECK (position_notional > 0),
     payment_amount INTEGER NOT NULL,
+    CHECK (
+        (funding_rate = 0.0 AND payment_amount = 0)
+        OR (
+            position_side = 'LONG'
+            AND (
+                (funding_rate > 0.0 AND payment_amount < 0)
+                OR (funding_rate < 0.0 AND payment_amount > 0)
+            )
+        )
+        OR (
+            position_side = 'SHORT'
+            AND (
+                (funding_rate > 0.0 AND payment_amount > 0)
+                OR (funding_rate < 0.0 AND payment_amount < 0)
+            )
+        )
+        OR (position_side = 'BOTH' AND payment_amount = 0)
+    ),
     UNIQUE (trade_id, settled_at)
 ) STRICT;
 

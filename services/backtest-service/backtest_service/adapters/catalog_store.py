@@ -6,6 +6,7 @@ import hashlib
 import math
 import re
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from typing import Protocol
@@ -20,6 +21,7 @@ _CONFIG_HASH_FIELDS = (
     "strategy_id",
     "strategy_version",
     "params_json",
+    "resolved_indicators_json",
     "params_schema_version",
     "symbol",
     "exchange",
@@ -157,6 +159,15 @@ class WriteConnection(Protocol):
         """Roll back the current transaction."""
 
 
+@dataclass(frozen=True, slots=True)
+class DeterminismReference:
+    """Catalog facts needed for one cross-run deterministic comparison."""
+
+    catalog_config_matches: bool
+    comparison_run_id: str | None
+    comparison_hash: str | None
+
+
 def _mapping(value: object, *, name: str) -> dict[str, object]:
     if not isinstance(value, Mapping):
         raise TypeError(f"{name} must be a mapping")
@@ -206,7 +217,8 @@ def normalized_config_hash(run_meta: Mapping[str, object]) -> str:
     values = [
         _hash_scalar(
             run_meta[field],
-            json_field=field in {"params_json", "cost_values_json"},
+            json_field=field
+            in {"params_json", "resolved_indicators_json", "cost_values_json"},
         )
         for field in _CONFIG_HASH_FIELDS
     ]
@@ -375,6 +387,41 @@ class BacktestCatalogStore(CatalogStore):
             self._connection.rollback()
             raise
 
+    def determinism_reference(
+        self,
+        run_id: str,
+        config_hash: str,
+    ) -> DeterminismReference:
+        """Compare the current catalog config and find the latest comparable run."""
+        current = self._connection.execute(
+            """
+            SELECT config_hash
+            FROM public.backtest_run
+            WHERE run_id = %s
+            """,
+            (run_id,),
+        ).fetchone()
+        current_matches = current is not None and current[0] == config_hash
+        previous = self._connection.execute(
+            """
+            SELECT run_id, evidence_hash
+            FROM public.backtest_run
+            WHERE config_hash = %s
+              AND run_id <> %s
+              AND evidence_hash IS NOT NULL
+              AND status IN ('COMPLETED', 'EVALUATED')
+            ORDER BY finished_at DESC NULLS LAST, run_seq DESC
+            LIMIT 1
+            """,
+            (config_hash, run_id),
+        ).fetchone()
+        if previous is None:
+            return DeterminismReference(current_matches, None, None)
+        previous_run_id, previous_hash = previous
+        if not isinstance(previous_run_id, str) or not isinstance(previous_hash, str):
+            raise TypeError("catalog determinism reference has invalid value types")
+        return DeterminismReference(current_matches, previous_run_id, previous_hash)
+
     def reconcile_orphaned(self) -> int:
         """Mark unfinished, unhashed RUNNING rows as ORPHANED without deleting them."""
         try:
@@ -407,6 +454,7 @@ class BacktestCatalogStore(CatalogStore):
 
 __all__ = [
     "BacktestCatalogStore",
+    "DeterminismReference",
     "WriteConnection",
     "normalized_config_hash",
 ]

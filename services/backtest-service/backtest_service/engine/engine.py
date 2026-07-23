@@ -11,7 +11,11 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Protocol, runtime_checkable
 
-from core_lib.costs import is_funding_boundary, settle_funding
+from core_lib.costs import (
+    funding_boundaries_between,
+    is_funding_boundary,
+    settle_funding,
+)
 from core_lib.eval import (
     DecisionResult,
     GateResult,
@@ -29,6 +33,7 @@ from core_lib.execution import (
     resolve_triggers,
     to_decimal,
 )
+from core_lib.indicators import DEFAULT_REGISTRY, IndicatorSpec, IndicatorState
 from core_lib.ports import Broker, CatalogStore, Clock, CostModel, DataFeed, EvidenceSink
 from core_lib.sizing import exposure_limit, wallet_pct_size
 from core_lib.sizing import size as risk_size
@@ -52,7 +57,10 @@ from core_lib.types import (
     quantize_price,
 )
 
-from backtest_service.adapters.catalog_store import normalized_config_hash
+from backtest_service.adapters.catalog_store import (
+    DeterminismReference,
+    normalized_config_hash,
+)
 from backtest_service.adapters.evidence_schema import (
     EVIDENCE_SCHEMA_VERSION,
     canonical_json,
@@ -101,6 +109,25 @@ class _BoundEvidence(Protocol):
     def set_eval_decision(self, eval_decision_json: str) -> None:
         """Store the canonical evaluation output."""
 
+    def set_determinism_reference(
+        self,
+        *,
+        catalog_config_matches: bool,
+        comparison_run_id: str | None,
+        comparison_hash: str | None,
+    ) -> None:
+        """Bind a catalog-backed cross-run comparison."""
+
+
+@runtime_checkable
+class _DeterminismCatalog(Protocol):
+    def determinism_reference(
+        self,
+        run_id: str,
+        config_hash: str,
+    ) -> DeterminismReference:
+        """Return current-config and previous-hash catalog facts."""
+
 
 @dataclass(frozen=True, slots=True)
 class RunResult:
@@ -139,6 +166,16 @@ class _ActiveTrade:
     funding: Decimal = field(default_factory=lambda: quantize_amount(ZERO))
     position_records: list[EvidenceRecord] = field(default_factory=list)
     funding_records: list[EvidenceRecord] = field(default_factory=list)
+    settled_boundaries: set[datetime] = field(default_factory=set)
+    entry_features: dict[str, object] = field(default_factory=dict)
+    mae_features: dict[str, object] = field(default_factory=dict)
+    mfe_features: dict[str, object] = field(default_factory=dict)
+    mae_ts: datetime | None = None
+    mfe_ts: datetime | None = None
+    mae_r: Decimal | None = None
+    mfe_r: Decimal | None = None
+    mae_pnl: Decimal | None = None
+    mfe_pnl: Decimal | None = None
 
 
 class Engine:
@@ -163,6 +200,10 @@ class Engine:
             raise TypeError("Engine requires a Broker with configure_execution")
         if not isinstance(evidence, _BoundEvidence):
             raise TypeError("Engine requires an EvidenceSink with bind/audit lifecycle")
+        if not isinstance(catalog, _DeterminismCatalog):
+            raise TypeError(
+                "Engine requires a CatalogStore with determinism_reference"
+            )
         self.feed = feed
         self.broker = broker
         self.clock = clock
@@ -182,6 +223,11 @@ class Engine:
         self._preload: list[Candle] = []
         self._evaluation: list[Candle] = []
         self._confirmed: list[Candle] = []
+        self._minute_history: list[Candle] = []
+        self._indicator_specs: list[IndicatorSpec] = []
+        self._indicator_states: dict[str, IndicatorState] = {}
+        self._indicator_values: dict[str, object] = {}
+        self._funding_rates: dict[datetime, tuple[Decimal, str]] = {}
         self._book = PositionBook()
         self._cash = quantize_amount(ZERO)
         self._equity_curve: list[tuple[datetime, Decimal]] = []
@@ -203,6 +249,8 @@ class Engine:
             "candidate": 0,
             "tfs": 0,
             "settlement": 0,
+            "indicator_snapshot": 0,
+            "source_snapshot": 0,
         }
 
     def run(self, config: RunConfig) -> RunResult:
@@ -224,6 +272,14 @@ class Engine:
             self._strategy.get_parameter_schema(),
             {"strategy_id": config.strategy_id, "params": dict(config.params)},
         )
+        self._indicator_specs = self._resolve_indicator_specs(
+            metadata.required_indicators,
+            config,
+        )
+        longest_indicator_history = max(
+            spec.min_history for spec in self._indicator_specs
+        )
+        required_warmup = max(metadata.min_history, longest_indicator_history)
 
         self._history = sorted(
             self.feed.candles(config.symbol, config.timeframe, config.end),
@@ -234,9 +290,15 @@ class Engine:
             for left, right in zip(self._history, self._history[1:], strict=False)
         ):
             raise ValueError("DataFeed candles must have strictly increasing open_time")
-        self._preload = [
+        available_preload = [
             candle for candle in self._history if candle.close_time <= config.start
-        ][-metadata.min_history :]
+        ]
+        if len(available_preload) < required_warmup:
+            raise ValueError(
+                "insufficient warm-up history: "
+                f"requires {required_warmup}, got {len(available_preload)}"
+            )
+        self._preload = available_preload[-required_warmup:]
         self._evaluation = [
             candle
             for candle in self._history
@@ -244,6 +306,8 @@ class Engine:
         ]
         if not self._evaluation:
             raise ValueError("evaluation period contains no confirmed candles")
+        self._prepare_indicator_states()
+        self._prepare_funding_sources()
 
         profile = metadata.profile
         params_json = dict(resolved.params)
@@ -254,6 +318,14 @@ class Engine:
             "strategy_name": type(self._strategy).__name__,
             "strategy_version": str(getattr(type(self._strategy), "VERSION", "1.0.0")),
             "params_json": params_json,
+            "resolved_indicators_json": [
+                {
+                    "name": spec.name,
+                    "params": dict(spec.params),
+                    "version": spec.version,
+                }
+                for spec in self._indicator_specs
+            ],
             "params_schema_version": resolved.schema_version,
             "symbol": config.symbol,
             "exchange": config.exchange,
@@ -287,7 +359,8 @@ class Engine:
         self._run_id = self.catalog.register(self._run_meta)
         self._evidence_path = self.evidence.bind(self._run_id)
         self._record_local_run(profile_json)
-        self._record_source_snapshot()
+        self._record_indicator_definitions()
+        self._record_source_snapshots()
         self.catalog.save_prereg(self._catalog_prereg())
 
         self.preload()
@@ -304,12 +377,17 @@ class Engine:
     def preload(self) -> list[Candle]:
         """Return warmed candles while structurally discarding all preload signals."""
         self._confirmed = list(self._preload)
+        for state in self._indicator_states.values():
+            state.seed(self._preload)
+            if not state.warmed_up:
+                raise ValueError("indicator state did not warm up after required preload")
         return list(self._preload)
 
     def step_open(self, candle: Candle) -> None:
-        """Execute prior-close orders, conservative triggers, then boundary funding."""
+        """Charge open boundary, execute orders, charge crossings, then trigger."""
         if self.clock.now() != candle.open_time:
             raise ValueError("Clock must be at candle.open_time during step_open")
+        self._settle_at_boundary(candle.open_time)
         carried = list(self.pending)
         self.pending.clear()
         for pending in carried:
@@ -333,10 +411,17 @@ class Engine:
                 candidate_id=pending.candidate_id,
             )
 
+        for boundary in funding_boundaries_between(
+            candle.open_time,
+            candle.close_time,
+        ):
+            self._settle_at_boundary(boundary)
+
         position = self._current_position()
         if position is not None:
             trigger = self.walk_triggers(position, [candle])
             if trigger is not None:
+                self._track_excursions(candle, position)
                 decision_id = self._next("decision")
                 self.evidence.record(
                     EvidenceRecord(
@@ -354,20 +439,14 @@ class Engine:
                 )
                 self._apply_fill(trigger, decision_id=decision_id)
 
-        self._settle_funding(candle)
-
     def step_close(self, candle: Candle) -> None:
         """Record the confirmed grid, analyze it, and queue only next-bar orders."""
         if self.clock.now() != candle.close_time:
             raise ValueError("Clock must be at candle.close_time during step_close")
-        confirmed = self.feed.candles(
-            self._config().symbol,
-            self._config().timeframe,
-            candle.close_time,
-        )
-        if any(item.close_time > candle.close_time for item in confirmed):
-            raise ValueError("DataFeed exposed an unconfirmed future candle")
-        self._confirmed = sorted(confirmed, key=lambda item: item.open_time)
+        if candle.close_time > self.clock.now():
+            raise ValueError("Engine cannot confirm a future candle")
+        self._confirmed.append(candle)
+        self._update_indicators(candle)
         self._mark_grid(candle)
         signal = self._strategy_instance().analyze(
             {
@@ -375,6 +454,7 @@ class Engine:
                 "candle": candle,
                 "symbol": self._config().symbol,
                 "timeframe": self._config().timeframe,
+                "indicators": dict(self._indicator_values),
             },
             self._current_position(),
         )
@@ -475,6 +555,15 @@ class Engine:
                 decision_route=final_decision.route,
                 higher_is_better=bool(decision_inputs["higher_is_better"]),
             )
+        )
+        reference = self.catalog.determinism_reference(
+            self._require_run_id(),
+            str(self._run_meta["config_hash"]),
+        )
+        self.evidence.set_determinism_reference(
+            catalog_config_matches=reference.catalog_config_matches,
+            comparison_run_id=reference.comparison_run_id,
+            comparison_hash=reference.comparison_hash,
         )
         evidence_hash = self.evidence.finalize(self._require_run_id())
         integrity = check_integrity(self.evidence.integrity_results)
@@ -789,6 +878,7 @@ class Engine:
                     candidate_id=candidate_id,
                     total_fee=fill.fee,
                     slippage=fill.slippage,
+                    entry_features=dict(self._indicator_values),
                 )
                 self._stop_price = (
                     None
@@ -944,10 +1034,29 @@ class Engine:
                     },
                 )
             )
-        for phase, timestamp in (
-            ("entry", active.entry_fill.timestamp),
-            ("exit", exit_fill.timestamp),
-        ):
+        exit_features = dict(self._indicator_values)
+        feature_rows = (
+            (
+                "entry",
+                active.entry_fill.timestamp,
+                active.entry_features,
+                None,
+            ),
+            ("exit", exit_fill.timestamp, exit_features, None),
+            (
+                "mae",
+                active.mae_ts or active.entry_fill.timestamp,
+                active.mae_features or active.entry_features,
+                active.mae_r,
+            ),
+            (
+                "mfe",
+                active.mfe_ts or active.entry_fill.timestamp,
+                active.mfe_features or active.entry_features,
+                active.mfe_r,
+            ),
+        )
+        for phase, timestamp, features, excursion_r in feature_rows:
             self.evidence.record(
                 EvidenceRecord(
                     "TRADE_FEATURE_SNAPSHOT",
@@ -956,7 +1065,10 @@ class Engine:
                         "trade_id": active.trade_id,
                         "phase": phase,
                         "ts": timestamp,
-                        "features_json": {},
+                        "features_json": features,
+                        "excursion_r": (
+                            None if excursion_r is None else float(excursion_r)
+                        ),
                     },
                 )
             )
@@ -966,6 +1078,7 @@ class Engine:
         mark = to_decimal(candle.close, quantizer=quantize_price)
         if position is not None:
             position.update_price(mark)
+            self._track_excursions(candle, position)
         current_position_value = position_value(position)
         equity = recompute(self._cash, position)
         peak = max((value for _, value in self._equity_curve), default=equity)
@@ -1059,45 +1172,262 @@ class Engine:
             },
         )
 
-    def _settle_funding(self, candle: Candle) -> None:
+    def _settle_at_boundary(self, boundary: datetime) -> None:
+        if (
+            self._market_type() is not MarketType.FUTURES
+            or not is_funding_boundary(boundary)
+        ):
+            return
         position = self._current_position()
         active = self._active_trade
         if (
             position is None
             or active is None
-            or not is_funding_boundary(candle.open_time)
-            or active.entry_fill.timestamp >= candle.open_time
+            or active.entry_fill.timestamp >= boundary
+            or boundary in active.settled_boundaries
         ):
             return
-        try:
-            rate = self.feed.funding(position.symbol, candle.open_time)
-            source = "measured"
-        except LookupError:
-            rate = self.cost_model.funding_rate(candle.open_time)
-            source = "fallback"
-        price = to_decimal(candle.open, quantizer=quantize_price)
-        payment = settle_funding(position, rate, price)
-        self._cash = quantize_amount(self._cash - payment)
-        position.funding_fee_total = quantize_amount(position.funding_fee_total + payment)
-        active.funding = quantize_amount(active.funding + payment)
+        cached = self._funding_rates.get(boundary)
+        if cached is None:
+            try:
+                rate = self.feed.funding(position.symbol, boundary)
+                source = "measured"
+            except LookupError:
+                rate = self.cost_model.funding_rate(boundary)
+                source = "fallback"
+            cached = (rate, source)
+            self._funding_rates[boundary] = cached
+        rate, source = cached
+        price, price_source = self._funding_price(boundary)
+        cost = settle_funding(position, rate, price)
+        payment_amount = quantize_amount(-cost)
+        self._cash = quantize_amount(self._cash - cost)
+        position.funding_fee_total = quantize_amount(position.funding_fee_total + cost)
+        active.funding = quantize_amount(active.funding + cost)
+        active.settled_boundaries.add(boundary)
         active.funding_records.append(
             EvidenceRecord(
                 "FUNDING_SETTLEMENT",
                 {
                     "settlement_id": self._next("settlement"),
                     "trade_id": active.trade_id,
-                    "settled_at": candle.open_time,
+                    "settled_at": boundary,
                     "symbol": position.symbol,
                     "position_side": position.side.name,
                     "funding_rate": float(rate),
                     "rate_source": source,
                     "settle_price": price,
-                    "settle_price_source": "boundary_open",
+                    "settle_price_source": price_source,
                     "position_notional": quantize_amount(position.quantity * price),
-                    "payment_amount": payment,
+                    "payment_amount": payment_amount,
                 },
             )
         )
+
+    def _funding_price(self, boundary: datetime) -> tuple[Decimal, str]:
+        source = self._minute_history or self._history
+        exact = next(
+            (candle for candle in source if candle.open_time == boundary),
+            None,
+        )
+        if exact is not None:
+            return to_decimal(exact.open, quantizer=quantize_price), "boundary_open"
+        previous = [candle for candle in source if candle.close_time <= boundary]
+        if not previous:
+            previous = [candle for candle in self._history if candle.open_time < boundary]
+        if not previous:
+            raise LookupError(f"no settlement price at or before {boundary.isoformat()}")
+        return to_decimal(previous[-1].close, quantizer=quantize_price), "prev_close"
+
+    def _resolve_indicator_specs(
+        self,
+        declared: list[dict[str, object]],
+        config: RunConfig,
+    ) -> list[IndicatorSpec]:
+        declared_specs = [self._indicator_spec(item) for item in declared]
+        explicit_specs = [
+            self._indicator_spec(item) for item in config.explicit_indicators
+        ]
+        declared_ids = {spec.identifier for spec in declared_specs}
+        explicit_ids = {spec.identifier for spec in explicit_specs}
+        if config.indicator_mode == "auto":
+            selected = declared_specs
+        elif config.indicator_mode == "explicit":
+            if not declared_ids.issubset(explicit_ids):
+                missing = sorted(declared_ids - explicit_ids)
+                raise ValueError(
+                    "explicit_indicators must include every strategy-required indicator: "
+                    f"{missing}"
+                )
+            selected = explicit_specs
+        else:
+            selected = DEFAULT_REGISTRY.list()
+        unique = {spec.identifier: spec for spec in selected}
+        if not unique:
+            raise ValueError("a backtest run must resolve at least one indicator")
+        return [unique[key] for key in sorted(unique)]
+
+    @staticmethod
+    def _indicator_spec(descriptor: Mapping[str, object]) -> IndicatorSpec:
+        if set(descriptor) != {"name", "params"}:
+            raise ValueError("indicator descriptor must contain exactly name and params")
+        name = descriptor["name"]
+        params = descriptor["params"]
+        if not isinstance(name, str) or not isinstance(params, Mapping):
+            raise TypeError("indicator descriptor name/params have invalid types")
+        normalized_params = dict(params)
+        if any(
+            not isinstance(key, str)
+            or not isinstance(value, bool | float | int | str)
+            for key, value in normalized_params.items()
+        ):
+            raise TypeError("indicator params must use scalar registry values")
+        matches = [
+            spec
+            for spec in DEFAULT_REGISTRY.list()
+            if spec.name.casefold() == name.casefold()
+            and dict(spec.params) == normalized_params
+        ]
+        if len(matches) != 1:
+            raise KeyError(f"indicator is not registered: {name} {normalized_params}")
+        return matches[0]
+
+    def _prepare_indicator_states(self) -> None:
+        self._indicator_states = {
+            spec.identifier: spec.make_state() for spec in self._indicator_specs
+        }
+
+    def _prepare_funding_sources(self) -> None:
+        if self._market_type() is not MarketType.FUTURES:
+            return
+        if self._config().timeframe == "1m":
+            self._minute_history = list(self._history)
+        else:
+            self._minute_history = sorted(
+                self.feed.candles(
+                    self._config().symbol,
+                    "1m",
+                    self._config().end,
+                ),
+                key=lambda candle: candle.open_time,
+            )
+        for boundary in funding_boundaries_between(
+            self._config().start,
+            self._config().end,
+        ):
+            try:
+                rate = self.feed.funding(self._config().symbol, boundary)
+                source = "measured"
+            except LookupError:
+                rate = self.cost_model.funding_rate(boundary)
+                source = "fallback"
+            self._funding_rates[boundary] = (rate, source)
+
+    def _record_indicator_definitions(self) -> None:
+        for spec in self._indicator_specs:
+            self.evidence.record(
+                EvidenceRecord(
+                    "INDICATOR_DEFINITION",
+                    {
+                        "indicator_key": self._indicator_key(spec),
+                        "indicator_name": spec.name,
+                        "params_json": dict(spec.params),
+                        "impl_version": spec.version,
+                        "pinned_impl": True,
+                        "min_history": spec.min_history,
+                        "computation_mode": "incremental",
+                        "enabled_reason": self._config().indicator_mode,
+                    },
+                )
+            )
+
+    def _update_indicators(self, candle: Candle) -> None:
+        values: dict[str, object] = {}
+        for spec in self._indicator_specs:
+            state = self._indicator_states[spec.identifier]
+            value = state.update(candle)
+            self._assert_finite_indicator(value, spec.identifier)
+            key = self._indicator_key(spec)
+            values[key] = value
+            self._sequence["indicator_snapshot"] += 1
+            self.evidence.record(
+                EvidenceRecord(
+                    "INDICATOR_SNAPSHOT",
+                    {
+                        "snapshot_seq": self._sequence["indicator_snapshot"],
+                        "indicator_key": key,
+                        "feature_ts": candle.close_time,
+                        "candle_open_time": candle.open_time,
+                        "candle_close_time": candle.close_time,
+                        "value": value if isinstance(value, float | int) else None,
+                        "value_json": value if isinstance(value, Mapping) else None,
+                        "is_warmup": False,
+                    },
+                )
+            )
+        self._indicator_values = values
+
+    @staticmethod
+    def _assert_finite_indicator(value: object, identifier: str) -> None:
+        scalars = value.values() if isinstance(value, Mapping) else (value,)
+        if any(
+            isinstance(item, bool)
+            or not isinstance(item, float | int)
+            or not math.isfinite(float(item))
+            for item in scalars
+        ):
+            raise ValueError(f"indicator {identifier} emitted a non-finite value")
+
+    @staticmethod
+    def _indicator_key(spec: IndicatorSpec) -> str:
+        name = re.sub(r"[^a-z0-9]+", "_", spec.name.casefold()).strip("_")
+        params = ",".join(
+            f"{key}={Engine._indicator_param(value)}"
+            for key, value in sorted(spec.params.items())
+        )
+        return name if not params else f"{name}:{params}"
+
+    @staticmethod
+    def _indicator_param(value: object) -> str:
+        if isinstance(value, bool):
+            return str(value).lower()
+        if isinstance(value, float) and value.is_integer():
+            return str(int(value))
+        return str(value)
+
+    def _track_excursions(self, candle: Candle, position: Position) -> None:
+        active = self._active_trade
+        if active is None or candle.open_time <= active.entry_fill.timestamp:
+            return
+        entry = active.entry_fill.reference_price
+        high = to_decimal(candle.high, quantizer=quantize_price)
+        low = to_decimal(candle.low, quantizer=quantize_price)
+        quantity = position.quantity
+        if position.side is PositionSide.LONG:
+            adverse = quantize_amount((low - entry) * quantity)
+            favorable = quantize_amount((high - entry) * quantity)
+        else:
+            adverse = quantize_amount((entry - high) * quantity)
+            favorable = quantize_amount((entry - low) * quantity)
+        features = dict(self._indicator_values)
+        if active.mae_pnl is None or adverse < active.mae_pnl:
+            active.mae_pnl = adverse
+            active.mae_ts = candle.close_time
+            active.mae_features = features
+            active.mae_r = (
+                None
+                if active.r0 in {None, ZERO}
+                else quantize_amount(adverse / active.r0)
+            )
+        if active.mfe_pnl is None or favorable > active.mfe_pnl:
+            active.mfe_pnl = favorable
+            active.mfe_ts = candle.close_time
+            active.mfe_features = features
+            active.mfe_r = (
+                None
+                if active.r0 in {None, ZERO}
+                else quantize_amount(favorable / active.r0)
+            )
 
     def _record_local_run(self, profile_json: Mapping[str, object]) -> None:
         match = _RUN_ID.fullmatch(self._require_run_id())
@@ -1150,7 +1480,59 @@ class Engine:
             )
         )
 
-    def _record_source_snapshot(self) -> None:
+    def _record_source_snapshots(self) -> None:
+        self._record_ohlcv_snapshot(
+            self._history,
+            timeframe=self._config().timeframe,
+        )
+        if (
+            self._minute_history
+            and self._config().timeframe != "1m"
+        ):
+            self._record_ohlcv_snapshot(self._minute_history, timeframe="1m")
+        if self._market_type() is MarketType.FUTURES:
+            content = [
+                {
+                    "settled_at": epoch_milliseconds(boundary),
+                    "funding_rate": rate,
+                    "rate_source": source,
+                }
+                for boundary, (rate, source) in sorted(self._funding_rates.items())
+            ]
+            fallback_count = sum(
+                source == "fallback" for _, source in self._funding_rates.values()
+            )
+            self._sequence["source_snapshot"] += 1
+            self.evidence.record(
+                EvidenceRecord(
+                    "SOURCE_DATA_SNAPSHOT",
+                    {
+                        "snapshot_id": self._sequence["source_snapshot"],
+                        "source_kind": "funding",
+                        "source_ref": "crypto_data.funding_rates",
+                        "symbol": self._config().symbol,
+                        "exchange": self._config().exchange,
+                        "timeframe": None,
+                        "range_start": self._config().start,
+                        "range_end": self._config().end,
+                        "row_count": len(content),
+                        "fallback_used": fallback_count > 0,
+                        "fallback_count": fallback_count,
+                        "content_hash": hashlib.sha256(
+                            canonical_json(content).encode()
+                        ).hexdigest(),
+                    },
+                )
+            )
+
+    def _record_ohlcv_snapshot(
+        self,
+        candles: list[Candle],
+        *,
+        timeframe: str,
+    ) -> None:
+        if not candles:
+            return
         content = [
             {
                 "open_time": epoch_milliseconds(candle.open_time),
@@ -1161,22 +1543,24 @@ class Engine:
                 "close": candle.close,
                 "volume": candle.volume,
             }
-            for candle in self._history
+            for candle in candles
         ]
         content_hash = hashlib.sha256(canonical_json(content).encode()).hexdigest()
+        self._sequence["source_snapshot"] += 1
         self.evidence.record(
             EvidenceRecord(
                 "SOURCE_DATA_SNAPSHOT",
                 {
-                    "snapshot_id": 1,
+                    "snapshot_id": self._sequence["source_snapshot"],
                     "source_kind": "ohlcv",
                     "source_ref": self._config().data_source,
                     "symbol": self._config().symbol,
                     "exchange": self._config().exchange,
-                    "timeframe": self._config().timeframe,
-                    "range_start": self._history[0].open_time,
-                    "range_end": self._history[-1].close_time,
-                    "row_count": len(self._history),
+                    "timeframe": timeframe,
+                    "resampled_from": "1m" if timeframe != "1m" else None,
+                    "range_start": candles[0].open_time,
+                    "range_end": candles[-1].close_time,
+                    "row_count": len(candles),
                     "content_hash": content_hash,
                 },
             )

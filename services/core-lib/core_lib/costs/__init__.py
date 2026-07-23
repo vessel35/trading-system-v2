@@ -1,6 +1,7 @@
 """Define the four net-profit cost formula standards."""
 
 from .fee import calc as calculate_fee
+from .funding import boundaries_between as funding_boundaries_between
 from .funding import is_boundary as is_funding_boundary
 from .funding import settle as settle_funding
 from .liquidation import is_triggered as is_liquidation_triggered
@@ -14,6 +15,7 @@ __all__ = [
     "apply_slippage",
     "calculate_fee",
     "effective_slippage_rate",
+    "funding_boundaries_between",
     "is_funding_boundary",
     "is_liquidation_triggered",
     "liquidation_price",

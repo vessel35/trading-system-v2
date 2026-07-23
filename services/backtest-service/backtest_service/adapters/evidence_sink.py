@@ -5,15 +5,17 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 import sqlite3
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_EVEN, Decimal
 from enum import Enum
 from pathlib import Path
 from typing import Final
 
+from core_lib.costs import funding_boundaries_between
 from core_lib.ports import EvidenceSink
 
 from .evidence_schema import (
@@ -22,6 +24,7 @@ from .evidence_schema import (
     EVIDENCE_SCHEMA_VERSION,
     EVIDENCE_TABLES,
     HASH_EXCLUDED_COLUMNS,
+    HASH_EXCLUDED_ROWS,
     HASH_EXCLUDED_TABLES,
     HASH_GLOBAL_EXCLUDED_COLUMNS,
     HASH_TABLES,
@@ -37,6 +40,9 @@ _US: Final = b"\x1f"
 _RS: Final = b"\x1e"
 _GS: Final = b"\x1d"
 _NUL: Final = b"\x00"
+_TIMEFRAME: Final = re.compile(r"^(?P<count>[1-9]\d*)(?P<unit>[mhd])$")
+_TIMEFRAME_MS: Final = {"m": 60_000, "h": 3_600_000, "d": 86_400_000}
+_DECIMAL_SCALE_INT: Final = 10**8
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,6 +136,10 @@ class BacktestEvidenceSink(EvidenceSink):
         self._connection: sqlite3.Connection | None = None
         self._run_id: str | None = None
         self._integrity: dict[str, bool] = {}
+        self._integrity_details: dict[str, dict[str, object]] = {}
+        self._catalog_config_matches = True
+        self._comparison_run_id: str | None = None
+        self._comparison_hash: str | None = None
 
     @property
     def path(self) -> str | None:
@@ -140,6 +150,11 @@ class BacktestEvidenceSink(EvidenceSink):
     def integrity_results(self) -> dict[str, bool]:
         """Return the last finalized integrity facts without exposing mutable state."""
         return dict(self._integrity)
+
+    @property
+    def integrity_details(self) -> dict[str, dict[str, object]]:
+        """Return deterministic diagnostic details for the last audit."""
+        return {name: dict(detail) for name, detail in self._integrity_details.items()}
 
     @property
     def connection(self) -> sqlite3.Connection:
@@ -215,18 +230,41 @@ class BacktestEvidenceSink(EvidenceSink):
         )
         self.connection.commit()
 
+    def set_determinism_reference(
+        self,
+        *,
+        catalog_config_matches: bool,
+        comparison_run_id: str | None,
+        comparison_hash: str | None,
+    ) -> None:
+        """Bind the external catalog comparison used only by the deterministic row."""
+        if (comparison_run_id is None) != (comparison_hash is None):
+            raise ValueError("comparison run id and hash must be both present or absent")
+        if comparison_hash is not None and (
+            len(comparison_hash) != 64
+            or comparison_hash.lower() != comparison_hash
+            or any(character not in "0123456789abcdef" for character in comparison_hash)
+        ):
+            raise ValueError("comparison hash must be lowercase SHA-256 hex")
+        self._catalog_config_matches = catalog_config_matches
+        self._comparison_run_id = comparison_run_id
+        self._comparison_hash = comparison_hash
+
     def audit(self, *, require_eval_decision: bool = False) -> dict[str, bool]:
         """Compute the six standard integrity facts from persisted records."""
         connection = self.connection
-        accounting_identity = connection.execute(
+        accounting_failures = connection.execute(
             """
-            SELECT COUNT(*)
+            SELECT equity_seq
             FROM PORTFOLIO_PNL
             WHERE cash_balance + position_value <> total_equity
+            ORDER BY equity_seq
             """
-        ).fetchone() == (0,)
-        timestamp_order = connection.execute(TIMESTAMP_ORDER_AUDIT_SQL).fetchall() == []
-        cost_once = connection.execute(
+        ).fetchall()
+        accounting_identity = not accounting_failures
+        timestamp_failures = connection.execute(TIMESTAMP_ORDER_AUDIT_SQL).fetchall()
+        timestamp_order = not timestamp_failures
+        execution_cost_failures = connection.execute(
             """
             SELECT t.trade_id
             FROM TRADE AS t
@@ -238,8 +276,15 @@ class BacktestEvidenceSink(EvidenceSink):
                OR t.slippage <> coalesce(entry_e.slippage, 0) + coalesce(exit_e.slippage, 0)
             ORDER BY t.trade_id
             """
-        ).fetchall() == []
-        net_of_cost = connection.execute(
+        ).fetchall()
+        slippage_failures = self._slippage_failures()
+        funding_failures = self._funding_failures()
+        cost_once = (
+            not execution_cost_failures
+            and not slippage_failures
+            and not funding_failures
+        )
+        net_failures = connection.execute(
             """
             SELECT trade_id
             FROM TRADE
@@ -250,7 +295,8 @@ class BacktestEvidenceSink(EvidenceSink):
               )
             ORDER BY trade_id
             """
-        ).fetchall() == []
+        ).fetchall()
+        net_of_cost = not net_failures
         foreign_keys_clean = connection.execute("PRAGMA foreign_key_check").fetchall() == []
         local = connection.execute(
             """
@@ -276,7 +322,10 @@ class BacktestEvidenceSink(EvidenceSink):
             ORDER BY d.decision_id
             """
         ).fetchall()
-        has_grid = connection.execute("SELECT 1 FROM PORTFOLIO_PNL LIMIT 1").fetchone()
+        grid_failures = self._grid_failures()
+        indicator_failures = self._indicator_failures()
+        source_failures = self._source_snapshot_failures()
+        feature_failures = self._trade_feature_failures()
         evidence_complete = (
             foreign_keys_clean
             and local is not None
@@ -284,16 +333,57 @@ class BacktestEvidenceSink(EvidenceSink):
             and (not require_eval_decision or local[1] == 1)
             and not missing_signal_decisions
             and not missing_executions
-            and has_grid is not None
+            and not grid_failures
+            and not indicator_failures
+            and not source_failures
+            and not feature_failures
         )
-        return {
+        results = {
             "accounting_identity": accounting_identity,
             "timestamp_order": timestamp_order,
             "cost_once": cost_once,
             "net_of_cost": net_of_cost,
-            "deterministic": True,
+            "deterministic": self._integrity.get("deterministic", True),
             "evidence_complete": evidence_complete,
         }
+        self._integrity_details = {
+            "accounting_identity": {
+                "failure_count": len(accounting_failures),
+                "failed_equity_seq": [row[0] for row in accounting_failures],
+            },
+            "timestamp_order": {
+                "failure_count": len(timestamp_failures),
+                "failures": [list(row) for row in timestamp_failures],
+            },
+            "cost_once": {
+                "execution_total_failure_count": len(execution_cost_failures),
+                "slippage_failure_count": len(slippage_failures),
+                "funding_failure_count": len(funding_failures),
+                "execution_total_failures": [row[0] for row in execution_cost_failures],
+                "slippage_failures": slippage_failures,
+                "funding_failures": funding_failures,
+            },
+            "net_of_cost": {
+                "failure_count": len(net_failures),
+                "failed_trade_ids": [row[0] for row in net_failures],
+            },
+            "deterministic": self._integrity_details.get(
+                "deterministic",
+                {"comparison": "pending_finalize"},
+            ),
+            "evidence_complete": {
+                "foreign_keys_clean": foreign_keys_clean,
+                "local_run_count": 0 if local is None else local[0],
+                "eval_decision_present": bool(local is not None and local[1] == 1),
+                "missing_signal_decisions": [row[0] for row in missing_signal_decisions],
+                "missing_executions": [row[0] for row in missing_executions],
+                "grid_failures": grid_failures,
+                "indicator_failures": indicator_failures,
+                "source_failures": source_failures,
+                "trade_feature_failures": feature_failures,
+            },
+        }
+        return results
 
     def finalize(self, run_id: str) -> str:
         """Write deterministic derivations and checks, then hash the complete state."""
@@ -306,13 +396,40 @@ class BacktestEvidenceSink(EvidenceSink):
         self._write_integrity_checks(results)
         first = self.normalized_bytes()
         second = self.normalized_bytes()
-        results["deterministic"] = first == second
-        if not results["deterministic"]:
-            self._write_integrity_checks(results)
-        final_bytes = self.normalized_bytes()
+        evidence_hash = hashlib.sha256(first).hexdigest()
+        serialization_stable = first == second
+        previous_matches = (
+            self._comparison_hash is None or self._comparison_hash == evidence_hash
+        )
+        results["deterministic"] = (
+            serialization_stable
+            and self._catalog_config_matches
+            and previous_matches
+        )
+        if self._comparison_hash is None:
+            comparison: dict[str, object] = {
+                "status": "no_comparison_target",
+                "comparison_run_id": None,
+                "comparison_hash": None,
+            }
+        else:
+            comparison = {
+                "status": "matched" if previous_matches else "mismatched",
+                "comparison_run_id": self._comparison_run_id,
+                "comparison_hash": self._comparison_hash,
+            }
+        self._integrity_details["deterministic"] = {
+            "serialization_stable": serialization_stable,
+            "catalog_config_matches": self._catalog_config_matches,
+            "current_evidence_hash": evidence_hash,
+            **comparison,
+        }
+        self._write_integrity_checks(results)
+        if self.normalized_bytes() != first:
+            raise RuntimeError("deterministic integrity context leaked into Evidence hash")
         self._integrity = results
         self.connection.commit()
-        return hashlib.sha256(final_bytes).hexdigest()
+        return evidence_hash
 
     def normalized_bytes(self) -> bytes:
         """Serialize all hash-owned rows using the §5.3.1 separators and ordering."""
@@ -325,9 +442,12 @@ class BacktestEvidenceSink(EvidenceSink):
                 and name not in HASH_EXCLUDED_COLUMNS.get(table, frozenset())
             ]
             sort_keys = ENTITY_SORT_KEYS[table]
+            predicates = HASH_EXCLUDED_ROWS.get(table, ())
+            where = "" if not predicates else f" WHERE {' AND '.join(predicates)}"
             sql = (
                 f"SELECT {', '.join(_quote_identifier(name) for name in columns)} "
                 f"FROM {_quote_identifier(table)} "
+                f"{where}"
                 f"ORDER BY {', '.join(_quote_identifier(name) for name in sort_keys)}"
             )
             rows = self.connection.execute(sql).fetchall()
@@ -335,6 +455,224 @@ class BacktestEvidenceSink(EvidenceSink):
                 _RS.join(_US.join(_serialize_value(value) for value in row) for row in rows)
             )
         return _GS.join(groups)
+
+    def _slippage_failures(self) -> list[dict[str, int]]:
+        failures: list[dict[str, int]] = []
+        rows = self.connection.execute(
+            """
+            SELECT execution_id, reference_price, price, quantity, slippage
+            FROM EXECUTION
+            ORDER BY execution_id
+            """
+        ).fetchall()
+        for execution_id, reference_price, price, quantity, stored in rows:
+            exact = (
+                Decimal(abs(price - reference_price))
+                * Decimal(quantity)
+                / Decimal(_DECIMAL_SCALE_INT)
+            )
+            expected = int(exact.quantize(Decimal("1"), rounding=ROUND_HALF_EVEN))
+            delta = abs(stored - expected)
+            if delta > 1:
+                failures.append(
+                    {
+                        "execution_id": execution_id,
+                        "stored": stored,
+                        "expected": expected,
+                        "scaled_unit_delta": delta,
+                    }
+                )
+        return failures
+
+    def _funding_failures(self) -> list[dict[str, object]]:
+        failures: list[dict[str, object]] = []
+        trades = self.connection.execute(
+            """
+            SELECT trade_id, market_type, entry_time, exit_time, funding_cost
+            FROM TRADE
+            ORDER BY trade_id
+            """
+        ).fetchall()
+        settlements = self.connection.execute(
+            """
+            SELECT trade_id, settled_at, payment_amount
+            FROM FUNDING_SETTLEMENT
+            ORDER BY trade_id, settled_at
+            """
+        ).fetchall()
+        by_trade: dict[int, list[tuple[int, int]]] = {}
+        for trade_id, settled_at, payment_amount in settlements:
+            by_trade.setdefault(trade_id, []).append((settled_at, payment_amount))
+        for trade_id, market_type, entry_time, exit_time, funding_cost in trades:
+            if exit_time is None or funding_cost is None:
+                failures.append(
+                    {"trade_id": trade_id, "reason": "unfinalized_trade"}
+                )
+                continue
+            expected = (
+                {
+                    epoch_milliseconds(boundary)
+                    for boundary in funding_boundaries_between(
+                        datetime.fromtimestamp(entry_time / 1_000, tz=UTC),
+                        datetime.fromtimestamp(exit_time / 1_000, tz=UTC),
+                    )
+                }
+                if str(market_type).upper() == "FUTURES"
+                else set()
+            )
+            actual_rows = by_trade.get(trade_id, [])
+            actual = {settled_at for settled_at, _ in actual_rows}
+            payment_total = sum(
+                (payment_amount for _, payment_amount in actual_rows),
+                start=0,
+            )
+            reasons: list[str] = []
+            if actual != expected or len(actual_rows) != len(expected):
+                reasons.append("boundary_count_or_timestamp")
+            if -payment_total != funding_cost:
+                reasons.append("payment_sign_identity")
+            if reasons:
+                failures.append(
+                    {
+                        "trade_id": trade_id,
+                        "reasons": reasons,
+                        "expected_boundaries": sorted(expected),
+                        "actual_boundaries": sorted(actual),
+                        "funding_cost": funding_cost,
+                        "negative_payment_total": -payment_total,
+                    }
+                )
+        return failures
+
+    def _grid_failures(self) -> list[str]:
+        local = self.connection.execute(
+            """
+            SELECT period_start, period_end, timeframe
+            FROM BACKTEST_RUN_LOCAL
+            """
+        ).fetchone()
+        if local is None:
+            return ["missing_local_run"]
+        period_start, period_end, timeframe = local
+        match = _TIMEFRAME.fullmatch(timeframe)
+        if match is None:
+            return ["unsupported_timeframe"]
+        duration = _TIMEFRAME_MS[match.group("unit")] * int(match.group("count"))
+        span = period_end - period_start
+        failures: list[str] = []
+        if span <= 0 or span % duration:
+            failures.append("period_not_aligned_to_timeframe")
+            return failures
+        expected = [
+            period_start + duration * index
+            for index in range(1, span // duration + 1)
+        ]
+        actual = [
+            row[0]
+            for row in self.connection.execute(
+                "SELECT ts FROM PORTFOLIO_PNL ORDER BY ts, equity_seq"
+            ).fetchall()
+        ]
+        if actual != expected:
+            failures.append(
+                f"portfolio_grid_mismatch:expected={len(expected)}:actual={len(actual)}"
+            )
+        return failures
+
+    def _indicator_failures(self) -> list[str]:
+        keys = [
+            row[0]
+            for row in self.connection.execute(
+                "SELECT indicator_key FROM INDICATOR_DEFINITION ORDER BY indicator_key"
+            ).fetchall()
+        ]
+        if not keys:
+            return ["missing_indicator_definitions"]
+        grid = [
+            row[0]
+            for row in self.connection.execute(
+                "SELECT ts FROM PORTFOLIO_PNL ORDER BY ts, equity_seq"
+            ).fetchall()
+        ]
+        failures: list[str] = []
+        for key in keys:
+            rows = self.connection.execute(
+                """
+                SELECT feature_ts
+                FROM INDICATOR_SNAPSHOT
+                WHERE indicator_key = ? AND is_warmup = 0
+                ORDER BY feature_ts, snapshot_seq
+                """,
+                (key,),
+            ).fetchall()
+            actual = [row[0] for row in rows]
+            if actual != grid:
+                failures.append(
+                    f"indicator_grid_mismatch:{key}:expected={len(grid)}:actual={len(actual)}"
+                )
+        return failures
+
+    def _source_snapshot_failures(self) -> list[str]:
+        local = self.connection.execute(
+            """
+            SELECT symbol, timeframe, market_type
+            FROM BACKTEST_RUN_LOCAL
+            """
+        ).fetchone()
+        if local is None:
+            return ["missing_local_run"]
+        symbol, timeframe, market_type = local
+        rows = self.connection.execute(
+            """
+            SELECT source_kind, symbol, timeframe, COUNT(*)
+            FROM SOURCE_DATA_SNAPSHOT
+            GROUP BY source_kind, symbol, timeframe
+            ORDER BY source_kind, symbol, timeframe
+            """
+        ).fetchall()
+        counts = {
+            (kind, row_symbol, row_timeframe): count
+            for kind, row_symbol, row_timeframe, count in rows
+        }
+        failures: list[str] = []
+        if counts.get(("ohlcv", symbol, timeframe)) != 1:
+            failures.append("strategy_ohlcv_snapshot_count")
+        if str(market_type).lower() == "futures":
+            if counts.get(("funding", symbol, None)) != 1:
+                failures.append("funding_snapshot_count")
+        if any(count != 1 for count in counts.values()):
+            failures.append("duplicate_source_snapshot")
+        return failures
+
+    def _trade_feature_failures(self) -> list[str]:
+        trade_ids = [
+            row[0]
+            for row in self.connection.execute(
+                "SELECT trade_id FROM TRADE ORDER BY trade_id"
+            ).fetchall()
+        ]
+        failures: list[str] = []
+        expected = {"entry", "exit", "mae", "mfe"}
+        for trade_id in trade_ids:
+            rows = self.connection.execute(
+                """
+                SELECT phase, features_json
+                FROM TRADE_FEATURE_SNAPSHOT
+                WHERE trade_id = ?
+                ORDER BY phase
+                """,
+                (trade_id,),
+            ).fetchall()
+            phases = {row[0] for row in rows}
+            if phases != expected or len(rows) != len(expected):
+                failures.append(f"trade_feature_phases:{trade_id}")
+                continue
+            if any(
+                not isinstance(json.loads(row[1]), dict) or json.loads(row[1]) == {}
+                for row in rows
+            ):
+                failures.append(f"empty_trade_features:{trade_id}")
+        return failures
 
     def close(self) -> None:
         """Commit and close the bound SQLite connection."""
@@ -550,7 +888,12 @@ class BacktestEvidenceSink(EvidenceSink):
         if tuple(results) != INTEGRITY_CHECK_NAMES:
             raise ValueError("integrity results must use the six canonical keys in order")
         for check_id, name in enumerate(INTEGRITY_CHECK_NAMES, start=1):
-            detail = canonical_json({"passed": results[name]})
+            detail = canonical_json(
+                {
+                    "passed": results[name],
+                    **self._integrity_details.get(name, {}),
+                }
+            )
             self.connection.execute(
                 """
                 INSERT INTO INTEGRITY_CHECK (

@@ -127,6 +127,9 @@ def test_catalog_issues_run_id_then_records_prereg_and_evaluated_metadata() -> N
         "strategy_name": "M9Fixture",
         "strategy_version": "1.0.0",
         "params_json": {},
+        "resolved_indicators_json": [
+            {"name": "EMA", "params": {"period": 9}, "version": "1.0.0"}
+        ],
         "params_schema_version": "1.0.0",
         "symbol": "BTCUSDT",
         "exchange": "binance",
@@ -160,6 +163,11 @@ def test_catalog_issues_run_id_then_records_prereg_and_evaluated_metadata() -> N
     with _connect_writer("backtest_db") as connection:
         catalog = BacktestCatalogStore(cast(WriteConnection, connection))
         run_id = catalog.register(run_meta)
+        reference = catalog.determinism_reference(
+            run_id,
+            str(run_meta["config_hash"]),
+        )
+        assert reference.catalog_config_matches is True
         catalog.save_prereg(
             {
                 "run_id": run_id,

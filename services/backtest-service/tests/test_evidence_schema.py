@@ -16,6 +16,7 @@ from backtest_service.adapters.evidence_schema import (
     EVIDENCE_TABLES,
     EXTENSION_TABLES,
     HASH_EXCLUDED_COLUMNS,
+    HASH_EXCLUDED_ROWS,
     HASH_EXCLUDED_TABLES,
     HASH_GLOBAL_EXCLUDED_COLUMNS,
     HASH_TABLES,
@@ -231,9 +232,12 @@ def test_schema_marks_deterministic_hash_boundaries() -> None:
     assert HASH_EXCLUDED_TABLES == {"FINDING_CLAIM"}
     assert HASH_GLOBAL_EXCLUDED_COLUMNS == {"run_id", "backtest_run_id"}
     assert HASH_EXCLUDED_COLUMNS == {
-        "BACKTEST_RUN_LOCAL": {"run_seq", "created_at"},
+        "BACKTEST_RUN_LOCAL": {"run_seq", "run_name", "created_at"},
         "INTEGRITY_CHECK": {"checked_at"},
         "FINDING_CLAIM": {"created_at"},
+    }
+    assert HASH_EXCLUDED_ROWS == {
+        "INTEGRITY_CHECK": ("check_name <> 'deterministic'",)
     }
     assert HASH_TABLES == tuple(sorted(set(EVIDENCE_TABLES) - HASH_EXCLUDED_TABLES))
     assert set(ENTITY_SORT_KEYS) == set(HASH_TABLES)

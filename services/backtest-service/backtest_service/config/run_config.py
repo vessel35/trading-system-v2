@@ -39,6 +39,7 @@ class RunConfig(BaseModel):
     position_size_pct: float | None = None
     cost_values: dict[str, Decimal] = Field(default_factory=dict)
     indicator_mode: Literal["auto", "explicit", "all"] = "auto"
+    explicit_indicators: list[dict[str, object]] = Field(default_factory=list)
     trigger_feed: Literal["tf_candle", "m1_subcandle"] = "tf_candle"
     fill_timing: Literal["immediate", "next_bar"] = "next_bar"
     profile_ref: str = Field(min_length=1)
@@ -72,6 +73,31 @@ class RunConfig(BaseModel):
             raise ValueError("run timestamps must be timezone-aware")
         return value.astimezone(UTC)
 
+    @field_validator("explicit_indicators")
+    @classmethod
+    def _validate_explicit_indicators(
+        cls,
+        value: list[dict[str, object]],
+    ) -> list[dict[str, object]]:
+        normalized: list[dict[str, object]] = []
+        for index, item in enumerate(value):
+            if set(item) != {"name", "params"}:
+                raise ValueError(
+                    f"explicit_indicators[{index}] must contain exactly name and params"
+                )
+            name = item["name"]
+            params = item["params"]
+            if not isinstance(name, str) or not name:
+                raise ValueError(f"explicit_indicators[{index}].name must be non-empty")
+            if not isinstance(params, dict) or any(
+                not isinstance(key, str) for key in params
+            ):
+                raise ValueError(
+                    f"explicit_indicators[{index}].params must be a string-keyed mapping"
+                )
+            normalized.append({"name": name, "params": dict(params)})
+        return normalized
+
     @model_validator(mode="after")
     def _validate_contract(self) -> RunConfig:
         if self.start >= self.end:
@@ -81,6 +107,12 @@ class RunConfig(BaseModel):
         if self.trigger_feed == "m1_subcandle":
             raise NotImplementedError(
                 "m1_subcandle is reserved; this scope supports tf_candle only"
+            )
+        if self.indicator_mode == "explicit" and not self.explicit_indicators:
+            raise ValueError("explicit indicator_mode requires explicit_indicators")
+        if self.indicator_mode != "explicit" and self.explicit_indicators:
+            raise ValueError(
+                "explicit_indicators may be set only when indicator_mode is explicit"
             )
         if self.sizing_method == "risk_based":
             if self.position_size_pct is not None:
