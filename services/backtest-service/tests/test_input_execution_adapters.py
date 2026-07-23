@@ -17,6 +17,7 @@ from core_lib.costs import SlippageParams
 from core_lib.execution import normalize_order
 from core_lib.ports import Clock, CostModel, DataFeed, StrategyRegistry
 from core_lib.types import (
+    Candle,
     MarketType,
     Order,
     OrderRequest,
@@ -110,19 +111,14 @@ def test_data_feed_resamples_complete_1m_rows_and_enforces_up_to() -> None:
     assert len(connection.calls) == 1
 
 
-@pytest.mark.parametrize("bad_row", ["missing", "null_volume"])
-def test_data_feed_discards_and_counts_bad_buckets(
-    bad_row: str,
+def test_data_feed_discards_and_counts_absent_source_buckets(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     base = datetime(2026, 1, 1, tzinfo=UTC)
     rows: list[Sequence[object]] = [
         _minute_row(base + timedelta(minutes=index), 100 + index) for index in range(5)
     ]
-    if bad_row == "missing":
-        del rows[2]
-    else:
-        rows[2] = _minute_row(base + timedelta(minutes=2), 102, volume=None)
+    del rows[2]
     feed = BacktestDataFeed(StubConnection(lambda query, params: rows))
 
     with caplog.at_level(logging.WARNING):
@@ -131,6 +127,20 @@ def test_data_feed_discards_and_counts_bad_buckets(
     assert candles == []
     assert feed.dropped_bucket_count == 1
     assert "discarded 1 incomplete OHLCV bucket" in caplog.text
+
+
+def test_data_feed_rejects_present_but_incomplete_source_rows() -> None:
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    rows: list[Sequence[object]] = [
+        _minute_row(base + timedelta(minutes=index), 100 + index) for index in range(5)
+    ]
+    rows[2] = _minute_row(base + timedelta(minutes=2), 102, volume=None)
+    feed = BacktestDataFeed(StubConnection(lambda query, params: rows))
+
+    with pytest.raises(TypeError, match="volume must be returned as Decimal"):
+        feed.candles("BTCUSDT", "5m", base + timedelta(minutes=5))
+
+    assert feed.dropped_bucket_count == 0
 
 
 def test_data_feed_normalizes_symbol_and_one_second_collection_jitter() -> None:
@@ -203,6 +213,43 @@ def test_clock_uses_only_its_strict_simulation_schedule() -> None:
         clock.advance()
     with pytest.raises(ValueError, match="strictly increasing"):
         BacktestClock([start, start])
+
+
+def test_clock_builds_open_close_union_across_candle_gaps() -> None:
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    candles = [
+        Candle(
+            symbol="BTCUSDT",
+            exchange="binance",
+            timeframe="1h",
+            open_time=opened,
+            close_time=opened + timedelta(hours=1),
+            open=100.0,
+            high=101.0,
+            low=99.0,
+            close=100.0,
+            volume=1.0,
+            quote_volume=100.0,
+            trade_count=1,
+        )
+        for opened in (start, start + timedelta(hours=2))
+    ]
+    clock = BacktestClock.from_candles(candles)
+
+    observed = [clock.now()]
+    while True:
+        try:
+            clock.advance()
+        except StopIteration:
+            break
+        observed.append(clock.now())
+
+    assert observed == [
+        start,
+        start + timedelta(hours=1),
+        start + timedelta(hours=2),
+        start + timedelta(hours=3),
+    ]
 
 
 def _order(*, reduce_only: bool = False) -> Order:

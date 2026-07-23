@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import re
 import sqlite3
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -35,13 +34,16 @@ from .evidence_schema import (
     initialize_evidence_schema,
     scale_decimal,
 )
+from .ohlcv_gaps import (
+    OhlcvGapContract,
+    decode_ohlcv_gap_contract,
+    timeframe_milliseconds,
+)
 
 _US: Final = b"\x1f"
 _RS: Final = b"\x1e"
 _GS: Final = b"\x1d"
 _NUL: Final = b"\x00"
-_TIMEFRAME: Final = re.compile(r"^(?P<count>[1-9]\d*)(?P<unit>[mhd])$")
-_TIMEFRAME_MS: Final = {"m": 60_000, "h": 3_600_000, "d": 86_400_000}
 _DECIMAL_SCALE_INT: Final = 10**8
 
 
@@ -573,25 +575,57 @@ class BacktestEvidenceSink(EvidenceSink):
     def _grid_failures(self) -> list[str]:
         local = self.connection.execute(
             """
-            SELECT period_start, period_end, timeframe
+            SELECT period_start, period_end, timeframe, symbol
             FROM BACKTEST_RUN_LOCAL
             """
         ).fetchone()
         if local is None:
             return ["missing_local_run"]
-        period_start, period_end, timeframe = local
-        match = _TIMEFRAME.fullmatch(timeframe)
-        if match is None:
+        period_start, period_end, timeframe, symbol = local
+        try:
+            duration = timeframe_milliseconds(timeframe)
+        except ValueError:
             return ["unsupported_timeframe"]
-        duration = _TIMEFRAME_MS[match.group("unit")] * int(match.group("count"))
         span = period_end - period_start
         failures: list[str] = []
         if span <= 0 or span % duration:
             failures.append("period_not_aligned_to_timeframe")
             return failures
-        expected = [
+        full_grid = [
             period_start + duration * index
             for index in range(1, span // duration + 1)
+        ]
+        source = self.connection.execute(
+            """
+            SELECT gap_count, note
+            FROM SOURCE_DATA_SNAPSHOT
+            WHERE source_kind = 'ohlcv'
+              AND symbol = ?
+              AND timeframe = ?
+            """,
+            (symbol, timeframe),
+        ).fetchone()
+        if source is None:
+            return ["missing_strategy_ohlcv_snapshot"]
+        gap_count, note = source
+        contract = OhlcvGapContract((), ())
+        if note is None:
+            if gap_count != 0:
+                return ["missing_strategy_ohlcv_gap_contract"]
+        else:
+            try:
+                contract = decode_ohlcv_gap_contract(note)
+            except ValueError:
+                return ["invalid_strategy_ohlcv_gap_contract"]
+        if contract.normal_gap_count != gap_count:
+            return ["strategy_ohlcv_gap_count_mismatch"]
+        allowed_gaps = set(contract.evaluation_grid_gap_close_times)
+        if not allowed_gaps <= set(full_grid):
+            return ["strategy_ohlcv_gap_outside_evaluation_grid"]
+        expected = [
+            close_time
+            for close_time in full_grid
+            if close_time not in allowed_gaps
         ]
         actual = [
             row[0]
@@ -601,7 +635,9 @@ class BacktestEvidenceSink(EvidenceSink):
         ]
         if actual != expected:
             failures.append(
-                f"portfolio_grid_mismatch:expected={len(expected)}:actual={len(actual)}"
+                "portfolio_grid_mismatch:"
+                f"expected={len(expected)}:actual={len(actual)}:"
+                f"declared_gaps={len(allowed_gaps)}"
             )
         return failures
 
@@ -641,25 +677,33 @@ class BacktestEvidenceSink(EvidenceSink):
     def _source_snapshot_failures(self) -> list[str]:
         local = self.connection.execute(
             """
-            SELECT symbol, timeframe, market_type
+            SELECT symbol, timeframe, market_type, period_start, period_end
             FROM BACKTEST_RUN_LOCAL
             """
         ).fetchone()
         if local is None:
             return ["missing_local_run"]
-        symbol, timeframe, market_type = local
+        symbol, timeframe, market_type, period_start, period_end = local
         rows = self.connection.execute(
             """
-            SELECT source_kind, symbol, timeframe, COUNT(*)
+            SELECT
+                snapshot_id,
+                source_kind,
+                symbol,
+                timeframe,
+                range_start,
+                range_end,
+                row_count,
+                gap_count,
+                note
             FROM SOURCE_DATA_SNAPSHOT
-            GROUP BY source_kind, symbol, timeframe
-            ORDER BY source_kind, symbol, timeframe
+            ORDER BY snapshot_id
             """
         ).fetchall()
-        counts = {
-            (kind, row_symbol, row_timeframe): count
-            for kind, row_symbol, row_timeframe, count in rows
-        }
+        counts: dict[tuple[object, object, object], int] = {}
+        for _, kind, row_symbol, row_timeframe, *_ in rows:
+            key = (kind, row_symbol, row_timeframe)
+            counts[key] = counts.get(key, 0) + 1
         failures: list[str] = []
         if counts.get(("ohlcv", symbol, timeframe)) != 1:
             failures.append("strategy_ohlcv_snapshot_count")
@@ -668,6 +712,62 @@ class BacktestEvidenceSink(EvidenceSink):
                 failures.append("funding_snapshot_count")
         if any(count != 1 for count in counts.values()):
             failures.append("duplicate_source_snapshot")
+        for (
+            snapshot_id,
+            kind,
+            _row_symbol,
+            row_timeframe,
+            range_start,
+            range_end,
+            row_count,
+            gap_count,
+            note,
+        ) in rows:
+            if kind != "ohlcv":
+                continue
+            assert isinstance(row_timeframe, str)
+            try:
+                duration = timeframe_milliseconds(row_timeframe)
+            except ValueError:
+                failures.append(f"ohlcv_unsupported_timeframe:{snapshot_id}")
+                continue
+            span = range_end - range_start
+            if span <= 0 or span % duration:
+                failures.append(f"ohlcv_snapshot_range_alignment:{snapshot_id}")
+                continue
+            if row_count + gap_count != span // duration:
+                failures.append(f"ohlcv_snapshot_count_identity:{snapshot_id}")
+            if not (range_start <= period_start and period_end <= range_end):
+                failures.append(f"ohlcv_snapshot_evaluation_coverage:{snapshot_id}")
+            contract = OhlcvGapContract((), ())
+            if note is None:
+                if gap_count != 0:
+                    failures.append(f"ohlcv_gap_contract_missing:{snapshot_id}")
+                    continue
+            else:
+                try:
+                    contract = decode_ohlcv_gap_contract(note)
+                except ValueError:
+                    failures.append(f"ohlcv_gap_contract_invalid:{snapshot_id}")
+                    continue
+            if contract.normal_gap_count != gap_count:
+                failures.append(f"ohlcv_gap_count_mismatch:{snapshot_id}")
+            if any(
+                not range_start < close_time <= range_end
+                or (close_time - range_start) % duration
+                for close_time in contract.normal_gap_close_times
+            ):
+                failures.append(f"ohlcv_normal_gap_off_grid:{snapshot_id}")
+            expected_evaluation_gaps = tuple(
+                close_time
+                for close_time in contract.normal_gap_close_times
+                if period_start < close_time <= period_end
+            )
+            if (
+                contract.evaluation_grid_gap_close_times
+                != expected_evaluation_gaps
+            ):
+                failures.append(f"ohlcv_evaluation_gap_mismatch:{snapshot_id}")
         return failures
 
     def _trade_feature_failures(self) -> list[str]:

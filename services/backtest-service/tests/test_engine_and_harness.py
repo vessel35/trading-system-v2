@@ -375,13 +375,12 @@ def _vessel_engine(
     prereg: Mapping[str, object] | None = None,
 ) -> Engine:
     candles = _vessel_candles()
-    schedule = [candles[0].open_time, *(candle.close_time for candle in candles)]
     config = _vessel_config()
     costs = BacktestCostModel(config.cost_values)
     return Engine(
         _Feed(candles),
         BacktestBroker(costs),
-        BacktestClock(schedule),
+        BacktestClock.from_candles(candles),
         costs,
         BacktestEvidenceSink(root),
         catalog,
@@ -519,13 +518,14 @@ def _engine(
     brokers: list[_Broker],
     feeds: list[_Feed] | None = None,
     sinks: list[BacktestEvidenceSink] | None = None,
+    *,
+    candles: list[Candle] | None = None,
 ) -> Engine:
-    candles = _candles()
-    schedule = [candles[0].open_time, *(candle.close_time for candle in candles)]
+    history = _candles() if candles is None else candles
     costs = BacktestCostModel(_config().cost_values)
     broker = _Broker(costs)
     brokers.append(broker)
-    feed = _Feed(candles)
+    feed = _Feed(history)
     if feeds is not None:
         feeds.append(feed)
     sink = BacktestEvidenceSink(root)
@@ -534,7 +534,7 @@ def _engine(
     return Engine(
         feed,
         broker,
-        BacktestClock(schedule),
+        BacktestClock.from_candles(history),
         costs,
         sink,
         catalog,
@@ -570,7 +570,6 @@ def _daily_engine(
         )
         for index in range(12)
     ]
-    schedule = [candles[0].open_time, *(candle.close_time for candle in candles)]
     config = RunConfig(
         run_name="daily",
         strategy_id="daily-fixture",
@@ -599,7 +598,7 @@ def _daily_engine(
         Engine(
             _DailyFeed(candles, funding_rate=funding_rate),
             _Broker(costs),
-            BacktestClock(schedule),
+            BacktestClock.from_candles(candles),
             costs,
             sink,
             catalog,
@@ -675,6 +674,56 @@ def test_engine_orders_configure_before_submit_and_persists_timing(
     assert result.integrity_status == "passed"
     assert feeds[0].candle_calls == 2
     assert catalog.events == ["reconcile", "register", "prereg", "summary"]
+
+
+def test_declared_source_gap_passes_but_an_evidence_record_gap_fails(
+    tmp_path: Path,
+) -> None:
+    history = [
+        candle
+        for candle in _candles()
+        if candle.open_time != _BASE + timedelta(hours=1)
+    ]
+    catalog = _Catalog()
+    brokers: list[_Broker] = []
+    sinks: list[BacktestEvidenceSink] = []
+
+    result = _engine(
+        tmp_path,
+        catalog,
+        brokers,
+        sinks=sinks,
+        candles=history,
+    ).run(_config())
+
+    assert result.integrity_status == "passed"
+    sink = sinks[0]
+    gap_count, note = sink.connection.execute(
+        """
+        SELECT gap_count, note
+        FROM SOURCE_DATA_SNAPSHOT
+        WHERE source_kind = 'ohlcv' AND timeframe = '1h'
+        """
+    ).fetchone()
+    gap_evidence = json.loads(note)
+    assert gap_count == 1
+    assert gap_evidence["normal_gap_count"] == 1
+    assert gap_evidence["evaluation_grid_gap_count"] == 1
+    assert sink.connection.execute(
+        "SELECT COUNT(*) FROM PORTFOLIO_PNL"
+    ).fetchone() == (3,)
+
+    sink.connection.execute(
+        "DELETE FROM PORTFOLIO_PNL WHERE ts = ?",
+        (int((_BASE + timedelta(hours=3)).timestamp() * 1_000),),
+    )
+    sink.connection.commit()
+    audit = sink.audit(require_eval_decision=True)
+
+    assert audit["evidence_complete"] is False
+    assert sink.integrity_details["evidence_complete"]["grid_failures"] == [
+        "portfolio_grid_mismatch:expected=3:actual=2:declared_gaps=1"
+    ]
 
 
 def test_engine_hash_parity_uses_different_catalog_run_ids(tmp_path: Path) -> None:

@@ -72,6 +72,7 @@ from backtest_service.adapters.evidence_sink import (
     EvidenceRecord,
     epoch_milliseconds,
 )
+from backtest_service.adapters.ohlcv_gaps import build_ohlcv_gap_contract
 from backtest_service.config import RunConfig
 
 _RUN_ID = re.compile(r"^BT_[0-9]{8}_(?P<seq>[0-9]+)_(?P<name>[a-z0-9-]+)$")
@@ -206,7 +207,7 @@ class Engine:
         manager: AdapterManager,
         *,
         prereg: Mapping[str, object],
-        engine_version: str = "1.1.0",
+        engine_version: str = "1.2.0",
         core_lib_version: str = "0.2.0",
         thresholds: Mapping[str, float] | None = None,
     ) -> None:
@@ -1686,6 +1687,16 @@ class Engine:
             for candle in candles
         ]
         content_hash = hashlib.sha256(canonical_json(content).encode()).hexdigest()
+        range_start = candles[0].open_time
+        range_end = self._config().end
+        gap_contract = build_ohlcv_gap_contract(
+            candles,
+            timeframe=timeframe,
+            range_start=range_start,
+            range_end=range_end,
+            evaluation_start=self._config().start,
+            evaluation_end=self._config().end,
+        )
         self._sequence["source_snapshot"] += 1
         self.evidence.record(
             EvidenceRecord(
@@ -1698,10 +1709,12 @@ class Engine:
                     "exchange": self._config().exchange,
                     "timeframe": timeframe,
                     "resampled_from": "1m" if timeframe != "1m" else None,
-                    "range_start": candles[0].open_time,
-                    "range_end": candles[-1].close_time,
+                    "range_start": range_start,
+                    "range_end": range_end,
                     "row_count": len(candles),
+                    "gap_count": gap_contract.normal_gap_count,
                     "content_hash": content_hash,
+                    "note": gap_contract.encode(),
                 },
             )
         )

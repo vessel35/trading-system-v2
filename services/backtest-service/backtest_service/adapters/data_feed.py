@@ -175,6 +175,14 @@ class BacktestDataFeed(DataFeed):
             open_time = row[0]
             if not isinstance(open_time, datetime):
                 raise TypeError("ohlcv_futures.time must be datetime")
+            for index, name in (
+                (1, "open"),
+                (2, "high"),
+                (3, "low"),
+                (4, "close"),
+                (5, "volume"),
+            ):
+                _decimal(row[index], name=name)
             normalized_time = _utc(open_time, name="ohlcv_futures.time")
             group = grouped.setdefault(_bucket_start(normalized_time, duration), {})
             if normalized_time in group:
@@ -198,10 +206,6 @@ class BacktestDataFeed(DataFeed):
                 current += duration
                 continue
             ordered = [bucket[at] for at in sorted(bucket)]
-            if any(row[5] is None for row in ordered):
-                dropped += 1
-                current += duration
-                continue
             result.append(self._build_candle(symbol, tf, current, duration, ordered))
             current += duration
 

@@ -372,9 +372,7 @@ def _run_real_vessel(root: Path, config: RunConfig) -> RunResult:
         result = Engine(
             feed,
             BacktestBroker(costs),
-            BacktestClock(
-                [history[0].open_time, *(candle.close_time for candle in history)]
-            ),
+            BacktestClock.from_candles(history),
             costs,
             BacktestEvidenceSink(root),
             BacktestCatalogStore(cast(WriteConnection, catalog_connection)),
@@ -428,7 +426,6 @@ def test_vessel_e2e_writes_evidence_and_real_catalog_with_hash_parity(
     """Issue two real run ids while proving logical Evidence hash parity."""
     start, candles = _gap_free_vessel_candles()
     config = _vessel_config(start)
-    schedule = [candles[0].open_time, *(candle.close_time for candle in candles)]
     prereg = {
         "hypothesis": "Vessel reference traverses the complete pipeline",
         "primary_metric": "pf",
@@ -458,7 +455,7 @@ def test_vessel_e2e_writes_evidence_and_real_catalog_with_hash_parity(
             result = Engine(
                 _GapFreeVesselFeed(candles),
                 BacktestBroker(costs),
-                BacktestClock(schedule),
+                BacktestClock.from_candles(candles),
                 costs,
                 BacktestEvidenceSink(tmp_path / label),
                 catalog,
@@ -566,9 +563,7 @@ def test_vessel_engine_traverses_real_crypto_data_feed(
         result = Engine(
             feed,
             BacktestBroker(costs),
-            BacktestClock(
-                [history[0].open_time, *(candle.close_time for candle in history)]
-            ),
+            BacktestClock.from_candles(history),
             costs,
             BacktestEvidenceSink(tmp_path / "real-data-feed"),
             BacktestCatalogStore(cast(WriteConnection, catalog_connection)),
@@ -700,6 +695,67 @@ def test_real_funding_sign_regressions_complete_without_negative_cash(
             assert evidence.execute(
                 "SELECT COUNT(*) FROM INTEGRITY_CHECK WHERE passed = 0"
             ).fetchone() == (0,)
+
+
+def test_real_missing_candles_complete_330_day_evidence(
+    tmp_path: Path,
+) -> None:
+    start = datetime(2025, 7, 1, tzinfo=UTC)
+    result = _run_real_vessel(
+        tmp_path / "cto-gap-330d",
+        _real_vessel_config(
+            run_name="cto-gap-330d",
+            start=start,
+            end=start + timedelta(days=330),
+        ),
+    )
+
+    with sqlite3.connect(result.evidence_path) as evidence:
+        hourly_count, hourly_gaps, hourly_note = evidence.execute(
+            """
+            SELECT row_count, gap_count, note
+            FROM SOURCE_DATA_SNAPSHOT
+            WHERE source_kind = 'ohlcv' AND timeframe = '1h'
+            """
+        ).fetchone()
+        minute_count, minute_gaps, minute_note = evidence.execute(
+            """
+            SELECT row_count, gap_count, note
+            FROM SOURCE_DATA_SNAPSHOT
+            WHERE source_kind = 'ohlcv' AND timeframe = '1m'
+            """
+        ).fetchone()
+        hourly_gap_evidence = json.loads(hourly_note)
+        minute_gap_evidence = json.loads(minute_note)
+        integrity = dict(
+            evidence.execute(
+                "SELECT check_name, passed FROM INTEGRITY_CHECK"
+            ).fetchall()
+        )
+
+        assert evidence.execute(
+            "SELECT COUNT(*) FROM PORTFOLIO_PNL"
+        ).fetchone() == (7_457,)
+        assert evidence.execute("SELECT COUNT(*) FROM TRADE").fetchone() == (565,)
+
+    assert hourly_count == 7_769
+    assert hourly_gaps == 463
+    assert hourly_gap_evidence["normal_gap_count"] == 463
+    assert hourly_gap_evidence["evaluation_grid_gap_count"] == 463
+    assert minute_count == 466_663
+    assert minute_gaps == 27_257
+    assert minute_gap_evidence["normal_gap_count"] == 27_257
+    assert minute_gap_evidence["evaluation_grid_gap_count"] == 27_257
+    assert integrity == {
+        "accounting_identity": 1,
+        "timestamp_order": 1,
+        "cost_once": 1,
+        "net_of_cost": 1,
+        "deterministic": 1,
+        "evidence_complete": 1,
+    }
+    assert result.integrity_status == "passed"
+    assert result.decision.route == "retest"
 
 
 def test_entry_quantity_is_independent_of_remaining_run_window(
