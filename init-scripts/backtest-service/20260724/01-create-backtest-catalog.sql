@@ -80,7 +80,11 @@ CREATE TABLE IF NOT EXISTS public.backtest_run (
     CONSTRAINT ck_backtest_run_run_id CHECK (
         run_id ~ (
             '^BT_[0-9]{8}_'
-            || lpad(run_seq::text, 6, '0')
+            || lpad(
+                run_seq::text,
+                greatest(6, length(run_seq::text)),
+                '0'
+            )
             || '_'
             || run_name
             || '$'
@@ -145,6 +149,25 @@ CREATE TABLE IF NOT EXISTS public.backtest_run (
         finished_at IS NULL OR finished_at >= started_at
     )
 );
+
+-- CREATE TABLE IF NOT EXISTS does not update an already-applied constraint.
+-- Replace it explicitly so rerunning this migration upgrades existing databases.
+ALTER TABLE public.backtest_run
+    DROP CONSTRAINT IF EXISTS ck_backtest_run_run_id;
+ALTER TABLE public.backtest_run
+    ADD CONSTRAINT ck_backtest_run_run_id CHECK (
+        run_id ~ (
+            '^BT_[0-9]{8}_'
+            || lpad(
+                run_seq::text,
+                greatest(6, length(run_seq::text)),
+                '0'
+            )
+            || '_'
+            || run_name
+            || '$'
+        )
+    );
 
 ALTER SEQUENCE public.backtest_run_seq
     OWNED BY public.backtest_run.run_seq;

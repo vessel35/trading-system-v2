@@ -21,8 +21,24 @@ BEGIN
             NOCREATEROLE
             NOREPLICATION;
     END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'signal_reader') THEN
+        CREATE ROLE signal_reader
+            NOLOGIN
+            NOSUPERUSER
+            NOCREATEDB
+            NOCREATEROLE
+            NOREPLICATION;
+    END IF;
 END
 $$;
+
+ALTER ROLE signal_reader
+    NOLOGIN
+    NOSUPERUSER
+    NOCREATEDB
+    NOCREATEROLE
+    NOREPLICATION;
 
 SELECT 'CREATE DATABASE backtest_db OWNER backtest_writer'
 WHERE NOT EXISTS (
@@ -32,6 +48,7 @@ WHERE NOT EXISTS (
 )
 \gexec
 
+GRANT CONNECT ON DATABASE signal_db TO signal_reader;
 GRANT ALL PRIVILEGES ON DATABASE backtest_db TO backtest_writer;
 GRANT CONNECT ON DATABASE backtest_db TO backtest_reader;
 
