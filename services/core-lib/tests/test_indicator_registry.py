@@ -67,7 +67,8 @@ def test_registry_contains_required_coverage_and_pinned_authority() -> None:
         "Volume SMA",
     }
     for spec in specs:
-        assert spec.version == "1.0.0"
+        expected_version = "1.0.1" if spec.name == "Bollinger Bands" else "1.0.0"
+        assert spec.version == expected_version
         assert "technical_indicators_calc_spec.md §" in spec.pinned_impl
         assert spec.min_history > 0
 

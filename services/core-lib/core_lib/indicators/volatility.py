@@ -3,11 +3,11 @@
 from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from math import isnan, sqrt
+from math import isnan
 
 from core_lib.types import Candle
 
-from .primitives import NAN, rma, sma, stdev, tr
+from .primitives import NAN, _RollingPopulationStdev, rma, sma, stdev, tr
 
 BollingerValue = dict[str, float]
 
@@ -126,7 +126,7 @@ class BollingerBandsState:
     min_history: int = field(init=False)
     _window: deque[float] = field(init=False, default_factory=deque)
     _total: float = field(init=False, default=0.0)
-    _total_squares: float = field(init=False, default=0.0)
+    _deviation: _RollingPopulationStdev = field(init=False)
     _value: BollingerValue = field(
         init=False,
         default_factory=lambda: {
@@ -144,6 +144,7 @@ class BollingerBandsState:
         if self.multiplier <= 0.0:
             raise ValueError("multiplier must be positive")
         self.min_history = self.period
+        self._deviation = _RollingPopulationStdev(self.period)
 
     @property
     def warmed_up(self) -> bool:
@@ -152,7 +153,7 @@ class BollingerBandsState:
     def seed(self, candles: Sequence[Candle]) -> None:
         self._window.clear()
         self._total = 0.0
-        self._total_squares = 0.0
+        self._deviation.reset()
         self._value = {
             "middle": NAN,
             "upper": NAN,
@@ -167,17 +168,14 @@ class BollingerBandsState:
         close = candle.close
         self._window.append(close)
         self._total += close
-        self._total_squares += close * close
+        deviation = self._deviation.update(close)
         if len(self._window) > self.period:
             removed = self._window.popleft()
             self._total -= removed
-            self._total_squares -= removed * removed
         if len(self._window) < self.period:
             return self.current()
 
         middle = self._total / self.period
-        variance = max(0.0, self._total_squares / self.period - middle * middle)
-        deviation = sqrt(variance)
         upper = middle + self.multiplier * deviation
         lower = middle - self.multiplier * deviation
         width = upper - lower

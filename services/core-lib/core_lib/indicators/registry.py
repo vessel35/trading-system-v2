@@ -241,8 +241,11 @@ def build_default_registry() -> IndicatorRegistry:
         IndicatorSpec(
             name="Bollinger Bands",
             params={"period": 20, "multiplier": 2.0},
-            version="1.0.0",
-            pinned_impl="technical_indicators_calc_spec.md §3.10 + §0.7 (population stdev)",
+            version="1.0.1",
+            pinned_impl=(
+                "technical_indicators_calc_spec.md §3.10 + §0.7 "
+                "(population stdev, rolling Welford moments)"
+            ),
             min_history=20,
             category="volatility",
             required_inputs=(),

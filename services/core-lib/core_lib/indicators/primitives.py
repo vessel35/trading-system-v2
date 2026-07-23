@@ -18,6 +18,71 @@ def _validate_period(period: int) -> None:
         raise ValueError("period must be positive")
 
 
+class _RollingPopulationStdev:
+    """Numerically stable rolling population deviation using Welford moments."""
+
+    def __init__(self, period: int) -> None:
+        _validate_period(period)
+        self.period = period
+        self._window: deque[float] = deque()
+        self._count = 0
+        self._invalid = 0
+        self._mean = 0.0
+        self._m2 = 0.0
+
+    def reset(self) -> None:
+        """Clear all observations and moments."""
+        self._window.clear()
+        self._count = 0
+        self._invalid = 0
+        self._mean = 0.0
+        self._m2 = 0.0
+
+    def _add(self, value: float) -> None:
+        self._count += 1
+        delta = value - self._mean
+        self._mean += delta / self._count
+        self._m2 += delta * (value - self._mean)
+
+    def _remove(self, value: float) -> None:
+        if self._count == 1:
+            self._count = 0
+            self._mean = 0.0
+            self._m2 = 0.0
+            return
+        new_count = self._count - 1
+        new_mean = self._mean - (value - self._mean) / new_count
+        new_m2 = self._m2 - (value - self._mean) * (value - new_mean)
+        self._count = new_count
+        self._mean = new_mean
+        self._m2 = max(0.0, new_m2)
+
+    def update(self, value: float) -> float:
+        """Add one value, evict the oldest, and return the current deviation."""
+        self._window.append(value)
+        if isnan(value):
+            self._invalid += 1
+        else:
+            self._add(value)
+        if len(self._window) > self.period:
+            removed = self._window.popleft()
+            if isnan(removed):
+                self._invalid -= 1
+            else:
+                self._remove(removed)
+        return self.current()
+
+    def current(self) -> float:
+        """Return sqrt(M2/n) for a complete valid window, otherwise NaN."""
+        if (
+            len(self._window) != self.period
+            or self._invalid
+            or self._count != self.period
+        ):
+            return NAN
+        return sqrt(max(0.0, self._m2) / self.period)
+
+
 def sma(values: Sequence[float], period: int) -> Series:
     """Return the rolling simple average with a NaN warm-up."""
     _validate_period(period)
@@ -118,32 +183,8 @@ def tp(candles: Sequence[Candle]) -> Series:
 
 def stdev(values: Sequence[float], period: int) -> Series:
     """Return rolling population standard deviation with divisor ``n``."""
-    _validate_period(period)
-    result: Series = []
-    window: deque[float] = deque()
-    total = 0.0
-    total_squares = 0.0
-    invalid = 0
-    for value in values:
-        window.append(value)
-        if isnan(value):
-            invalid += 1
-        else:
-            total += value
-            total_squares += value * value
-        if len(window) > period:
-            removed = window.popleft()
-            if isnan(removed):
-                invalid -= 1
-            else:
-                total -= removed
-                total_squares -= removed * removed
-        if len(window) != period or invalid:
-            result.append(NAN)
-            continue
-        variance = max(0.0, total_squares / period - (total / period) ** 2)
-        result.append(sqrt(variance))
-    return result
+    state = _RollingPopulationStdev(period)
+    return [state.update(value) for value in values]
 
 
 def _rolling_extreme(values: Sequence[float], period: int, *, highest: bool) -> Series:
