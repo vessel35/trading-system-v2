@@ -17,6 +17,11 @@ configuration keeps the sibling package editable.
 
 ## Quality checks
 
+The following repository-root command is the standard combined pytest invocation.
+Both package configurations register the same marker contract, so swapping the two
+test-path arguments produces the same result. Integration tests are excluded unless
+explicitly selected.
+
 ```bash
 .venv/bin/pytest services/core-lib/tests services/backtest-service/tests
 .venv/bin/ruff check services/core-lib services/backtest-service

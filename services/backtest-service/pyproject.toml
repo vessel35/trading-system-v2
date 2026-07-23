@@ -50,6 +50,7 @@ select = ["B", "E", "F", "I", "UP"]
 
 [tool.mypy]
 files = ["backtest_service", "tests"]
+mypy_path = "$MYPY_CONFIG_FILE_DIR/../core-lib"
 python_version = "3.12"
 strict = true
 warn_unreachable = true

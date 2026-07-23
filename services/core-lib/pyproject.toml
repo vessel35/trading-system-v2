@@ -20,8 +20,20 @@ dev = [
 where = ["."]
 include = ["core_lib*"]
 
+[tool.setuptools.package-data]
+core_lib = ["py.typed"]
+
 [tool.pytest.ini_options]
-addopts = ["--import-mode=importlib", "--strict-config", "--strict-markers"]
+addopts = [
+    "--import-mode=importlib",
+    "--strict-config",
+    "--strict-markers",
+    "-m",
+    "not integration",
+]
+markers = [
+    "integration: uses the local development PostgreSQL instance",
+]
 testpaths = ["tests"]
 
 [tool.ruff]

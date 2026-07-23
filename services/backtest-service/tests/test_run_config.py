@@ -28,7 +28,7 @@ def _raw_config() -> dict[str, object]:
 def test_valid_config_defaults_and_manager_selection() -> None:
     """Validate run-level fields and pass strategy params through untouched."""
     config = RunConfig.model_validate(_raw_config())
-    config.validate()
+    config.revalidate()
     assert config.fill_timing == "next_bar"
     assert config.trigger_feed == "tf_candle"
     assert config.indicator_mode == "auto"

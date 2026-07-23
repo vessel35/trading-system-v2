@@ -100,7 +100,7 @@ class RunConfig(BaseModel):
         )
         return self
 
-    def validate(self) -> None:  # type: ignore[override]
+    def revalidate(self) -> None:
         """Re-run field and cross-field validation for an existing instance."""
         type(self).model_validate(self.model_dump())
 
