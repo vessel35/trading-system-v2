@@ -1,1 +1,1 @@
-"""Define the callable pure trailing-stop calculator."""
+"""Reserve the pure trailing-stop calculator location; implementation is deferred."""
