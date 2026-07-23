@@ -218,10 +218,64 @@ def test_next_bar_open_gap_reanchors_stop_and_truncates_quantity() -> None:
     assert fill.reference_price == Decimal("110.00000000")
     assert fill.timestamp == next_bar.open_time + timedelta(milliseconds=1)
     assert fill.timestamp > decision.close_time
-    assert fill.quantity == Decimal("1.81818182")
+    assert fill.quantity == Decimal("1.81818181")
     assert fill.qty_truncated is True
     assert order.stop_price == Decimal("100.00000000")
     assert order.status is OrderStatus.FILLED
+
+
+@pytest.mark.parametrize(
+    ("fee_rate", "expected_cost_rate", "expected_quantity"),
+    [
+        (Decimal("0"), Decimal("0"), Decimal("0.09317241")),
+        (Decimal("0.0004"), Decimal("0"), Decimal("0.09313516")),
+        (Decimal("0.0004"), Decimal("0.0009"), Decimal("0.09305145")),
+    ],
+)
+def test_margin_cap_truncates_down_and_reserves_expected_costs(
+    fee_rate: Decimal,
+    expected_cost_rate: Decimal,
+    expected_quantity: Decimal,
+) -> None:
+    """Keep real-scale BTC margin and declared costs within the cash ceiling."""
+    decision = make_candle(
+        0,
+        open_price=106_500.0,
+        high=107_500.0,
+        low=106_000.0,
+        close=107_000.0,
+    )
+    next_bar = make_candle(
+        1,
+        open_price=107_327.9,
+        high=108_000.0,
+        low=106_000.0,
+        close=107_500.0,
+    )
+    order = normalize_order(
+        make_request(
+            quantity=1.0,
+            side=OrderSide.SELL,
+            position_side=PositionSide.SHORT,
+        ),
+        order_id=f"real-scale-margin-{fee_rate}",
+    )
+    fill = match(
+        order,
+        decision,
+        [decision, next_bar],
+        FakeCostModel(fee_rate=fee_rate),
+        "next_bar",
+        available_margin=Decimal("10000"),
+        leverage=1,
+        expected_cost_rate=expected_cost_rate,
+    )
+    margin = (fill.price * fill.quantity).quantize(Decimal("0.00000001"))
+    reserve = (margin * expected_cost_rate).quantize(Decimal("0.00000001"))
+
+    assert fill.quantity == expected_quantity
+    assert margin + fill.fee + reserve <= Decimal("10000")
+    assert fill.qty_truncated is True
 
 
 def test_fill_timing_immediate_uses_decision_close_and_unknown_values_fail() -> None:

@@ -3,7 +3,7 @@
 from collections.abc import Sequence
 from dataclasses import replace
 from datetime import datetime, timedelta
-from decimal import Decimal
+from decimal import ROUND_DOWN, Decimal
 from uuid import NAMESPACE_URL, uuid5
 
 from core_lib.costs import fee as fee_cost
@@ -20,7 +20,7 @@ from core_lib.types import (
     Position,
     PositionSide,
 )
-from core_lib.types.money import ZERO, quantize_amount, quantize_price
+from core_lib.types.money import Q_AMOUNT, ZERO, quantize_amount, quantize_price
 
 from .normalizer import to_decimal
 from .position_book import PositionBook
@@ -156,6 +156,10 @@ def _execution_price(
     *,
     gap_filled: bool,
 ) -> tuple[Decimal, Decimal]:
+    priced_order = replace(
+        order,
+        quantity=quantize_amount(order.filled_quantity + quantity),
+    )
     context: dict[str, object] = {
         "gap_filled": gap_filled,
         "reference_price": reference_price,
@@ -165,13 +169,71 @@ def _execution_price(
         reference_notional,
         order.side,
         cost_model,
-        order=order,
+        order=priced_order,
         context=context,
     )
     actual_price = quantize_price(reference_price + signed_slippage / quantity)
     if actual_price <= ZERO:
         raise ValueError("slippage produced a non-positive execution price")
     return actual_price, signed_slippage
+
+
+def _truncate_amount(value: Decimal) -> Decimal:
+    """Round a quantity toward zero so a hard upper bound is never exceeded."""
+    return value.quantize(Q_AMOUNT, rounding=ROUND_DOWN)
+
+
+def _entry_cash_requirement(
+    order: Order,
+    fill_price: Decimal,
+    quantity: Decimal,
+    cost_model: CostModel,
+    leverage: int,
+    expected_cost_rate: Decimal,
+) -> Decimal:
+    """Return entry margin, charged fee, and the declared future-cost reserve."""
+    notional = quantize_amount(fill_price * quantity)
+    margin = quantize_amount(notional / Decimal(leverage))
+    fee = fee_cost.calc(notional, cost_model.fee(order.symbol, notional))
+    reserve = quantize_amount(notional * expected_cost_rate)
+    return quantize_amount(margin + fee + reserve)
+
+
+def _affordable_entry_quantity(
+    order: Order,
+    fill_price: Decimal,
+    maximum: Decimal,
+    available_margin: Decimal,
+    cost_model: CostModel,
+    leverage: int,
+    expected_cost_rate: Decimal,
+) -> Decimal:
+    """Find the largest eight-decimal quantity whose margin and fee fit cash."""
+    upper_units = int(_truncate_amount(maximum) / Q_AMOUNT)
+    low = 0
+    high = upper_units
+    affordable_units = 0
+    while low <= high:
+        middle = (low + high) // 2
+        quantity = Q_AMOUNT * middle
+        requirement = (
+            ZERO
+            if middle == 0
+            else _entry_cash_requirement(
+                order,
+                fill_price,
+                quantity,
+                cost_model,
+                leverage,
+                expected_cost_rate,
+            )
+        )
+        if requirement <= available_margin:
+            affordable_units = middle
+            low = middle + 1
+        else:
+            high = middle - 1
+    return Q_AMOUNT * affordable_units
 
 
 def recompute_qty_and_stop(
@@ -181,12 +243,16 @@ def recompute_qty_and_stop(
     risk_budget: Decimal | None = None,
     available_margin: Decimal | None = None,
     leverage: int = 1,
+    cost_model: CostModel | None = None,
+    expected_cost_rate: Decimal = ZERO,
 ) -> tuple[Decimal, Decimal | None]:
     """Re-anchor initial risk to the fill and truncate quantity to risk/margin."""
     if not isinstance(fill_price, Decimal) or fill_price <= ZERO:
         raise ValueError("fill_price must be a positive Decimal")
     if isinstance(leverage, bool) or not isinstance(leverage, int) or leverage <= 0:
         raise ValueError("leverage must be a positive int")
+    if not isinstance(expected_cost_rate, Decimal) or expected_cost_rate < ZERO:
+        raise ValueError("expected_cost_rate must be a non-negative Decimal")
 
     reference = order.price or fill_price
     new_stop: Decimal | None = None
@@ -212,8 +278,16 @@ def recompute_qty_and_stop(
     if available_margin is not None:
         if not isinstance(available_margin, Decimal) or available_margin < ZERO:
             raise ValueError("available_margin must be a non-negative Decimal")
-        margin_quantity = quantize_amount(
-            available_margin * Decimal(leverage) / fill_price
+        if cost_model is None:
+            raise ValueError("margin truncation requires a CostModel")
+        margin_quantity = _affordable_entry_quantity(
+            order,
+            fill_price,
+            quantity,
+            available_margin,
+            cost_model,
+            leverage,
+            expected_cost_rate,
         )
         quantity = min(quantity, margin_quantity)
     return quantize_amount(quantity), new_stop
@@ -229,6 +303,7 @@ def match(
     risk_budget: Decimal | None = None,
     available_margin: Decimal | None = None,
     leverage: int = 1,
+    expected_cost_rate: Decimal = ZERO,
 ) -> Fill:
     """Deterministically match one order at immediate close or next-bar open."""
     if order.status.is_terminal():
@@ -245,27 +320,62 @@ def match(
     if order.order_type is OrderType.MARKET:
         reference_price = base_reference
 
-    preview_price, _ = _execution_price(
-        order,
-        reference_price,
-        order.remaining_quantity(),
-        cost_model,
-        gap_filled=gap_filled,
+    remaining = order.remaining_quantity()
+    quantity = remaining
+    new_stop: Decimal | None = None
+    entry_margin = (
+        None if order.reduce_only or order.close_position else available_margin
     )
-    quantity, new_stop = recompute_qty_and_stop(
-        order,
-        preview_price,
-        risk_budget=risk_budget,
-        available_margin=available_margin,
-        leverage=leverage,
-    )
+    for _ in range(32):
+        preview_price, _ = _execution_price(
+            order,
+            reference_price,
+            quantity,
+            cost_model,
+            gap_filled=gap_filled,
+        )
+        recomputed, new_stop = recompute_qty_and_stop(
+            order,
+            preview_price,
+            risk_budget=risk_budget,
+            available_margin=entry_margin,
+            leverage=leverage,
+            cost_model=cost_model,
+            expected_cost_rate=expected_cost_rate,
+        )
+        recomputed = min(quantity, recomputed)
+        if recomputed == quantity:
+            break
+        quantity = recomputed
+    else:
+        raise RuntimeError("fee-aware quantity truncation did not converge")
     if quantity <= ZERO:
         raise ValueError("available risk or margin truncates the order to zero")
-    qty_truncated = quantity < order.remaining_quantity()
+    qty_truncated = quantity < remaining
     if qty_truncated:
         order.quantity = quantize_amount(order.filled_quantity + quantity)
     if new_stop is not None:
         order.stop_price = new_stop
+    if entry_margin is not None:
+        final_price, _ = _execution_price(
+            order,
+            reference_price,
+            quantity,
+            cost_model,
+            gap_filled=gap_filled,
+        )
+        if (
+            _entry_cash_requirement(
+                order,
+                final_price,
+                quantity,
+                cost_model,
+                leverage,
+                expected_cost_rate,
+            )
+            > entry_margin
+        ):
+            raise RuntimeError("truncated entry still exceeds available cash")
     return _fill(
         order,
         reference_price,

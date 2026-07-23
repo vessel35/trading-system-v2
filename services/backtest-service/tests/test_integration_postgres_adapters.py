@@ -121,15 +121,37 @@ def test_crypto_data_adapter_reads_only_contract_tables() -> None:
             assert funding_feed.mark_price(funding_symbol, at).is_finite()
 
 
+def test_crypto_data_funding_maps_derivative_symbol_and_collection_jitter() -> None:
+    boundary = datetime(2025, 7, 1, 8, tzinfo=UTC)
+    with _connect("crypto_data") as connection:
+        feed = BacktestDataFeed(
+            cast(ReadConnection, connection),
+            exchange="binance",
+        )
+        rate = feed.funding("BTC/USDT:USDT", boundary)
+
+    assert rate == Decimal("0.0000433400")
+    assert feed.funding_diagnostics() == {
+        "exact_count": 0,
+        "normalized_count": 1,
+        "missing_count": 0,
+    }
+
+
 def test_signal_registry_adapter_reads_only_registry_table() -> None:
     with _connect("signal_db") as connection:
         registry = BacktestStrategyRegistry(cast(ReadConnection, connection))
-        entries = registry.list()
-        assert all("strategy_id" in entry for entry in entries)
-        if entries:
-            strategy_id = entries[0]["strategy_id"]
-            assert isinstance(strategy_id, str)
-            assert registry.get(strategy_id)["strategy_id"] == strategy_id
+        entry = registry.get(VESSEL_STRATEGY_ID)
+        assert isinstance(registry, StrategyRegistry)
+        assert entry["class_name"] == "VesselReference"
+        assert entry["module_path"] == VesselReference.__module__
+        assert entry["supported_timeframes"] == ["1h"]
+        assert entry["min_history"] == 21
+        assert entry["is_active"] is True
+        assert entry["is_deprecated"] is False
+        assert VESSEL_STRATEGY_ID in [
+            row["strategy_id"] for row in registry.list()
+        ]
 
 
 def test_catalog_issues_run_id_then_records_prereg_and_evaluated_metadata() -> None:
@@ -254,25 +276,6 @@ class _GapFreeVesselFeed(DataFeed):
         return Decimal("100")
 
 
-class _VesselCatalog(StrategyRegistry):
-    def get(self, strategy_id: str) -> dict[str, object]:
-        assert strategy_id == VESSEL_STRATEGY_ID
-        return {
-            "strategy_id": strategy_id,
-            "class_name": VesselReference.__name__,
-            "module_path": VesselReference.__module__,
-            "is_active": True,
-            "is_deprecated": False,
-        }
-
-    def list(self) -> list[dict[str, object]]:
-        return [self.get(VESSEL_STRATEGY_ID)]
-
-    def register(self, strategy_id: str, meta: dict[str, object]) -> None:
-        del strategy_id, meta
-        raise PermissionError("the E2E fixture catalog is read-only")
-
-
 def _gap_free_vessel_candles() -> tuple[datetime, list[Candle]]:
     start = datetime(2026, 5, 1, 1, tzinfo=UTC)
     first = start - timedelta(hours=21)
@@ -304,10 +307,10 @@ def _gap_free_vessel_candles() -> tuple[datetime, list[Candle]]:
     return start, candles
 
 
-def _vessel_manager() -> AdapterManager:
+def _vessel_manager(registry: StrategyRegistry) -> AdapterManager:
     plugins = InProcessStrategyRegistry()
     plugins.register(VESSEL_STRATEGY_ID, VesselReference)
-    return AdapterManager(_VesselCatalog(), plugins)
+    return AdapterManager(registry, plugins)
 
 
 def _vessel_config(start: datetime) -> RunConfig:
@@ -351,8 +354,12 @@ def test_vessel_e2e_writes_evidence_and_real_catalog_with_hash_parity(
         "higher_is_better": True,
     }
 
-    with _connect_writer("backtest_db") as connection:
+    with (
+        _connect_writer("backtest_db") as connection,
+        _connect("signal_db") as signal_connection,
+    ):
         catalog = BacktestCatalogStore(cast(WriteConnection, connection))
+        registry = BacktestStrategyRegistry(cast(ReadConnection, signal_connection))
         results = []
         for label in ("first", "second"):
             costs = BacktestCostModel(config.cost_values)
@@ -371,7 +378,7 @@ def test_vessel_e2e_writes_evidence_and_real_catalog_with_hash_parity(
                 costs,
                 BacktestEvidenceSink(tmp_path / label),
                 catalog,
-                _vessel_manager(),
+                _vessel_manager(registry),
                 prereg=run_prereg,
             ).run(config)
             results.append(result)
@@ -417,9 +424,9 @@ def test_vessel_e2e_writes_evidence_and_real_catalog_with_hash_parity(
 def test_vessel_engine_traverses_real_crypto_data_feed(
     tmp_path: Path,
 ) -> None:
-    """Exercise the Engine through the bounded read-only PostgreSQL DataFeed."""
-    start = datetime(2025, 6, 18, 21, tzinfo=UTC)
-    end = start + timedelta(hours=6)
+    """Complete a fee-bearing three-day run through both real input catalogs."""
+    start = datetime(2025, 7, 1, tzinfo=UTC)
+    end = start + timedelta(days=3)
     config = RunConfig(
         run_name="m10-real-data-feed",
         strategy_id=VESSEL_STRATEGY_ID,
@@ -435,10 +442,10 @@ def test_vessel_engine_traverses_real_crypto_data_feed(
         risk_per_trade=0.01,
         seed=17,
         cost_values={
-            "futures_taker_fee_rate": Decimal("0"),
-            "futures_entry_slippage_rate": Decimal("0"),
-            "exit_slippage_rate": Decimal("0"),
-            "funding_fallback_rate": Decimal("0"),
+            "futures_taker_fee_rate": Decimal("0.0004"),
+            "futures_entry_slippage_rate": Decimal("0.0005"),
+            "exit_slippage_rate": Decimal("0.0001"),
+            "funding_fallback_rate": Decimal("0.0001"),
         },
         profile_ref="vessel-reference-v1",
     )
@@ -454,6 +461,7 @@ def test_vessel_engine_traverses_real_crypto_data_feed(
     with (
         _connect("crypto_data") as crypto_connection,
         _connect_writer("backtest_db") as catalog_connection,
+        _connect("signal_db") as signal_connection,
     ):
         feed = BacktestDataFeed(
             cast(ReadConnection, crypto_connection),
@@ -465,7 +473,7 @@ def test_vessel_engine_traverses_real_crypto_data_feed(
             for candle in history
             if candle.open_time >= start and candle.close_time <= end
         ]
-        assert len(evaluation) == 6
+        assert len(evaluation) == 72
         assert all(
             left.close_time == right.open_time
             for left, right in zip(evaluation, evaluation[1:], strict=False)
@@ -480,11 +488,32 @@ def test_vessel_engine_traverses_real_crypto_data_feed(
             costs,
             BacktestEvidenceSink(tmp_path / "real-data-feed"),
             BacktestCatalogStore(cast(WriteConnection, catalog_connection)),
-            _vessel_manager(),
+            _vessel_manager(
+                BacktestStrategyRegistry(cast(ReadConnection, signal_connection))
+            ),
             prereg=prereg,
         ).run(config)
+        catalog_row = catalog_connection.execute(
+            """
+            SELECT r.status, r.evidence_hash, s.integrity_status
+            FROM public.backtest_run AS r
+            JOIN public.backtest_summary AS s USING (run_id)
+            WHERE r.run_id = %s
+            """,
+            (result.run_id,),
+        ).fetchone()
+        unreconciled_count = catalog_connection.execute(
+            """
+            SELECT count(*)
+            FROM public.backtest_run
+            WHERE status = 'RUNNING'
+              AND evidence_hash IS NULL
+            """
+        ).fetchone()
 
     assert result.integrity_status == "passed"
+    assert catalog_row == ("EVALUATED", result.evidence_hash, "passed")
+    assert unreconciled_count == (0,)
     with sqlite3.connect(result.evidence_path) as evidence:
         source = evidence.execute(
             """
@@ -496,7 +525,36 @@ def test_vessel_engine_traverses_real_crypto_data_feed(
         assert source is not None
         assert source[:2] == ("crypto_data.ohlcv_futures", "1h")
         assert source[2] == len(history)
-        assert len(history) >= 27
+        assert len(history) >= 93
+        funding_source = evidence.execute(
+            """
+            SELECT row_count, fallback_used, fallback_count, note
+            FROM SOURCE_DATA_SNAPSHOT
+            WHERE source_kind = 'funding'
+            """
+        ).fetchone()
+        assert funding_source == (
+            9,
+            0,
+            0,
+            "measured_exact=2; measured_jitter_normalized=7; measured_missing=0",
+        )
+        first_entry = evidence.execute(
+            """
+            SELECT price, quantity, fee, qty_truncated
+            FROM EXECUTION
+            WHERE reduce_only = 0
+            ORDER BY execution_id
+            LIMIT 1
+            """
+        ).fetchone()
+        assert first_entry is not None
+        assert first_entry[0] >= 100_000 * 100_000_000
+        assert first_entry[2] > 0
+        assert first_entry[3] == 1
+        assert evidence.execute(
+            "SELECT min(cash_balance) >= 0 FROM PORTFOLIO_PNL"
+        ).fetchone() == (1,)
         assert evidence.execute(
             "SELECT COUNT(*) FROM PORTFOLIO_PNL"
-        ).fetchone() == (6,)
+        ).fetchone() == (72,)

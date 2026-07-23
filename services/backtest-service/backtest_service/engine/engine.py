@@ -86,6 +86,7 @@ class _ExecutionBroker(Protocol):
         risk_budget: Decimal | None = None,
         available_margin: Decimal | None = None,
         leverage: int = 1,
+        expected_cost_rate: Decimal = ZERO,
     ) -> None:
         """Bind one next-bar matching context."""
 
@@ -127,6 +128,18 @@ class _DeterminismCatalog(Protocol):
         config_hash: str,
     ) -> DeterminismReference:
         """Return current-config and previous-hash catalog facts."""
+
+
+@runtime_checkable
+class _OrphanReconciler(Protocol):
+    def reconcile_orphaned(self) -> int:
+        """Mark unfinished runs left by an earlier interrupted process."""
+
+
+@runtime_checkable
+class _FundingDiagnostics(Protocol):
+    def funding_diagnostics(self) -> dict[str, int]:
+        """Return cumulative exact, normalized, and missing funding counts."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,6 +241,11 @@ class Engine:
         self._indicator_states: dict[str, IndicatorState] = {}
         self._indicator_values: dict[str, object] = {}
         self._funding_rates: dict[datetime, tuple[Decimal, str]] = {}
+        self._funding_diagnostics = {
+            "exact_count": 0,
+            "normalized_count": 0,
+            "missing_count": 0,
+        }
         self._book = PositionBook()
         self._cash = quantize_amount(ZERO)
         self._equity_curve: list[tuple[datetime, Decimal]] = []
@@ -255,6 +273,8 @@ class Engine:
 
     def run(self, config: RunConfig) -> RunResult:
         """Resolve config, issue run_id, execute the candle loop, and finalize."""
+        if isinstance(self.catalog, _OrphanReconciler):
+            self.catalog.reconcile_orphaned()
         config.revalidate()
         if config.trigger_feed != "tf_candle":
             raise NotImplementedError("m1_subcandle trigger walk remains reserved")
@@ -398,6 +418,7 @@ class Engine:
                 risk_budget=self._risk_budget(pending),
                 available_margin=self._cash,
                 leverage=self._leverage(pending.signal),
+                expected_cost_rate=self._expected_entry_cost_rate(pending),
             )
             fill = self.broker.submit(pending.request)
             if pending.exit_reason is not None:
@@ -815,6 +836,22 @@ class Engine:
         candidate_id: int | None = None,
     ) -> None:
         position_before = self._current_position()
+        projected_entry_cash: Decimal | None = None
+        if not fill.reduce_only:
+            leverage = self._leverage(signal)
+            notional = quantize_amount(fill.price * fill.quantity)
+            added_margin = (
+                quantize_amount(notional / Decimal(leverage))
+                if self._market_type() is MarketType.FUTURES
+                else notional
+            )
+            projected_entry_cash = quantize_amount(
+                self._cash - added_margin - fill.fee
+            )
+            if projected_entry_cash < ZERO:
+                raise ValueError(
+                    "entry margin plus fee exceeds available cash after truncation"
+                )
         execution_id = self._next("execution")
         self.evidence.record(
             EvidenceRecord(
@@ -854,7 +891,10 @@ class Engine:
             position_after = self._current_position()
             assert position_after is not None
             added_margin = quantize_amount(position_after.margin - before_margin)
-            self._cash = quantize_amount(self._cash - added_margin - fill.fee)
+            actual_cash = quantize_amount(self._cash - added_margin - fill.fee)
+            if projected_entry_cash is None or actual_cash != projected_entry_cash:
+                raise RuntimeError("entry cash projection diverged from position accounting")
+            self._cash = actual_cash
             if self._active_trade is None:
                 if signal is None:
                     raise ValueError("entry fills require their originating signal")
@@ -1301,6 +1341,14 @@ class Engine:
     def _prepare_funding_sources(self) -> None:
         if self._market_type() is not MarketType.FUTURES:
             return
+        diagnostics_feed = (
+            self.feed if isinstance(self.feed, _FundingDiagnostics) else None
+        )
+        before = (
+            diagnostics_feed.funding_diagnostics()
+            if diagnostics_feed is not None
+            else None
+        )
         if self._config().timeframe == "1m":
             self._minute_history = list(self._history)
         else:
@@ -1323,6 +1371,24 @@ class Engine:
                 rate = self.cost_model.funding_rate(boundary)
                 source = "fallback"
             self._funding_rates[boundary] = (rate, source)
+        if before is not None:
+            assert diagnostics_feed is not None
+            after = diagnostics_feed.funding_diagnostics()
+            self._funding_diagnostics = {
+                name: after[name] - before[name]
+                for name in self._funding_diagnostics
+            }
+            if any(value < 0 for value in self._funding_diagnostics.values()):
+                raise RuntimeError("funding diagnostic counters moved backwards")
+        else:
+            fallback_count = sum(
+                source == "fallback" for _, source in self._funding_rates.values()
+            )
+            self._funding_diagnostics = {
+                "exact_count": len(self._funding_rates) - fallback_count,
+                "normalized_count": 0,
+                "missing_count": fallback_count,
+            }
 
     def _record_indicator_definitions(self) -> None:
         for spec in self._indicator_specs:
@@ -1506,6 +1572,16 @@ class Engine:
             fallback_count = sum(
                 source == "fallback" for _, source in self._funding_rates.values()
             )
+            if self._funding_diagnostics["missing_count"] != fallback_count:
+                raise RuntimeError(
+                    "funding fallback count diverged from feed diagnostics"
+                )
+            note = (
+                f"measured_exact={self._funding_diagnostics['exact_count']}; "
+                "measured_jitter_normalized="
+                f"{self._funding_diagnostics['normalized_count']}; "
+                f"measured_missing={self._funding_diagnostics['missing_count']}"
+            )
             self._sequence["source_snapshot"] += 1
             self.evidence.record(
                 EvidenceRecord(
@@ -1522,6 +1598,7 @@ class Engine:
                         "row_count": len(content),
                         "fallback_used": fallback_count > 0,
                         "fallback_count": fallback_count,
+                        "note": note,
                         "content_hash": hashlib.sha256(
                             canonical_json(content).encode()
                         ).hexdigest(),
@@ -1763,6 +1840,30 @@ class Engine:
         assert risk is not None
         normalized_risk = to_decimal(risk, quantizer=quantize_amount)
         return quantize_amount(self._current_equity() * normalized_risk)
+
+    def _expected_entry_cost_rate(self, pending: _PendingOrder) -> Decimal:
+        """Reserve configured funding stress without reading future measured rates."""
+        if (
+            pending.request.reduce_only
+            or pending.request.market_type is not MarketType.FUTURES
+        ):
+            return ZERO
+        if pending.request.position_side is PositionSide.LONG:
+            direction = Decimal("1")
+        elif pending.request.position_side is PositionSide.SHORT:
+            direction = Decimal("-1")
+        else:
+            raise ValueError("entry funding direction is ambiguous")
+        reserve = ZERO
+        for boundary in funding_boundaries_between(
+            pending.decision_candle.close_time,
+            self._config().end,
+        ):
+            rate = self.cost_model.funding_rate(boundary)
+            if not isinstance(rate, Decimal):
+                raise TypeError("CostModel.funding_rate must return Decimal")
+            reserve += max(ZERO, rate * direction)
+        return reserve
 
     def _current_equity(self) -> Decimal:
         return recompute(self._cash, self._current_position())

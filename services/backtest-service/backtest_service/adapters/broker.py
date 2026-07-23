@@ -18,6 +18,7 @@ class _ExecutionContext:
     risk_budget: Decimal | None
     available_margin: Decimal | None
     leverage: int
+    expected_cost_rate: Decimal
 
 
 class BacktestBroker(Broker):
@@ -38,6 +39,7 @@ class BacktestBroker(Broker):
         risk_budget: Decimal | None = None,
         available_margin: Decimal | None = None,
         leverage: int = 1,
+        expected_cost_rate: Decimal = Decimal("0"),
     ) -> None:
         """Bind the current candle-loop context consumed by subsequent submits."""
         if fill_timing != "next_bar":
@@ -51,6 +53,7 @@ class BacktestBroker(Broker):
             risk_budget=risk_budget,
             available_margin=available_margin,
             leverage=leverage,
+            expected_cost_rate=expected_cost_rate,
         )
 
     def submit(self, request: OrderRequest) -> Fill:
@@ -71,6 +74,7 @@ class BacktestBroker(Broker):
                 risk_budget=self._execution.risk_budget,
                 available_margin=self._execution.available_margin,
                 leverage=self._execution.leverage,
+                expected_cost_rate=self._execution.expected_cost_rate,
             )
         except Exception:
             if order.status.is_terminal():

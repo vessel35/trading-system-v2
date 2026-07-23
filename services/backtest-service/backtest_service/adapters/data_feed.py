@@ -16,6 +16,14 @@ _LOGGER = logging.getLogger(__name__)
 _TIMEFRAME_PATTERN = re.compile(r"^(?P<count>[1-9]\d*)(?P<unit>[mhd])$")
 _TIMEFRAME_SECONDS = {"m": 60, "h": 3600, "d": 86400}
 _MINUTE = timedelta(minutes=1)
+# Exchange rates are fixed at the boundary; crypto_data may timestamp their
+# collection a few milliseconds later. The coordinator-approved normalization
+# window is deliberately capped at one second so no later funding event can be
+# pulled into the current eight-hour boundary.
+_FUNDING_COLLECTION_WINDOW = timedelta(seconds=1)
+_DERIVATIVE_SYMBOL = re.compile(
+    r"^(?P<base>[A-Z0-9]+)/(?P<quote>[A-Z0-9]+)(?::[A-Z0-9]+)?$"
+)
 
 _CANDLES_SQL = """
 SELECT time, open, high, low, close, volume, quote_volume, trade_count
@@ -27,14 +35,24 @@ WHERE symbol = %s
 ORDER BY time
 """
 _FUNDING_SQL = """
-SELECT funding_rate
+SELECT time, funding_rate
 FROM public.funding_rates
-WHERE symbol = %s AND exchange = %s AND time = %s
+WHERE symbol = %s
+  AND exchange = %s
+  AND time >= %s
+  AND time <= %s
+ORDER BY time
+LIMIT 1
 """
 _MARK_PRICE_SQL = """
-SELECT mark_price
+SELECT time, mark_price
 FROM public.funding_rates
-WHERE symbol = %s AND exchange = %s AND time = %s
+WHERE symbol = %s
+  AND exchange = %s
+  AND time >= %s
+  AND time <= %s
+ORDER BY time
+LIMIT 1
 """
 
 
@@ -87,6 +105,16 @@ def _decimal(value: object, *, name: str) -> Decimal:
     return value
 
 
+def _funding_symbol(symbol: str) -> str:
+    normalized = symbol.strip().upper()
+    match = _DERIVATIVE_SYMBOL.fullmatch(normalized)
+    if match is not None:
+        return f"{match.group('base')}{match.group('quote')}"
+    if normalized and normalized.isalnum():
+        return normalized
+    raise ValueError(f"unsupported crypto_data symbol format: {symbol!r}")
+
+
 class BacktestDataFeed(DataFeed):
     """Read only confirmed crypto_data facts available at a simulation boundary."""
 
@@ -96,6 +124,9 @@ class BacktestDataFeed(DataFeed):
         self._connection = connection
         self._exchange = exchange
         self._dropped_bucket_count = 0
+        self._funding_exact_count = 0
+        self._funding_normalized_count = 0
+        self._funding_missing_count = 0
         self._source_cache: dict[
             tuple[str, datetime],
             tuple[Sequence[object], ...],
@@ -105,6 +136,14 @@ class BacktestDataFeed(DataFeed):
     def dropped_bucket_count(self) -> int:
         """Return the cumulative number of incomplete or invalid buckets dropped."""
         return self._dropped_bucket_count
+
+    def funding_diagnostics(self) -> dict[str, int]:
+        """Return cumulative exact, jitter-normalized, and missing observations."""
+        return {
+            "exact_count": self._funding_exact_count,
+            "normalized_count": self._funding_normalized_count,
+            "missing_count": self._funding_missing_count,
+        }
 
     def candles(self, symbol: str, tf: str, up_to: datetime) -> list[Candle]:
         """Resample 1m source rows and expose only buckets closed by ``up_to``."""
@@ -216,23 +255,42 @@ class BacktestDataFeed(DataFeed):
         return value
 
     def funding(self, symbol: str, at: datetime) -> Decimal:
-        """Return the exact observed rate at one settlement boundary."""
+        """Return the boundary rate, normalizing only approved collection jitter."""
         boundary = _utc(at, name="at")
+        deadline = boundary + _FUNDING_COLLECTION_WINDOW
         row = self._connection.execute(
             _FUNDING_SQL,
-            (symbol, self._exchange, boundary),
+            (_funding_symbol(symbol), self._exchange, boundary, deadline),
         ).fetchone()
         if row is None:
+            self._funding_missing_count += 1
             raise LookupError(f"no measured funding rate for {symbol} at {boundary.isoformat()}")
-        return _decimal(row[0], name="funding_rate")
+        observed_at = row[0]
+        if not isinstance(observed_at, datetime):
+            raise TypeError("funding_rates.time must be datetime")
+        normalized_at = _utc(observed_at, name="funding_rates.time")
+        if not boundary <= normalized_at <= deadline:
+            raise ValueError("funding observation falls outside the collection window")
+        if normalized_at == boundary:
+            self._funding_exact_count += 1
+        else:
+            self._funding_normalized_count += 1
+        return _decimal(row[1], name="funding_rate")
 
     def mark_price(self, symbol: str, at: datetime) -> Decimal:
-        """Return the exact measured mark price at one settlement boundary."""
+        """Return the mark paired with the normalized funding boundary."""
         boundary = _utc(at, name="at")
+        deadline = boundary + _FUNDING_COLLECTION_WINDOW
         row = self._connection.execute(
             _MARK_PRICE_SQL,
-            (symbol, self._exchange, boundary),
+            (_funding_symbol(symbol), self._exchange, boundary, deadline),
         ).fetchone()
-        if row is None or row[0] is None:
+        if row is None or row[1] is None:
             raise LookupError(f"no measured mark price for {symbol} at {boundary.isoformat()}")
-        return _decimal(row[0], name="mark_price")
+        observed_at = row[0]
+        if not isinstance(observed_at, datetime):
+            raise TypeError("funding_rates.time must be datetime")
+        normalized_at = _utc(observed_at, name="funding_rates.time")
+        if not boundary <= normalized_at <= deadline:
+            raise ValueError("mark-price observation falls outside the collection window")
+        return _decimal(row[1], name="mark_price")

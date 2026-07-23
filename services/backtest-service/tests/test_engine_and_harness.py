@@ -454,6 +454,7 @@ class _Broker(BacktestBroker):
         risk_budget: Decimal | None = None,
         available_margin: Decimal | None = None,
         leverage: int = 1,
+        expected_cost_rate: Decimal = Decimal("0"),
     ) -> None:
         self.call_order.append("configure")
         super().configure_execution(
@@ -463,6 +464,7 @@ class _Broker(BacktestBroker):
             risk_budget=risk_budget,
             available_margin=available_margin,
             leverage=leverage,
+            expected_cost_rate=expected_cost_rate,
         )
 
     def submit(self, request: OrderRequest) -> Fill:
@@ -665,7 +667,7 @@ def test_engine_orders_configure_before_submit_and_persists_timing(
         ).fetchone() == (1,)
     assert result.integrity_status == "passed"
     assert feeds[0].candle_calls == 2
-    assert catalog.events == ["register", "prereg", "summary"]
+    assert catalog.events == ["reconcile", "register", "prereg", "summary"]
 
 
 def test_engine_hash_parity_uses_different_catalog_run_ids(tmp_path: Path) -> None:

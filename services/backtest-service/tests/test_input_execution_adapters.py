@@ -133,20 +133,51 @@ def test_data_feed_discards_and_counts_bad_buckets(
     assert "discarded 1 incomplete OHLCV bucket" in caplog.text
 
 
-def test_data_feed_returns_exact_measured_funding_and_mark_values() -> None:
+def test_data_feed_normalizes_symbol_and_one_second_collection_jitter() -> None:
     at = datetime(2026, 1, 1, 8, tzinfo=UTC)
+    observed_at = at + timedelta(milliseconds=2)
 
     def handler(query: str, params: tuple[object, ...]) -> list[Sequence[object]]:
-        assert params == ("BTCUSDT", "binance", at)
-        if "SELECT funding_rate" in query:
-            return [(Decimal("0.0000875000"),)]
-        if "SELECT mark_price" in query:
-            return [(Decimal("101234.12345678"),)]
+        assert params == (
+            "BTCUSDT",
+            "binance",
+            at,
+            at + timedelta(seconds=1),
+        )
+        assert "ORDER BY time" in query
+        if query.lstrip().startswith("SELECT time, funding_rate"):
+            return [(observed_at, Decimal("0.0000875000"))]
+        if query.lstrip().startswith("SELECT time, mark_price"):
+            return [(observed_at, Decimal("101234.12345678"))]
         raise AssertionError(query)
 
     feed = BacktestDataFeed(StubConnection(handler))
-    assert feed.funding("BTCUSDT", at) == Decimal("0.0000875000")
-    assert feed.mark_price("BTCUSDT", at) == Decimal("101234.12345678")
+    assert feed.funding("BTC/USDT:USDT", at) == Decimal("0.0000875000")
+    assert feed.mark_price("BTC/USDT:USDT", at) == Decimal("101234.12345678")
+    assert feed.funding_diagnostics() == {
+        "exact_count": 0,
+        "normalized_count": 1,
+        "missing_count": 0,
+    }
+
+
+def test_data_feed_funding_fails_closed_outside_jitter_window() -> None:
+    at = datetime(2026, 1, 1, 8, tzinfo=UTC)
+
+    outside = BacktestDataFeed(
+        StubConnection(
+            lambda query, params: [
+                (at + timedelta(seconds=1, milliseconds=1), Decimal("0.0001"))
+            ]
+        )
+    )
+    with pytest.raises(ValueError, match="outside the collection window"):
+        outside.funding("BTC/USDT:USDT", at)
+
+    missing = BacktestDataFeed(StubConnection(lambda query, params: []))
+    with pytest.raises(LookupError, match="no measured funding rate"):
+        missing.funding("BTC/USDT:USDT", at)
+    assert missing.funding_diagnostics()["missing_count"] == 1
 
 
 def test_clock_uses_only_its_strict_simulation_schedule() -> None:
