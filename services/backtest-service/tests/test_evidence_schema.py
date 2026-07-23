@@ -234,7 +234,12 @@ def test_schema_marks_deterministic_hash_boundaries() -> None:
     assert HASH_EXCLUDED_TABLES == {"FINDING_CLAIM"}
     assert HASH_GLOBAL_EXCLUDED_COLUMNS == {"run_id", "backtest_run_id"}
     assert HASH_EXCLUDED_COLUMNS == {
-        "BACKTEST_RUN_LOCAL": {"run_seq", "run_name", "created_at"},
+        "BACKTEST_RUN_LOCAL": {
+            "run_seq",
+            "run_name",
+            "prereg_json",
+            "created_at",
+        },
         "INTEGRITY_CHECK": {"checked_at"},
         "FINDING_CLAIM": {"created_at"},
     }
@@ -243,6 +248,7 @@ def test_schema_marks_deterministic_hash_boundaries() -> None:
     }
     assert HASH_TABLES == tuple(sorted(set(EVIDENCE_TABLES) - HASH_EXCLUDED_TABLES))
     assert set(ENTITY_SORT_KEYS) == set(HASH_TABLES)
+    assert "prereg_json" in HASH_EXCLUDED_COLUMNS["BACKTEST_RUN_LOCAL"]
     assert "eval_decision_json" not in HASH_EXCLUDED_COLUMNS["BACKTEST_RUN_LOCAL"]
 
 

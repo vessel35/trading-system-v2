@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+from typing import cast
 
 import pytest
 from backtest_service.adapters.catalog_store import (
@@ -231,6 +232,48 @@ def test_hash_ignores_only_instance_identity_and_keeps_logical_decision(
     second.close()
     changed.close()
     logical_change.close()
+
+
+def test_hash_ignores_prereg_wording_when_eval_decision_is_unchanged(
+    tmp_path: Path,
+) -> None:
+    """Keep declaration prose outside the logical-result hash."""
+    first, first_hash = _finalize(
+        tmp_path / "one",
+        "BT_20260101_000001_prereg-one",
+        1,
+        local_overrides={
+            "prereg_json": {
+                **cast(dict[str, object], _local_values(1)["prereg_json"]),
+                "hypothesis": "EMA crossover should exceed the declared edge",
+            }
+        },
+    )
+    second, second_hash = _finalize(
+        tmp_path / "two",
+        "BT_20260102_000002_prereg-two",
+        2,
+        local_overrides={
+            "prereg_json": {
+                **cast(dict[str, object], _local_values(2)["prereg_json"]),
+                "hypothesis": "Reworded declaration with the same decision criteria",
+            }
+        },
+    )
+
+    assert first_hash == second_hash
+    first_payload = first.connection.execute(
+        "SELECT prereg_json, eval_decision_json FROM BACKTEST_RUN_LOCAL"
+    ).fetchone()
+    second_payload = second.connection.execute(
+        "SELECT prereg_json, eval_decision_json FROM BACKTEST_RUN_LOCAL"
+    ).fetchone()
+    assert first_payload is not None
+    assert second_payload is not None
+    assert first_payload[0] != second_payload[0]
+    assert first_payload[1] == second_payload[1]
+    first.close()
+    second.close()
 
 
 def test_eval_decision_rejects_noncanonical_or_incomplete_json(tmp_path: Path) -> None:

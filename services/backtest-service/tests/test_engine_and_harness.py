@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
@@ -361,7 +362,12 @@ def _vessel_config(*, run_name: str = "vessel-dry-run") -> RunConfig:
     )
 
 
-def _vessel_engine(root: Path, catalog: _Catalog) -> Engine:
+def _vessel_engine(
+    root: Path,
+    catalog: _Catalog,
+    *,
+    prereg: Mapping[str, object] | None = None,
+) -> Engine:
     candles = _vessel_candles()
     schedule = [candles[0].open_time, *(candle.close_time for candle in candles)]
     config = _vessel_config()
@@ -374,7 +380,7 @@ def _vessel_engine(root: Path, catalog: _Catalog) -> Engine:
         BacktestEvidenceSink(root),
         catalog,
         _vessel_manager(),
-        prereg=_prereg(),
+        prereg=_prereg() if prereg is None else prereg,
     )
 
 
@@ -702,8 +708,21 @@ def test_vessel_reference_end_to_end_dry_run_is_complete_and_deterministic(
 ) -> None:
     """Exercise the first real Adaptee over an explicitly gap-free fixture."""
     catalog = _Catalog()
-    first = _vessel_engine(tmp_path / "first", catalog).run(_vessel_config())
-    second = _vessel_engine(tmp_path / "second", catalog).run(_vessel_config())
+    first_prereg = _prereg()
+    second_prereg = {
+        **first_prereg,
+        "hypothesis": "same criteria, independently reworded declaration",
+    }
+    first = _vessel_engine(
+        tmp_path / "first",
+        catalog,
+        prereg=first_prereg,
+    ).run(_vessel_config())
+    second = _vessel_engine(
+        tmp_path / "second",
+        catalog,
+        prereg=second_prereg,
+    ).run(_vessel_config())
 
     assert first.run_id != second.run_id
     assert first.evidence_hash == second.evidence_hash
@@ -725,6 +744,18 @@ def test_vessel_reference_end_to_end_dry_run_is_complete_and_deterministic(
         assert connection.execute(
             "SELECT COUNT(*) FROM PORTFOLIO_PNL"
         ).fetchone() == (6,)
+    with sqlite3.connect(second.evidence_path) as connection:
+        detail = json.loads(
+            connection.execute(
+                """
+                SELECT detail_json
+                FROM INTEGRITY_CHECK
+                WHERE check_name = 'deterministic'
+                """
+            ).fetchone()[0]
+        )
+        assert detail["status"] == "matched"
+        assert detail["comparison_run_id"] == first.run_id
 
 
 def test_deterministic_check_fails_on_catalog_config_or_previous_hash_mismatch(

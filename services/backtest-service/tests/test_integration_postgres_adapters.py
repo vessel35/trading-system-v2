@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -355,6 +356,14 @@ def test_vessel_e2e_writes_evidence_and_real_catalog_with_hash_parity(
         results = []
         for label in ("first", "second"):
             costs = BacktestCostModel(config.cost_values)
+            run_prereg = {
+                **prereg,
+                "hypothesis": (
+                    prereg["hypothesis"]
+                    if label == "first"
+                    else "Same criteria with independently revised declaration prose"
+                ),
+            }
             result = Engine(
                 _GapFreeVesselFeed(candles),
                 BacktestBroker(costs),
@@ -363,7 +372,7 @@ def test_vessel_e2e_writes_evidence_and_real_catalog_with_hash_parity(
                 BacktestEvidenceSink(tmp_path / label),
                 catalog,
                 _vessel_manager(),
-                prereg=prereg,
+                prereg=run_prereg,
             ).run(config)
             results.append(result)
 
@@ -385,9 +394,109 @@ def test_vessel_e2e_writes_evidence_and_real_catalog_with_hash_parity(
     assert all(len(cast(list[object], row[2])) == 3 for row in rows)
     assert rows[0][3] == rows[1][3]
     assert rows[0][4] == rows[1][4] == first_result.evidence_hash
+    with sqlite3.connect(second_result.evidence_path) as evidence:
+        detail = json.loads(
+            evidence.execute(
+                """
+                SELECT detail_json
+                FROM INTEGRITY_CHECK
+                WHERE check_name = 'deterministic'
+                """
+            ).fetchone()[0]
+        )
+        assert detail["status"] == "matched"
+        assert detail["comparison_run_id"] == first_result.run_id
     for result in results:
         with sqlite3.connect(result.evidence_path) as evidence:
             assert evidence.execute(
                 "SELECT COUNT(*) FROM BACKTEST_RUN_LOCAL"
             ).fetchone() == (1,)
             assert evidence.execute("SELECT COUNT(*) FROM TRADE").fetchone() == (1,)
+
+
+def test_vessel_engine_traverses_real_crypto_data_feed(
+    tmp_path: Path,
+) -> None:
+    """Exercise the Engine through the bounded read-only PostgreSQL DataFeed."""
+    start = datetime(2025, 6, 18, 21, tzinfo=UTC)
+    end = start + timedelta(hours=6)
+    config = RunConfig(
+        run_name="m10-real-data-feed",
+        strategy_id=VESSEL_STRATEGY_ID,
+        params={},
+        symbol="BTC/USDT:USDT",
+        exchange="binance",
+        timeframe="1h",
+        market_type="futures",
+        data_source="crypto_data.ohlcv_futures",
+        start=start,
+        end=end,
+        initial_capital=Decimal("10000"),
+        risk_per_trade=0.01,
+        seed=17,
+        cost_values={
+            "futures_taker_fee_rate": Decimal("0"),
+            "futures_entry_slippage_rate": Decimal("0"),
+            "exit_slippage_rate": Decimal("0"),
+            "funding_fallback_rate": Decimal("0"),
+        },
+        profile_ref="vessel-reference-v1",
+    )
+    prereg = {
+        "hypothesis": "Vessel traverses the real bounded crypto_data adapter",
+        "primary_metric": "pf",
+        "success_threshold": 1.3,
+        "failure_threshold": 1.0,
+        "edge_distinguishable": True,
+        "higher_is_better": True,
+    }
+
+    with (
+        _connect("crypto_data") as crypto_connection,
+        _connect_writer("backtest_db") as catalog_connection,
+    ):
+        feed = BacktestDataFeed(
+            cast(ReadConnection, crypto_connection),
+            exchange=config.exchange,
+        )
+        history = feed.candles(config.symbol, config.timeframe, config.end)
+        evaluation = [
+            candle
+            for candle in history
+            if candle.open_time >= start and candle.close_time <= end
+        ]
+        assert len(evaluation) == 6
+        assert all(
+            left.close_time == right.open_time
+            for left, right in zip(evaluation, evaluation[1:], strict=False)
+        )
+        costs = BacktestCostModel(config.cost_values)
+        result = Engine(
+            feed,
+            BacktestBroker(costs),
+            BacktestClock(
+                [history[0].open_time, *(candle.close_time for candle in history)]
+            ),
+            costs,
+            BacktestEvidenceSink(tmp_path / "real-data-feed"),
+            BacktestCatalogStore(cast(WriteConnection, catalog_connection)),
+            _vessel_manager(),
+            prereg=prereg,
+        ).run(config)
+
+    assert result.integrity_status == "passed"
+    with sqlite3.connect(result.evidence_path) as evidence:
+        source = evidence.execute(
+            """
+            SELECT source_ref, timeframe, row_count
+            FROM SOURCE_DATA_SNAPSHOT
+            WHERE source_kind = 'ohlcv' AND timeframe = '1h'
+            """
+        ).fetchone()
+        assert source is not None
+        assert source[:2] == ("crypto_data.ohlcv_futures", "1h")
+        assert source[2] == len(history)
+        assert len(history) >= 27
+        assert evidence.execute(
+            "SELECT COUNT(*) FROM PORTFOLIO_PNL"
+        ).fetchone() == (6,)
