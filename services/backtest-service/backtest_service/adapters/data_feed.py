@@ -127,6 +127,9 @@ class BacktestDataFeed(DataFeed):
         self._funding_exact_count = 0
         self._funding_normalized_count = 0
         self._funding_missing_count = 0
+        self._mark_exact_count = 0
+        self._mark_normalized_count = 0
+        self._mark_missing_count = 0
         self._source_cache: dict[
             tuple[str, datetime],
             tuple[Sequence[object], ...],
@@ -138,11 +141,14 @@ class BacktestDataFeed(DataFeed):
         return self._dropped_bucket_count
 
     def funding_diagnostics(self) -> dict[str, int]:
-        """Return cumulative exact, jitter-normalized, and missing observations."""
+        """Return cumulative funding and mark-price measurement quality counts."""
         return {
             "exact_count": self._funding_exact_count,
             "normalized_count": self._funding_normalized_count,
             "missing_count": self._funding_missing_count,
+            "mark_exact_count": self._mark_exact_count,
+            "mark_normalized_count": self._mark_normalized_count,
+            "mark_missing_count": self._mark_missing_count,
         }
 
     def candles(self, symbol: str, tf: str, up_to: datetime) -> list[Candle]:
@@ -286,6 +292,7 @@ class BacktestDataFeed(DataFeed):
             (_funding_symbol(symbol), self._exchange, boundary, deadline),
         ).fetchone()
         if row is None or row[1] is None:
+            self._mark_missing_count += 1
             raise LookupError(f"no measured mark price for {symbol} at {boundary.isoformat()}")
         observed_at = row[0]
         if not isinstance(observed_at, datetime):
@@ -293,4 +300,8 @@ class BacktestDataFeed(DataFeed):
         normalized_at = _utc(observed_at, name="funding_rates.time")
         if not boundary <= normalized_at <= deadline:
             raise ValueError("mark-price observation falls outside the collection window")
+        if normalized_at == boundary:
+            self._mark_exact_count += 1
+        else:
+            self._mark_normalized_count += 1
         return _decimal(row[1], name="mark_price")

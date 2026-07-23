@@ -10,6 +10,7 @@ from core_lib.execution import (
     PositionBook,
     assert_identity,
     can_transition,
+    liquidation_fill,
     match,
     normalize_order,
     order_lifecycle,
@@ -225,19 +226,17 @@ def test_next_bar_open_gap_reanchors_stop_and_truncates_quantity() -> None:
 
 
 @pytest.mark.parametrize(
-    ("fee_rate", "expected_cost_rate", "expected_quantity"),
+    ("fee_rate", "expected_quantity"),
     [
-        (Decimal("0"), Decimal("0"), Decimal("0.09317241")),
-        (Decimal("0.0004"), Decimal("0"), Decimal("0.09313516")),
-        (Decimal("0.0004"), Decimal("0.0009"), Decimal("0.09305145")),
+        (Decimal("0"), Decimal("0.09317241")),
+        (Decimal("0.0004"), Decimal("0.09309794")),
     ],
 )
-def test_margin_cap_truncates_down_and_reserves_expected_costs(
+def test_margin_cap_truncates_down_and_leaves_one_forced_exit_fee(
     fee_rate: Decimal,
-    expected_cost_rate: Decimal,
     expected_quantity: Decimal,
 ) -> None:
-    """Keep real-scale BTC margin and declared costs within the cash ceiling."""
+    """Keep margin, entry fee, and one known liquidation fee within cash."""
     decision = make_candle(
         0,
         open_price=106_500.0,
@@ -268,14 +267,59 @@ def test_margin_cap_truncates_down_and_reserves_expected_costs(
         "next_bar",
         available_margin=Decimal("10000"),
         leverage=1,
-        expected_cost_rate=expected_cost_rate,
     )
     margin = (fill.price * fill.quantity).quantize(Decimal("0.00000001"))
-    reserve = (margin * expected_cost_rate).quantize(Decimal("0.00000001"))
 
     assert fill.quantity == expected_quantity
-    assert margin + fill.fee + reserve <= Decimal("10000")
+    assert margin + fill.fee * 2 <= Decimal("10000")
     assert fill.qty_truncated is True
+
+
+def test_isolated_funding_updates_margin_liquidation_price_and_caps_payment() -> None:
+    position = make_position()
+    book = PositionBook([position])
+
+    receipt = book.apply_funding(
+        position,
+        Decimal("-5"),
+        maintenance_margin_rate=Decimal("0.004"),
+    )
+
+    assert receipt.applied_cost == Decimal("-5.00000000")
+    assert receipt.exhausted is False
+    assert position.margin == Decimal("25.00000000")
+    assert position.liquidation_price == Decimal("87.90000000")
+    assert book.check_liquidation(position, Decimal("89")) is False
+
+    payment = book.apply_funding(
+        position,
+        Decimal("30"),
+        maintenance_margin_rate=Decimal("0.004"),
+    )
+
+    assert payment.theoretical_cost == Decimal("30.00000000")
+    assert payment.applied_cost == Decimal("25.00000000")
+    assert payment.exhausted is True
+    assert position.margin == Decimal("0E-8")
+    assert position.liquidation_price == Decimal("100.40000000")
+
+
+def test_funding_exhaustion_liquidation_fill_is_deterministic() -> None:
+    position = make_position()
+    boundary = datetime(2026, 1, 1, 8, tzinfo=UTC)
+
+    fill = liquidation_fill(
+        position,
+        Decimal("100"),
+        boundary + timedelta(milliseconds=1),
+        FakeCostModel(fee_rate=Decimal("0.0004")),
+    )
+
+    assert fill.reference_price == Decimal("100.00000000")
+    assert fill.timestamp == boundary + timedelta(milliseconds=1)
+    assert fill.exit_reason is ExitReason.LIQUIDATION
+    assert fill.reduce_only is True
+    assert fill.fee == Decimal("0.08000000")
 
 
 def test_fill_timing_immediate_uses_decision_close_and_unknown_values_fail() -> None:

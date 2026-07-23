@@ -10,7 +10,7 @@ from decimal import Decimal
 from types import MappingProxyType
 from typing import Final
 
-EVIDENCE_SCHEMA_VERSION: Final = "1.1.0"
+EVIDENCE_SCHEMA_VERSION: Final = "1.2.0"
 MINIMUM_SQLITE_VERSION: Final = (3, 37, 0)
 DECIMAL_PLACES: Final = 8
 DECIMAL_SCALE: Final = Decimal(10) ** DECIMAL_PLACES
@@ -126,6 +126,7 @@ WRITER_CONTRACT_COLUMNS: Final = MappingProxyType(
                 "settle_price_source",
                 "position_notional",
                 "payment_amount",
+                "theoretical_payment_amount",
             }
         ),
     }
@@ -406,6 +407,7 @@ CREATE TABLE IF NOT EXISTS FUNDING_SETTLEMENT (
         CHECK (settle_price_source IN ('boundary_open', 'prev_close')),
     position_notional INTEGER NOT NULL CHECK (position_notional > 0),
     payment_amount INTEGER NOT NULL,
+    theoretical_payment_amount INTEGER NOT NULL,
     CHECK (
         payment_amount = 0
         OR (
@@ -423,6 +425,30 @@ CREATE TABLE IF NOT EXISTS FUNDING_SETTLEMENT (
             )
         )
         OR (position_side = 'BOTH' AND payment_amount = 0)
+    ),
+    CHECK (
+        theoretical_payment_amount = 0
+        OR (
+            position_side = 'LONG'
+            AND (
+                (funding_rate > 0.0 AND theoretical_payment_amount < 0)
+                OR (funding_rate < 0.0 AND theoretical_payment_amount > 0)
+            )
+        )
+        OR (
+            position_side = 'SHORT'
+            AND (
+                (funding_rate > 0.0 AND theoretical_payment_amount > 0)
+                OR (funding_rate < 0.0 AND theoretical_payment_amount < 0)
+            )
+        )
+        OR (position_side = 'BOTH' AND theoretical_payment_amount = 0)
+    ),
+    CHECK (abs(payment_amount) <= abs(theoretical_payment_amount)),
+    CHECK (
+        payment_amount = 0
+        OR (payment_amount < 0 AND theoretical_payment_amount < 0)
+        OR (payment_amount > 0 AND theoretical_payment_amount > 0)
     ),
     UNIQUE (trade_id, settled_at)
 ) STRICT;

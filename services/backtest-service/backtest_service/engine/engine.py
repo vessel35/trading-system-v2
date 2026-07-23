@@ -14,6 +14,7 @@ from typing import Protocol, runtime_checkable
 from core_lib.costs import (
     funding_boundaries_between,
     is_funding_boundary,
+    liquidation_price,
     settle_funding,
 )
 from core_lib.eval import (
@@ -28,6 +29,7 @@ from core_lib.eval import (
 )
 from core_lib.execution import (
     PositionBook,
+    liquidation_fill,
     position_value,
     recompute,
     resolve_triggers,
@@ -86,7 +88,6 @@ class _ExecutionBroker(Protocol):
         risk_budget: Decimal | None = None,
         available_margin: Decimal | None = None,
         leverage: int = 1,
-        expected_cost_rate: Decimal = ZERO,
     ) -> None:
         """Bind one next-bar matching context."""
 
@@ -139,7 +140,7 @@ class _OrphanReconciler(Protocol):
 @runtime_checkable
 class _FundingDiagnostics(Protocol):
     def funding_diagnostics(self) -> dict[str, int]:
-        """Return cumulative exact, normalized, and missing funding counts."""
+        """Return cumulative funding and mark-price measurement counts."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -205,8 +206,8 @@ class Engine:
         manager: AdapterManager,
         *,
         prereg: Mapping[str, object],
-        engine_version: str = "1.0.0",
-        core_lib_version: str = "0.1.0",
+        engine_version: str = "1.1.0",
+        core_lib_version: str = "0.2.0",
         thresholds: Mapping[str, float] | None = None,
     ) -> None:
         if not isinstance(broker, _ExecutionBroker):
@@ -245,6 +246,9 @@ class Engine:
             "exact_count": 0,
             "normalized_count": 0,
             "missing_count": 0,
+            "mark_exact_count": 0,
+            "mark_normalized_count": 0,
+            "mark_missing_count": 0,
         }
         self._book = PositionBook()
         self._cash = quantize_amount(ZERO)
@@ -279,7 +283,7 @@ class Engine:
         if config.trigger_feed != "tf_candle":
             raise NotImplementedError("m1_subcandle trigger walk remains reserved")
         self.config = config
-        self._cash = quantize_amount(config.initial_capital)
+        self._cash = self._checked_cash(config.initial_capital, context="run initialization")
         self._strategy = self.manager.create(
             config.strategy_id,
             {"strategy_id": config.strategy_id, "params": dict(config.params)},
@@ -418,7 +422,6 @@ class Engine:
                 risk_budget=self._risk_budget(pending),
                 available_margin=self._cash,
                 leverage=self._leverage(pending.signal),
-                expected_cost_rate=self._expected_entry_cost_rate(pending),
             )
             fill = self.broker.submit(pending.request)
             if pending.exit_reason is not None:
@@ -887,6 +890,16 @@ class Engine:
                 leverage=leverage,
                 margin_type=MarginType.ISOLATED,
                 market_type=self._market_type(),
+                liquidation_price=(
+                    liquidation_price(
+                        fill.price,
+                        leverage,
+                        self._maintenance_margin_rate(),
+                        side=fill.position_side,
+                    )
+                    if self._market_type() is MarketType.FUTURES
+                    else ZERO
+                ),
             )
             position_after = self._current_position()
             assert position_after is not None
@@ -894,7 +907,7 @@ class Engine:
             actual_cash = quantize_amount(self._cash - added_margin - fill.fee)
             if projected_entry_cash is None or actual_cash != projected_entry_cash:
                 raise RuntimeError("entry cash projection diverged from position accounting")
-            self._cash = actual_cash
+            self._cash = self._checked_cash(actual_cash, context="entry fill")
             if self._active_trade is None:
                 if signal is None:
                     raise ValueError("entry fills require their originating signal")
@@ -951,8 +964,16 @@ class Engine:
             else position_before.entry_price - fill.price
         )
         actual_pnl = quantize_amount(actual_delta * fill.quantity)
+        next_cash = self._checked_cash(
+            self._cash + released_margin + actual_pnl - fill.fee,
+            context=(
+                "liquidation exit"
+                if fill.exit_reason is ExitReason.LIQUIDATION
+                else "position exit"
+            ),
+        )
         self._book.apply(fill)
-        self._cash = quantize_amount(self._cash + released_margin + actual_pnl - fill.fee)
+        self._cash = next_cash
         active = self._active_trade
         active.total_fee = quantize_amount(active.total_fee + fill.fee)
         active.slippage = quantize_amount(active.slippage + fill.slippage)
@@ -1240,11 +1261,15 @@ class Engine:
             self._funding_rates[boundary] = cached
         rate, source = cached
         price, price_source = self._funding_price(boundary)
-        cost = settle_funding(position, rate, price)
-        payment_amount = quantize_amount(-cost)
-        self._cash = quantize_amount(self._cash - cost)
-        position.funding_fee_total = quantize_amount(position.funding_fee_total + cost)
-        active.funding = quantize_amount(active.funding + cost)
+        theoretical_cost = settle_funding(position, rate, price)
+        funding = self._book.apply_funding(
+            position,
+            theoretical_cost,
+            maintenance_margin_rate=self._maintenance_margin_rate(),
+        )
+        payment_amount = quantize_amount(-funding.applied_cost)
+        theoretical_payment_amount = quantize_amount(-funding.theoretical_cost)
+        active.funding = quantize_amount(active.funding + funding.applied_cost)
         active.settled_boundaries.add(boundary)
         active.funding_records.append(
             EvidenceRecord(
@@ -1261,9 +1286,36 @@ class Engine:
                     "settle_price_source": price_source,
                     "position_notional": quantize_amount(position.quantity * price),
                     "payment_amount": payment_amount,
+                    "theoretical_payment_amount": theoretical_payment_amount,
                 },
             )
         )
+        if funding.exhausted:
+            decision_id = self._next("decision")
+            execution_time = boundary + timedelta(milliseconds=1)
+            self.evidence.record(
+                EvidenceRecord(
+                    "DECISION",
+                    {
+                        "decision_id": decision_id,
+                        "decision_ts": boundary,
+                        "action": "exit",
+                        "intended_side": position.side.name,
+                        "intended_qty": float(position.quantity),
+                        "framework_compliant": (
+                            self._config().sizing_method == "risk_based"
+                        ),
+                        "planned_execution_ts": execution_time,
+                    },
+                )
+            )
+            fill = liquidation_fill(
+                position,
+                price,
+                execution_time,
+                self.cost_model,
+            )
+            self._apply_fill(fill, decision_id=decision_id)
 
     def _funding_price(self, boundary: datetime) -> tuple[Decimal, str]:
         source = self._minute_history or self._history
@@ -1388,6 +1440,9 @@ class Engine:
                 "exact_count": len(self._funding_rates) - fallback_count,
                 "normalized_count": 0,
                 "missing_count": fallback_count,
+                "mark_exact_count": 0,
+                "mark_normalized_count": 0,
+                "mark_missing_count": 0,
             }
 
     def _record_indicator_definitions(self) -> None:
@@ -1580,7 +1635,11 @@ class Engine:
                 f"measured_exact={self._funding_diagnostics['exact_count']}; "
                 "measured_jitter_normalized="
                 f"{self._funding_diagnostics['normalized_count']}; "
-                f"measured_missing={self._funding_diagnostics['missing_count']}"
+                f"measured_missing={self._funding_diagnostics['missing_count']}; "
+                f"mark_exact={self._funding_diagnostics['mark_exact_count']}; "
+                "mark_jitter_normalized="
+                f"{self._funding_diagnostics['mark_normalized_count']}; "
+                f"mark_missing={self._funding_diagnostics['mark_missing_count']}"
             )
             self._sequence["source_snapshot"] += 1
             self.evidence.record(
@@ -1841,29 +1900,24 @@ class Engine:
         normalized_risk = to_decimal(risk, quantizer=quantize_amount)
         return quantize_amount(self._current_equity() * normalized_risk)
 
-    def _expected_entry_cost_rate(self, pending: _PendingOrder) -> Decimal:
-        """Reserve configured funding stress without reading future measured rates."""
-        if (
-            pending.request.reduce_only
-            or pending.request.market_type is not MarketType.FUTURES
-        ):
-            return ZERO
-        if pending.request.position_side is PositionSide.LONG:
-            direction = Decimal("1")
-        elif pending.request.position_side is PositionSide.SHORT:
-            direction = Decimal("-1")
-        else:
-            raise ValueError("entry funding direction is ambiguous")
-        reserve = ZERO
-        for boundary in funding_boundaries_between(
-            pending.decision_candle.close_time,
-            self._config().end,
-        ):
-            rate = self.cost_model.funding_rate(boundary)
-            if not isinstance(rate, Decimal):
-                raise TypeError("CostModel.funding_rate must return Decimal")
-            reserve += max(ZERO, rate * direction)
-        return reserve
+    def _maintenance_margin_rate(self) -> Decimal:
+        params = self.cost_model.liq_params()
+        value = params.get("maintenance_margin_rate")
+        if not isinstance(value, Decimal):
+            raise TypeError("liq_params.maintenance_margin_rate must be Decimal")
+        if not ZERO <= value < Decimal("1"):
+            raise ValueError("maintenance_margin_rate must be in [0, 1)")
+        return value
+
+    @staticmethod
+    def _checked_cash(value: Decimal, *, context: str) -> Decimal:
+        """Normalize every cash mutation and reject a negative balance atomically."""
+        if not isinstance(value, Decimal):
+            raise TypeError(f"{context} cash value must be Decimal")
+        normalized = quantize_amount(value)
+        if normalized < ZERO:
+            raise ValueError(f"{context} would make cash negative")
+        return normalized
 
     def _current_equity(self) -> Decimal:
         return recompute(self._cash, self._current_position())

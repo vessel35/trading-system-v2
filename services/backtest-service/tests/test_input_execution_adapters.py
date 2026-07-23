@@ -158,6 +158,9 @@ def test_data_feed_normalizes_symbol_and_one_second_collection_jitter() -> None:
         "exact_count": 0,
         "normalized_count": 1,
         "missing_count": 0,
+        "mark_exact_count": 0,
+        "mark_normalized_count": 1,
+        "mark_missing_count": 0,
     }
 
 
@@ -177,7 +180,16 @@ def test_data_feed_funding_fails_closed_outside_jitter_window() -> None:
     missing = BacktestDataFeed(StubConnection(lambda query, params: []))
     with pytest.raises(LookupError, match="no measured funding rate"):
         missing.funding("BTC/USDT:USDT", at)
-    assert missing.funding_diagnostics()["missing_count"] == 1
+    with pytest.raises(LookupError, match="no measured mark price"):
+        missing.mark_price("BTC/USDT:USDT", at)
+    assert missing.funding_diagnostics() == {
+        "exact_count": 0,
+        "normalized_count": 0,
+        "missing_count": 1,
+        "mark_exact_count": 0,
+        "mark_normalized_count": 0,
+        "mark_missing_count": 1,
+    }
 
 
 def test_clock_uses_only_its_strict_simulation_schedule() -> None:

@@ -94,8 +94,14 @@ class _Feed(DataFeed):
 
 
 class _DailyFeed(DataFeed):
-    def __init__(self, candles: list[Candle]) -> None:
+    def __init__(
+        self,
+        candles: list[Candle],
+        *,
+        funding_rate: Decimal = Decimal("0.001"),
+    ) -> None:
         self._candles = candles
+        self._funding_rate = funding_rate
 
     def candles(self, symbol: str, tf: str, up_to: datetime) -> list[Candle]:
         assert symbol == "BTCUSDT"
@@ -107,7 +113,7 @@ class _DailyFeed(DataFeed):
     def funding(self, symbol: str, at: datetime) -> Decimal:
         assert symbol == "BTCUSDT"
         assert at.hour in {0, 8, 16}
-        return Decimal("0.001")
+        return self._funding_rate
 
     def mark_price(self, symbol: str, at: datetime) -> Decimal:
         del symbol, at
@@ -454,7 +460,6 @@ class _Broker(BacktestBroker):
         risk_budget: Decimal | None = None,
         available_margin: Decimal | None = None,
         leverage: int = 1,
-        expected_cost_rate: Decimal = Decimal("0"),
     ) -> None:
         self.call_order.append("configure")
         super().configure_execution(
@@ -464,7 +469,6 @@ class _Broker(BacktestBroker):
             risk_budget=risk_budget,
             available_margin=available_margin,
             leverage=leverage,
-            expected_cost_rate=expected_cost_rate,
         )
 
     def submit(self, request: OrderRequest) -> Fill:
@@ -543,6 +547,9 @@ def _daily_engine(
     root: Path,
     catalog: _Catalog,
     sinks: list[BacktestEvidenceSink],
+    *,
+    funding_rate: Decimal = Decimal("0.001"),
+    fee_rate: Decimal = Decimal("0"),
 ) -> tuple[Engine, RunConfig]:
     start = datetime(2026, 1, 1, tzinfo=UTC)
     history_start = start - timedelta(days=9)
@@ -578,7 +585,7 @@ def _daily_engine(
         initial_capital=Decimal("10000"),
         risk_per_trade=0.01,
         cost_values={
-            "futures_taker_fee_rate": Decimal("0"),
+            "futures_taker_fee_rate": fee_rate,
             "futures_entry_slippage_rate": Decimal("0"),
             "exit_slippage_rate": Decimal("0"),
             "funding_fallback_rate": Decimal("0"),
@@ -590,7 +597,7 @@ def _daily_engine(
     sinks.append(sink)
     return (
         Engine(
-            _DailyFeed(candles),
+            _DailyFeed(candles, funding_rate=funding_rate),
             _Broker(costs),
             BacktestClock(schedule),
             costs,
@@ -926,6 +933,84 @@ def test_coarse_candle_funding_charges_every_crossed_boundary_with_payment_sign(
     sink.connection.commit()
     assert sink.audit(require_eval_decision=True)["cost_once"] is False
     assert sink.integrity_details["cost_once"]["funding_failure_count"] == 1
+
+
+def test_funding_margin_exhaustion_liquidates_without_negative_cash(
+    tmp_path: Path,
+) -> None:
+    catalog = _Catalog()
+    sinks: list[BacktestEvidenceSink] = []
+    engine, config = _daily_engine(
+        tmp_path,
+        catalog,
+        sinks,
+        funding_rate=Decimal("2"),
+        fee_rate=Decimal("0.0004"),
+    )
+
+    result = engine.run(config)
+
+    assert result.integrity_status == "passed"
+    with sqlite3.connect(result.evidence_path) as connection:
+        trade = connection.execute(
+            """
+            SELECT exit_reason, liquidated, funding_cost, total_fee,
+                   liquidation_penalty, net_pnl
+            FROM TRADE
+            """
+        ).fetchone()
+        assert trade == (
+            "LIQUIDATION",
+            1,
+            100_000_000_000,
+            80_000_000,
+            0,
+            -100_080_000_000,
+        )
+        settlement = connection.execute(
+            """
+            SELECT payment_amount, theoretical_payment_amount
+            FROM FUNDING_SETTLEMENT
+            """
+        ).fetchone()
+        assert settlement == (-100_000_000_000, -200_000_000_000)
+        execution = connection.execute(
+            """
+            SELECT d.decision_ts, e.execution_ts, e.reference_price,
+                   e.exit_reason, e.reduce_only
+            FROM EXECUTION AS e
+            JOIN DECISION AS d USING (decision_id)
+            WHERE e.exit_reason = 'LIQUIDATION'
+            """
+        ).fetchone()
+        boundary_ms = int(datetime(2026, 1, 2, 8, tzinfo=UTC).timestamp() * 1_000)
+        assert execution == (
+            boundary_ms,
+            boundary_ms + 1,
+            10_000_000_000,
+            "LIQUIDATION",
+            1,
+        )
+        assert connection.execute(
+            "SELECT min(cash_balance), min(position_value), min(total_equity) "
+            "FROM PORTFOLIO_PNL"
+        ).fetchone() == (
+            899_920_000_000,
+            0,
+            899_920_000_000,
+        )
+        assert set(
+            connection.execute(
+                "SELECT check_name FROM INTEGRITY_CHECK WHERE passed = 1"
+            ).fetchall()
+        ) == {
+            ("accounting_identity",),
+            ("timestamp_order",),
+            ("cost_once",),
+            ("net_of_cost",),
+            ("deterministic",),
+            ("evidence_complete",),
+        }
 
 
 def _metrics(pf: float) -> MetricSet:

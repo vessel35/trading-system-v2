@@ -75,6 +75,7 @@ EXPECTED_COLUMNS = {
     "FUNDING_SETTLEMENT": """
         settlement_id run_id trade_id settled_at symbol position_side funding_rate rate_source
         settle_price settle_price_source position_notional payment_amount
+        theoretical_payment_amount
     """.split(),
     "TRADE": """
         trade_id run_id backtest_run_id source_type symbol side market_type entry_execution_id
@@ -517,6 +518,7 @@ def test_writer_contract_columns_match_section_5_3_7(
             "settle_price_source",
             "position_notional",
             "payment_amount",
+            "theoretical_payment_amount",
         },
     }
     assert WRITER_CONTRACT_COLUMNS["Fill"] <= _table_columns(evidence_db, "EXECUTION")
@@ -565,9 +567,10 @@ def test_funding_settlement_allows_nonzero_rate_rounded_to_zero(
         """
         INSERT INTO FUNDING_SETTLEMENT (
             settlement_id, run_id, trade_id, settled_at, symbol, position_side,
-            funding_rate, settle_price, position_notional, payment_amount
+            funding_rate, settle_price, position_notional, payment_amount,
+            theoretical_payment_amount
         ) VALUES (1, ?, 1, 2000, 'BTCUSDT', 'LONG', 0.000001,
-                  10000000000, 1, 0)
+                  10000000000, 1, 0, 0)
         """,
         (RUN_ID,),
     )

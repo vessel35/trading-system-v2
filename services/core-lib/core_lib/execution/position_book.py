@@ -1,14 +1,24 @@
 """Define position updates, reductions, liquidation, and first-fill self-check rules."""
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import ClassVar
 
-from core_lib.costs.liquidation import is_triggered
+from core_lib.costs.liquidation import is_triggered, price_from_margin
 from core_lib.types import Fill, MarginType, MarketType, Position, PositionSide
 from core_lib.types.money import ZERO, quantize_amount, quantize_price
 
 PositionKey = tuple[str, PositionSide]
+
+
+@dataclass(frozen=True, slots=True)
+class FundingMarginResult:
+    """The theoretical and actually collectible isolated-margin funding costs."""
+
+    theoretical_cost: Decimal
+    applied_cost: Decimal
+    exhausted: bool
 
 
 class PositionBook:
@@ -118,6 +128,45 @@ class PositionBook:
         if position.quantity == ZERO:
             del self._positions[key]
         return released_margin
+
+    def apply_funding(
+        self,
+        position: Position,
+        theoretical_cost: Decimal,
+        *,
+        maintenance_margin_rate: Decimal,
+    ) -> FundingMarginResult:
+        """Apply funding to isolated margin and refresh its liquidation threshold."""
+        key = self._key(position.symbol, position.side)
+        if self._positions.get(key) is not position:
+            raise ValueError("funding position must be the active book value")
+        if position.market_type is not MarketType.FUTURES:
+            raise ValueError("funding applies to futures positions only")
+        if position.margin_type is not MarginType.ISOLATED:
+            raise ValueError("funding margin application supports ISOLATED only")
+        if not isinstance(theoretical_cost, Decimal):
+            raise TypeError("theoretical_cost must be Decimal")
+        normalized_cost = quantize_amount(theoretical_cost)
+        applied_cost = (
+            min(normalized_cost, position.margin)
+            if normalized_cost > ZERO
+            else normalized_cost
+        )
+        position.margin = quantize_amount(position.margin - applied_cost)
+        if position.margin < ZERO:
+            raise RuntimeError("funding must not make isolated margin negative")
+        position.funding_fee_total = quantize_amount(
+            position.funding_fee_total + applied_cost
+        )
+        position.liquidation_price = price_from_margin(
+            position,
+            maintenance_margin_rate,
+        )
+        return FundingMarginResult(
+            theoretical_cost=normalized_cost,
+            applied_cost=applied_cost,
+            exhausted=normalized_cost > ZERO and position.margin == ZERO,
+        )
 
     @staticmethod
     def check_liquidation(position: Position, market_price: Decimal) -> bool:

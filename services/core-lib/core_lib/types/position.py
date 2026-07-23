@@ -41,6 +41,8 @@ class Position:
             raise TypeError("leverage must be int")
         if self.leverage <= 0:
             raise ValueError("leverage must be positive")
+        if self.margin < ZERO:
+            raise ValueError("margin must be non-negative")
         self._validate_total_cost()
 
     def _quantize_fields(self) -> None:

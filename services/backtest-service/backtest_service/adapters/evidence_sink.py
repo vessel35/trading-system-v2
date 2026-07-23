@@ -488,22 +488,33 @@ class BacktestEvidenceSink(EvidenceSink):
         failures: list[dict[str, object]] = []
         trades = self.connection.execute(
             """
-            SELECT trade_id, market_type, entry_time, exit_time, funding_cost
+            SELECT trade_id, market_type, entry_time, exit_time,
+                   funding_cost, liquidated
             FROM TRADE
             ORDER BY trade_id
             """
         ).fetchall()
         settlements = self.connection.execute(
             """
-            SELECT trade_id, settled_at, payment_amount
+            SELECT trade_id, settled_at, payment_amount,
+                   theoretical_payment_amount
             FROM FUNDING_SETTLEMENT
             ORDER BY trade_id, settled_at
             """
         ).fetchall()
-        by_trade: dict[int, list[tuple[int, int]]] = {}
-        for trade_id, settled_at, payment_amount in settlements:
-            by_trade.setdefault(trade_id, []).append((settled_at, payment_amount))
-        for trade_id, market_type, entry_time, exit_time, funding_cost in trades:
+        by_trade: dict[int, list[tuple[int, int, int]]] = {}
+        for trade_id, settled_at, payment_amount, theoretical_payment in settlements:
+            by_trade.setdefault(trade_id, []).append(
+                (settled_at, payment_amount, theoretical_payment)
+            )
+        for (
+            trade_id,
+            market_type,
+            entry_time,
+            exit_time,
+            funding_cost,
+            liquidated,
+        ) in trades:
             if exit_time is None or funding_cost is None:
                 failures.append(
                     {"trade_id": trade_id, "reason": "unfinalized_trade"}
@@ -521,9 +532,9 @@ class BacktestEvidenceSink(EvidenceSink):
                 else set()
             )
             actual_rows = by_trade.get(trade_id, [])
-            actual = {settled_at for settled_at, _ in actual_rows}
+            actual = {settled_at for settled_at, _, _ in actual_rows}
             payment_total = sum(
-                (payment_amount for _, payment_amount in actual_rows),
+                (payment_amount for _, payment_amount, _ in actual_rows),
                 start=0,
             )
             reasons: list[str] = []
@@ -531,6 +542,20 @@ class BacktestEvidenceSink(EvidenceSink):
                 reasons.append("boundary_count_or_timestamp")
             if -payment_total != funding_cost:
                 reasons.append("payment_sign_identity")
+            invalid_caps = [
+                settled_at
+                for settled_at, payment, theoretical in actual_rows
+                if abs(payment) > abs(theoretical)
+                or (
+                    payment != theoretical
+                    and (
+                        liquidated != 1
+                        or exit_time != settled_at + 1
+                    )
+                )
+            ]
+            if invalid_caps:
+                reasons.append("isolated_margin_cap")
             if reasons:
                 failures.append(
                     {
@@ -540,6 +565,7 @@ class BacktestEvidenceSink(EvidenceSink):
                         "actual_boundaries": sorted(actual),
                         "funding_cost": funding_cost,
                         "negative_payment_total": -payment_total,
+                        "invalid_capped_boundaries": invalid_caps,
                     }
                 )
         return failures

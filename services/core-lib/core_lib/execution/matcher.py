@@ -189,14 +189,14 @@ def _entry_cash_requirement(
     quantity: Decimal,
     cost_model: CostModel,
     leverage: int,
-    expected_cost_rate: Decimal,
 ) -> Decimal:
-    """Return entry margin, charged fee, and the declared future-cost reserve."""
+    """Return entry margin plus known entry and forced-exit fee capacity."""
     notional = quantize_amount(fill_price * quantity)
     margin = quantize_amount(notional / Decimal(leverage))
-    fee = fee_cost.calc(notional, cost_model.fee(order.symbol, notional))
-    reserve = quantize_amount(notional * expected_cost_rate)
-    return quantize_amount(margin + fee + reserve)
+    fee_rate = cost_model.fee(order.symbol, notional)
+    entry_fee = fee_cost.calc(notional, fee_rate)
+    liquidation_exit_fee = fee_cost.calc(notional, fee_rate)
+    return quantize_amount(margin + entry_fee + liquidation_exit_fee)
 
 
 def _affordable_entry_quantity(
@@ -206,7 +206,6 @@ def _affordable_entry_quantity(
     available_margin: Decimal,
     cost_model: CostModel,
     leverage: int,
-    expected_cost_rate: Decimal,
 ) -> Decimal:
     """Find the largest eight-decimal quantity whose margin and fee fit cash."""
     upper_units = int(_truncate_amount(maximum) / Q_AMOUNT)
@@ -225,7 +224,6 @@ def _affordable_entry_quantity(
                 quantity,
                 cost_model,
                 leverage,
-                expected_cost_rate,
             )
         )
         if requirement <= available_margin:
@@ -244,16 +242,12 @@ def recompute_qty_and_stop(
     available_margin: Decimal | None = None,
     leverage: int = 1,
     cost_model: CostModel | None = None,
-    expected_cost_rate: Decimal = ZERO,
 ) -> tuple[Decimal, Decimal | None]:
     """Re-anchor initial risk to the fill and truncate quantity to risk/margin."""
     if not isinstance(fill_price, Decimal) or fill_price <= ZERO:
         raise ValueError("fill_price must be a positive Decimal")
     if isinstance(leverage, bool) or not isinstance(leverage, int) or leverage <= 0:
         raise ValueError("leverage must be a positive int")
-    if not isinstance(expected_cost_rate, Decimal) or expected_cost_rate < ZERO:
-        raise ValueError("expected_cost_rate must be a non-negative Decimal")
-
     reference = order.price or fill_price
     new_stop: Decimal | None = None
     stop_distance: Decimal | None = None
@@ -287,7 +281,6 @@ def recompute_qty_and_stop(
             available_margin,
             cost_model,
             leverage,
-            expected_cost_rate,
         )
         quantity = min(quantity, margin_quantity)
     return quantize_amount(quantity), new_stop
@@ -303,7 +296,6 @@ def match(
     risk_budget: Decimal | None = None,
     available_margin: Decimal | None = None,
     leverage: int = 1,
-    expected_cost_rate: Decimal = ZERO,
 ) -> Fill:
     """Deterministically match one order at immediate close or next-bar open."""
     if order.status.is_terminal():
@@ -341,7 +333,6 @@ def match(
             available_margin=entry_margin,
             leverage=leverage,
             cost_model=cost_model,
-            expected_cost_rate=expected_cost_rate,
         )
         recomputed = min(quantity, recomputed)
         if recomputed == quantity:
@@ -371,7 +362,6 @@ def match(
                 quantity,
                 cost_model,
                 leverage,
-                expected_cost_rate,
             )
             > entry_margin
         ):
@@ -409,11 +399,11 @@ def _protection_reference(
 
 def _synthetic_exit_order(
     position: Position,
-    candle: Candle,
+    timestamp: datetime,
     reason: ExitReason,
 ) -> Order:
     side = OrderSide.SELL if position.side is PositionSide.LONG else OrderSide.BUY
-    canonical = f"{position.symbol}|{candle.open_time.isoformat()}|{reason.value}"
+    canonical = f"{position.symbol}|{timestamp.isoformat()}|{reason.value}"
     client_id = uuid5(NAMESPACE_URL, canonical)
     return Order(
         id=f"synthetic-{client_id}",
@@ -527,7 +517,7 @@ def resolve_triggers(
             level,
             reason,
         )
-        order = _synthetic_exit_order(position, candle, reason)
+        order = _synthetic_exit_order(position, candle.open_time, reason)
         return _fill(
             order,
             reference,
@@ -539,3 +529,31 @@ def resolve_triggers(
             exit_reason=reason,
         )
     return None
+
+
+def liquidation_fill(
+    position: Position,
+    reference_price: Decimal,
+    timestamp: datetime,
+    cost_model: CostModel,
+) -> Fill:
+    """Create one deterministic taker Fill for a funding-forced liquidation."""
+    if not isinstance(reference_price, Decimal) or reference_price <= ZERO:
+        raise ValueError("liquidation reference_price must be a positive Decimal")
+    if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+        raise ValueError("liquidation timestamp must be timezone-aware")
+    order = _synthetic_exit_order(
+        position,
+        timestamp,
+        ExitReason.LIQUIDATION,
+    )
+    return _fill(
+        order,
+        reference_price,
+        position.quantity,
+        timestamp,
+        cost_model,
+        gap_filled=False,
+        qty_truncated=False,
+        exit_reason=ExitReason.LIQUIDATION,
+    )

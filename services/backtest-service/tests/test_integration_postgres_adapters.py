@@ -23,7 +23,7 @@ from backtest_service.adapters.data_feed import BacktestDataFeed, ReadConnection
 from backtest_service.adapters.evidence_sink import BacktestEvidenceSink
 from backtest_service.adapters.strategy_registry import BacktestStrategyRegistry
 from backtest_service.config import RunConfig
-from backtest_service.engine import Engine
+from backtest_service.engine import Engine, RunResult
 from core_lib.ports import DataFeed, StrategyRegistry
 from core_lib.strategy import AdapterManager, InProcessStrategyRegistry
 from core_lib.strategy.adaptees import STRATEGY_ID as VESSEL_STRATEGY_ID
@@ -129,12 +129,17 @@ def test_crypto_data_funding_maps_derivative_symbol_and_collection_jitter() -> N
             exchange="binance",
         )
         rate = feed.funding("BTC/USDT:USDT", boundary)
+        mark = feed.mark_price("BTC/USDT:USDT", boundary)
 
     assert rate == Decimal("0.0000433400")
+    assert mark.is_finite()
     assert feed.funding_diagnostics() == {
         "exact_count": 0,
         "normalized_count": 1,
         "missing_count": 0,
+        "mark_exact_count": 0,
+        "mark_normalized_count": 1,
+        "mark_missing_count": 0,
     }
 
 
@@ -311,6 +316,85 @@ def _vessel_manager(registry: StrategyRegistry) -> AdapterManager:
     plugins = InProcessStrategyRegistry()
     plugins.register(VESSEL_STRATEGY_ID, VesselReference)
     return AdapterManager(registry, plugins)
+
+
+def _real_vessel_config(
+    *,
+    run_name: str,
+    start: datetime,
+    end: datetime,
+    funding_fallback_rate: Decimal = Decimal("0.0001"),
+) -> RunConfig:
+    return RunConfig(
+        run_name=run_name,
+        strategy_id=VESSEL_STRATEGY_ID,
+        params={},
+        symbol="BTC/USDT:USDT",
+        exchange="binance",
+        timeframe="1h",
+        market_type="futures",
+        data_source="crypto_data.ohlcv_futures",
+        start=start,
+        end=end,
+        initial_capital=Decimal("10000"),
+        risk_per_trade=0.01,
+        seed=17,
+        cost_values={
+            "futures_taker_fee_rate": Decimal("0.0004"),
+            "futures_entry_slippage_rate": Decimal("0.0005"),
+            "exit_slippage_rate": Decimal("0.0001"),
+            "funding_fallback_rate": funding_fallback_rate,
+        },
+        profile_ref="vessel-reference-v1",
+    )
+
+
+def _run_real_vessel(root: Path, config: RunConfig) -> RunResult:
+    prereg = {
+        "hypothesis": "Vessel must survive real measured funding",
+        "primary_metric": "pf",
+        "success_threshold": 1.3,
+        "failure_threshold": 1.0,
+        "edge_distinguishable": True,
+        "higher_is_better": True,
+    }
+    with (
+        _connect("crypto_data") as crypto_connection,
+        _connect_writer("backtest_db") as catalog_connection,
+        _connect("signal_db") as signal_connection,
+    ):
+        feed = BacktestDataFeed(
+            cast(ReadConnection, crypto_connection),
+            exchange=config.exchange,
+        )
+        history = feed.candles(config.symbol, config.timeframe, config.end)
+        costs = BacktestCostModel(config.cost_values)
+        result = Engine(
+            feed,
+            BacktestBroker(costs),
+            BacktestClock(
+                [history[0].open_time, *(candle.close_time for candle in history)]
+            ),
+            costs,
+            BacktestEvidenceSink(root),
+            BacktestCatalogStore(cast(WriteConnection, catalog_connection)),
+            _vessel_manager(
+                BacktestStrategyRegistry(cast(ReadConnection, signal_connection))
+            ),
+            prereg=prereg,
+        ).run(config)
+        catalog_row = catalog_connection.execute(
+            """
+            SELECT r.status, s.integrity_status
+            FROM public.backtest_run AS r
+            JOIN public.backtest_summary AS s USING (run_id)
+            WHERE r.run_id = %s
+            """,
+            (result.run_id,),
+        ).fetchone()
+    assert catalog_row == ("EVALUATED", "passed")
+    assert result.integrity_status == "passed"
+    return result
 
 
 def _vessel_config(start: datetime) -> RunConfig:
@@ -537,7 +621,8 @@ def test_vessel_engine_traverses_real_crypto_data_feed(
             9,
             0,
             0,
-            "measured_exact=2; measured_jitter_normalized=7; measured_missing=0",
+            "measured_exact=2; measured_jitter_normalized=7; measured_missing=0; "
+            "mark_exact=0; mark_jitter_normalized=0; mark_missing=0",
         )
         first_entry = evidence.execute(
             """
@@ -558,3 +643,90 @@ def test_vessel_engine_traverses_real_crypto_data_feed(
         assert evidence.execute(
             "SELECT COUNT(*) FROM PORTFOLIO_PNL"
         ).fetchone() == (72,)
+
+
+def test_real_funding_sign_regressions_complete_without_negative_cash(
+    tmp_path: Path,
+) -> None:
+    start = datetime(2025, 7, 1, tzinfo=UTC)
+    scenarios = (
+        (
+            "cto3-funding-short-180d",
+            timedelta(days=180),
+            Decimal("0.0001"),
+            """
+            SELECT COUNT(*)
+            FROM FUNDING_SETTLEMENT
+            WHERE position_side = 'SHORT'
+              AND funding_rate < 0.0
+              AND payment_amount < 0
+            """,
+        ),
+        (
+            "cto3-funding-long-30d",
+            timedelta(days=30),
+            Decimal("0.00001"),
+            """
+            SELECT COUNT(*)
+            FROM FUNDING_SETTLEMENT
+            WHERE position_side = 'LONG'
+              AND funding_rate > 0.00001
+              AND payment_amount < 0
+            """,
+        ),
+    )
+    for run_name, duration, fallback, target_sql in scenarios:
+        result = _run_real_vessel(
+            tmp_path / run_name,
+            _real_vessel_config(
+                run_name=run_name,
+                start=start,
+                end=start + duration,
+                funding_fallback_rate=fallback,
+            ),
+        )
+        with sqlite3.connect(result.evidence_path) as evidence:
+            assert evidence.execute(target_sql).fetchone()[0] > 0
+            assert evidence.execute(
+                "SELECT min(cash_balance) >= 0 FROM PORTFOLIO_PNL"
+            ).fetchone() == (1,)
+            assert evidence.execute(
+                """
+                SELECT COUNT(*)
+                FROM FUNDING_SETTLEMENT
+                WHERE abs(payment_amount) > abs(theoretical_payment_amount)
+                """
+            ).fetchone() == (0,)
+            assert evidence.execute(
+                "SELECT COUNT(*) FROM INTEGRITY_CHECK WHERE passed = 0"
+            ).fetchone() == (0,)
+
+
+def test_entry_quantity_is_independent_of_remaining_run_window(
+    tmp_path: Path,
+) -> None:
+    start = datetime(2025, 10, 1, tzinfo=UTC)
+    first_entries: list[tuple[int, int, int]] = []
+    for days in (3, 10, 45):
+        result = _run_real_vessel(
+            tmp_path / f"window-{days}",
+            _real_vessel_config(
+                run_name=f"cto3-window-{days}d",
+                start=start,
+                end=start + timedelta(days=days),
+            ),
+        )
+        with sqlite3.connect(result.evidence_path) as evidence:
+            entry = evidence.execute(
+                """
+                SELECT execution_ts, reference_price, quantity
+                FROM EXECUTION
+                WHERE reduce_only = 0
+                ORDER BY execution_id
+                LIMIT 1
+                """
+            ).fetchone()
+            assert entry is not None
+            first_entries.append(entry)
+
+    assert len(set(first_entries)) == 1

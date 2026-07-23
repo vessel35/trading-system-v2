@@ -6,6 +6,7 @@ from .funding import is_boundary as is_funding_boundary
 from .funding import settle as settle_funding
 from .liquidation import is_triggered as is_liquidation_triggered
 from .liquidation import price as liquidation_price
+from .liquidation import price_from_margin as liquidation_price_from_margin
 from .slippage import SlippageParams
 from .slippage import apply as apply_slippage
 from .slippage import effective_rate as effective_slippage_rate
@@ -19,5 +20,6 @@ __all__ = [
     "is_funding_boundary",
     "is_liquidation_triggered",
     "liquidation_price",
+    "liquidation_price_from_margin",
     "settle_funding",
 ]

@@ -44,3 +44,24 @@ def is_triggered(position: Position, market_price: Decimal) -> bool:
     if position.side is PositionSide.SHORT:
         return market_price >= position.liquidation_price
     raise ValueError("liquidation direction is ambiguous for PositionSide.BOTH")
+
+
+def price_from_margin(position: Position, mmr: Decimal) -> Decimal:
+    """Reprice isolated liquidation after funding changes assigned margin."""
+    if not isinstance(mmr, Decimal):
+        raise TypeError("mmr must be Decimal")
+    if not ZERO <= mmr < Decimal("1"):
+        raise ValueError("mmr must be between zero and one")
+    if position.quantity <= ZERO or position.entry_price <= ZERO:
+        raise ValueError("an open position is required")
+    if position.margin < ZERO:
+        raise ValueError("isolated margin must not be negative")
+    notional = position.quantity * position.entry_price
+    margin_fraction = position.margin / notional
+    if position.side is PositionSide.LONG:
+        result = position.entry_price * (Decimal("1") - margin_fraction + mmr)
+    elif position.side is PositionSide.SHORT:
+        result = position.entry_price * (Decimal("1") + margin_fraction - mmr)
+    else:
+        raise ValueError("liquidation direction is ambiguous for PositionSide.BOTH")
+    return quantize_price(max(ZERO, result))
