@@ -67,6 +67,17 @@ def test_liquidation_penalty_is_non_negative() -> None:
         make_trade(liquidation_penalty=Decimal("-0.01"))
 
 
+def test_non_liquidated_trade_takes_the_zero_penalty_branch() -> None:
+    trade = make_trade(liquidation_penalty=Decimal("0"), liquidated=False)
+    assert trade.liquidation_penalty == Decimal("0E-8")
+    with pytest.raises(ValueError, match="non-liquidated"):
+        make_trade(
+            net_pnl=Decimal("16.5"),
+            liquidation_penalty=Decimal("1"),
+            liquidated=False,
+        )
+
+
 def test_liquidated_flag_pairs_with_liquidation_exit_reason() -> None:
     liquidated_trade = make_trade(
         net_pnl=Decimal("16.5"),

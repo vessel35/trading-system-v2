@@ -11,6 +11,7 @@ def make_position(
     total_cost: Decimal = Decimal("200"),
     average_price: Decimal = Decimal("100"),
     entry_price: Decimal = Decimal("100"),
+    side: PositionSide = PositionSide.LONG,
 ) -> Position:
     return Position(
         wallet_id=None,
@@ -20,7 +21,7 @@ def make_position(
         total_cost=total_cost,
         current_price=Decimal("100"),
         unrealized_pnl=Decimal("0"),
-        side=PositionSide.LONG,
+        side=side,
         market_type=MarketType.FUTURES,
         leverage=10,
         margin_type=MarginType.ISOLATED,
@@ -47,6 +48,14 @@ def test_update_price_recalculates_unrealized_pnl() -> None:
     position.update_price(Decimal("120"))
     assert position.mark_price == Decimal("120.00000000")
     assert position.unrealized_pnl == Decimal("40.00000000")
+
+
+def test_short_unrealized_pnl_has_the_inverse_price_direction() -> None:
+    position = make_position(side=PositionSide.SHORT)
+    position.update_price(Decimal("90"))
+    assert position.unrealized_pnl == Decimal("20.00000000")
+    position.update_price(Decimal("110"))
+    assert position.unrealized_pnl == Decimal("-20.00000000")
 
 
 def test_add_quantity_updates_weighted_average_and_cost() -> None:
