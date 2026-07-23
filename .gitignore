@@ -1,0 +1,18 @@
+# 비밀·로컬 환경
+.env
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# 백테스트 산출물(Evidence SQLite 등 로컬 run 산출물)
+var/
+*.sqlite
+*.sqlite3
