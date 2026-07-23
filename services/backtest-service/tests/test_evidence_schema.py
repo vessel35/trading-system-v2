@@ -17,6 +17,7 @@ from backtest_service.adapters.evidence_schema import (
     EXTENSION_TABLES,
     HASH_EXCLUDED_COLUMNS,
     HASH_EXCLUDED_TABLES,
+    HASH_GLOBAL_EXCLUDED_COLUMNS,
     HASH_TABLES,
     INTEGRITY_CHECK_NAMES,
     OPTIONAL_DECISION_CONTRACT_KEYS,
@@ -228,8 +229,9 @@ def test_declared_column_order_matches_database_design(
 def test_schema_marks_deterministic_hash_boundaries() -> None:
     """Expose exact sort and exclusion metadata to the future hash finalizer."""
     assert HASH_EXCLUDED_TABLES == {"FINDING_CLAIM"}
+    assert HASH_GLOBAL_EXCLUDED_COLUMNS == {"run_id", "backtest_run_id"}
     assert HASH_EXCLUDED_COLUMNS == {
-        "BACKTEST_RUN_LOCAL": {"created_at"},
+        "BACKTEST_RUN_LOCAL": {"run_seq", "created_at"},
         "INTEGRITY_CHECK": {"checked_at"},
         "FINDING_CLAIM": {"created_at"},
     }

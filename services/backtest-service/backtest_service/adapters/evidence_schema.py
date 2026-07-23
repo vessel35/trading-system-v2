@@ -71,9 +71,12 @@ HASH_EXCLUDED_TABLES: Final = frozenset({"FINDING_CLAIM"})
 HASH_TABLES: Final = tuple(
     sorted(table for table in EVIDENCE_TABLES if table not in HASH_EXCLUDED_TABLES)
 )
+# ``backtest_run_id`` is TRADE's schema-level alias of the same instance
+# identifier, not an additional logical identity field.
+HASH_GLOBAL_EXCLUDED_COLUMNS: Final = frozenset({"run_id", "backtest_run_id"})
 HASH_EXCLUDED_COLUMNS: Final = MappingProxyType(
     {
-        "BACKTEST_RUN_LOCAL": frozenset({"created_at"}),
+        "BACKTEST_RUN_LOCAL": frozenset({"run_seq", "created_at"}),
         "INTEGRITY_CHECK": frozenset({"checked_at"}),
         "FINDING_CLAIM": frozenset({"created_at"}),
     }

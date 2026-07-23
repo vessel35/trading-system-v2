@@ -30,8 +30,10 @@ explicitly selected.
 ```
 
 PostgreSQL integration tests are opt-in and use the repository `.env`. They set
-each session to read-only; the crypto test selects only `ohlcv_futures` and
-`funding_rates`, and the signal test selects only `strategy_registry`.
+the crypto and signal sessions to read-only: crypto selects only `ohlcv_futures`
+and `funding_rates`, and signal selects only `strategy_registry`. The catalog
+integration check writes permanent initialization-test metadata only to
+`backtest_db.backtest_run`, `backtest_prereg`, and `backtest_summary`.
 
 ```bash
 .venv/bin/pytest \
