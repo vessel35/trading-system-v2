@@ -1,0 +1,1 @@
+"""Define trend-strength indicators."""

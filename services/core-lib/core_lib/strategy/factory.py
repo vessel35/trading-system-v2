@@ -1,0 +1,1 @@
+"""Define Adaptee construction rules."""
