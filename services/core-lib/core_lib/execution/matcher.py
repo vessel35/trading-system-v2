@@ -1,15 +1,14 @@
 """Define deterministic bar-trigger and fill matching rules."""
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import replace
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Protocol
 from uuid import NAMESPACE_URL, uuid5
 
 from core_lib.costs import fee as fee_cost
 from core_lib.costs import liquidation, slippage
-from core_lib.costs.slippage import SlippageCostModel
+from core_lib.ports import CostModel
 from core_lib.types import (
     Candle,
     ExitReason,
@@ -27,18 +26,6 @@ from .normalizer import to_decimal
 from .position_book import PositionBook
 
 FILL_TIMINGS = frozenset({"immediate", "next_bar"})
-
-
-class CostModel(SlippageCostModel, Protocol):
-    """M5 structural value-provider contract; the M6 port must conform to it."""
-
-    def fee_rate(self, order: Order) -> Decimal:
-        """Return a maker/taker fee rate without applying the formula."""
-        ...
-
-    def liquidation_mmr(self, position: Position) -> Decimal:
-        """Return the maintenance-margin rate without applying the formula."""
-        ...
 
 
 def _price(value: float) -> Decimal:
@@ -126,7 +113,10 @@ def _fill(
     )
     fee = fee_cost.calc(
         quantize_amount(actual_price * quantity),
-        cost_model.fee_rate(order),
+        cost_model.fee(
+            order.symbol,
+            quantize_amount(actual_price * quantity),
+        ),
     )
     cumulative_quantity = quantize_amount(order.filled_quantity + quantity)
     previous_notional = (
@@ -166,7 +156,7 @@ def _execution_price(
     *,
     gap_filled: bool,
 ) -> tuple[Decimal, Decimal]:
-    context: Mapping[str, object] = {
+    context: dict[str, object] = {
         "gap_filled": gap_filled,
         "reference_price": reference_price,
     }
@@ -361,10 +351,16 @@ def resolve_triggers(
         high = _price(candle.high)
         liquidation_level = position.liquidation_price
         if liquidation_level <= ZERO:
+            liq_params = cost_model.liq_params()
+            maintenance_margin_rate = liq_params.get("maintenance_margin_rate")
+            if not isinstance(maintenance_margin_rate, Decimal):
+                raise TypeError(
+                    "liq_params.maintenance_margin_rate must be Decimal"
+                )
             liquidation_level = liquidation.price(
                 position.entry_price,
                 position.leverage,
-                cost_model.liquidation_mmr(position),
+                maintenance_margin_rate,
                 side=position.side,
             )
         liquidation_position = (

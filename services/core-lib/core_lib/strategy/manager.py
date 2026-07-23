@@ -1,7 +1,8 @@
 """Coordinate Adaptee creation, configuration, registry access, and lifecycle."""
 
 from collections.abc import Mapping
-from typing import Protocol
+
+from core_lib.ports import StrategyRegistry
 
 from .base import StrategyAdapter
 from .config import StrategyConfig
@@ -9,28 +10,12 @@ from .factory import AdapterFactory
 from .registry import InProcessStrategyRegistry
 
 
-class StrategyCatalog(Protocol):
-    """Structural shape of the injected external StrategyRegistry port."""
-
-    def get(self, strategy_id: str) -> dict[str, object]:
-        """Return one external catalog row."""
-        ...
-
-    def list(self) -> list[dict[str, object]]:
-        """Return external catalog rows."""
-        ...
-
-    def register(self, strategy_id: str, meta: dict[str, object]) -> None:
-        """Persist one external catalog row."""
-        ...
-
-
 class AdapterManager:
     """Orchestrate schema lookup, config resolution, creation, and lifecycle."""
 
     def __init__(
         self,
-        catalog_registry: StrategyCatalog,
+        catalog_registry: StrategyRegistry,
         adapter_registry: InProcessStrategyRegistry,
         *,
         config: type[StrategyConfig] = StrategyConfig,

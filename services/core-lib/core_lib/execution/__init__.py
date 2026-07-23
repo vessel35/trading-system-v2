@@ -1,8 +1,9 @@
 """Define deterministic execution, position-book, and accounting standards."""
 
+from core_lib.ports import CostModel
+
 from .accounting import assert_identity, position_value, recompute
 from .matcher import (
-    CostModel,
     match,
     recompute_qty_and_stop,
     resolve_triggers,

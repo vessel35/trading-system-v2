@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from typing import ClassVar
 
 import pytest
+from core_lib.ports import StrategyRegistry
 from core_lib.strategy import (
     AdapterManager,
     FieldSpec,
@@ -79,7 +80,7 @@ class FakeAdaptee:
         return None
 
 
-class FakeCatalog:
+class FakeCatalog(StrategyRegistry):
     """In-memory stand-in for the injected external StrategyRegistry port."""
 
     def __init__(self, events: list[str]) -> None:

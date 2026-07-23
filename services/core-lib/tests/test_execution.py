@@ -1,12 +1,11 @@
 """Verify deterministic matching, lifecycle consumption, books, and accounting."""
 
-from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
-from core_lib.costs import SlippageParams
+from core_lib.costs import SlippageParams, effective_slippage_rate
 from core_lib.execution import (
     PositionBook,
     assert_identity,
@@ -18,6 +17,7 @@ from core_lib.execution import (
     resolve_triggers,
     to_decimal,
 )
+from core_lib.ports import CostModel
 from core_lib.types import (
     Candle,
     ExitReason,
@@ -34,7 +34,7 @@ from core_lib.types import (
 )
 
 
-class FakeCostModel:
+class FakeCostModel(CostModel):
     """Value-only M5 stand-in for the M6 CostModel port."""
 
     def __init__(
@@ -50,24 +50,30 @@ class FakeCostModel:
         self._gap_multiplier = gap_multiplier
         self._mmr = mmr
 
-    def fee_rate(self, order: Order) -> Decimal:
-        del order
+    def fee(self, symbol: str, notional: Decimal) -> Decimal:
+        del symbol, notional
         return self._fee_rate
 
-    def slippage_params(
+    def slippage(
         self,
-        order: Order | None,
-        context: Mapping[str, object],
-    ) -> SlippageParams:
-        del order, context
-        return SlippageParams(
-            fixed_rate=self._fixed_slippage,
-            gap_multiplier=self._gap_multiplier,
+        order: Order,
+        context: dict[str, object],
+    ) -> Decimal:
+        return effective_slippage_rate(
+            SlippageParams(
+                fixed_rate=self._fixed_slippage,
+                gap_multiplier=self._gap_multiplier,
+            ),
+            order=order,
+            context=context,
         )
 
-    def liquidation_mmr(self, position: Position) -> Decimal:
-        del position
-        return self._mmr
+    def funding_rate(self, at: datetime) -> Decimal:
+        del at
+        return Decimal("0")
+
+    def liq_params(self) -> dict[str, object]:
+        return {"maintenance_margin_rate": self._mmr}
 
 
 def make_candle(

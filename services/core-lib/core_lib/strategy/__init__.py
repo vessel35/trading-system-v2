@@ -10,7 +10,7 @@ from .config import (
     StrategyConfig,
 )
 from .factory import AdapterFactory
-from .manager import AdapterManager, StrategyCatalog
+from .manager import AdapterManager
 from .profile import StrategyProfile
 from .registry import (
     DEFAULT_STRATEGY_REGISTRY,
@@ -30,7 +30,6 @@ __all__ = [
     "ParameterSchema",
     "ResolvedConfig",
     "StrategyAdapter",
-    "StrategyCatalog",
     "StrategyConfig",
     "StrategyMetadata",
     "StrategyProfile",

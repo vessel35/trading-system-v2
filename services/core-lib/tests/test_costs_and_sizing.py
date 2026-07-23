@@ -1,6 +1,5 @@
 """Verify net-cost formulas and survival sizing boundaries."""
 
-from collections.abc import Mapping
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -9,12 +8,14 @@ from core_lib.costs import (
     SlippageParams,
     apply_slippage,
     calculate_fee,
+    effective_slippage_rate,
     is_funding_boundary,
     is_liquidation_triggered,
     liquidation_price,
     settle_funding,
 )
 from core_lib.execution import normalize_order
+from core_lib.ports import CostModel
 from core_lib.sizing import (
     cap_kelly,
     equity,
@@ -39,19 +40,29 @@ from core_lib.types import (
 )
 
 
-class FixedSlippageModel:
+class FixedSlippageModel(CostModel):
     """Return deterministic values while leaving the formula in core_lib.costs."""
 
     def __init__(self, params: SlippageParams) -> None:
         self.params = params
 
-    def slippage_params(
+    def fee(self, symbol: str, notional: Decimal) -> Decimal:
+        del symbol, notional
+        return Decimal("0")
+
+    def slippage(
         self,
-        order: Order | None,
-        context: Mapping[str, object],
-    ) -> SlippageParams:
-        del order, context
-        return self.params
+        order: Order,
+        context: dict[str, object],
+    ) -> Decimal:
+        return effective_slippage_rate(self.params, order=order, context=context)
+
+    def funding_rate(self, at: datetime) -> Decimal:
+        del at
+        return Decimal("0")
+
+    def liq_params(self) -> dict[str, object]:
+        return {"maintenance_margin_rate": Decimal("0.004")}
 
 
 def make_position(side: PositionSide = PositionSide.LONG) -> Position:
@@ -81,16 +92,6 @@ def test_fee_and_signed_slippage_costs_are_deterministic() -> None:
     assert calculate_fee(Decimal("1000"), Decimal("0.0005")) == Decimal(
         "0.50000000"
     )
-    model = FixedSlippageModel(
-        SlippageParams(fixed_rate=Decimal("0.001"))
-    )
-    assert apply_slippage(Decimal("1000"), OrderSide.BUY, model) == Decimal(
-        "1.00000000"
-    )
-    assert apply_slippage(Decimal("1000"), OrderSide.SELL, model) == Decimal(
-        "-1.00000000"
-    )
-
     order = normalize_order(
         OrderRequest(
             symbol="BTCUSDT",
@@ -106,6 +107,13 @@ def test_fee_and_signed_slippage_costs_are_deterministic() -> None:
             time_in_force="GTC",
         )
     )
+    model = FixedSlippageModel(SlippageParams(fixed_rate=Decimal("0.001")))
+    assert apply_slippage(
+        Decimal("1000"), OrderSide.BUY, model, order=order
+    ) == Decimal("1.00000000")
+    assert apply_slippage(
+        Decimal("1000"), OrderSide.SELL, model, order=order
+    ) == Decimal("-1.00000000")
     stress_model = FixedSlippageModel(
         SlippageParams(
             spread_rate=Decimal("0.002"),
