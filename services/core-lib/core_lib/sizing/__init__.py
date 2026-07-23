@@ -1,5 +1,6 @@
 """Define risk-constrained position sizing standards."""
 
+from . import exposure_limit
 from .kelly import cap as cap_kelly
 from .kelly import f_star
 from .risk_money import MAX_RISK_PER_TRADE, equity, one_r, size
@@ -11,6 +12,7 @@ __all__ = [
     "MAX_RISK_PER_TRADE",
     "cap_kelly",
     "equity",
+    "exposure_limit",
     "f_star",
     "non_compliant",
     "one_r",
