@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -9,13 +10,24 @@ from typing import cast
 
 import psycopg
 import pytest
+from backtest_service.adapters.broker import BacktestBroker
 from backtest_service.adapters.catalog_store import (
     BacktestCatalogStore,
     WriteConnection,
     normalized_config_hash,
 )
+from backtest_service.adapters.clock import BacktestClock
+from backtest_service.adapters.cost_model import BacktestCostModel
 from backtest_service.adapters.data_feed import BacktestDataFeed, ReadConnection
+from backtest_service.adapters.evidence_sink import BacktestEvidenceSink
 from backtest_service.adapters.strategy_registry import BacktestStrategyRegistry
+from backtest_service.config import RunConfig
+from backtest_service.engine import Engine
+from core_lib.ports import DataFeed, StrategyRegistry
+from core_lib.strategy import AdapterManager, InProcessStrategyRegistry
+from core_lib.strategy.adaptees import STRATEGY_ID as VESSEL_STRATEGY_ID
+from core_lib.strategy.adaptees import VesselReference
+from core_lib.types import Candle
 
 pytestmark = pytest.mark.integration
 
@@ -217,3 +229,165 @@ def test_catalog_issues_run_id_then_records_prereg_and_evaluated_metadata() -> N
     assert evidence_hash == "b" * 64
     assert locked is True
     assert integrity == "passed"
+
+
+class _GapFreeVesselFeed(DataFeed):
+    """Serve one immutable, explicitly contiguous fixture without future exposure."""
+
+    def __init__(self, candles: list[Candle]) -> None:
+        self._candles = list(candles)
+
+    def candles(self, symbol: str, tf: str, up_to: datetime) -> list[Candle]:
+        assert symbol == "BTCUSDT"
+        if tf == "1m":
+            return []
+        assert tf == "1h"
+        return [candle for candle in self._candles if candle.close_time <= up_to]
+
+    def funding(self, symbol: str, at: datetime) -> Decimal:
+        del symbol, at
+        raise LookupError("fixture deliberately uses the configured zero fallback")
+
+    def mark_price(self, symbol: str, at: datetime) -> Decimal:
+        del symbol, at
+        return Decimal("100")
+
+
+class _VesselCatalog(StrategyRegistry):
+    def get(self, strategy_id: str) -> dict[str, object]:
+        assert strategy_id == VESSEL_STRATEGY_ID
+        return {
+            "strategy_id": strategy_id,
+            "class_name": VesselReference.__name__,
+            "module_path": VesselReference.__module__,
+            "is_active": True,
+            "is_deprecated": False,
+        }
+
+    def list(self) -> list[dict[str, object]]:
+        return [self.get(VESSEL_STRATEGY_ID)]
+
+    def register(self, strategy_id: str, meta: dict[str, object]) -> None:
+        del strategy_id, meta
+        raise PermissionError("the E2E fixture catalog is read-only")
+
+
+def _gap_free_vessel_candles() -> tuple[datetime, list[Candle]]:
+    start = datetime(2026, 5, 1, 1, tzinfo=UTC)
+    first = start - timedelta(hours=21)
+    candles: list[Candle] = []
+    for index in range(27):
+        opened = first + timedelta(hours=index)
+        open_price = 100.0 + index
+        close = open_price + 0.5
+        candles.append(
+            Candle(
+                symbol="BTCUSDT",
+                exchange="binance",
+                timeframe="1h",
+                open_time=opened,
+                close_time=opened + timedelta(hours=1),
+                open=open_price,
+                high=close + 0.25,
+                low=open_price - 0.25,
+                close=close,
+                volume=100.0,
+                quote_volume=10_000.0,
+                trade_count=100,
+            )
+        )
+    assert all(
+        left.close_time == right.open_time
+        for left, right in zip(candles, candles[1:], strict=False)
+    )
+    return start, candles
+
+
+def _vessel_manager() -> AdapterManager:
+    plugins = InProcessStrategyRegistry()
+    plugins.register(VESSEL_STRATEGY_ID, VesselReference)
+    return AdapterManager(_VesselCatalog(), plugins)
+
+
+def _vessel_config(start: datetime) -> RunConfig:
+    return RunConfig(
+        run_name="m10-vessel-e2e",
+        strategy_id=VESSEL_STRATEGY_ID,
+        params={},
+        symbol="BTCUSDT",
+        exchange="binance",
+        timeframe="1h",
+        market_type="futures",
+        data_source="gap-free-fixture",
+        start=start,
+        end=start + timedelta(hours=6),
+        initial_capital=Decimal("10000"),
+        risk_per_trade=0.01,
+        seed=17,
+        cost_values={
+            "futures_taker_fee_rate": Decimal("0"),
+            "futures_entry_slippage_rate": Decimal("0"),
+            "exit_slippage_rate": Decimal("0"),
+            "funding_fallback_rate": Decimal("0"),
+        },
+        profile_ref="vessel-reference-v1",
+    )
+
+
+def test_vessel_e2e_writes_evidence_and_real_catalog_with_hash_parity(
+    tmp_path: Path,
+) -> None:
+    """Issue two real run ids while proving logical Evidence hash parity."""
+    start, candles = _gap_free_vessel_candles()
+    config = _vessel_config(start)
+    schedule = [candles[0].open_time, *(candle.close_time for candle in candles)]
+    prereg = {
+        "hypothesis": "Vessel reference traverses the complete pipeline",
+        "primary_metric": "pf",
+        "success_threshold": 1.3,
+        "failure_threshold": 1.0,
+        "edge_distinguishable": True,
+        "higher_is_better": True,
+    }
+
+    with _connect_writer("backtest_db") as connection:
+        catalog = BacktestCatalogStore(cast(WriteConnection, connection))
+        results = []
+        for label in ("first", "second"):
+            costs = BacktestCostModel(config.cost_values)
+            result = Engine(
+                _GapFreeVesselFeed(candles),
+                BacktestBroker(costs),
+                BacktestClock(schedule),
+                costs,
+                BacktestEvidenceSink(tmp_path / label),
+                catalog,
+                _vessel_manager(),
+                prereg=prereg,
+            ).run(config)
+            results.append(result)
+
+        rows = connection.execute(
+            """
+            SELECT run_id, status, resolved_indicators_json, config_hash, evidence_hash
+            FROM public.backtest_run
+            WHERE run_id = ANY(%s)
+            ORDER BY run_seq
+            """,
+            ([result.run_id for result in results],),
+        ).fetchall()
+
+    first_result, second_result = results
+    assert first_result.run_id != second_result.run_id
+    assert first_result.evidence_hash == second_result.evidence_hash
+    assert len(rows) == 2
+    assert all(row[1] == "EVALUATED" for row in rows)
+    assert all(len(cast(list[object], row[2])) == 3 for row in rows)
+    assert rows[0][3] == rows[1][3]
+    assert rows[0][4] == rows[1][4] == first_result.evidence_hash
+    for result in results:
+        with sqlite3.connect(result.evidence_path) as evidence:
+            assert evidence.execute(
+                "SELECT COUNT(*) FROM BACKTEST_RUN_LOCAL"
+            ).fetchone() == (1,)
+            assert evidence.execute("SELECT COUNT(*) FROM TRADE").fetchone() == (1,)

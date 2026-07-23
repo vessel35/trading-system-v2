@@ -467,6 +467,7 @@ erDiagram
         varchar strategy_name
         varchar strategy_version
         jsonb params_json "해석된 전략 파라미터"
+        jsonb resolved_indicators_json "확정 지표 이름·파라미터·구현 버전"
         varchar params_schema_version
         varchar symbol
         varchar exchange
@@ -591,6 +592,7 @@ erDiagram
 | `strategy_name` | 최대 120자 | 불가 | 없음 | 발급 시점의 표시 이름 사본. 레지스트리에서 이름이 바뀌어도 과거 run의 기록은 변하지 않아야 한다 |
 | `strategy_version` | 최대 40자 | 불가 | 없음 | 판단 로직의 버전. 이 값이 다르면 같은 파라미터라도 다른 run이다 |
 | `params_json` | JSON 문서 | 불가 | `{}` | **해석·검증을 마친** 전략 파라미터. 원본 입력이 아니라 기본값 병합 후의 확정값을 넣어야 재현된다 |
+| `resolved_indicators_json` | JSON 배열 | 불가 | `[]` | Engine이 `indicator_mode`를 해석해 확정한 지표의 이름·파라미터·구현 버전. 카탈로그 행만으로 `config_hash`를 재계산할 수 있도록 실행 전 확정값을 보존한다 |
 | `params_schema_version` | 최대 40자 | 불가 | 없음 | 파라미터 스키마 버전. 스키마가 바뀐 뒤 과거 run을 해석할 때 필요하다 |
 | `symbol` | 최대 30자 | 불가 | 없음 | 대상 심볼 |
 | `exchange` | 최대 20자 | 불가 | 없음 | 대상 거래소 |
@@ -634,10 +636,10 @@ erDiagram
 **`config_hash` 입력 컬럼(이 순서 그대로).** 필드 표의 배열 순서가 물리적 CREATE 순서와 어긋나도 두 구현이 같은
 해시를 내도록, 대상 컬럼과 순서를 못 박는다. `config_hash`는 **재현을 좌우하는 입력만** 담아, 같은 설정을 다시
 돌린 run을 같은 값으로 묶는 것이 목적이다. 순서대로 `strategy_id` · `strategy_version` · `params_json` ·
-`params_schema_version` · `symbol` · `exchange` · `timeframe` · `market_type` · `period_start` · `period_end` ·
+`resolved_indicators_json` · `params_schema_version` · `symbol` · `exchange` · `timeframe` · `market_type` · `period_start` · `period_end` ·
 `data_source` · `indicator_mode` · `trigger_feed` · `fill_timing` · `initial_capital` · `sizing_method` ·
 `risk_per_trade` · `position_size_pct` · `cost_values_json` · `seed` · `engine_version` · `core_lib_version`
-(스물둘). 다음은 **제외**한다 — `run_id`·`run_seq`·`run_name`·`status`·경로·해시 자신·프로파일/스윕/fold 등
+(스물셋). 다음은 **제외**한다 — `run_id`·`run_seq`·`run_name`·`status`·경로·해시 자신·프로파일/스윕/fold 등
 분류·비교 메타·모든 벽시계 시각과 결과 컬럼(재현 입력이 아니다); `strategy_name`(표시 이름 사본이라, 이름만 바뀐
 같은 설정을 다른 해시로 갈라서는 안 된다); `framework_compliant`(`sizing_method`에서 파생되는 값); `warmup_start`·
 `warmup_candles`(데이터 가용성에 따라 달라지는 관측값이라, 넣으면 보존 창이 늘어난 뒤의 같은 설정 재실행이 중복으로
@@ -696,7 +698,7 @@ erDiagram
 | `gross_pnl_total`·`total_fee`·`total_slippage`·`total_funding`·`total_liquidation_penalty` | 십진 고정소수점, 정수부 20자리·소수부 8자리. 절대값이 922억을 넘지 않는다(Evidence 파일의 저장 상한과 같은 값을 걸어 두 저장소의 정의역을 맞춘다). **부호 규약이 셋으로 갈린다** — 손익 두 컬럼(`gross_pnl_total`·위 행의 `net_pnl_total`)과 `total_funding`은 부호 허용(손실·펀딩 수취가 정상이다), 나머지 세 비용(`total_fee`·`total_slippage`·`total_liquidation_penalty`)만 0 이상 | 허용 | 없음 | 비용 차감 전 손익과 네 비용의 합계. `net_pnl_total = gross_pnl_total − total_fee − total_slippage − total_funding − total_liquidation_penalty`가 성립해야 하며, 이 등식이 카탈로그 층에서 비용 이중 차감을 잡아내는 장치다 |
 | `integrity_passed` | 참·거짓 | 불가 | `false` | 무결성 검사 통과 여부 |
 | `integrity_status` | 최대 24자. `passed`·`diagnostic_only` 중 하나 | 불가 | `diagnostic_only` | 실패면 판정을 진행하지 않는다. 근거 부족 run(크래시 잔여, `ORPHANED`)은 요약 행 자체가 생기지 않으므로 별도 값을 두지 않는다 |
-| `integrity_failed_json` | JSON 배열 | 허용 | 없음 | 실패한 검사 이름들(회계 항등식·시점 순서·비용 1회 차감·비용 차감 후 손익·결정성·기록 완성도 중. 1분 하위 캔들 트리거 run에서는 트레일링 파리티가 더해질 수 있다) |
+| `integrity_failed_json` | JSON 배열 | 허용 | 없음 | 실패한 표준 검사 이름들(`accounting_identity`·`timestamp_order`·`cost_once`·`net_of_cost`·`deterministic`·`evidence_complete` 중. 1분 하위 캔들 트리거 run에서는 `trailing_parity`가 더해질 수 있다) |
 | `gate_passed` | 참·거짓 | 허용 | 없음 | 통과선·형태 대조 관문 통과 여부 |
 | `gate_stage` | 최대 2자. `A`·`B` 중 하나 | 허용 | 없음 | 어느 관문에서 갈렸는지. `A`는 형태 무관 통과선, `B`는 프로파일 기대 범위 |
 | `gate_verdict` | 최대 24자. `pass`·`not_promotable`·`established_regression` 중 하나 | 허용 | 없음 | 미달·회귀는 **종료가 아니라 원인 분석으로 가는 경로**를 뜻한다 |
@@ -1113,6 +1115,7 @@ erDiagram
         text strategy_name
         text strategy_version
         text params_json
+        text resolved_indicators_json "확정 지표 이름·파라미터·구현 버전"
         text params_schema_version
         text symbol
         text exchange
@@ -1376,6 +1379,7 @@ erDiagram
 | `run_name` | 문자열 | 불가 | 없음 | 사람이 붙인 이름 사본 |
 | `strategy_id`·`strategy_name`·`strategy_version` | 문자열 | 불가 | 없음 | 실행 시점의 전략 신원 사본. 레지스트리에서 나중에 바뀌어도 이 값은 변하지 않는다 |
 | `params_json` | JSON 객체 문자열 | 불가 | `{}` | 해석·검증을 마친 확정 파라미터 |
+| `resolved_indicators_json` | JSON 배열 문자열 | 불가 | `[]` | Engine이 확정한 지표 이름·파라미터·구현 버전. 로컬 파일만으로도 카탈로그와 같은 23개 입력의 `config_hash`를 재계산한다 |
 | `params_schema_version` | 문자열 | 불가 | 없음 | 파라미터 스키마 버전 |
 | `symbol`·`exchange`·`timeframe`·`market_type` | 문자열 | 불가 | 없음 | 대상 시장과 판단 주기 |
 | `period_start`·`period_end` | 정수 (epoch ms, UTC) | 불가 | 없음 | 평가 구간 |
@@ -1963,7 +1967,7 @@ erDiagram
 |---|---|---|---|---|
 | `check_id` | 정수 기본키(엔티티 내 시퀀스) | 불가 | 자동 증가 | |
 | `run_id` | `BACKTEST_RUN_LOCAL` 외래키 | 불가 | 없음 | |
-| `check_name` | `accounting_identity`·`timestamp_order`·`cost_charged_once`·`net_of_cost`·`determinism`·`evidence_completeness` 중 하나. 트리거 세밀도가 1분 하위 캔들인 run에서는 `trailing_parity`가 더해진다 | 불가 | 없음 | 아래 검사 규칙 표가 각 이름이 무엇을 보는지 정한다 |
+| `check_name` | `accounting_identity`·`timestamp_order`·`cost_once`·`net_of_cost`·`deterministic`·`evidence_complete` 중 하나. 트리거 세밀도가 1분 하위 캔들인 run에서는 `trailing_parity`가 더해진다 | 불가 | 없음 | 아래 검사 규칙 표가 각 이름이 무엇을 보는지 정한다 |
 | `passed` | 0 또는 1 | 불가 | 없음 | 통과 여부 |
 | `detail_json` | JSON 객체 문자열 | 허용 | 없음 | 실패 상세(어긋난 값·건수). 파리티 검사에서는 거래별 편차의 분포(건수·최대·평균·허용 한계 초과 건수)를 여기 담는다 |
 | `sample_ref` | 문자열 | 허용 | 없음 | 위반 사례를 지목하는 참조(엔티티 이름과 식별자) |
@@ -1992,10 +1996,10 @@ erDiagram
 |---|---|
 | `accounting_identity` | 자산곡선의 모든 행에서 `cash_balance + position_value = total_equity`가 성립하고, 같은 시각의 포지션 행들로 다시 계산한 증거금·평가 손익의 합이 `position_value`와 일치하는가 |
 | `timestamp_order` | 신호마다 `feature_ts ≤ decision_ts`이고, 그 판단에서 나온 체결마다 `decision_ts < execution_ts`인가. 신호에서 온 판단이면 `feature_ts`가 그 판단이 소비한 지표 스냅샷들의 시각 중 최댓값과 일치하는가. 지표 스냅샷마다 `candle_close_time ≤ feature_ts`인가. **신호 없이 트리거로 일어난 판단**에는 지표 시각 항이 없으므로 시각 부여 규약대로만 본다 — 판단 `decision_ts` = 발동 하위 캔들의 여는 시각(= `trigger_subcandle_ts`), 체결 `execution_ts` = 같은 하위 캔들의 닫는 시각이라 `decision_ts < execution_ts` 엄격 부등이 항상 성립하고, TF 캔들 판정 모드에서는 판단 = 그 TF 캔들의 여는 시각·체결 = 닫는 시각·하위 캔들 시각은 비운다(규약 소유는 실행 설계의 트리거 walk) |
-| `cost_charged_once` | 거래의 수수료·슬리피지 합이 그 거래에 속한 체결들의 같은 컬럼 합과 일치하고, 각 체결의 슬리피지가 체결가와 기준가의 차이의 절대값에 수량을 곱한 값과 일치하며, 펀딩 부과 행 수가 보유 구간의 정산 경계 수와 같고 **부과액 합의 부호를 뒤집은 값**이 거래의 펀딩 비용과 일치하는가(`−Σ payment_amount = funding_cost`) |
+| `cost_once` | 거래의 수수료·슬리피지 합이 그 거래에 속한 체결들의 같은 컬럼 합과 일치하고, 각 체결의 슬리피지가 체결가와 기준가의 차이의 절대값에 수량을 곱한 값과 일치하며, 펀딩 부과 행 수가 보유 구간의 정산 경계 수와 같고 **부과액 합의 부호를 뒤집은 값**이 거래의 펀딩 비용과 일치하는가(`−Σ payment_amount = funding_cost`) |
 | `net_of_cost` | 모든 거래에서 `net_pnl = gross_pnl − total_fee − slippage − funding_cost − liquidation_penalty`가 성립하고, `gross_pnl`이 기준가 기준으로 계산됐는가(체결가 기준이면 슬리피지가 이중 차감된다) |
-| `determinism` | 아래 판정 방법 참조 |
-| `evidence_completeness` | 아래 완성도 규칙 목록 참조 |
+| `deterministic` | 아래 판정 방법 참조 |
+| `evidence_complete` | 아래 완성도 규칙 목록 참조 |
 | `trailing_parity` | **라이브의 매분 폴링 경로와 백테스트의 1분 walk 사이의 거래별 출구 가격 편차**가 허용 한계 안인가. 한계는 거래별 상대 편차가 1틱과 5bp 중 큰 값 이내이고, 부호를 살린 평균 편차가 1bp 이내다. 초과분이 있으면 실패하고 편차 분포(건수·최대·평균·초과 건수)를 상세에 남긴다. **이 한 검사만은 기록 대조가 아니다** — 비교 대상이 이 파일 밖(라이브 경로)에 있어 실행 시점에 산출해 기록하는 값이며, 그래서 소비 전략이 없는 첫 검증 스코프에서는 행 자체가 생기지 않는다 |
 
 **결정성 검사를 단일 run에서 무엇으로 판정하는가.** 이 검사는 원래 재실행이 필요한 성질이라, 한 run 안에서는 아래

@@ -28,6 +28,8 @@ from core_lib.strategy import (
     StrategyMetadata,
     StrategyProfile,
 )
+from core_lib.strategy.adaptees import STRATEGY_ID as VESSEL_STRATEGY_ID
+from core_lib.strategy.adaptees import VesselReference
 from core_lib.types import (
     Candle,
     Fill,
@@ -276,6 +278,104 @@ def _daily_manager() -> AdapterManager:
     plugins = InProcessStrategyRegistry()
     plugins.register("daily-fixture", _DailyStrategy)
     return AdapterManager(_DailyStrategyCatalog(), plugins)
+
+
+class _VesselCatalog(StrategyRegistry):
+    def get(self, strategy_id: str) -> dict[str, object]:
+        assert strategy_id == VESSEL_STRATEGY_ID
+        return {
+            "strategy_id": strategy_id,
+            "class_name": VesselReference.__name__,
+            "module_path": VesselReference.__module__,
+            "is_active": True,
+            "is_deprecated": False,
+        }
+
+    def list(self) -> list[dict[str, object]]:
+        return [self.get(VESSEL_STRATEGY_ID)]
+
+    def register(self, strategy_id: str, meta: dict[str, object]) -> None:
+        del strategy_id, meta
+        raise PermissionError("read-only fixture")
+
+
+def _vessel_manager() -> AdapterManager:
+    plugins = InProcessStrategyRegistry()
+    plugins.register(VESSEL_STRATEGY_ID, VesselReference)
+    return AdapterManager(_VesselCatalog(), plugins)
+
+
+def _vessel_candles() -> list[Candle]:
+    """Return 21 warm-up plus six gap-free hourly evaluation candles."""
+    first = _BASE - timedelta(hours=21)
+    candles = []
+    for index in range(27):
+        opened = first + timedelta(hours=index)
+        open_price = 100.0 + index
+        close = open_price + 0.5
+        candles.append(
+            Candle(
+                symbol="BTCUSDT",
+                exchange="binance",
+                timeframe="1h",
+                open_time=opened,
+                close_time=opened + timedelta(hours=1),
+                open=open_price,
+                high=close + 0.25,
+                low=open_price - 0.25,
+                close=close,
+                volume=100.0,
+                quote_volume=10_000.0,
+                trade_count=100,
+            )
+        )
+    assert all(
+        left.close_time == right.open_time
+        for left, right in zip(candles, candles[1:], strict=False)
+    )
+    return candles
+
+
+def _vessel_config(*, run_name: str = "vessel-dry-run") -> RunConfig:
+    return RunConfig(
+        run_name=run_name,
+        strategy_id=VESSEL_STRATEGY_ID,
+        params={},
+        symbol="BTCUSDT",
+        exchange="binance",
+        timeframe="1h",
+        market_type="futures",
+        data_source="gap-free-fixture",
+        start=_BASE,
+        end=_BASE + timedelta(hours=6),
+        initial_capital=Decimal("10000"),
+        risk_per_trade=0.01,
+        cost_values={
+            "futures_taker_fee_rate": Decimal("0"),
+            "futures_entry_slippage_rate": Decimal("0"),
+            "exit_slippage_rate": Decimal("0"),
+            "funding_fallback_rate": Decimal("0"),
+        },
+        profile_ref="vessel-reference-v1",
+        seed=17,
+    )
+
+
+def _vessel_engine(root: Path, catalog: _Catalog) -> Engine:
+    candles = _vessel_candles()
+    schedule = [candles[0].open_time, *(candle.close_time for candle in candles)]
+    config = _vessel_config()
+    costs = BacktestCostModel(config.cost_values)
+    return Engine(
+        _Feed(candles),
+        BacktestBroker(costs),
+        BacktestClock(schedule),
+        costs,
+        BacktestEvidenceSink(root),
+        catalog,
+        _vessel_manager(),
+        prereg=_prereg(),
+    )
 
 
 class _Catalog(CatalogStore):
@@ -595,6 +695,36 @@ def test_engine_hash_parity_uses_different_catalog_run_ids(tmp_path: Path) -> No
             """
         ).fetchone()[0]
         assert '"status":"matched"' in detail
+
+
+def test_vessel_reference_end_to_end_dry_run_is_complete_and_deterministic(
+    tmp_path: Path,
+) -> None:
+    """Exercise the first real Adaptee over an explicitly gap-free fixture."""
+    catalog = _Catalog()
+    first = _vessel_engine(tmp_path / "first", catalog).run(_vessel_config())
+    second = _vessel_engine(tmp_path / "second", catalog).run(_vessel_config())
+
+    assert first.run_id != second.run_id
+    assert first.evidence_hash == second.evidence_hash
+    assert first.integrity_status == second.integrity_status == "passed"
+    with sqlite3.connect(first.evidence_path) as connection:
+        local = connection.execute(
+            """
+            SELECT resolved_indicators_json, warmup_candles
+            FROM BACKTEST_RUN_LOCAL
+            """
+        ).fetchone()
+        assert local is not None
+        assert local[1] == 21
+        assert '"ATR"' in local[0]
+        assert connection.execute("SELECT COUNT(*) FROM TRADE").fetchone() == (1,)
+        assert connection.execute(
+            "SELECT COUNT(*) FROM INDICATOR_SNAPSHOT"
+        ).fetchone() == (18,)
+        assert connection.execute(
+            "SELECT COUNT(*) FROM PORTFOLIO_PNL"
+        ).fetchone() == (6,)
 
 
 def test_deterministic_check_fails_on_catalog_config_or_previous_hash_mismatch(

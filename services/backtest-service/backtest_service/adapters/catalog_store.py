@@ -48,6 +48,7 @@ _RUN_INSERT_FIELDS = (
     "strategy_name",
     "strategy_version",
     "params_json",
+    "resolved_indicators_json",
     "params_schema_version",
     "symbol",
     "exchange",
@@ -123,6 +124,7 @@ _SUMMARY_FIELDS = (
 _JSON_FIELDS = frozenset(
     {
         "params_json",
+        "resolved_indicators_json",
         "cost_values_json",
         "strategy_profile_json",
         "integrity_failed_json",

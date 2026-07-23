@@ -38,7 +38,8 @@ HASH = "a" * 64
 EXPECTED_COLUMNS = {
     "BACKTEST_RUN_LOCAL": """
         run_id run_seq run_name strategy_id strategy_name strategy_version params_json
-        params_schema_version symbol exchange timeframe market_type period_start period_end
+        resolved_indicators_json params_schema_version symbol exchange timeframe market_type
+        period_start period_end
         warmup_start warmup_candles indicator_mode trigger_feed fill_timing initial_capital
         sizing_method risk_per_trade position_size_pct framework_compliant cost_values_json
         seed engine_version core_lib_version config_hash profile_ref strategy_profile_json
@@ -177,6 +178,7 @@ def _insert_run(connection: sqlite3.Connection) -> None:
                 {
                     "failure_threshold": 0.2,
                     "hypothesis": "edge persists",
+                    "higher_is_better": True,
                     "primary_metric": "profit_factor",
                     "success_threshold": 1.5,
                 }
@@ -406,6 +408,15 @@ def test_preregistration_and_finalize_decision_output_restore_m6_contract(
         "higher_is_better",
     }
 
+    mismatched = encode_eval_decision(
+        observed_value=Decimal("1.6250"),
+        edge_distinguishable=True,
+        decision_route="promote",
+        higher_is_better=False,
+    )
+    with pytest.raises(ValueError, match="authoritative prereg_json"):
+        restore_decision_contract(str(after[0]), mismatched)
+
 
 def test_separate_feature_decision_execution_times_support_post_hoc_audit(
     evidence_db: sqlite3.Connection,
@@ -507,6 +518,56 @@ def test_writer_contract_columns_match_section_5_3_7(
     assert WRITER_CONTRACT_COLUMNS["FundingSettlement"] <= _table_columns(
         evidence_db, "FUNDING_SETTLEMENT"
     )
+
+
+def test_funding_settlement_allows_nonzero_rate_rounded_to_zero(
+    evidence_db: sqlite3.Connection,
+) -> None:
+    """Allow a valid sub-precision payment to persist as scaled integer zero."""
+    _insert_run(evidence_db)
+    evidence_db.execute(
+        """
+        INSERT INTO DECISION (
+            decision_id, run_id, decision_ts, action, intended_side,
+            intended_qty, planned_execution_ts
+        ) VALUES (1, ?, 1000, 'enter', 'LONG', 0.00000001, 1001)
+        """,
+        (RUN_ID,),
+    )
+    evidence_db.execute(
+        """
+        INSERT INTO EXECUTION (
+            execution_id, run_id, decision_id, order_id, execution_ts, symbol,
+            side, position_side, reference_price, price, quantity, notional
+        ) VALUES (1, ?, 1, 'order-1', 1001, 'BTCUSDT', 'BUY', 'LONG',
+                  10000000000, 10000000000, 1, 100)
+        """,
+        (RUN_ID,),
+    )
+    evidence_db.execute(
+        """
+        INSERT INTO TRADE (
+            trade_id, run_id, backtest_run_id, source_type, symbol, side,
+            market_type, entry_execution_id, entry_price, entry_quantity,
+            entry_time, leverage, liquidated, strategy_id, strategy_name
+        ) VALUES (1, ?, ?, 'backtest', 'BTCUSDT', 'BUY', 'FUTURES',
+                  1, 10000000000, 1, 1001, 1, 0, 'fake', 'Fake')
+        """,
+        (RUN_ID, RUN_ID),
+    )
+    evidence_db.execute(
+        """
+        INSERT INTO FUNDING_SETTLEMENT (
+            settlement_id, run_id, trade_id, settled_at, symbol, position_side,
+            funding_rate, settle_price, position_notional, payment_amount
+        ) VALUES (1, ?, 1, 2000, 'BTCUSDT', 'LONG', 0.000001,
+                  10000000000, 1, 0)
+        """,
+        (RUN_ID,),
+    )
+    assert evidence_db.execute(
+        "SELECT payment_amount FROM FUNDING_SETTLEMENT"
+    ).fetchone() == (0,)
 
 
 def test_finding_claim_requires_explicit_nonempty_evidence_references(

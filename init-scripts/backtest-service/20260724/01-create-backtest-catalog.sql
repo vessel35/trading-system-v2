@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS public.backtest_run (
     strategy_name VARCHAR(120) NOT NULL,
     strategy_version VARCHAR(40) NOT NULL,
     params_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    resolved_indicators_json JSONB NOT NULL DEFAULT '[]'::jsonb,
     params_schema_version VARCHAR(40) NOT NULL,
     symbol VARCHAR(30) NOT NULL,
     exchange VARCHAR(20) NOT NULL,
@@ -177,7 +178,7 @@ COMMENT ON SEQUENCE public.backtest_run_seq IS
 COMMENT ON COLUMN public.backtest_run.run_id IS
     'Engine assembles BT_<UTC YYYYMMDD>_<run_seq left-padded to at least 6 digits>_<run_name> after obtaining run_seq and before creating Evidence.';
 COMMENT ON COLUMN public.backtest_run.config_hash IS
-    'SHA-256 over, in order: strategy_id, strategy_version, params_json, params_schema_version, symbol, exchange, timeframe, market_type, period_start, period_end, data_source, indicator_mode, trigger_feed, fill_timing, initial_capital, sizing_method, risk_per_trade, position_size_pct, cost_values_json, seed, engine_version, core_lib_version.';
+    'SHA-256 over 23 inputs, in order: strategy_id, strategy_version, params_json, resolved_indicators_json, params_schema_version, symbol, exchange, timeframe, market_type, period_start, period_end, data_source, indicator_mode, trigger_feed, fill_timing, initial_capital, sizing_method, risk_per_trade, position_size_pct, cost_values_json, seed, engine_version, core_lib_version.';
 
 CREATE INDEX IF NOT EXISTS ix_backtest_run_strategy_period
     ON public.backtest_run (strategy_id, symbol, timeframe, period_start);

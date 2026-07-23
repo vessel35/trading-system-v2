@@ -454,6 +454,7 @@ class Engine:
                 "candle": candle,
                 "symbol": self._config().symbol,
                 "timeframe": self._config().timeframe,
+                "market_type": self._config().market_type,
                 "indicators": dict(self._indicator_values),
             },
             self._current_position(),
@@ -1449,6 +1450,9 @@ class Engine:
                     "strategy_name": self._run_meta["strategy_name"],
                     "strategy_version": self._run_meta["strategy_version"],
                     "params_json": self._run_meta["params_json"],
+                    "resolved_indicators_json": self._run_meta[
+                        "resolved_indicators_json"
+                    ],
                     "params_schema_version": self._run_meta["params_schema_version"],
                     "symbol": config.symbol,
                     "exchange": config.exchange,

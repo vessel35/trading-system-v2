@@ -2,7 +2,7 @@
 
 import math
 import statistics
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -125,6 +125,30 @@ def test_metrics_resample_daily_and_use_whole_n_sortino_denominator() -> None:
     assert metrics.ulcer == pytest.approx(math.sqrt(10.0))
     assert metrics.pf == 2.0
     assert metrics.trade_count == 30
+
+
+def test_daily_resampling_normalizes_equivalent_instants_to_utc() -> None:
+    """Group daily closes by UTC day, independent of the input timezone offset."""
+    kst = timezone(timedelta(hours=9))
+    equity = [
+        (datetime(2025, 1, 2, 7, tzinfo=kst), 100.0),
+        (datetime(2025, 1, 2, 8, tzinfo=kst), 101.0),
+        (datetime(2025, 1, 2, 9, tzinfo=kst), 102.0),
+        (datetime(2025, 1, 3, 9, tzinfo=kst), 104.0),
+    ]
+    utc_equity = [(timestamp.astimezone(UTC), value) for timestamp, value in equity]
+
+    assert annualize(equity) == annualize(utc_equity)
+
+
+def test_metrics_reject_naive_timestamps_before_daily_resampling() -> None:
+    with pytest.raises(ValueError, match="timezone-aware"):
+        annualize(
+            [
+                (datetime(2025, 1, 1), 100.0),
+                (datetime(2025, 1, 2), 101.0),
+            ]
+        )
 
 
 def test_sqn_uses_r_multiples_caps_n_at_100_and_rejects_short_samples() -> None:

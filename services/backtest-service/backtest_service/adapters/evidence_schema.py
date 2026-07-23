@@ -10,7 +10,7 @@ from decimal import Decimal
 from types import MappingProxyType
 from typing import Final
 
-EVIDENCE_SCHEMA_VERSION: Final = "1.0.0"
+EVIDENCE_SCHEMA_VERSION: Final = "1.1.0"
 MINIMUM_SQLITE_VERSION: Final = (3, 37, 0)
 DECIMAL_PLACES: Final = 8
 DECIMAL_SCALE: Final = Decimal(10) ** DECIMAL_PLACES
@@ -143,6 +143,7 @@ CREATE TABLE IF NOT EXISTS BACKTEST_RUN_LOCAL (
     strategy_name TEXT NOT NULL,
     strategy_version TEXT NOT NULL,
     params_json TEXT NOT NULL DEFAULT '{{}}',
+    resolved_indicators_json TEXT NOT NULL DEFAULT '[]',
     params_schema_version TEXT NOT NULL,
     symbol TEXT NOT NULL,
     exchange TEXT NOT NULL,
@@ -404,7 +405,7 @@ CREATE TABLE IF NOT EXISTS FUNDING_SETTLEMENT (
     position_notional INTEGER NOT NULL CHECK (position_notional > 0),
     payment_amount INTEGER NOT NULL,
     CHECK (
-        (funding_rate = 0.0 AND payment_amount = 0)
+        payment_amount = 0
         OR (
             position_side = 'LONG'
             AND (
@@ -842,18 +843,29 @@ def restore_decision_contract(
         "primary_metric",
         "success_threshold",
         "failure_threshold",
+        "higher_is_better",
     } - prereg.keys()
     if missing_prereg:
         raise ValueError(f"prereg_json missing Decision keys: {sorted(missing_prereg)}")
     if set(evaluation) != set(EVAL_DECISION_KEYS):
         raise ValueError("eval_decision_json must contain exactly the finalize keys")
+    prereg_higher_is_better = prereg["higher_is_better"]
+    evaluation_higher_is_better = evaluation["higher_is_better"]
+    if not isinstance(prereg_higher_is_better, bool):
+        raise TypeError("prereg_json higher_is_better must be bool")
+    if not isinstance(evaluation_higher_is_better, bool):
+        raise TypeError("eval_decision_json higher_is_better must be bool")
+    if evaluation_higher_is_better is not prereg_higher_is_better:
+        raise ValueError(
+            "eval_decision_json higher_is_better does not match authoritative prereg_json"
+        )
     return {
         "primary_metric": prereg["primary_metric"],
         "observed_value": evaluation["observed_value"],
         "success_threshold": prereg["success_threshold"],
         "failure_threshold": prereg["failure_threshold"],
         "edge_distinguishable": evaluation["edge_distinguishable"],
-        "higher_is_better": evaluation["higher_is_better"],
+        "higher_is_better": prereg_higher_is_better,
         "decision_route": evaluation["decision_route"],
     }
 

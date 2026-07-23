@@ -5,7 +5,7 @@ import random
 import statistics
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from core_lib.types import Trade
@@ -49,6 +49,9 @@ def _as_points(series: EquitySeries) -> list[tuple[datetime, float]]:
     for timestamp, raw_value in raw_points:
         if not isinstance(timestamp, datetime):
             raise TypeError("equity timestamps must be datetime")
+        if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+            raise ValueError("equity timestamps must be timezone-aware")
+        timestamp = timestamp.astimezone(UTC)
         value = float(raw_value)
         if not math.isfinite(value) or value <= 0.0:
             raise ValueError("equity values must be finite and positive")
