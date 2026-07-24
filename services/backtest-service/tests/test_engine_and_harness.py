@@ -38,6 +38,7 @@ from core_lib.types import (
     MarketType,
     OrderRequest,
     Position,
+    PositionSide,
     TradingSignal,
 )
 
@@ -305,6 +306,68 @@ class _StrategyCatalog(StrategyRegistry):
         raise PermissionError("read-only fixture")
 
 
+class _ReversalStrategy(_Strategy):
+    """Exercise the §4.2 opposite-protection reversal contract."""
+
+    def analyze(
+        self,
+        market_data: dict[str, object],
+        current_position: Position | None,
+    ) -> TradingSignal | None:
+        candle = market_data["candle"]
+        assert isinstance(candle, Candle)
+        if candle.open_time == _BASE and current_position is None:
+            return TradingSignal(
+                symbol=candle.symbol,
+                timestamp=candle.close_time,
+                confidence=0.8,
+                price=candle.close,
+                stop_loss=candle.close - 1.0,
+                take_profit=candle.close + 50.0,
+                market_type=MarketType.FUTURES,
+                leverage=1,
+                reason="reversal-fixture-long",
+                metadata={"fixture": True},
+            )
+        if (
+            candle.open_time == _BASE + timedelta(hours=2)
+            and current_position is not None
+            and current_position.side is PositionSide.LONG
+        ):
+            return TradingSignal(
+                symbol=candle.symbol,
+                timestamp=candle.close_time,
+                confidence=0.8,
+                price=candle.close,
+                stop_loss=candle.close + 1.0,
+                take_profit=candle.close - 50.0,
+                market_type=MarketType.FUTURES,
+                leverage=1,
+                reason="reversal-fixture-short",
+                metadata={"fixture": True},
+            )
+        return None
+
+
+class _ReversalStrategyCatalog(StrategyRegistry):
+    def get(self, strategy_id: str) -> dict[str, object]:
+        assert strategy_id == "reversal-fixture"
+        return {
+            "strategy_id": strategy_id,
+            "class_name": _ReversalStrategy.__name__,
+            "module_path": _ReversalStrategy.__module__,
+            "is_active": True,
+            "is_deprecated": False,
+        }
+
+    def list(self) -> list[dict[str, object]]:
+        return [self.get("reversal-fixture")]
+
+    def register(self, strategy_id: str, meta: dict[str, object]) -> None:
+        del strategy_id, meta
+        raise PermissionError("read-only fixture")
+
+
 class _DailyStrategy(_Strategy):
     @classmethod
     def get_metadata(cls) -> StrategyMetadata:
@@ -375,6 +438,12 @@ def _manager() -> AdapterManager:
     plugins = InProcessStrategyRegistry()
     plugins.register("engine-fixture", _Strategy)
     return AdapterManager(_StrategyCatalog(), plugins)
+
+
+def _reversal_manager() -> AdapterManager:
+    plugins = InProcessStrategyRegistry()
+    plugins.register("reversal-fixture", _ReversalStrategy)
+    return AdapterManager(_ReversalStrategyCatalog(), plugins)
 
 
 def _daily_manager() -> AdapterManager:
@@ -553,6 +622,7 @@ class _Broker(BacktestBroker):
         super().__init__(cost_model)
         self.call_order: list[str] = []
         self.fills: list[Fill] = []
+        self.available_margins: list[Decimal | None] = []
 
     def configure_execution(
         self,
@@ -565,6 +635,7 @@ class _Broker(BacktestBroker):
         leverage: int = 1,
     ) -> None:
         self.call_order.append("configure")
+        self.available_margins.append(available_margin)
         super().configure_execution(
             decision_candle,
             history,
@@ -711,6 +782,161 @@ def _daily_engine(
         ),
         config,
     )
+
+
+def _reversal_candles() -> list[Candle]:
+    prices = [
+        *((100.0, 100.5, 99.5, 100.0) for _ in range(9)),
+        (100.0, 100.5, 99.5, 100.0),
+        (101.0, 102.0, 100.5, 101.5),
+        (102.0, 103.0, 101.0, 102.5),
+        (103.0, 103.8, 102.5, 103.5),
+    ]
+    return [
+        Candle(
+            symbol="BTCUSDT",
+            exchange="binance",
+            timeframe="1h",
+            open_time=_BASE - timedelta(hours=9) + timedelta(hours=index),
+            close_time=_BASE - timedelta(hours=8) + timedelta(hours=index),
+            open=open_price,
+            high=high,
+            low=low,
+            close=close,
+            volume=100.0,
+            quote_volume=10_000.0,
+            trade_count=10,
+        )
+        for index, (open_price, high, low, close) in enumerate(prices)
+    ]
+
+
+def test_reversal_closes_then_enters_with_separate_once_only_costs_and_margin(
+    tmp_path: Path,
+) -> None:
+    candles = _reversal_candles()
+    config = RunConfig(
+        run_name="reversal",
+        strategy_id="reversal-fixture",
+        params={},
+        symbol="BTCUSDT",
+        exchange="binance",
+        timeframe="1h",
+        market_type="futures",
+        data_source="fixture",
+        start=_BASE,
+        end=_BASE + timedelta(hours=4),
+        initial_capital=Decimal("10000"),
+        risk_per_trade=0.01,
+        cost_values={
+            "futures_taker_fee_rate": Decimal("0.0004"),
+            "futures_entry_slippage_rate": Decimal("0"),
+            "exit_slippage_rate": Decimal("0"),
+            "funding_fallback_rate": Decimal("0"),
+        },
+        profile_ref="engine-profile",
+    )
+    costs = BacktestCostModel(config.cost_values)
+    broker = _Broker(costs)
+    result = Engine(
+        _Feed(candles),
+        broker,
+        BacktestClock.from_candles(candles),
+        costs,
+        BacktestEvidenceSink(tmp_path),
+        _Catalog(),
+        _reversal_manager(),
+        prereg=_prereg(),
+    ).run(config)
+
+    assert result.integrity_status == "passed"
+    assert len(broker.fills) == 4
+    assert broker.fills[2].qty_truncated is True
+    cash_before_exit = broker.available_margins[1]
+    cash_after_exit = broker.available_margins[2]
+    assert cash_before_exit is not None
+    assert cash_after_exit is not None
+    assert cash_after_exit > cash_before_exit
+    reverse_entry = broker.fills[2]
+    amount_quantum = Decimal("0.00000001")
+    reverse_notional = (reverse_entry.price * reverse_entry.quantity).quantize(
+        amount_quantum
+    )
+    reverse_requirement = (reverse_notional + reverse_entry.fee * 2).quantize(
+        amount_quantum
+    )
+    next_notional = (
+        reverse_entry.price * (reverse_entry.quantity + amount_quantum)
+    ).quantize(amount_quantum)
+    next_fee = (next_notional * Decimal("0.0004")).quantize(amount_quantum)
+    next_requirement = (next_notional + next_fee * 2).quantize(amount_quantum)
+    assert reverse_requirement <= cash_after_exit < next_requirement
+
+    with sqlite3.connect(result.evidence_path) as connection:
+        assert connection.execute(
+            """
+            SELECT action, intended_side
+            FROM DECISION
+            WHERE action IN ('enter', 'reverse')
+            ORDER BY decision_id
+            """
+        ).fetchall() == [("enter", "LONG"), ("reverse", "SHORT")]
+        reversal = connection.execute(
+            """
+            SELECT decision_id, decision_ts
+            FROM DECISION
+            WHERE action = 'reverse'
+            """
+        ).fetchone()
+        assert reversal is not None
+        reversal_id, decision_ts = reversal
+        reversal_fills = connection.execute(
+            """
+            SELECT execution_ts, reduce_only, position_side, exit_reason
+            FROM EXECUTION
+            WHERE decision_id = ?
+            ORDER BY execution_id
+            """,
+            (reversal_id,),
+        ).fetchall()
+        assert len(reversal_fills) == 2
+        execution_ts = reversal_fills[0][0]
+        assert reversal_fills == [
+            (execution_ts, 1, "LONG", "REVERSAL"),
+            (execution_ts, 0, "SHORT", None),
+        ]
+        assert decision_ts < execution_ts
+
+        trades = connection.execute(
+            """
+            SELECT t.exit_reason, t.total_fee, entry.fee + exit.fee,
+                   t.net_pnl,
+                   t.gross_pnl - t.total_fee - t.slippage
+                       - t.funding_cost - t.liquidation_penalty
+            FROM TRADE AS t
+            JOIN EXECUTION AS entry ON entry.execution_id = t.entry_execution_id
+            JOIN EXECUTION AS exit ON exit.execution_id = t.exit_execution_id
+            ORDER BY t.trade_id
+            """
+        ).fetchall()
+        assert [row[0] for row in trades] == ["REVERSAL", "END_OF_DATA"]
+        assert all(total_fee == execution_fees for _, total_fee, execution_fees, _, _ in trades)
+        assert all(net_pnl == recomputed_net for *_, net_pnl, recomputed_net in trades)
+        assert connection.execute(
+            "SELECT min(cash_balance) >= 0 FROM PORTFOLIO_PNL"
+        ).fetchone() == (1,)
+        assert dict(
+            connection.execute(
+                "SELECT check_name, passed FROM INTEGRITY_CHECK"
+            ).fetchall()
+        ) == {
+            "accounting_identity": 1,
+            "timestamp_order": 1,
+            "cost_once": 1,
+            "net_of_cost": 1,
+            "deterministic": 1,
+            "evidence_complete": 1,
+        }
 
 
 def test_engine_orders_configure_before_submit_and_persists_timing(

@@ -8,7 +8,7 @@ import sqlite3
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
-from typing import cast
+from typing import ClassVar, cast
 
 import psycopg
 import pytest
@@ -26,10 +26,18 @@ from backtest_service.adapters.strategy_registry import BacktestStrategyRegistry
 from backtest_service.config import RunConfig
 from backtest_service.engine import Engine, RunResult
 from core_lib.ports import DataFeed, StrategyRegistry
-from core_lib.strategy import AdapterManager, InProcessStrategyRegistry
+from core_lib.strategy import (
+    AdapterManager,
+    FieldSpec,
+    InProcessStrategyRegistry,
+    ParameterSchema,
+    ResolvedConfig,
+    StrategyMetadata,
+    StrategyProfile,
+)
 from core_lib.strategy.adaptees import STRATEGY_ID as VESSEL_STRATEGY_ID
 from core_lib.strategy.adaptees import VesselReference
-from core_lib.types import Candle
+from core_lib.types import Candle, MarketType, Position, TradingSignal
 
 pytestmark = pytest.mark.integration
 
@@ -299,6 +307,110 @@ def test_catalog_issues_run_id_then_records_prereg_and_evaluated_metadata() -> N
     assert evidence_hash == "b" * 64
     assert locked is True
     assert integrity == "passed"
+
+
+_FUNDING_PROBE_ID = "funding-exhaustion-probe"
+_FUNDING_PROBE_DECISION_OPEN = datetime(2025, 6, 22, 14, tzinfo=UTC)
+
+
+class _FundingExhaustionProbe:
+    """Hold one real-data long until measured funding consumes its margin."""
+
+    VERSION: ClassVar[str] = "1.0.0"
+
+    def __init__(self, config: ResolvedConfig) -> None:
+        if config.strategy_id != _FUNDING_PROBE_ID:
+            raise ValueError("funding probe received a mismatched strategy id")
+        self.config = config
+
+    @classmethod
+    def get_metadata(cls) -> StrategyMetadata:
+        return StrategyMetadata(
+            required_indicators=[{"name": "EMA", "params": {"period": 9}}],
+            min_history=9,
+            supported_timeframes=["1h"],
+            profile=StrategyProfile(
+                id="funding-exhaustion-multi-boundary-v1",
+                family="verification",
+                bar="1h",
+                expected_win_rate=(0.0, 1.0),
+                expected_payoff=(0.0, 100.0),
+                tail_shape="symmetric",
+                holding_horizon="multi_boundary",
+                primary_metric="calmar",
+                risk_adjusted_pref="sortino",
+                profit_structure_to_preserve="funding-accounting",
+                envelope_tolerance=1.0,
+                envelope_status="provisional",
+            ),
+        )
+
+    @classmethod
+    def get_parameter_schema(cls) -> ParameterSchema:
+        return ParameterSchema(
+            fields={
+                "leverage": FieldSpec(
+                    type="integer",
+                    default=39,
+                    range=(1, 100),
+                ),
+                "scenario": FieldSpec(
+                    type="string",
+                    default="natural-multi-boundary",
+                ),
+            }
+        )
+
+    def analyze(
+        self,
+        market_data: dict[str, object],
+        current_position: Position | None,
+    ) -> TradingSignal | None:
+        candle = market_data.get("candle")
+        if not isinstance(candle, Candle):
+            raise TypeError("market_data.candle must be Candle")
+        if candle.open_time != _FUNDING_PROBE_DECISION_OPEN or current_position is not None:
+            return None
+        leverage = self.config.params["leverage"]
+        if isinstance(leverage, bool) or not isinstance(leverage, int):
+            raise TypeError("resolved leverage must be an int")
+        return TradingSignal(
+            symbol=candle.symbol,
+            timestamp=candle.close_time,
+            confidence=1.0,
+            price=candle.close,
+            stop_loss=candle.close * 0.01,
+            take_profit=candle.close * 10.0,
+            market_type=MarketType.FUTURES,
+            leverage=leverage,
+            reason="measured-funding-exhaustion-probe",
+            metadata={"adaptee": _FUNDING_PROBE_ID},
+        )
+
+
+class _FundingProbeCatalog(StrategyRegistry):
+    def get(self, strategy_id: str) -> dict[str, object]:
+        assert strategy_id == _FUNDING_PROBE_ID
+        return {
+            "strategy_id": strategy_id,
+            "class_name": _FundingExhaustionProbe.__name__,
+            "module_path": _FundingExhaustionProbe.__module__,
+            "is_active": True,
+            "is_deprecated": False,
+        }
+
+    def list(self) -> list[dict[str, object]]:
+        return [self.get(_FUNDING_PROBE_ID)]
+
+    def register(self, strategy_id: str, meta: dict[str, object]) -> None:
+        del strategy_id, meta
+        raise PermissionError("read-only fixture")
+
+
+def _funding_probe_manager() -> AdapterManager:
+    plugins = InProcessStrategyRegistry()
+    plugins.register(_FUNDING_PROBE_ID, _FundingExhaustionProbe)
+    return AdapterManager(_FundingProbeCatalog(), plugins)
 
 
 class _GapFreeVesselFeed(DataFeed):
@@ -716,6 +828,172 @@ def test_vessel_engine_traverses_real_crypto_data_feed(
         assert evidence.execute(
             "SELECT COUNT(*) FROM PORTFOLIO_PNL"
         ).fetchone() == (72,)
+
+
+def test_measured_funding_exhaustion_liquidates_a_natural_real_data_position(
+    tmp_path: Path,
+) -> None:
+    start = _FUNDING_PROBE_DECISION_OPEN
+    end = datetime(2025, 11, 4, 10, tzinfo=UTC)
+    leverage = 39
+    config = RunConfig(
+        run_name="funding-exhaustion",
+        strategy_id=_FUNDING_PROBE_ID,
+        params={
+            "leverage": leverage,
+            "scenario": "natural-multi-boundary",
+        },
+        symbol="BTC/USDT:USDT",
+        exchange="binance",
+        timeframe="1h",
+        market_type="futures",
+        data_source="crypto_data.ohlcv_futures",
+        start=start,
+        end=end,
+        initial_capital=Decimal("10000"),
+        risk_per_trade=0.01,
+        seed=17,
+        cost_values={
+            "futures_taker_fee_rate": Decimal("0.0004"),
+            "futures_entry_slippage_rate": Decimal("0"),
+            "exit_slippage_rate": Decimal("0"),
+            "funding_fallback_rate": Decimal("0"),
+        },
+        profile_ref="funding-exhaustion-multi-boundary-v1",
+    )
+    prereg = {
+        "hypothesis": "measured funding exhausts an exchange-range leveraged long",
+        "primary_metric": "pf",
+        "success_threshold": 0.0,
+        "failure_threshold": -1.0,
+        "edge_distinguishable": True,
+        "higher_is_better": True,
+    }
+
+    with (
+        _connect("crypto_data") as crypto_connection,
+        _connect_writer("backtest_db") as catalog_connection,
+    ):
+        feed = BacktestDataFeed(
+            cast(ReadConnection, crypto_connection),
+            exchange=config.exchange,
+        )
+        history = feed.candles(config.symbol, config.timeframe, config.end)
+        costs = BacktestCostModel(config.cost_values)
+        result = Engine(
+            feed,
+            BacktestBroker(costs),
+            BacktestClock.from_candles(history),
+            costs,
+            BacktestEvidenceSink(tmp_path / "measured-funding-exhaustion"),
+            BacktestCatalogStore(cast(WriteConnection, catalog_connection)),
+            _funding_probe_manager(),
+            prereg=prereg,
+        ).run(config)
+
+    assert result.integrity_status == "passed"
+    with sqlite3.connect(result.evidence_path) as evidence:
+        entry = evidence.execute(
+            """
+            SELECT execution_ts, notional, fee
+            FROM EXECUTION
+            WHERE reduce_only = 0
+            """
+        ).fetchone()
+        settlement = evidence.execute(
+            """
+            SELECT settled_at, funding_rate, rate_source, settle_price,
+                   settle_price_source, payment_amount, theoretical_payment_amount
+            FROM FUNDING_SETTLEMENT
+            ORDER BY settled_at DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        liquidation = evidence.execute(
+            """
+            SELECT d.decision_ts, e.execution_ts, e.reference_price,
+                   e.fee, e.exit_reason, e.reduce_only
+            FROM EXECUTION AS e
+            JOIN DECISION AS d USING (decision_id)
+            WHERE e.exit_reason = 'LIQUIDATION'
+            """
+        ).fetchone()
+        trade = evidence.execute(
+            """
+            SELECT t.liquidated, t.exit_reason, t.total_fee,
+                   entry.fee + exit.fee, t.funding_cost,
+                   t.liquidation_penalty, t.net_pnl,
+                   t.gross_pnl - t.total_fee - t.slippage
+                       - t.funding_cost - t.liquidation_penalty
+            FROM TRADE AS t
+            JOIN EXECUTION AS entry ON entry.execution_id = t.entry_execution_id
+            JOIN EXECUTION AS exit ON exit.execution_id = t.exit_execution_id
+            """
+        ).fetchone()
+        assert entry is not None
+        assert settlement is not None
+        assert liquidation is not None
+        assert trade is not None
+
+        assert entry[0] == int(
+            datetime(2025, 6, 22, 15, tzinfo=UTC).timestamp() * 1_000
+        ) + 1
+        assert evidence.execute(
+            """
+            SELECT COUNT(*), SUM(rate_source = 'measured')
+            FROM FUNDING_SETTLEMENT
+            """
+        ).fetchone() == (405, 405)
+        settled_at, rate, rate_source, settle_price, price_source, payment, theoretical = (
+            settlement
+        )
+        assert rate == pytest.approx(0.00005808)
+        assert rate_source == "measured"
+        assert price_source == "boundary_open"
+        assert settled_at == int(datetime(2025, 11, 4, 8, tzinfo=UTC).timestamp() * 1_000)
+        assert payment < 0
+        assert theoretical < payment
+        assert leverage <= 100
+
+        assert liquidation == (
+            settled_at,
+            settled_at + 1,
+            settle_price,
+            liquidation[3],
+            "LIQUIDATION",
+            1,
+        )
+        assert liquidation[3] > 0
+        (
+            liquidated,
+            exit_reason,
+            total_fee,
+            execution_fees,
+            funding_cost,
+            liquidation_penalty,
+            net_pnl,
+            recomputed_net,
+        ) = trade
+        assert (liquidated, exit_reason) == (1, "LIQUIDATION")
+        assert total_fee == execution_fees
+        assert funding_cost == round(entry[1] / leverage)
+        assert liquidation_penalty == 0
+        assert net_pnl == recomputed_net
+        assert evidence.execute(
+            "SELECT min(cash_balance) >= 0 FROM PORTFOLIO_PNL"
+        ).fetchone() == (1,)
+        assert dict(
+            evidence.execute(
+                "SELECT check_name, passed FROM INTEGRITY_CHECK"
+            ).fetchall()
+        ) == {
+            "accounting_identity": 1,
+            "timestamp_order": 1,
+            "cost_once": 1,
+            "net_of_cost": 1,
+            "deterministic": 1,
+            "evidence_complete": 1,
+        }
 
 
 def test_real_funding_sign_regressions_complete_without_negative_cash(
