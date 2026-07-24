@@ -125,6 +125,42 @@ class IndicatorRegistry:
             raise KeyError(f"indicator is not registered: {requested}")
         return matches
 
+    def _descriptor_spec(self, descriptor: Mapping[str, object]) -> IndicatorSpec:
+        """Resolve one external name-and-parameters descriptor to its registry spec."""
+        if set(descriptor) != {"name", "params"}:
+            raise ValueError("indicator descriptor must contain exactly name and params")
+        name = descriptor["name"]
+        params = descriptor["params"]
+        if not isinstance(name, str) or not isinstance(params, Mapping):
+            raise TypeError("indicator descriptor name/params have invalid types")
+        normalized_params = dict(params)
+        if any(
+            not isinstance(key, str)
+            or not isinstance(value, bool | float | int | str)
+            for key, value in normalized_params.items()
+        ):
+            raise TypeError("indicator params must use scalar registry values")
+        matches = [
+            spec
+            for spec in self._specs.values()
+            if spec.name.casefold() == name.casefold()
+            and dict(spec.params) == normalized_params
+        ]
+        if len(matches) != 1:
+            raise KeyError(f"indicator is not registered: {name} {normalized_params}")
+        return matches[0]
+
+    def specs_for(
+        self,
+        enabled_set: Collection[str],
+    ) -> builtins.list[IndicatorSpec]:
+        """Return the deterministic, de-duplicated specs named by an enabled set."""
+        selected: dict[str, IndicatorSpec] = {}
+        for requested in enabled_set:
+            for spec in self._matching_specs(requested):
+                selected[spec.identifier] = spec
+        return [selected[identifier] for identifier in sorted(selected)]
+
     def compute_batch(
         self,
         candles: Sequence[Candle],
@@ -133,7 +169,12 @@ class IndicatorRegistry:
         decision_time: datetime | None = None,
         available_inputs: Collection[str] = (),
     ) -> dict[str, IndicatorSeries]:
-        """Compute enabled specs after finalized/history/input validation."""
+        """Compute a batch/research series after finalized/history/input validation.
+
+        The backtest engine deliberately uses incremental state updates so its
+        look-ahead boundary stays structural. This batch path remains the
+        independent parity oracle for those state implementations.
+        """
         effective_decision_time = decision_time
         if effective_decision_time is None and candles:
             effective_decision_time = candles[-1].close_time
@@ -141,21 +182,16 @@ class IndicatorRegistry:
             for candle in candles:
                 assert_finalized(candle, effective_decision_time)
 
-        selected: dict[str, IndicatorSpec] = {}
-        for requested in enabled_set:
-            for spec in self._matching_specs(requested):
-                selected[spec.identifier] = spec
-
         available = set(available_inputs)
         result: dict[str, IndicatorSeries] = {}
-        for identifier, spec in sorted(selected.items()):
+        for spec in self.specs_for(enabled_set):
             if not set(spec.required_inputs).issubset(available):
                 continue
             if len(candles) < spec.min_history:
                 raise ValueError(
-                    f"{identifier} requires {spec.min_history} candles, got {len(candles)}"
+                    f"{spec.identifier} requires {spec.min_history} candles, got {len(candles)}"
                 )
-            result[identifier] = spec.compute_vectorized(candles)
+            result[spec.identifier] = spec.compute_vectorized(candles)
         return result
 
     def resolve_enabled(
@@ -176,6 +212,25 @@ class IndicatorRegistry:
         for requested in resolved:
             self._matching_specs(requested)
         return resolved
+
+    def resolve_specs(
+        self,
+        mode: str,
+        declared: Collection[Mapping[str, object]],
+        explicit: Collection[Mapping[str, object]],
+    ) -> builtins.list[IndicatorSpec]:
+        """Resolve external descriptors and calculation mode through one registry path."""
+        declared_ids = {
+            self._descriptor_spec(descriptor).identifier for descriptor in declared
+        }
+        explicit_ids = {
+            self._descriptor_spec(descriptor).identifier for descriptor in explicit
+        }
+        enabled = self.resolve_enabled(mode, declared_ids, explicit_ids)
+        specs = self.specs_for(enabled)
+        if not specs:
+            raise ValueError("an indicator selection must resolve at least one spec")
+        return specs
 
 
 def build_default_registry() -> IndicatorRegistry:

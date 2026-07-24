@@ -81,6 +81,10 @@ from backtest_service.config import RunConfig
 _RUN_ID = re.compile(r"^BT_[0-9]{8}_(?P<seq>[0-9]+)_(?P<name>[a-z0-9-]+)$")
 MIN_DATA_COVERAGE_RATIO: Final = 0.95
 MAX_CONSECUTIVE_GAP_SECONDS: Final = 86_400
+# Deliberate design divergence: backtests use the same per-finalized-candle
+# incremental path as live/paper.  This keeps look-ahead exclusion structural;
+# the vectorized path remains the batch API and the independent parity oracle.
+BACKTEST_INDICATOR_EXECUTION_MODE: Final = "incremental"
 
 
 @runtime_checkable
@@ -322,9 +326,10 @@ class Engine:
             self._strategy.get_parameter_schema(),
             {"strategy_id": config.strategy_id, "params": dict(config.params)},
         )
-        self._indicator_specs = self._resolve_indicator_specs(
+        self._indicator_specs = DEFAULT_REGISTRY.resolve_specs(
+            config.indicator_mode,
             metadata.required_indicators,
-            config,
+            config.explicit_indicators,
         )
         longest_indicator_history = max(
             spec.min_history for spec in self._indicator_specs
@@ -1460,59 +1465,6 @@ class Engine:
             raise LookupError(f"no settlement price at or before {boundary.isoformat()}")
         return to_decimal(previous[-1].close, quantizer=quantize_price), "prev_close"
 
-    def _resolve_indicator_specs(
-        self,
-        declared: list[dict[str, object]],
-        config: RunConfig,
-    ) -> list[IndicatorSpec]:
-        declared_specs = [self._indicator_spec(item) for item in declared]
-        explicit_specs = [
-            self._indicator_spec(item) for item in config.explicit_indicators
-        ]
-        declared_ids = {spec.identifier for spec in declared_specs}
-        explicit_ids = {spec.identifier for spec in explicit_specs}
-        if config.indicator_mode == "auto":
-            selected = declared_specs
-        elif config.indicator_mode == "explicit":
-            if not declared_ids.issubset(explicit_ids):
-                missing = sorted(declared_ids - explicit_ids)
-                raise ValueError(
-                    "explicit_indicators must include every strategy-required indicator: "
-                    f"{missing}"
-                )
-            selected = explicit_specs
-        else:
-            selected = DEFAULT_REGISTRY.list()
-        unique = {spec.identifier: spec for spec in selected}
-        if not unique:
-            raise ValueError("a backtest run must resolve at least one indicator")
-        return [unique[key] for key in sorted(unique)]
-
-    @staticmethod
-    def _indicator_spec(descriptor: Mapping[str, object]) -> IndicatorSpec:
-        if set(descriptor) != {"name", "params"}:
-            raise ValueError("indicator descriptor must contain exactly name and params")
-        name = descriptor["name"]
-        params = descriptor["params"]
-        if not isinstance(name, str) or not isinstance(params, Mapping):
-            raise TypeError("indicator descriptor name/params have invalid types")
-        normalized_params = dict(params)
-        if any(
-            not isinstance(key, str)
-            or not isinstance(value, bool | float | int | str)
-            for key, value in normalized_params.items()
-        ):
-            raise TypeError("indicator params must use scalar registry values")
-        matches = [
-            spec
-            for spec in DEFAULT_REGISTRY.list()
-            if spec.name.casefold() == name.casefold()
-            and dict(spec.params) == normalized_params
-        ]
-        if len(matches) != 1:
-            raise KeyError(f"indicator is not registered: {name} {normalized_params}")
-        return matches[0]
-
     def _prepare_indicator_states(self) -> None:
         self._indicator_states = {
             spec.identifier: spec.make_state() for spec in self._indicator_specs
@@ -1585,7 +1537,7 @@ class Engine:
                         "impl_version": spec.version,
                         "pinned_impl": True,
                         "min_history": spec.min_history,
-                        "computation_mode": "incremental",
+                        "computation_mode": BACKTEST_INDICATOR_EXECUTION_MODE,
                         "enabled_reason": self._config().indicator_mode,
                     },
                 )

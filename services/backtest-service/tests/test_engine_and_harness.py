@@ -1042,6 +1042,43 @@ def test_vessel_reference_end_to_end_dry_run_is_complete_and_deterministic(
         assert connection.execute(
             "SELECT COUNT(*) FROM PORTFOLIO_PNL"
         ).fetchone() == (6,)
+        snapshots = connection.execute(
+            """
+            SELECT indicator_key, value
+            FROM INDICATOR_SNAPSHOT
+            ORDER BY snapshot_seq
+            """
+        ).fetchall()
+        assert [key for key, _ in snapshots] == [
+            key
+            for _ in range(6)
+            for key in ("atr:period=14", "ema:period=21", "ema:period=9")
+        ]
+        assert [value for _, value in snapshots] == pytest.approx(
+            [
+                1.2401296056108868,
+                111.5,
+                117.5,
+                1.2408346337815377,
+                112.5,
+                118.5,
+                1.241489302797142,
+                113.5,
+                119.5,
+                1.2420972097402034,
+                114.5,
+                120.5,
+                1.2426616947587603,
+                115.5,
+                121.5,
+                1.243185859418849,
+                116.5,
+                122.5,
+            ]
+        )
+        assert connection.execute(
+            "SELECT DISTINCT computation_mode FROM INDICATOR_DEFINITION"
+        ).fetchall() == [("incremental",)]
     with sqlite3.connect(second.evidence_path) as connection:
         detail = json.loads(
             connection.execute(
@@ -1190,30 +1227,54 @@ def test_indicator_mode_changes_selection_and_longest_history_owns_warmup(
 ) -> None:
     catalog = _Catalog()
     brokers: list[_Broker] = []
-    missing_required = RunConfig.model_validate(
-        {
-            **_config().model_dump(),
-            "indicator_mode": "explicit",
-            "explicit_indicators": [
-                {"name": "EMA", "params": {"period": 21}},
-            ],
-        }
-    )
-    with pytest.raises(ValueError, match="must include every strategy-required"):
-        _engine(tmp_path / "missing", catalog, brokers).run(missing_required)
-
+    oldest = _candles()[0]
+    extended_history = [
+        replace(
+            oldest,
+            open_time=oldest.open_time - timedelta(hours=offset),
+            close_time=oldest.close_time - timedelta(hours=offset),
+        )
+        for offset in range(12, 0, -1)
+    ] + _candles()
     explicit = RunConfig.model_validate(
         {
             **_config().model_dump(),
             "indicator_mode": "explicit",
             "explicit_indicators": [
-                {"name": "EMA", "params": {"period": 9}},
+                {"name": "EMA", "params": {"period": 21}},
+            ],
+        }
+    )
+    result = _engine(
+        tmp_path / "explicit",
+        catalog,
+        brokers,
+        candles=extended_history,
+    ).run(explicit)
+    with sqlite3.connect(result.evidence_path) as connection:
+        resolved_json, warmup_candles = connection.execute(
+            """
+            SELECT resolved_indicators_json, warmup_candles
+            FROM BACKTEST_RUN_LOCAL
+            """
+        ).fetchone()
+        assert json.loads(resolved_json) == [
+            {"name": "EMA", "params": {"period": 21}, "version": "1.0.0"},
+            {"name": "EMA", "params": {"period": 9}, "version": "1.0.0"},
+        ]
+        assert warmup_candles == 21
+
+    insufficient = RunConfig.model_validate(
+        {
+            **_config().model_dump(),
+            "indicator_mode": "explicit",
+            "explicit_indicators": [
                 {"name": "EMA", "params": {"period": 21}},
             ],
         }
     )
     with pytest.raises(ValueError, match="requires 21"):
-        _engine(tmp_path / "explicit", catalog, brokers).run(explicit)
+        _engine(tmp_path / "insufficient", catalog, brokers).run(insufficient)
 
     all_indicators = RunConfig.model_validate(
         {**_config().model_dump(), "indicator_mode": "all"}

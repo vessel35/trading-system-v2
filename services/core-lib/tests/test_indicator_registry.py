@@ -116,6 +116,39 @@ def test_resolve_enabled_supports_auto_explicit_and_all() -> None:
         DEFAULT_REGISTRY.resolve_enabled("unknown", set(), set())
 
 
+def test_resolve_specs_is_the_single_descriptor_and_mode_interpreter() -> None:
+    declared = [{"name": "ema", "params": {"period": 9}}]
+    explicit = [{"name": "ATR", "params": {"period": 14}}]
+
+    auto = DEFAULT_REGISTRY.resolve_specs("auto", declared, explicit)
+    selected = DEFAULT_REGISTRY.resolve_specs("explicit", declared, explicit)
+    all_specs = DEFAULT_REGISTRY.resolve_specs("all", declared, ())
+
+    assert [spec.identifier for spec in auto] == ["EMA(period=9)"]
+    assert [spec.identifier for spec in selected] == [
+        "ATR(period=14)",
+        "EMA(period=9)",
+    ]
+    assert len(all_specs) == 9
+
+
+def test_resolve_specs_rejects_invalid_or_empty_descriptor_selection() -> None:
+    with pytest.raises(ValueError, match="exactly name and params"):
+        DEFAULT_REGISTRY.resolve_specs(
+            "auto",
+            [{"name": "RSI", "params": {"period": 14}, "extra": True}],
+            (),
+        )
+    with pytest.raises(KeyError, match="not registered"):
+        DEFAULT_REGISTRY.resolve_specs(
+            "auto",
+            [{"name": "RSI", "params": {"period": 10}}],
+            (),
+        )
+    with pytest.raises(ValueError, match="at least one spec"):
+        DEFAULT_REGISTRY.resolve_specs("auto", (), ())
+
+
 def test_batch_computes_only_selected_registered_specs() -> None:
     candles = make_candles(30)
     result = DEFAULT_REGISTRY.compute_batch(
