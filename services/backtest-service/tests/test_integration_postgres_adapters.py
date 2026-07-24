@@ -58,12 +58,11 @@ class _RealDataRegressionCase:
 
 
 _MATRIX_START = datetime(2025, 7, 1, tzinfo=UTC)
-# This is a coverage matrix, not a Cartesian benchmark explosion.  The short
-# tier exercises ordinary execution and real-price reversal on every run; the
-# long tier owns sign-specific funding, high-leverage exhaustion, missing data,
-# and window invariance.  Negative funding at high leverage is intentionally
-# omitted to avoid a costly Cartesian expansion: its sign arithmetic is covered
-# at 1x and its isolated-margin cap is covered independently at 39x.
+# This is a 10-cell coverage matrix, not a Cartesian benchmark explosion.
+# Short: baseline-3d and slippage-bearing reversal-3d.
+# Long: window-3d, window-10d, funding-long-positive-30d, window-45d,
+# slippage-bearing funding-exhaustion-135d, funding-short-negative-20h-39x,
+# funding-short-negative-180d, and missing-data-330d.
 _REAL_DATA_REGRESSION_MATRIX = (
     _RealDataRegressionCase(
         "baseline-3d",
@@ -83,7 +82,7 @@ _REAL_DATA_REGRESSION_MATRIX = (
         ("LONG", "SHORT"),
         ("positive",),
         (3,),
-        "real-price close-before-open reversal",
+        "real-price reversal with entry and exit slippage",
     ),
     _RealDataRegressionCase(
         "window-3d",
@@ -133,7 +132,17 @@ _REAL_DATA_REGRESSION_MATRIX = (
         ("LONG",),
         ("positive", "negative"),
         (39,),
-        "measured funding exhausts isolated margin",
+        "measured funding exhaustion with entry and liquidation slippage",
+    ),
+    _RealDataRegressionCase(
+        "funding-short-negative-20h-39x",
+        "long",
+        datetime(2025, 6, 22, 14, tzinfo=UTC),
+        datetime(2025, 6, 23, 10, tzinfo=UTC),
+        ("SHORT",),
+        ("negative",),
+        (39,),
+        "negative measured funding at 39x short leverage",
     ),
     _RealDataRegressionCase(
         "funding-short-negative-180d",
@@ -188,6 +197,7 @@ def _assert_matrix_axes(
 
 
 def test_real_data_regression_matrix_covers_every_contract_axis() -> None:
+    assert len(_REAL_DATA_REGRESSION_MATRIX) == 10
     assert len({case.case_id for case in _REAL_DATA_REGRESSION_MATRIX}) == len(
         _REAL_DATA_REGRESSION_MATRIX
     )
@@ -206,14 +216,18 @@ def test_real_data_regression_matrix_covers_every_contract_axis() -> None:
     }
     assert {(case.case_id, case.contract) for case in _REAL_DATA_REGRESSION_MATRIX} == {
         ("baseline-3d", "bounded feed, measured funding, fees, and catalog"),
-        ("reversal-3d", "real-price close-before-open reversal"),
+        ("reversal-3d", "real-price reversal with entry and exit slippage"),
         ("window-3d", "entry reservation window invariance"),
         ("window-10d", "entry reservation window invariance"),
         ("funding-long-positive-30d", "positive-rate long debit"),
         ("window-45d", "entry reservation window invariance"),
         (
             "funding-exhaustion-135d",
-            "measured funding exhausts isolated margin",
+            "measured funding exhaustion with entry and liquidation slippage",
+        ),
+        (
+            "funding-short-negative-20h-39x",
+            "negative measured funding at 39x short leverage",
         ),
         ("funding-short-negative-180d", "negative-rate short debit"),
         (
@@ -538,6 +552,10 @@ class _FundingExhaustionProbe:
                     type="string",
                     default="natural-multi-boundary",
                 ),
+                "direction": FieldSpec(
+                    type="string",
+                    default="LONG",
+                ),
             }
         )
 
@@ -554,16 +572,21 @@ class _FundingExhaustionProbe:
         leverage = self.config.params["leverage"]
         if isinstance(leverage, bool) or not isinstance(leverage, int):
             raise TypeError("resolved leverage must be an int")
+        direction = self.config.params["direction"]
+        if not isinstance(direction, str) or direction not in {"LONG", "SHORT"}:
+            raise ValueError("resolved direction must be LONG or SHORT")
+        stop_loss = candle.close * (0.01 if direction == "LONG" else 10.0)
+        take_profit = candle.close * (10.0 if direction == "LONG" else 0.01)
         return TradingSignal(
             symbol=candle.symbol,
             timestamp=candle.close_time,
             confidence=1.0,
             price=candle.close,
-            stop_loss=candle.close * 0.01,
-            take_profit=candle.close * 10.0,
+            stop_loss=stop_loss,
+            take_profit=take_profit,
             market_type=MarketType.FUTURES,
             leverage=leverage,
-            reason="measured-funding-exhaustion-probe",
+            reason=f"measured-funding-probe-{direction.casefold()}",
             metadata={"adaptee": _FUNDING_PROBE_ID},
         )
 
@@ -1129,8 +1152,8 @@ def test_real_data_matrix_reversal_closes_before_opposite_entry(
         seed=17,
         cost_values={
             "futures_taker_fee_rate": Decimal("0.0004"),
-            "futures_entry_slippage_rate": Decimal("0"),
-            "exit_slippage_rate": Decimal("0"),
+            "futures_entry_slippage_rate": Decimal("0.0005"),
+            "exit_slippage_rate": Decimal("0.0001"),
             "funding_fallback_rate": Decimal("0"),
         },
         profile_ref="real-data-reversal-v1",
@@ -1172,7 +1195,8 @@ def test_real_data_matrix_reversal_closes_before_opposite_entry(
         assert decision is not None
         fills = evidence.execute(
             """
-            SELECT execution_ts, position_side, reduce_only, exit_reason
+            SELECT execution_ts, position_side, reduce_only, exit_reason,
+                   reference_price, price, slippage
             FROM EXECUTION
             WHERE decision_id = ?
             ORDER BY execution_id
@@ -1182,10 +1206,12 @@ def test_real_data_matrix_reversal_closes_before_opposite_entry(
         assert len(fills) == 2
         execution_ts = fills[0][0]
         assert execution_ts - decision[1] == 1
-        assert fills == [
+        assert [fill[:4] for fill in fills] == [
             (execution_ts, "LONG", 1, "REVERSAL"),
             (execution_ts, "SHORT", 0, None),
         ]
+        assert all(fill[6] > 0 for fill in fills)
+        assert all(fill[5] < fill[4] for fill in fills)
         assert evidence.execute(
             "SELECT COUNT(*) FROM TRADE WHERE leverage = ?",
             (leverage,),
@@ -1198,6 +1224,7 @@ def test_real_data_matrix_reversal_closes_before_opposite_entry(
             JOIN EXECUTION AS entry ON entry.execution_id = t.entry_execution_id
             JOIN EXECUTION AS exit ON exit.execution_id = t.exit_execution_id
             WHERE t.total_fee <> entry.fee + exit.fee
+               OR t.slippage <> entry.slippage + exit.slippage
                OR t.net_pnl <> (
                    t.gross_pnl - t.total_fee - t.slippage
                    - t.funding_cost - t.liquidation_penalty
@@ -1223,6 +1250,7 @@ def test_measured_funding_exhaustion_liquidates_a_natural_real_data_position(
         params={
             "leverage": leverage,
             "scenario": "natural-multi-boundary",
+            "direction": "LONG",
         },
         symbol="BTC/USDT:USDT",
         exchange="binance",
@@ -1236,8 +1264,8 @@ def test_measured_funding_exhaustion_liquidates_a_natural_real_data_position(
         seed=17,
         cost_values={
             "futures_taker_fee_rate": Decimal("0.0004"),
-            "futures_entry_slippage_rate": Decimal("0"),
-            "exit_slippage_rate": Decimal("0"),
+            "futures_entry_slippage_rate": Decimal("0.0005"),
+            "exit_slippage_rate": Decimal("0.0001"),
             "funding_fallback_rate": Decimal("0"),
         },
         profile_ref="funding-exhaustion-multi-boundary-v1",
@@ -1276,7 +1304,7 @@ def test_measured_funding_exhaustion_liquidates_a_natural_real_data_position(
     with sqlite3.connect(result.evidence_path) as evidence:
         entry = evidence.execute(
             """
-            SELECT execution_ts, notional, fee
+            SELECT execution_ts, notional, fee, reference_price, price, slippage
             FROM EXECUTION
             WHERE reduce_only = 0
             """
@@ -1293,7 +1321,7 @@ def test_measured_funding_exhaustion_liquidates_a_natural_real_data_position(
         liquidation = evidence.execute(
             """
             SELECT d.decision_ts, e.execution_ts, e.reference_price,
-                   e.fee, e.exit_reason, e.reduce_only
+                   e.price, e.slippage, e.fee, e.exit_reason, e.reduce_only
             FROM EXECUTION AS e
             JOIN DECISION AS d USING (decision_id)
             WHERE e.exit_reason = 'LIQUIDATION'
@@ -1303,7 +1331,8 @@ def test_measured_funding_exhaustion_liquidates_a_natural_real_data_position(
             """
             SELECT t.liquidated, t.exit_reason, t.total_fee,
                    entry.fee + exit.fee, t.funding_cost,
-                   t.liquidation_penalty, t.net_pnl,
+                   t.liquidation_penalty, t.slippage,
+                   entry.slippage + exit.slippage, t.net_pnl,
                    t.gross_pnl - t.total_fee - t.slippage
                        - t.funding_cost - t.liquidation_penalty
             FROM TRADE AS t
@@ -1317,6 +1346,8 @@ def test_measured_funding_exhaustion_liquidates_a_natural_real_data_position(
         assert trade is not None
 
         assert entry[0] == int(datetime(2025, 6, 22, 15, tzinfo=UTC).timestamp() * 1_000) + 1
+        assert entry[4] > entry[3]
+        assert entry[5] > 0
         assert evidence.execute(
             """
             SELECT COUNT(*), SUM(rate_source = 'measured')
@@ -1337,10 +1368,14 @@ def test_measured_funding_exhaustion_liquidates_a_natural_real_data_position(
             settled_at + 1,
             settle_price,
             liquidation[3],
+            liquidation[4],
+            liquidation[5],
             "LIQUIDATION",
             1,
         )
-        assert liquidation[3] > 0
+        assert liquidation[3] < liquidation[2]
+        assert liquidation[4] > 0
+        assert liquidation[5] > 0
         (
             liquidated,
             exit_reason,
@@ -1348,6 +1383,8 @@ def test_measured_funding_exhaustion_liquidates_a_natural_real_data_position(
             execution_fees,
             funding_cost,
             liquidation_penalty,
+            total_slippage,
+            execution_slippage,
             net_pnl,
             recomputed_net,
         ) = trade
@@ -1355,10 +1392,131 @@ def test_measured_funding_exhaustion_liquidates_a_natural_real_data_position(
         assert total_fee == execution_fees
         assert funding_cost == round(entry[1] / leverage)
         assert liquidation_penalty == 0
+        assert total_slippage == execution_slippage
         assert net_pnl == recomputed_net
         assert evidence.execute("SELECT min(cash_balance) >= 0 FROM PORTFOLIO_PNL").fetchone() == (
             1,
         )
+        assert dict(
+            evidence.execute("SELECT check_name, passed FROM INTEGRITY_CHECK").fetchall()
+        ) == {
+            "accounting_identity": 1,
+            "timestamp_order": 1,
+            "cost_once": 1,
+            "net_of_cost": 1,
+            "deterministic": 1,
+            "evidence_complete": 1,
+        }
+        _assert_matrix_axes(evidence, case)
+
+
+@pytest.mark.real_data_long
+def test_negative_measured_funding_debits_a_high_leverage_short(
+    tmp_path: Path,
+) -> None:
+    case = _matrix_case("funding-short-negative-20h-39x")
+    leverage = case.leverages[0]
+    config = RunConfig(
+        run_name="fund-short-neg-39x",
+        strategy_id=_FUNDING_PROBE_ID,
+        params={
+            "leverage": leverage,
+            "scenario": "negative-measured-rate",
+            "direction": "SHORT",
+        },
+        symbol="BTC/USDT:USDT",
+        exchange="binance",
+        timeframe="1h",
+        market_type="futures",
+        data_source="crypto_data.ohlcv_futures",
+        start=case.start,
+        end=case.end,
+        initial_capital=Decimal("10000"),
+        risk_per_trade=0.01,
+        seed=17,
+        cost_values={
+            "futures_taker_fee_rate": Decimal("0.0004"),
+            "futures_entry_slippage_rate": Decimal("0.0005"),
+            "exit_slippage_rate": Decimal("0.0001"),
+            "funding_fallback_rate": Decimal("0"),
+        },
+        profile_ref="funding-negative-high-leverage-v1",
+    )
+    prereg = {
+        "hypothesis": "measured negative funding debits a real-price 39x short",
+        "primary_metric": "pf",
+        "success_threshold": 0.0,
+        "failure_threshold": -1.0,
+        "edge_distinguishable": True,
+        "higher_is_better": True,
+    }
+
+    with (
+        _connect("crypto_data") as crypto_connection,
+        _connect_writer("backtest_db") as catalog_connection,
+    ):
+        feed = BacktestDataFeed(
+            cast(ReadConnection, crypto_connection),
+            exchange=config.exchange,
+        )
+        history = feed.candles(config.symbol, config.timeframe, config.end)
+        evaluation = [
+            candle
+            for candle in history
+            if candle.open_time >= case.start and candle.close_time <= case.end
+        ]
+        assert len(evaluation) == 20
+        costs = BacktestCostModel(config.cost_values)
+        result = Engine(
+            feed,
+            BacktestBroker(costs),
+            BacktestClock.from_candles(history),
+            costs,
+            BacktestEvidenceSink(tmp_path / case.case_id),
+            BacktestCatalogStore(cast(WriteConnection, catalog_connection)),
+            _funding_probe_manager(),
+            prereg=prereg,
+        ).run(config)
+
+    assert result.integrity_status == "passed"
+    with sqlite3.connect(result.evidence_path) as evidence:
+        negative_stats = evidence.execute(
+            """
+            SELECT COUNT(*), min(funding_rate),
+                   SUM(payment_amount < 0),
+                   SUM(rate_source = 'measured')
+            FROM FUNDING_SETTLEMENT
+            WHERE position_side = 'SHORT' AND funding_rate < 0
+            """
+        ).fetchone()
+        assert negative_stats is not None
+        negative_count, minimum_rate, debit_count, measured_count = negative_stats
+        assert negative_count == debit_count == measured_count == 1
+        assert minimum_rate == pytest.approx(-0.00001061)
+        assert evidence.execute(
+            """
+            SELECT COUNT(*), SUM(rate_source = 'measured')
+            FROM FUNDING_SETTLEMENT
+            """
+        ).fetchone() == (2, 2)
+        assert evidence.execute(
+            "SELECT COUNT(*) FROM TRADE WHERE leverage = ?",
+            (leverage,),
+        ).fetchone() == (1,)
+        assert evidence.execute(
+            """
+            SELECT COUNT(*)
+            FROM TRADE AS t
+            JOIN EXECUTION AS entry ON entry.execution_id = t.entry_execution_id
+            JOIN EXECUTION AS exit ON exit.execution_id = t.exit_execution_id
+            WHERE t.total_fee <> entry.fee + exit.fee
+               OR t.slippage <> entry.slippage + exit.slippage
+               OR t.net_pnl <> (
+                   t.gross_pnl - t.total_fee - t.slippage
+                   - t.funding_cost - t.liquidation_penalty
+               )
+            """
+        ).fetchone() == (0,)
         assert dict(
             evidence.execute("SELECT check_name, passed FROM INTEGRITY_CHECK").fetchall()
         ) == {
