@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -91,6 +91,38 @@ class _Feed(DataFeed):
     def mark_price(self, symbol: str, at: datetime) -> Decimal:
         del symbol, at
         return Decimal("100")
+
+
+class _OriginMismatchFeed(_Feed):
+    def candles(self, symbol: str, tf: str, up_to: datetime) -> list[Candle]:
+        if tf != "1m":
+            return super().candles(symbol, tf, up_to)
+        opened = _BASE - timedelta(hours=9)
+        return [
+            Candle(
+                symbol=symbol,
+                exchange="binance",
+                timeframe="1m",
+                open_time=opened,
+                close_time=opened + timedelta(minutes=1),
+                open=100.0,
+                high=100.0,
+                low=100.0,
+                close=100.0,
+                volume=1.0,
+                quote_volume=None,
+                trade_count=None,
+            )
+        ]
+
+    def source_open_times(
+        self,
+        symbol: str,
+        range_start: datetime,
+        range_end: datetime,
+    ) -> tuple[datetime, ...]:
+        del symbol, range_end
+        return (range_start, range_start + timedelta(minutes=1))
 
 
 class _DailyFeed(DataFeed):
@@ -712,6 +744,15 @@ def test_declared_source_gap_passes_but_an_evidence_record_gap_fails(
     assert sink.connection.execute(
         "SELECT COUNT(*) FROM PORTFOLIO_PNL"
     ).fetchone() == (3,)
+    assert sink.connection.execute(
+        "SELECT action, skip_reason FROM DECISION ORDER BY decision_id"
+    ).fetchall() == [("skip", "next_candle_gap")]
+    assert sink.connection.execute("SELECT COUNT(*) FROM EXECUTION").fetchone() == (0,)
+    summary = cast(Mapping[str, object], catalog.summaries[-1])
+    assert summary["data_coverage_ratio"] == 0.75
+    assert summary["max_consecutive_gap_seconds"] == 3600
+    assert summary["data_coverage_passed"] is False
+    assert result.decision.route == "retest"
 
     sink.connection.execute(
         "DELETE FROM PORTFOLIO_PNL WHERE ts = ?",
@@ -724,6 +765,83 @@ def test_declared_source_gap_passes_but_an_evidence_record_gap_fails(
     assert sink.integrity_details["evidence_complete"]["grid_failures"] == [
         "portfolio_grid_mismatch:expected=3:actual=2:declared_gaps=1"
     ]
+
+
+def test_execution_lag_over_one_timeframe_fails_timestamp_integrity(
+    tmp_path: Path,
+) -> None:
+    catalog = _Catalog()
+    sinks: list[BacktestEvidenceSink] = []
+    _engine(tmp_path, catalog, [], sinks=sinks).run(_config())
+    sink = sinks[0]
+    sink.connection.execute(
+        "UPDATE EXECUTION SET execution_ts = execution_ts + ? WHERE execution_id = 1",
+        (2 * 60 * 60 * 1_000,),
+    )
+    sink.connection.commit()
+
+    assert sink.audit()["timestamp_order"] is False
+    failures = cast(
+        Sequence[Sequence[object]],
+        sink.integrity_details["timestamp_order"]["failures"],
+    )
+    assert any(failure[0] == "execution_lag" for failure in failures)
+
+
+def test_open_position_is_closed_before_unobservable_gap_boundaries(
+    tmp_path: Path,
+) -> None:
+    history = [
+        candle
+        for candle in _candles()
+        if candle.open_time != _BASE + timedelta(hours=2)
+    ]
+    sinks: list[BacktestEvidenceSink] = []
+    result = _engine(
+        tmp_path,
+        _Catalog(),
+        [],
+        sinks=sinks,
+        candles=history,
+    ).run(_config())
+
+    assert result.integrity_status == "passed"
+    sink = sinks[0]
+    assert sink.connection.execute(
+        """
+        SELECT exit_reason, execution_ts - decision_ts
+        FROM EXECUTION
+        JOIN DECISION USING (decision_id)
+        WHERE exit_reason = 'DATA_GAP'
+        """
+    ).fetchone() == ("DATA_GAP", 1)
+    assert sink.connection.execute(
+        "SELECT COUNT(*) FROM FUNDING_SETTLEMENT"
+    ).fetchone() == (0,)
+
+
+def test_crypto_data_snapshot_rejects_origin_query_divergence(tmp_path: Path) -> None:
+    config = _config().model_copy(
+        update={"data_source": "crypto_data.ohlcv_futures"}
+    )
+    costs = BacktestCostModel(config.cost_values)
+    history = _candles()
+    engine = Engine(
+        _OriginMismatchFeed(history),
+        _Broker(costs),
+        BacktestClock.from_candles(history),
+        costs,
+        BacktestEvidenceSink(tmp_path),
+        _Catalog(),
+        _manager(),
+        prereg=_prereg(),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="1m OHLCV Evidence diverges from independent origin query",
+    ):
+        engine.run(config)
 
 
 def test_engine_hash_parity_uses_different_catalog_run_ids(tmp_path: Path) -> None:

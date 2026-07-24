@@ -220,6 +220,16 @@ CREATE TABLE IF NOT EXISTS public.backtest_summary (
     total_slippage NUMERIC(28, 8),
     total_funding NUMERIC(28, 8),
     total_liquidation_penalty NUMERIC(28, 8),
+    expected_candle_count INTEGER NOT NULL DEFAULT 0,
+    observed_candle_count INTEGER NOT NULL DEFAULT 0,
+    source_absent_gap_count INTEGER NOT NULL DEFAULT 0,
+    partial_bucket_count INTEGER NOT NULL DEFAULT 0,
+    data_coverage_ratio DOUBLE PRECISION NOT NULL DEFAULT 0,
+    max_consecutive_gap_bars INTEGER NOT NULL DEFAULT 0,
+    max_consecutive_gap_seconds BIGINT NOT NULL DEFAULT 0,
+    data_coverage_passed BOOLEAN NOT NULL DEFAULT false,
+    unobservable_funding_boundary_count INTEGER NOT NULL DEFAULT 0,
+    data_gap_exit_count INTEGER NOT NULL DEFAULT 0,
     integrity_passed BOOLEAN NOT NULL DEFAULT false,
     integrity_status VARCHAR(24) NOT NULL DEFAULT 'diagnostic_only',
     integrity_failed_json JSONB,
@@ -242,6 +252,19 @@ CREATE TABLE IF NOT EXISTS public.backtest_summary (
         AND r_excluded_count >= 0
         AND win_count + loss_count <= trade_count
         AND r_excluded_count <= trade_count
+    ),
+    CONSTRAINT ck_backtest_summary_coverage CHECK (
+        expected_candle_count >= 0
+        AND observed_candle_count BETWEEN 0 AND expected_candle_count
+        AND source_absent_gap_count >= 0
+        AND partial_bucket_count >= 0
+        AND source_absent_gap_count + partial_bucket_count
+            = expected_candle_count - observed_candle_count
+        AND data_coverage_ratio BETWEEN 0 AND 1
+        AND max_consecutive_gap_bars >= 0
+        AND max_consecutive_gap_seconds >= 0
+        AND unobservable_funding_boundary_count >= 0
+        AND data_gap_exit_count >= 0
     ),
     CONSTRAINT ck_backtest_summary_calmar_basis CHECK (
         calmar_basis IS NULL OR calmar_basis IN ('calmar', 'mar')

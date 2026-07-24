@@ -603,8 +603,8 @@ def test_vessel_engine_traverses_real_crypto_data_feed(
         ).fetchone()
         assert source is not None
         assert source[:2] == ("crypto_data.ohlcv_futures", "1h")
-        assert source[2] == len(history)
-        assert len(history) >= 93
+        assert source[2] == 93
+        assert len(history) >= source[2]
         funding_source = evidence.execute(
             """
             SELECT row_count, fallback_used, fallback_count, note
@@ -617,7 +617,8 @@ def test_vessel_engine_traverses_real_crypto_data_feed(
             0,
             0,
             "measured_exact=2; measured_jitter_normalized=7; measured_missing=0; "
-            "mark_exact=0; mark_jitter_normalized=0; mark_missing=0",
+            "mark_exact=0; mark_jitter_normalized=0; mark_missing=0; "
+            "unobservable_boundaries=0",
         )
         first_entry = evidence.execute(
             """
@@ -736,16 +737,33 @@ def test_real_missing_candles_complete_330_day_evidence(
         assert evidence.execute(
             "SELECT COUNT(*) FROM PORTFOLIO_PNL"
         ).fetchone() == (7_457,)
-        assert evidence.execute("SELECT COUNT(*) FROM TRADE").fetchone() == (565,)
+        assert evidence.execute("SELECT COUNT(*) FROM TRADE").fetchone() == (563,)
+        assert evidence.execute(
+            "SELECT COUNT(*) FROM EXECUTION WHERE exit_reason = 'DATA_GAP'"
+        ).fetchone() == (3,)
+        assert evidence.execute(
+            "SELECT COUNT(*) FROM DECISION WHERE skip_reason = 'next_candle_gap'"
+        ).fetchone() == (3,)
+        assert evidence.execute(
+            """
+            SELECT max(e.execution_ts - d.decision_ts)
+            FROM EXECUTION AS e
+            JOIN DECISION AS d USING (decision_id)
+            """
+        ).fetchone() == (3_600_000,)
 
-    assert hourly_count == 7_769
+    assert hourly_count == 7_478
     assert hourly_gaps == 463
-    assert hourly_gap_evidence["normal_gap_count"] == 463
+    assert hourly_gap_evidence["normal_gap_count"] == 453
+    assert hourly_gap_evidence["partial_bucket_count"] == 10
     assert hourly_gap_evidence["evaluation_grid_gap_count"] == 463
-    assert minute_count == 466_663
+    assert hourly_gap_evidence["origin_validation_status"] == "verified"
+    assert minute_count == 449_203
     assert minute_gaps == 27_257
     assert minute_gap_evidence["normal_gap_count"] == 27_257
+    assert minute_gap_evidence["partial_bucket_count"] == 0
     assert minute_gap_evidence["evaluation_grid_gap_count"] == 27_257
+    assert minute_gap_evidence["origin_validation_status"] == "verified"
     assert integrity == {
         "accounting_identity": 1,
         "timestamp_order": 1,
@@ -754,6 +772,25 @@ def test_real_missing_candles_complete_330_day_evidence(
         "deterministic": 1,
         "evidence_complete": 1,
     }
+    with _connect("backtest_db") as catalog:
+        coverage = catalog.execute(
+            """
+            SELECT expected_candle_count, observed_candle_count,
+                   source_absent_gap_count, partial_bucket_count,
+                   data_coverage_ratio, max_consecutive_gap_bars,
+                   max_consecutive_gap_seconds, data_coverage_passed,
+                   unobservable_funding_boundary_count, data_gap_exit_count,
+                   gate_failed_json
+            FROM public.backtest_summary
+            WHERE run_id = %s
+            """,
+            (result.run_id,),
+        ).fetchone()
+    assert coverage is not None
+    assert coverage[:4] == (7_920, 7_457, 453, 10)
+    assert coverage[4] == pytest.approx(7_457 / 7_920)
+    assert coverage[5:10] == (455, 1_638_000, False, 57, 3)
+    assert coverage[10] == ["data_coverage_ratio", "max_consecutive_gap"]
     assert result.integrity_status == "passed"
     assert result.decision.route == "retest"
 

@@ -72,7 +72,11 @@ from backtest_service.adapters.evidence_sink import (
     EvidenceRecord,
     epoch_milliseconds,
 )
-from backtest_service.adapters.ohlcv_gaps import build_ohlcv_gap_contract
+from backtest_service.adapters.ohlcv_gaps import (
+    OhlcvGapContract,
+    build_ohlcv_gap_contract,
+    timeframe_milliseconds,
+)
 from backtest_service.config import RunConfig
 
 _RUN_ID = re.compile(r"^BT_[0-9]{8}_(?P<seq>[0-9]+)_(?P<name>[a-z0-9-]+)$")
@@ -144,6 +148,17 @@ class _FundingDiagnostics(Protocol):
         """Return cumulative funding and mark-price measurement counts."""
 
 
+@runtime_checkable
+class _SourceOrigin(Protocol):
+    def source_open_times(
+        self,
+        symbol: str,
+        range_start: datetime,
+        range_end: datetime,
+    ) -> tuple[datetime, ...]:
+        """Return an independent query of 1m source timestamps."""
+
+
 @dataclass(frozen=True, slots=True)
 class RunResult:
     """The immutable result returned by one Engine run."""
@@ -207,7 +222,7 @@ class Engine:
         manager: AdapterManager,
         *,
         prereg: Mapping[str, object],
-        engine_version: str = "1.2.0",
+        engine_version: str = "1.3.1",
         core_lib_version: str = "0.2.0",
         thresholds: Mapping[str, float] | None = None,
     ) -> None:
@@ -262,6 +277,9 @@ class Engine:
         self._evidence_path: str | None = None
         self._run_meta: dict[str, object] = {}
         self._last_candle: Candle | None = None
+        self._gap_stats: dict[str, int | float | bool] = {}
+        self._strategy_gap_contract: OhlcvGapContract | None = None
+        self._data_gap_exit_count = 0
         self._sequence = {
             "signal": 0,
             "decision": 0,
@@ -396,7 +414,10 @@ class Engine:
             self._move_clock(candle.close_time)
             self.step_close(candle)
             if index + 1 < len(self._evaluation):
-                self._move_clock(self._evaluation[index + 1].open_time)
+                next_candle = self._evaluation[index + 1]
+                if next_candle.open_time != candle.close_time:
+                    self._close_at_data_gap(candle)
+                self._move_clock(next_candle.open_time)
         return self.finalize()
 
     def preload(self) -> list[Candle]:
@@ -416,6 +437,8 @@ class Engine:
         carried = list(self.pending)
         self.pending.clear()
         for pending in carried:
+            if pending.decision_candle.close_time != candle.open_time:
+                raise ValueError("pending order crossed a missing candle boundary")
             self.broker.configure_execution(
                 pending.decision_candle,
                 self._history,
@@ -551,8 +574,29 @@ class Engine:
         self._equity_curve.append((terminal_ts, final_equity))
         metrics = compute(self._trades, self._equity_curve)
         preliminary_integrity = check_integrity(self.evidence.audit())
-        if preliminary_integrity.passed:
+        coverage_failed = [
+            name
+            for name, failed in (
+                (
+                    "data_coverage_ratio",
+                    float(self._gap_stats["data_coverage_ratio"]) < 0.95,
+                ),
+                (
+                    "max_consecutive_gap",
+                    int(self._gap_stats["max_consecutive_gap_seconds"]) > 86_400,
+                ),
+            )
+            if failed
+        ]
+        if preliminary_integrity.passed and not coverage_failed:
             gate = judge(metrics, self.thresholds, self._strategy_instance().get_metadata().profile)
+        elif preliminary_integrity.passed:
+            gate = GateResult(
+                passed=False,
+                stage="A",
+                failed=coverage_failed,
+                verdict="not_promotable",
+            )
         else:
             gate = GateResult(
                 passed=False,
@@ -644,6 +688,11 @@ class Engine:
         )
         decision_id = self._next("decision")
         next_candle = self._next_candle(candle)
+        if next_candle is not None and next_candle.open_time != candle.close_time:
+            next_candle = None
+            missing_next_bar = True
+        else:
+            missing_next_bar = False
         planned = (
             None
             if next_candle is None
@@ -659,7 +708,13 @@ class Engine:
                     decision_id,
                     signal_id,
                     candle,
-                    "no_position" if position is None else "end_of_data",
+                    (
+                        "no_position"
+                        if position is None
+                        else "next_candle_gap"
+                        if missing_next_bar
+                        else "end_of_data"
+                    ),
                 )
                 return
             self._record_action_decision(
@@ -706,7 +761,13 @@ class Engine:
         )
         candidate_id = self._next("candidate")
         if not within_limits or next_candle is None:
-            reason = "exposure_limit" if not within_limits else "end_of_data"
+            reason = (
+                "exposure_limit"
+                if not within_limits
+                else "next_candle_gap"
+                if missing_next_bar
+                else "end_of_data"
+            )
             self._record_skip_decision(decision_id, signal_id, candle, reason)
             self.evidence.record(
                 EvidenceRecord(
@@ -759,6 +820,59 @@ class Engine:
                 candidate_id=candidate_id,
             )
         )
+
+    def _close_at_data_gap(self, candle: Candle) -> None:
+        """Close known exposure at the last confirmed price before an unknown span."""
+        if self.pending:
+            raise RuntimeError("orders must not remain pending across a data gap")
+        position = self._current_position()
+        if position is None:
+            return
+        execution_time = candle.close_time + timedelta(milliseconds=1)
+        decision_id = self._next("decision")
+        self.evidence.record(
+            EvidenceRecord(
+                "DECISION",
+                {
+                    "decision_id": decision_id,
+                    "decision_ts": candle.close_time,
+                    "action": "exit",
+                    "intended_side": position.side.name,
+                    "intended_qty": float(position.quantity),
+                    "framework_compliant": (
+                        self._config().sizing_method == "risk_based"
+                    ),
+                    "planned_execution_ts": execution_time,
+                },
+            )
+        )
+        terminal = Candle(
+            symbol=candle.symbol,
+            exchange=candle.exchange,
+            timeframe=candle.timeframe,
+            open_time=execution_time,
+            close_time=execution_time + (candle.close_time - candle.open_time),
+            open=candle.close,
+            high=candle.close,
+            low=candle.close,
+            close=candle.close,
+            volume=0.0,
+            quote_volume=None,
+            trade_count=None,
+        )
+        self.broker.configure_execution(
+            candle,
+            [candle, terminal],
+            fill_timing="next_bar",
+            available_margin=self._cash,
+            leverage=position.leverage,
+        )
+        fill = replace(
+            self.broker.submit(self._exit_request(position)),
+            exit_reason=ExitReason.DATA_GAP,
+        )
+        self._apply_fill(fill, decision_id=decision_id)
+        self._data_gap_exit_count += 1
 
     def _derive_intent(
         self,
@@ -1392,16 +1506,6 @@ class Engine:
         }
 
     def _prepare_funding_sources(self) -> None:
-        if self._market_type() is not MarketType.FUTURES:
-            return
-        diagnostics_feed = (
-            self.feed if isinstance(self.feed, _FundingDiagnostics) else None
-        )
-        before = (
-            diagnostics_feed.funding_diagnostics()
-            if diagnostics_feed is not None
-            else None
-        )
         if self._config().timeframe == "1m":
             self._minute_history = list(self._history)
         else:
@@ -1413,6 +1517,16 @@ class Engine:
                 ),
                 key=lambda candle: candle.open_time,
             )
+        if self._market_type() is not MarketType.FUTURES:
+            return
+        diagnostics_feed = (
+            self.feed if isinstance(self.feed, _FundingDiagnostics) else None
+        )
+        before = (
+            diagnostics_feed.funding_diagnostics()
+            if diagnostics_feed is not None
+            else None
+        )
         for boundary in funding_boundaries_between(
             self._config().start,
             self._config().end,
@@ -1607,15 +1721,86 @@ class Engine:
         )
 
     def _record_source_snapshots(self) -> None:
-        self._record_ohlcv_snapshot(
-            self._history,
-            timeframe=self._config().timeframe,
+        range_start = self._preload[0].open_time
+        minute_candles = [
+            candle
+            for candle in self._minute_history
+            if range_start <= candle.open_time and candle.close_time <= self._config().end
+        ]
+        if not minute_candles and self._config().timeframe != "1m":
+            if self._config().data_source == "crypto_data.ohlcv_futures":
+                raise ValueError("crypto_data run has no 1m origin snapshot")
+            duration_ms = timeframe_milliseconds(self._config().timeframe)
+            minute_ms = timeframe_milliseconds("1m")
+            start_ms = epoch_milliseconds(range_start)
+            end_ms = epoch_milliseconds(self._config().end)
+            actual_closes = {
+                epoch_milliseconds(candle.close_time)
+                for candle in self._history
+                if range_start <= candle.open_time
+                and candle.close_time <= self._config().end
+            }
+            fixture_minute_gaps = tuple(
+                minute_close
+                for close_time in range(start_ms + duration_ms, end_ms + 1, duration_ms)
+                if close_time not in actual_closes
+                for minute_close in range(
+                    close_time - duration_ms + minute_ms,
+                    close_time + 1,
+                    minute_ms,
+                )
+            )
+            strategy_candles = [
+                candle
+                for candle in self._history
+                if range_start <= candle.open_time
+                and candle.close_time <= self._config().end
+            ]
+            self._strategy_gap_contract = self._record_ohlcv_snapshot(
+                strategy_candles,
+                timeframe=self._config().timeframe,
+                range_start=range_start,
+                minute_gap_close_times=fixture_minute_gaps,
+                origin_status="fixture_unverified",
+                origin_count=0,
+                origin_hash=None,
+            )
+            self._set_gap_stats()
+            self._record_funding_snapshot()
+            return
+        origin_status, origin_count, origin_hash = self._validate_minute_origin(
+            minute_candles, range_start
         )
-        if (
-            self._minute_history
-            and self._config().timeframe != "1m"
-        ):
-            self._record_ohlcv_snapshot(self._minute_history, timeframe="1m")
+        minute_contract = self._record_ohlcv_snapshot(
+            minute_candles,
+            timeframe="1m",
+            range_start=range_start,
+            origin_status=origin_status,
+            origin_count=origin_count,
+            origin_hash=origin_hash,
+        )
+        if self._config().timeframe == "1m":
+            self._strategy_gap_contract = minute_contract
+        else:
+            strategy_candles = [
+                candle
+                for candle in self._history
+                if range_start <= candle.open_time and candle.close_time <= self._config().end
+            ]
+            self._strategy_gap_contract = self._record_ohlcv_snapshot(
+                strategy_candles,
+                timeframe=self._config().timeframe,
+                range_start=range_start,
+                minute_gap_close_times=minute_contract.normal_gap_close_times,
+                origin_status=origin_status,
+                origin_count=origin_count,
+                origin_hash=origin_hash,
+            )
+        self._set_gap_stats()
+        self._record_funding_snapshot()
+
+    def _record_funding_snapshot(self) -> None:
+        """Record measured/fallback funding facts after OHLCV provenance."""
         if self._market_type() is MarketType.FUTURES:
             content = [
                 {
@@ -1640,7 +1825,9 @@ class Engine:
                 f"mark_exact={self._funding_diagnostics['mark_exact_count']}; "
                 "mark_jitter_normalized="
                 f"{self._funding_diagnostics['mark_normalized_count']}; "
-                f"mark_missing={self._funding_diagnostics['mark_missing_count']}"
+                f"mark_missing={self._funding_diagnostics['mark_missing_count']}; "
+                "unobservable_boundaries="
+                f"{self._gap_stats['unobservable_funding_boundary_count']}"
             )
             self._sequence["source_snapshot"] += 1
             self.evidence.record(
@@ -1671,9 +1858,14 @@ class Engine:
         candles: list[Candle],
         *,
         timeframe: str,
-    ) -> None:
+        range_start: datetime,
+        minute_gap_close_times: tuple[int, ...] | None = None,
+        origin_status: str,
+        origin_count: int,
+        origin_hash: str | None,
+    ) -> OhlcvGapContract:
         if not candles:
-            return
+            raise ValueError("OHLCV snapshot cannot be empty")
         content = [
             {
                 "open_time": epoch_milliseconds(candle.open_time),
@@ -1687,7 +1879,6 @@ class Engine:
             for candle in candles
         ]
         content_hash = hashlib.sha256(canonical_json(content).encode()).hexdigest()
-        range_start = candles[0].open_time
         range_end = self._config().end
         gap_contract = build_ohlcv_gap_contract(
             candles,
@@ -1696,6 +1887,10 @@ class Engine:
             range_end=range_end,
             evaluation_start=self._config().start,
             evaluation_end=self._config().end,
+            minute_gap_close_times=minute_gap_close_times,
+            origin_validation_status=origin_status,
+            origin_minute_row_count=origin_count,
+            origin_timestamp_hash=origin_hash,
         )
         self._sequence["source_snapshot"] += 1
         self.evidence.record(
@@ -1712,12 +1907,91 @@ class Engine:
                     "range_start": range_start,
                     "range_end": range_end,
                     "row_count": len(candles),
-                    "gap_count": gap_contract.normal_gap_count,
+                    "gap_count": gap_contract.snapshot_gap_count,
                     "content_hash": content_hash,
                     "note": gap_contract.encode(),
                 },
             )
         )
+        return gap_contract
+
+    def _validate_minute_origin(
+        self,
+        minute_candles: list[Candle],
+        range_start: datetime,
+    ) -> tuple[str, int, str | None]:
+        """Validate the declared 1m absence against a separate origin query."""
+        origin_feed = self.feed if isinstance(self.feed, _SourceOrigin) else None
+        requires_origin = self._config().data_source == "crypto_data.ohlcv_futures"
+        if origin_feed is None:
+            if requires_origin:
+                raise TypeError("crypto_data OHLCV requires independent origin validation")
+            return "fixture_unverified", len(minute_candles), None
+        observed = origin_feed.source_open_times(
+            self._config().symbol,
+            range_start,
+            self._config().end,
+        )
+        expected = tuple(candle.open_time for candle in minute_candles)
+        if observed != expected:
+            raise ValueError("1m OHLCV Evidence diverges from independent origin query")
+        timestamp_hash = hashlib.sha256(
+            canonical_json([epoch_milliseconds(value) for value in observed]).encode()
+        ).hexdigest()
+        return "verified", len(observed), timestamp_hash
+
+    def _set_gap_stats(self) -> None:
+        contract = self._strategy_gap_contract
+        if contract is None:
+            raise RuntimeError("strategy gap contract was not recorded")
+        expected = int(
+            (self._config().end - self._config().start).total_seconds()
+            * 1_000
+            / contract.timeframe_ms
+        )
+        missing = contract.evaluation_grid_gap_count
+        longest = 0
+        current = 0
+        previous: int | None = None
+        for close_time in contract.evaluation_grid_gap_close_times:
+            if previous is not None and close_time == previous + contract.timeframe_ms:
+                current += 1
+            else:
+                current = 1
+            longest = max(longest, current)
+            previous = close_time
+        coverage = (expected - missing) / expected
+        max_gap_seconds = longest * contract.timeframe_ms // 1_000
+        passed = coverage >= 0.95 and max_gap_seconds <= 86_400
+        evaluation_gaps = set(contract.evaluation_grid_gap_close_times)
+        self._gap_stats = {
+            "expected_candle_count": expected,
+            "observed_candle_count": expected - missing,
+            "source_absent_gap_count": sum(
+                self._config().start.timestamp() * 1_000 < value
+                <= self._config().end.timestamp() * 1_000
+                for value in contract.normal_gap_close_times
+            ),
+            "partial_bucket_count": sum(
+                self._config().start.timestamp() * 1_000 < value
+                <= self._config().end.timestamp() * 1_000
+                for value in contract.partial_bucket_close_times
+            ),
+            "data_coverage_ratio": coverage,
+            "max_consecutive_gap_bars": longest,
+            "max_consecutive_gap_seconds": max_gap_seconds,
+            "data_coverage_passed": passed,
+            "unobservable_funding_boundary_count": sum(
+                epoch_milliseconds(boundary)
+                in evaluation_gaps
+                and epoch_milliseconds(boundary) + contract.timeframe_ms
+                in evaluation_gaps
+                for boundary in funding_boundaries_between(
+                    self._config().start,
+                    self._config().end,
+                )
+            ),
+        }
 
     def _catalog_prereg(self) -> dict[str, object]:
         config = self._config()
@@ -1877,6 +2151,8 @@ class Engine:
             "total_slippage": slippage,
             "total_funding": funding,
             "total_liquidation_penalty": penalties,
+            **self._gap_stats,
+            "data_gap_exit_count": self._data_gap_exit_count,
             "integrity_passed": integrity_status == "passed",
             "integrity_status": integrity_status,
             "integrity_failed_json": failed_checks,

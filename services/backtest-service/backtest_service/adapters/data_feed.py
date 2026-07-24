@@ -7,7 +7,7 @@ import re
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import Protocol
+from typing import Protocol, cast
 
 from core_lib.ports import DataFeed
 from core_lib.types import Candle
@@ -31,6 +31,16 @@ FROM public.ohlcv_futures
 WHERE symbol = %s
   AND exchange = %s
   AND timeframe = '1m'
+  AND time < %s
+ORDER BY time
+"""
+_SOURCE_OPEN_TIMES_SQL = """
+SELECT time
+FROM public.ohlcv_futures
+WHERE symbol = %s
+  AND exchange = %s
+  AND timeframe = '1m'
+  AND time >= %s
   AND time < %s
 ORDER BY time
 """
@@ -220,6 +230,30 @@ class BacktestDataFeed(DataFeed):
             )
         return result
 
+    def source_open_times(
+        self,
+        symbol: str,
+        range_start: datetime,
+        range_end: datetime,
+    ) -> tuple[datetime, ...]:
+        """Query the 1m origin independently for Evidence gap validation."""
+        start = _utc(range_start, name="range_start")
+        end = _utc(range_end, name="range_end")
+        if start >= end:
+            raise ValueError("source validation range must be positive")
+        rows = self._connection.execute(
+            _SOURCE_OPEN_TIMES_SQL,
+            (symbol, self._exchange, start, end),
+        ).fetchall()
+        result: list[datetime] = []
+        for row in rows:
+            if len(row) != 1 or not isinstance(row[0], datetime):
+                raise TypeError("ohlcv_futures source timestamp query returned invalid rows")
+            result.append(_utc(row[0], name="ohlcv_futures.time"))
+        if any(left >= right for left, right in zip(result, result[1:], strict=False)):
+            raise ValueError("1m origin timestamps must be strictly increasing")
+        return tuple(result)
+
     def _build_candle(
         self,
         symbol: str,
@@ -228,11 +262,11 @@ class BacktestDataFeed(DataFeed):
         duration: timedelta,
         rows: list[Sequence[object]],
     ) -> Candle:
-        opens = [_decimal(row[1], name="open") for row in rows]
-        highs = [_decimal(row[2], name="high") for row in rows]
-        lows = [_decimal(row[3], name="low") for row in rows]
-        closes = [_decimal(row[4], name="close") for row in rows]
-        volumes = [_decimal(row[5], name="volume") for row in rows]
+        opens = [cast(Decimal, row[1]) for row in rows]
+        highs = [cast(Decimal, row[2]) for row in rows]
+        lows = [cast(Decimal, row[3]) for row in rows]
+        closes = [cast(Decimal, row[4]) for row in rows]
+        volumes = [cast(Decimal, row[5]) for row in rows]
         quote_volume = (
             None
             if any(row[6] is None for row in rows)

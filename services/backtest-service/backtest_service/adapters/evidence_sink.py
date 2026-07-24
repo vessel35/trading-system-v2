@@ -265,6 +265,28 @@ class BacktestEvidenceSink(EvidenceSink):
         ).fetchall()
         accounting_identity = not accounting_failures
         timestamp_failures = connection.execute(TIMESTAMP_ORDER_AUDIT_SQL).fetchall()
+        local_timeframe = connection.execute(
+            "SELECT timeframe FROM BACKTEST_RUN_LOCAL"
+        ).fetchone()
+        if local_timeframe is not None:
+            try:
+                max_execution_lag = timeframe_milliseconds(local_timeframe[0])
+            except ValueError:
+                max_execution_lag = -1
+            lag_failures = connection.execute(
+                """
+                SELECT e.execution_id, d.decision_id,
+                       e.execution_ts - d.decision_ts AS lag_ms
+                FROM EXECUTION AS e
+                JOIN DECISION AS d ON d.decision_id = e.decision_id
+                WHERE e.execution_ts - d.decision_ts > ?
+                ORDER BY e.execution_id
+                """,
+                (max_execution_lag,),
+            ).fetchall()
+            timestamp_failures.extend(
+                ("execution_lag", *row) for row in lag_failures
+            )
         timestamp_order = not timestamp_failures
         execution_cost_failures = connection.execute(
             """
@@ -595,7 +617,7 @@ class BacktestEvidenceSink(EvidenceSink):
             period_start + duration * index
             for index in range(1, span // duration + 1)
         ]
-        source = self.connection.execute(
+        source_rows = self.connection.execute(
             """
             SELECT gap_count, note
             FROM SOURCE_DATA_SNAPSHOT
@@ -604,11 +626,14 @@ class BacktestEvidenceSink(EvidenceSink):
               AND timeframe = ?
             """,
             (symbol, timeframe),
-        ).fetchone()
+        ).fetchall()
+        if len(source_rows) != 1:
+            return ["strategy_ohlcv_snapshot_count"]
+        source = source_rows[0]
         if source is None:
             return ["missing_strategy_ohlcv_snapshot"]
         gap_count, note = source
-        contract = OhlcvGapContract((), ())
+        contract: OhlcvGapContract | None = None
         if note is None:
             if gap_count != 0:
                 return ["missing_strategy_ohlcv_gap_contract"]
@@ -617,9 +642,13 @@ class BacktestEvidenceSink(EvidenceSink):
                 contract = decode_ohlcv_gap_contract(note)
             except ValueError:
                 return ["invalid_strategy_ohlcv_gap_contract"]
-        if contract.normal_gap_count != gap_count:
+        if contract is not None and contract.snapshot_gap_count != gap_count:
             return ["strategy_ohlcv_gap_count_mismatch"]
-        allowed_gaps = set(contract.evaluation_grid_gap_close_times)
+        allowed_gaps = (
+            set()
+            if contract is None
+            else set(contract.evaluation_grid_gap_close_times)
+        )
         if not allowed_gaps <= set(full_grid):
             return ["strategy_ohlcv_gap_outside_evaluation_grid"]
         expected = [
@@ -689,6 +718,7 @@ class BacktestEvidenceSink(EvidenceSink):
             SELECT
                 snapshot_id,
                 source_kind,
+                source_ref,
                 symbol,
                 timeframe,
                 range_start,
@@ -701,7 +731,7 @@ class BacktestEvidenceSink(EvidenceSink):
             """
         ).fetchall()
         counts: dict[tuple[object, object, object], int] = {}
-        for _, kind, row_symbol, row_timeframe, *_ in rows:
+        for _, kind, _source_ref, row_symbol, row_timeframe, *_ in rows:
             key = (kind, row_symbol, row_timeframe)
             counts[key] = counts.get(key, 0) + 1
         failures: list[str] = []
@@ -715,6 +745,7 @@ class BacktestEvidenceSink(EvidenceSink):
         for (
             snapshot_id,
             kind,
+            source_ref,
             _row_symbol,
             row_timeframe,
             range_start,
@@ -739,7 +770,7 @@ class BacktestEvidenceSink(EvidenceSink):
                 failures.append(f"ohlcv_snapshot_count_identity:{snapshot_id}")
             if not (range_start <= period_start and period_end <= range_end):
                 failures.append(f"ohlcv_snapshot_evaluation_coverage:{snapshot_id}")
-            contract = OhlcvGapContract((), ())
+            contract: OhlcvGapContract | None = None
             if note is None:
                 if gap_count != 0:
                     failures.append(f"ohlcv_gap_contract_missing:{snapshot_id}")
@@ -750,7 +781,11 @@ class BacktestEvidenceSink(EvidenceSink):
                 except ValueError:
                     failures.append(f"ohlcv_gap_contract_invalid:{snapshot_id}")
                     continue
-            if contract.normal_gap_count != gap_count:
+            if contract is None:
+                continue
+            if contract.timeframe_ms != duration:
+                failures.append(f"ohlcv_gap_timeframe_mismatch:{snapshot_id}")
+            if contract.snapshot_gap_count != gap_count:
                 failures.append(f"ohlcv_gap_count_mismatch:{snapshot_id}")
             if any(
                 not range_start < close_time <= range_end
@@ -760,7 +795,10 @@ class BacktestEvidenceSink(EvidenceSink):
                 failures.append(f"ohlcv_normal_gap_off_grid:{snapshot_id}")
             expected_evaluation_gaps = tuple(
                 close_time
-                for close_time in contract.normal_gap_close_times
+                for close_time in sorted(
+                    contract.normal_gap_close_times
+                    + contract.partial_bucket_close_times
+                )
                 if period_start < close_time <= period_end
             )
             if (
@@ -768,6 +806,86 @@ class BacktestEvidenceSink(EvidenceSink):
                 != expected_evaluation_gaps
             ):
                 failures.append(f"ohlcv_evaluation_gap_mismatch:{snapshot_id}")
+            if (
+                source_ref == "crypto_data.ohlcv_futures"
+                and contract.origin_validation_status != "verified"
+            ):
+                failures.append(f"ohlcv_origin_unverified:{snapshot_id}")
+            if (
+                row_timeframe == "1m"
+                and contract.origin_validation_status == "verified"
+                and contract.origin_minute_row_count != row_count
+            ):
+                failures.append(f"ohlcv_origin_row_count_mismatch:{snapshot_id}")
+
+        contracts: dict[str, OhlcvGapContract] = {}
+        for row in rows:
+            _, kind, _, _, row_timeframe, *_, note = row
+            if kind == "ohlcv" and isinstance(row_timeframe, str) and note is not None:
+                try:
+                    contracts[row_timeframe] = decode_ohlcv_gap_contract(note)
+                except ValueError:
+                    pass
+        strategy_contract = contracts.get(str(timeframe))
+        minute_contract = contracts.get("1m")
+        if strategy_contract is not None and minute_contract is not None:
+            if (
+                strategy_contract.origin_validation_status
+                != minute_contract.origin_validation_status
+                or strategy_contract.origin_minute_row_count
+                != minute_contract.origin_minute_row_count
+                or strategy_contract.origin_timestamp_hash
+                != minute_contract.origin_timestamp_hash
+            ):
+                failures.append("ohlcv_origin_contract_mismatch")
+            if str(timeframe) != "1m":
+                minute_gaps = set(minute_contract.normal_gap_close_times)
+                minute_duration = timeframe_milliseconds("1m")
+                strategy_gaps = set(
+                    strategy_contract.normal_gap_close_times
+                    + strategy_contract.partial_bucket_close_times
+                )
+                for close_time in (
+                    strategy_contract.normal_gap_close_times
+                    + strategy_contract.partial_bucket_close_times
+                ):
+                    count = sum(
+                        close_time - strategy_contract.timeframe_ms
+                        + offset * minute_duration
+                        in minute_gaps
+                        for offset in range(
+                            1,
+                            strategy_contract.timeframe_ms // minute_duration + 1,
+                        )
+                    )
+                    classified_normal = (
+                        close_time in strategy_contract.normal_gap_close_times
+                    )
+                    if (
+                        classified_normal
+                        and count * minute_duration
+                        != strategy_contract.timeframe_ms
+                    ) or (
+                        not classified_normal
+                        and not 0 < count * minute_duration < strategy_contract.timeframe_ms
+                    ):
+                        failures.append(
+                            f"ohlcv_resample_gap_classification:{close_time}"
+                        )
+                for minute_close in minute_contract.evaluation_grid_gap_close_times:
+                    offset = minute_close - period_start
+                    upper_close = (
+                        period_start
+                        + (
+                            (offset + strategy_contract.timeframe_ms - 1)
+                            // strategy_contract.timeframe_ms
+                        )
+                        * strategy_contract.timeframe_ms
+                    )
+                    if upper_close not in strategy_gaps:
+                        failures.append(
+                            f"ohlcv_minute_gap_without_resample_gap:{minute_close}"
+                        )
         return failures
 
     def _trade_feature_failures(self) -> list[str]:

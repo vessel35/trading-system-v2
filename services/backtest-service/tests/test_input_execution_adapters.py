@@ -12,6 +12,10 @@ from backtest_service.adapters import cost_model as cost_model_module
 from backtest_service.adapters.clock import BacktestClock
 from backtest_service.adapters.cost_model import BacktestCostModel
 from backtest_service.adapters.data_feed import BacktestDataFeed
+from backtest_service.adapters.ohlcv_gaps import (
+    build_ohlcv_gap_contract,
+    decode_ohlcv_gap_contract,
+)
 from backtest_service.adapters.strategy_registry import BacktestStrategyRegistry
 from core_lib.costs import SlippageParams
 from core_lib.execution import normalize_order
@@ -127,6 +131,61 @@ def test_data_feed_discards_and_counts_absent_source_buckets(
     assert candles == []
     assert feed.dropped_bucket_count == 1
     assert "discarded 1 incomplete OHLCV bucket" in caplog.text
+
+
+def test_gap_contract_classifies_partial_resample_and_is_compact() -> None:
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    candle = Candle(
+        symbol="BTCUSDT",
+        exchange="binance",
+        timeframe="1h",
+        open_time=base,
+        close_time=base + timedelta(hours=1),
+        open=100.0,
+        high=101.0,
+        low=99.0,
+        close=100.0,
+        volume=1.0,
+        quote_volume=None,
+        trade_count=None,
+    )
+    missing_minutes = [
+        int((base + timedelta(hours=1, minutes=index)).timestamp() * 1_000)
+        for index in range(1, 13)
+    ]
+    contract = build_ohlcv_gap_contract(
+        [candle],
+        timeframe="1h",
+        range_start=base,
+        range_end=base + timedelta(hours=3),
+        evaluation_start=base,
+        evaluation_end=base + timedelta(hours=3),
+        minute_gap_close_times=missing_minutes
+        + [
+            int((base + timedelta(hours=2, minutes=index)).timestamp() * 1_000)
+            for index in range(1, 61)
+        ],
+    )
+
+    assert contract.partial_bucket_count == 1
+    assert contract.normal_gap_count == 1
+    assert contract.evaluation_grid_gap_count == 2
+    assert decode_ohlcv_gap_contract(contract.encode()) == contract
+    assert len(contract.encode()) < 600
+
+
+def test_source_open_times_uses_an_independent_bounded_query() -> None:
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    rows: list[Sequence[object]] = [(base,), (base + timedelta(minutes=1),)]
+    connection = StubConnection(lambda query, params: rows)
+    feed = BacktestDataFeed(connection)
+
+    assert feed.source_open_times(
+        "BTCUSDT", base, base + timedelta(minutes=2)
+    ) == tuple(row[0] for row in rows)
+    query, params = connection.calls[0]
+    assert "time >= %s" in query and "time < %s" in query
+    assert params == ("BTCUSDT", "binance", base, base + timedelta(minutes=2))
 
 
 def test_data_feed_rejects_present_but_incomplete_source_rows() -> None:

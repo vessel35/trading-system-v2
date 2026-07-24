@@ -380,6 +380,7 @@ CREATE TABLE IF NOT EXISTS EXECUTION (
                 'LIQUIDATION',
                 'SIGNAL_EXIT',
                 'REVERSAL',
+                'DATA_GAP',
                 'END_OF_DATA'
             )
         ),
@@ -483,6 +484,7 @@ CREATE TABLE IF NOT EXISTS TRADE (
                 'LIQUIDATION',
                 'SIGNAL_EXIT',
                 'REVERSAL',
+                'DATA_GAP',
                 'END_OF_DATA'
             )
         ),
