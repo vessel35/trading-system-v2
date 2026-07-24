@@ -623,7 +623,7 @@ erDiagram
 | `framework_compliant` | 참·거짓 | 불가 | `true` | 이 run이 거래당 위험 1% 상한을 **보장하는 방식으로 돌았는지**. 비율 사이징은 손절 거리에 따라 실제 위험이 1%를 넘을 수 있어 보장하지 못하므로 거짓이다. **run을 열지 않고 판정하려면 이 플래그가 카탈로그에 있어야 한다** |
 | `cost_values_json` | JSON 문서 | 불가 | `{}` | 이 run에 주입한 비용 값 묶음(수수료율·유지증거금률·슬리피지·펀딩 대체율) |
 | `seed` | 64비트 정수 | 불가 | `0` | 난수 seed. 같은 입력·같은 seed가 같은 결과를 낸다는 결정성의 입력 절반이다 |
-| `engine_version`·`core_lib_version` | 각 최대 40자 | 불가 | 없음 | 실행 코드 버전. 결정성 보증은 같은 플랫폼·고정 의존성 버전 조건부이므로 반드시 남긴다 |
+| `engine_version`·`core_lib_version` | 각 최대 40자 | 불가 | 없음 | 실행 코드 버전. 설치된 `backtest-service`와 `core-lib` 패키지 메타데이터에서 읽어 수동 버전 상수와의 어긋남을 막는다. 결정성 보증은 같은 플랫폼·고정 의존성 버전 조건부이므로 반드시 남긴다 |
 | `config_hash` | 64자 고정 길이 16진 문자열 | 불가 | 없음 | 아래 **`config_hash` 입력 컬럼**을 그 순서 그대로, **Evidence 결정성 직렬화와 같은 형식 규칙**(값 표기·US 구분자·NUL 표기, JSON은 정규 형식, SHA-256)으로 이어 낸 해시. Engine이 run 등록 전에 산출한다. **같은 값이면 같은 설정의 재실행**이라 스윕에서 중복 실행을 찾는 데 쓴다. 유일 제약은 걸지 않는다(의도적 재실행이 정상이다) |
 | `source_data_hash` | 64자 고정 길이 소문자 16진 문자열 | 허용 | 없음 | run의 모든 `SOURCE_DATA_SNAPSHOT`을 `source_kind`·`source_ref`·`symbol`·`exchange`·`timeframe`·`range_start`·`range_end`·`content_hash` 순서의 정규 JSON 객체로 만들고 정렬해 SHA-256으로 낸 원천 지문. 원천 스냅샷을 기록하기 전에는 비어 있고, finalize에서 `config_hash`와 짝지어 결정성 비교 대상을 고른다 |
 | `profile_ref` | 최대 80자 | 허용 | 없음 | 대조에 쓴 전략 프로파일 식별자 |
@@ -714,7 +714,7 @@ erDiagram
 | `source_absent_gap_count`·`partial_bucket_count` | 32비트 정수, 0 이상 | 불가 | `0` | 1분 원천이 전부 없었던 정상 결측 칸과 일부 1분만 있어 완전한 상위 주기 캔들을 만들지 못한 부분 버킷 수. 두 값의 합은 기대 수와 관측 수의 차이와 같아야 한다 |
 | `data_coverage_ratio` | 0 이상 1 이하의 배정밀도 비율 | 불가 | `0` | `observed_candle_count ÷ expected_candle_count`. `0.95` 미만이면 Hard Gate A가 `not_promotable`이고 최종 경로가 `retest`다 |
 | `max_consecutive_gap_bars`·`max_consecutive_gap_seconds` | 각각 32비트·64비트 정수, 0 이상 | 불가 | `0` | 가장 긴 연속 결측의 전략 주기 칸 수와 초. 초 값이 `86,400`을 넘으면 커버리지 총비율과 무관하게 Hard Gate A가 실패한다 |
-| `data_coverage_passed` | 참·거짓 | 불가 | `false` | 커버리지 `0.95` 이상과 최장 연속 결측 `86,400`초 이하를 모두 만족했는지. 실제 적용값은 Evidence의 `prereg_json.data_quality_criteria`에도 남긴다 |
+| `data_coverage_passed` | 참·거짓 | 불가 | `false` | 커버리지 `0.95` 이상과 최장 연속 결측 `86,400`초 이하를 모두 만족했는지. 실제 적용값은 Evidence의 해시 대상 `data_quality_criteria_json`에 남긴다 |
 | `unobservable_funding_boundary_count` | 32비트 정수, 0 이상 | 불가 | `0` | 앞뒤 전략 주기 칸이 모두 결측이라 가격·포지션 정산에 도달할 수 없었던 펀딩 경계 수 |
 | `data_gap_exit_count` | 32비트 정수, 0 이상 | 불가 | `0` | 미관측 구간을 보유 상태로 넘기지 않도록 결측 직전 마지막 확정 가격에서 `DATA_GAP` 청산한 횟수 |
 | `integrity_passed` | 참·거짓 | 불가 | `false` | 무결성 검사 통과 여부 |
@@ -855,9 +855,10 @@ erDiagram
 정렬된 행을 정규화 직렬화해서 낸 값이다. 정렬 기준은 엔티티 종류·논리 타임스탬프·엔티티 내 시퀀스이고, 벽시계
 시각·인스턴스 식별자·파일 경로처럼 같은 논리 입력에서도 달라지는 컨텍스트는 직렬화에서 제외하며, 수치는 저장
 규약의 표준형을 쓴다. 결정성 비교 대상은 완료·평가된 과거 run 중 `config_hash`와 `source_data_hash`가 모두 같은
-가장 최근 run이다. 설정이 같아도 원천 지문이 다르면 비결정성이 아니라 비교 대상 없음이며, 두 지문이 모두 같은데
-`evidence_hash`가 다를 때만 결정성 실패다. 값이 비어 있으면 아직 확정되지 않은 것이고, 그 상태로 남은 run은 다음
-기동에서 `ORPHANED`가 된다.
+가장 최근 run이다. 비교 결과의 통과 상태는 같은 설정의 선행 run이 없는 `no_prior_config_run`, 같은 설정은 있으나
+원천 지문이 다른 `source_changed`, 같은 설정·원천의 Evidence 해시까지 같은 `matched`로 구분한다. 같은
+설정·원천인데 `evidence_hash`가 다를 때만 `mismatched`로 기록하고 결정성 검사를 실패시킨다. 값이 비어 있으면 아직
+확정되지 않은 것이고, 그 상태로 남은 run은 다음 기동에서 `ORPHANED`가 된다.
 
 **데이터베이스를 건너는 참조에는 외래키를 걸지 않는다.** `strategy_id`가 가리키는 전략 레지스트리는 다른
 데이터베이스에 있고, `evidence_path`가 가리키는 Evidence 파일은 데이터베이스 밖에 있다. 둘 다 값으로만 참조하며
@@ -1038,6 +1039,8 @@ SQLite 3.37 이상이 필요하므로 그 버전을 최소 요구로 둔다.
    같은 논리 입력으로 다시 돌려도 인스턴스·외부 상태에 따라 값이 달라질 수 있기 때문이고, 마지막은
    finalize 이후 외부 분석 시스템이 적는 유일한 엔티티라(위 기록 주체 규약) 해시에 넣으면 주석 한 줄이 결정성
    재검증을 깨뜨리기 때문이다. 선언하지 않은 암묵 컬럼과 인덱스는 애초에 대상이 아니다.
+   `BACKTEST_RUN_LOCAL.data_quality_criteria_json`은 커버리지와 최장 연속 결측의 판정 입력이므로 이 제외 집합에
+   들지 않으며 반드시 직렬화한다.
 2. **정렬.** 엔티티 이름의 사전순으로 엔티티를 정렬하고, 각 엔티티 안에서는 아래 표의 정렬 키를 순서대로 적용한다.
    각 표의 마지막 키는 반드시 그 엔티티의 기본키라 **정렬은 언제나 전순서**가 된다(같은 순위의 행이 남지 않는다).
 
@@ -1171,6 +1174,7 @@ erDiagram
         real position_size_pct
         integer framework_compliant "1R≤1% 보장 여부"
         text cost_values_json
+        text data_quality_criteria_json "판정 입력 · 해시 대상"
         integer seed
         text engine_version
         text core_lib_version
@@ -1430,14 +1434,15 @@ erDiagram
 | `position_size_pct` | 실수, 0 초과 1 이하. **비율 경로에서만 필수** | 조건부 허용 | 없음 | 비율 사이징의 투입 비율 |
 | `framework_compliant` | 0 또는 1 | 불가 | `1` | 이 run이 거래당 위험 1% 상한을 보장하는 방식으로 돌았는지. **파일만으로 준수 여부를 판정하려면 사본이 필요하다** |
 | `cost_values_json` | JSON 객체 문자열 | 불가 | `{}` | 주입된 비용 값 묶음 |
+| `data_quality_criteria_json` | JSON 객체 문자열 | 불가 | 없음 | 적용한 데이터 품질 판정 입력. `min_coverage_ratio`는 `0.95`, `max_consecutive_gap_seconds`는 `86,400`이며 둘 다 반드시 기록한다. 이 컬럼은 결정성 해시 대상이라 기준 변경이 같은 Evidence로 위장되지 않는다 |
 | `seed` | 정수 | 불가 | `0` | 난수 seed |
-| `engine_version`·`core_lib_version` | 문자열 | 불가 | 없음 | 실행 코드 버전. 결정성 보증이 조건부이므로 반드시 남긴다 |
+| `engine_version`·`core_lib_version` | 문자열 | 불가 | 없음 | 설치된 `backtest-service`와 `core-lib` 패키지 메타데이터에서 읽은 실행 코드 버전. 수동 기본 상수를 따로 두지 않으며, 결정성 보증이 조건부이므로 반드시 남긴다 |
 | `config_hash` | 64자 16진 문자열 | 불가 | 없음 | 설정 정규화 해시. 카탈로그의 같은 이름 값과 일치해야 한다 |
 | `profile_ref` | 문자열 | 허용 | 없음 | 대조에 쓴 전략 프로파일 식별자 사본 |
 | `strategy_profile_json` | JSON 객체 문자열 | 허용 | 없음 | 그 시점 형태 선언 사본(전략군·기대 승률/손익비 범위·꼬리 형태·보유 지평·주 지표·보존할 수익 구조·허용오차). **파일만으로 형태 대조를 재검산하려면 이 사본이 있어야 한다** |
 | `envelope_status_declared` | `provisional`·`updating`·`established` 중 하나 | 허용 | 없음 | run 시점의 프로파일 성숙도 사본 |
-| `prereg_json` | JSON 객체 문자열 | 허용 | 없음 | 사전등록 사본(가설·주 지표·성공/실패 기준·선언 시각과 적용한 `data_quality_criteria`). 최종 라우팅의 대조값을 파일 안에서 확인하기 위한 사본이며 결정성 해시에서는 제외된다. 사전등록 무결성은 카탈로그의 잠긴 행이 보증한다 |
-| `evidence_schema_version` | 문자열 | 불가 | 없음 | 이 파일의 스키마 버전. 현재 `1.2.0`이며, 이 버전에서 펀딩 이론 부과액 컬럼과 그 한도 제약을 추가했다. 나중에 엔티티가 늘어도 옛 파일을 읽을 수 있게 한다 |
+| `prereg_json` | JSON 객체 문자열 | 허용 | 없음 | 사전등록 사본(가설·주 지표·성공/실패 기준·선언 시각). 최종 라우팅의 대조값을 파일 안에서 확인하기 위한 사본이며 결정성 해시에서는 제외된다. 사전등록 무결성은 카탈로그의 잠긴 행이 보증한다. 데이터 품질 판정 입력은 해시 대상인 별도 컬럼에 둔다 |
+| `evidence_schema_version` | 문자열 | 불가 | 없음 | 이 파일의 스키마 버전. 현재 `1.3.0`이며, 이 버전에서 필수 해시 대상 `data_quality_criteria_json`을 추가했다. 직전 `1.2.0`은 펀딩 이론 부과액 컬럼과 그 한도 제약을 추가한 버전이다. 나중에 엔티티가 늘어도 옛 파일을 읽을 수 있게 한다 |
 | `created_at` | 정수 (epoch ms, UTC). **벽시계이며 해시에서 제외** | 불가 | 현재 시각 | 파일 생성 시각 |
 
 **키·제약**
@@ -1526,7 +1531,7 @@ erDiagram
 | `impl_version` | 문자열 | 불가 | 없음 | 구현 버전. 지표 구현이 바뀌면 과거 결과와 값이 달라질 수 있으므로 남긴다 |
 | `pinned_impl` | 0 또는 1 | 불가 | `0` | 출처마다 정의가 갈리는 지표라 구현을 하나로 고정한 경우 1 |
 | `min_history` | 정수, 1 이상 | 불가 | 없음 | 이 지표의 워밍업 길이. 사전 적재 길이를 정한 근거 |
-| `computation_mode` | `vectorized`·`incremental` 중 하나 | 불가 | `vectorized` | 이 run이 쓴 계산 방식. 두 방식의 값이 같아야 한다는 요구의 관측 지점이다 |
+| `computation_mode` | `vectorized`·`incremental` 중 하나 | 불가 | `vectorized` | 이 run이 쓴 계산 방식. 백테스트 Engine은 `incremental`을 명시적으로 기록하고 `vectorized`는 연구·일치 검증 경로에 남는다. 두 방식의 값이 같아야 한다는 요구의 관측 지점이다 |
 | `enabled_reason` | `auto`·`explicit`·`all` 중 하나 | 불가 | 없음 | 이 지표가 계산 대상이 된 이유 |
 
 **키·제약**
@@ -2061,9 +2066,10 @@ erDiagram
 자체에 비결정적 요소가 있다는 뜻이라 즉시 실패다). 그다음 현재 파일의 모든 Source Data Snapshot 식별값과
 `content_hash`를 정렬해 `source_data_hash`를 만들고, 카탈로그에서 **같은 `config_hash`와 같은
 `source_data_hash`를 모두 가진 완료·평가된 이전 run**의 Evidence 해시와 비교한다. 설정이 같아도 원천 해시가
-다르면 비교 대상이 아니며 비결정성 실패로 세지 않는다. 두 해시가 모두 같은데 Evidence 해시가 다를 때는 반드시
-실패한다. 비교 대상이 없으면 검사는 통과로 남기되 상세에 "비교 대상 없음"을 적어, 나중에 같은 설정과 원천이 다시
-돌 때 대조할 수 있게 한다.
+다르면 비교 대상이 아니며 비결정성 실패로 세지 않는다. 같은 설정의 선행 run 자체가 없으면 상세 상태를
+`no_prior_config_run`, 같은 설정의 선행 run은 있으나 원천 지문이 다르면 `source_changed`로 남긴다. 같은 설정과
+원천을 쓴 비교 대상의 Evidence 해시가 같으면 `matched`, 다르면 `mismatched`로 남기며 후자는 반드시 실패한다.
+앞의 두 비교 대상 없음 상태는 검사를 통과로 남겨, 나중에 같은 설정과 원천이 다시 돌 때 대조할 수 있게 한다.
 
 **기록 완성도가 보는 규칙 목록.** 무엇이 갖춰져야 완전한지를 열거해 둔다. 하나라도 어긋나면 실패다.
 
