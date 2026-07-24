@@ -62,8 +62,8 @@ _MATRIX_START = datetime(2025, 7, 1, tzinfo=UTC)
 # tier exercises ordinary execution and real-price reversal on every run; the
 # long tier owns sign-specific funding, high-leverage exhaustion, missing data,
 # and window invariance.  Negative funding at high leverage is intentionally
-# omitted because crypto_data has no stable natural candidate fixed by contract:
-# its sign arithmetic is covered at 1x and its margin cap is covered at 39x.
+# omitted to avoid a costly Cartesian expansion: its sign arithmetic is covered
+# at 1x and its isolated-margin cap is covered independently at 39x.
 _REAL_DATA_REGRESSION_MATRIX = (
     _RealDataRegressionCase(
         "baseline-3d",
