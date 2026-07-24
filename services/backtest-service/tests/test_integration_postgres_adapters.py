@@ -165,6 +165,28 @@ def _matrix_case(case_id: str) -> _RealDataRegressionCase:
     return matches[0]
 
 
+def _assert_matrix_axes(
+    evidence: sqlite3.Connection,
+    case: _RealDataRegressionCase,
+) -> None:
+    observed_directions = {
+        row[0]
+        for row in evidence.execute("SELECT DISTINCT position_side FROM EXECUTION").fetchall()
+    }
+    observed_signs = {
+        "positive" if row[0] > 0 else "negative"
+        for row in evidence.execute(
+            "SELECT DISTINCT funding_rate FROM FUNDING_SETTLEMENT WHERE funding_rate <> 0"
+        ).fetchall()
+    }
+    observed_leverages = {
+        row[0] for row in evidence.execute("SELECT DISTINCT leverage FROM TRADE").fetchall()
+    }
+    assert set(case.directions) <= observed_directions
+    assert set(case.funding_rate_signs) <= observed_signs
+    assert set(case.leverages) <= observed_leverages
+
+
 def test_real_data_regression_matrix_covers_every_contract_axis() -> None:
     assert len({case.case_id for case in _REAL_DATA_REGRESSION_MATRIX}) == len(
         _REAL_DATA_REGRESSION_MATRIX
@@ -1083,16 +1105,7 @@ def test_vessel_engine_traverses_real_crypto_data_feed(
             1,
         )
         assert evidence.execute("SELECT COUNT(*) FROM PORTFOLIO_PNL").fetchone() == (72,)
-        assert {
-            row[0]
-            for row in evidence.execute("SELECT DISTINCT position_side FROM EXECUTION").fetchall()
-        } == set(case.directions)
-        assert (
-            evidence.execute(
-                "SELECT COUNT(*) FROM FUNDING_SETTLEMENT WHERE funding_rate > 0"
-            ).fetchone()[0]
-            > 0
-        )
+        _assert_matrix_axes(evidence, case)
 
 
 def test_real_data_matrix_reversal_closes_before_opposite_entry(
@@ -1173,20 +1186,11 @@ def test_real_data_matrix_reversal_closes_before_opposite_entry(
             (execution_ts, "LONG", 1, "REVERSAL"),
             (execution_ts, "SHORT", 0, None),
         ]
-        assert {
-            row[0]
-            for row in evidence.execute("SELECT DISTINCT position_side FROM EXECUTION").fetchall()
-        } == set(case.directions)
         assert evidence.execute(
             "SELECT COUNT(*) FROM TRADE WHERE leverage = ?",
             (leverage,),
         ).fetchone() == (2,)
-        assert (
-            evidence.execute(
-                "SELECT COUNT(*) FROM FUNDING_SETTLEMENT WHERE funding_rate > 0"
-            ).fetchone()[0]
-            > 0
-        )
+        _assert_matrix_axes(evidence, case)
         assert evidence.execute(
             """
             SELECT COUNT(*)
@@ -1365,6 +1369,7 @@ def test_measured_funding_exhaustion_liquidates_a_natural_real_data_position(
             "deterministic": 1,
             "evidence_complete": 1,
         }
+        _assert_matrix_axes(evidence, case)
 
 
 @pytest.mark.real_data_long
@@ -1430,6 +1435,7 @@ def test_real_funding_sign_matrix_completes_without_negative_cash(
         assert evidence.execute(
             "SELECT COUNT(*) FROM INTEGRITY_CHECK WHERE passed = 0"
         ).fetchone() == (0,)
+        _assert_matrix_axes(evidence, case)
 
 
 @pytest.mark.real_data_long
@@ -1466,6 +1472,7 @@ def test_real_missing_candles_complete_330_day_evidence(
         integrity = dict(
             evidence.execute("SELECT check_name, passed FROM INTEGRITY_CHECK").fetchall()
         )
+        _assert_matrix_axes(evidence, case)
 
         assert evidence.execute("SELECT COUNT(*) FROM PORTFOLIO_PNL").fetchone() == (7_457,)
         assert evidence.execute("SELECT COUNT(*) FROM TRADE").fetchone() == (563,)
@@ -1558,5 +1565,6 @@ def test_entry_quantity_is_independent_of_remaining_run_window(
             ).fetchone()
             assert entry is not None
             first_entries.append(entry)
+            _assert_matrix_axes(evidence, case)
 
     assert len(set(first_entries)) == 1
