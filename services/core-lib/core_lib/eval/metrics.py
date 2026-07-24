@@ -157,6 +157,16 @@ def _r_multiples(trades: Sequence[Trade]) -> list[float]:
     ]
 
 
+def trade_r_multiples(trades: Sequence[Trade]) -> list[float]:
+    """Return per-trade R-multiples for trades with a positive initial risk."""
+    return _r_multiples(trades)
+
+
+def daily_returns(equity: EquitySeries) -> list[float]:
+    """Return daily-resampled simple returns of an equity series."""
+    return _returns(_daily_points(equity))
+
+
 def risk_of_ruin(
     r_multiples: Sequence[float],
     *,

@@ -400,6 +400,40 @@ class BacktestCatalogStore(CatalogStore):
             self._connection.rollback()
             raise
 
+    def record_harness_aggregate(
+        self,
+        run_id: str,
+        *,
+        oos_degradation: float | None,
+        psr: float | None,
+        harness_json: object,
+    ) -> None:
+        """Stamp cross-run overfitting aggregates onto one representative summary."""
+        params = (
+            _database_value("oos_degradation", oos_degradation),
+            _database_value("psr", psr),
+            _database_value("harness_json", harness_json),
+            run_id,
+        )
+        try:
+            row = self._connection.execute(
+                """
+                UPDATE public.backtest_summary
+                SET oos_degradation = %s,
+                    psr = %s,
+                    harness_json = %s
+                WHERE run_id = %s
+                RETURNING run_id
+                """,
+                params,
+            ).fetchone()
+            if row is None:
+                raise RuntimeError("representative run summary is absent for harness aggregate")
+            self._connection.commit()
+        except Exception:
+            self._connection.rollback()
+            raise
+
     def determinism_reference(
         self,
         run_id: str,

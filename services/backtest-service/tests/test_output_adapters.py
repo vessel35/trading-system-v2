@@ -445,3 +445,55 @@ def test_catalog_register_uses_one_sequence_cte_before_any_filename() -> None:
     assert params[0] == "catalog"
     assert connection.commits == 1
     assert connection.rollbacks == 0
+
+
+def test_catalog_records_only_harness_aggregates_on_the_representative() -> None:
+    connection = _Connection()
+    store = BacktestCatalogStore(connection)
+
+    store.record_harness_aggregate(
+        "BT_20260101_000042_catalog",
+        oos_degradation=0.25,
+        psr=0.96,
+        harness_json={"workflow": "overfit_defense", "seed": 29},
+    )
+
+    query, params = connection.calls[0]
+    assert "UPDATE public.backtest_summary" in query
+    assert "RETURNING run_id" in query
+    assert params == (
+        0.25,
+        0.96,
+        '{"seed":29,"workflow":"overfit_defense"}',
+        "BT_20260101_000042_catalog",
+    )
+    assert connection.commits == 1
+    assert connection.rollbacks == 0
+
+
+def test_catalog_rejects_a_missing_representative_summary() -> None:
+    class MissingSummaryConnection(_Connection):
+        def execute(
+            self,
+            query: str,
+            params: Sequence[object] = (),
+        ) -> _Result:
+            self.calls.append((query, params))
+            return _Result([])
+
+    connection = MissingSummaryConnection()
+    store = BacktestCatalogStore(connection)
+
+    with pytest.raises(
+        RuntimeError,
+        match="representative run summary is absent",
+    ):
+        store.record_harness_aggregate(
+            "BT_20260101_999999_missing",
+            oos_degradation=None,
+            psr=None,
+            harness_json={"workflow": "walk_forward"},
+        )
+
+    assert connection.commits == 0
+    assert connection.rollbacks == 1

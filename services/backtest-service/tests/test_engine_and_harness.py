@@ -532,6 +532,7 @@ class _Catalog(CatalogStore):
         self.events: list[str] = []
         self.preregs: list[object] = []
         self.summaries: list[object] = []
+        self.aggregates: dict[str, dict[str, object]] = {}
         self.runs: dict[str, Mapping[str, object]] = {}
         self.force_config_mismatch = False
         self.comparison_hash_override: str | None = None
@@ -552,6 +553,20 @@ class _Catalog(CatalogStore):
     def upsert_summary(self, summary: object) -> None:
         self.events.append("summary")
         self.summaries.append(summary)
+
+    def record_harness_aggregate(
+        self,
+        run_id: str,
+        *,
+        oos_degradation: float | None,
+        psr: float | None,
+        harness_json: object,
+    ) -> None:
+        self.aggregates[run_id] = {
+            "oos_degradation": oos_degradation,
+            "psr": psr,
+            "harness_json": harness_json,
+        }
 
     def reconcile_orphaned(self) -> int:
         self.events.append("reconcile")
@@ -1648,6 +1663,8 @@ def _run_result(run_id: str, pf: float) -> RunResult:
         integrity_status="passed",
         metrics=_metrics(pf),
         decision=DecisionResult(route="promote", rationale="fixture"),
+        r_multiples=(1.0, -0.5, 0.75),
+        period_returns=(0.03, 0.02, -0.01, 0.025),
     )
 
 
@@ -1663,6 +1680,22 @@ def test_harness_is_fixed_seed_and_applies_cross_run_boundaries() -> None:
 
     assert oos["oos_degradation"] == pytest.approx(0.4)
     assert oos["passed"] is True
+    assert catalog.aggregates["oos"] == {
+        "oos_degradation": pytest.approx(0.4),
+        "psr": None,
+        "harness_json": {
+            "workflow": "is_oos",
+            "metric": "pf",
+            "split": 0.5,
+            "boundary": (_BASE + timedelta(hours=2)).isoformat(),
+            "in_sample_run_id": "is",
+            "out_of_sample_run_id": "oos",
+            "in_sample_value": 2.0,
+            "out_of_sample_value": 1.2,
+            "oos_degradation": pytest.approx(0.4),
+            "passed": True,
+        },
+    }
     assert catalog.events == ["reconcile"]
     assert (
         first
@@ -1688,13 +1721,37 @@ def test_harness_is_fixed_seed_and_applies_cross_run_boundaries() -> None:
             _run_result("wf-3", 1.0),
         ]
     )
-    walk = Harness(_Catalog(), lambda: cast(Engine, walk_engine)).walk_forward(
+    walk_catalog = _Catalog()
+    walk_harness = Harness(walk_catalog, lambda: cast(Engine, walk_engine))
+    walk = walk_harness.walk_forward(
         _config(run_name="walk"),
         3,
     )
     assert walk["degradations"] == pytest.approx([0.4, 1.0 / 6.0])
     assert walk["maximum_degradation"] == pytest.approx(0.4)
     assert walk["passed"] is True
+    assert walk_catalog.aggregates["wf-3"]["oos_degradation"] == pytest.approx(0.4)
+    assert walk_catalog.aggregates["wf-3"]["psr"] is None
+
+    bundle_engine = _HarnessEngine(
+        [
+            _run_result("bundle-1", 2.0),
+            _run_result("bundle-2", 1.2),
+            _run_result("bundle-3", 1.0),
+        ]
+    )
+    bundle_catalog = _Catalog()
+    bundle_harness = Harness(bundle_catalog, lambda: cast(Engine, bundle_engine), seed=7)
+    bundle = bundle_harness.evaluate_overfit_defense(
+        _config(run_name="bundle"),
+        folds=3,
+        mc_iters=50,
+    )
+    aggregate = bundle_catalog.aggregates["bundle-3"]
+    assert bundle["representative_run_id"] == "bundle-3"
+    assert aggregate["oos_degradation"] == pytest.approx(0.4)
+    assert aggregate["psr"] == bundle["psr"]
+    assert cast(dict[str, object], aggregate["harness_json"])["monte_carlo"] is not None
 
 
 def test_harness_reads_every_overfit_limit_from_shared_eval_thresholds(

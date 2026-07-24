@@ -20,7 +20,12 @@ def test_all_seven_ports_are_abstract_with_the_standard_methods() -> None:
         Clock: {"now", "advance"},
         CostModel: {"fee", "slippage", "funding_rate", "liq_params"},
         EvidenceSink: {"record", "finalize"},
-        CatalogStore: {"save_prereg", "register", "upsert_summary"},
+        CatalogStore: {
+            "save_prereg",
+            "register",
+            "upsert_summary",
+            "record_harness_aggregate",
+        },
         StrategyRegistry: {"get", "list", "register"},
     }
     assert len(expected) == 7
