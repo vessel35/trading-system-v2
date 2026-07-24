@@ -33,10 +33,11 @@ addopts = [
     "--strict-config",
     "--strict-markers",
     "-m",
-    "not integration",
+    "not integration and not acceptance",
 ]
 markers = [
     "integration: uses the local development PostgreSQL instance",
+    "acceptance: exercises the operator-assembled backtest against development data",
     "real_data_long: runs the long-window real-data regression tier",
 ]
 testpaths = ["tests"]
