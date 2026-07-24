@@ -1,0 +1,5 @@
+# Install from the repository root. Listing both editable projects in one pip
+# transaction guarantees that backtest-service resolves core-lib from this
+# workspace rather than from a package index.
+-e ./services/core-lib[dev]
+-e ./services/backtest-service[dev]

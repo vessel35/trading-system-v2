@@ -67,8 +67,9 @@
 10. **생존 사이징.** 거래당 위험은 계좌의 1% 이하(`1R ≤ 1%`)이며, 엣지는 진입 신호에서 온다(손절·익절 배치로
     기대값을 창조하지 못한다). pct 방식 사이징은 호환 경로로 두되 `1R ≤ 1%`를 보장하지 못하면 메타에 비준수로
     표시한다.
-11. **결정성.** 같은 입력·같은 seed는 언제나 같은 Evidence를 낸다. 결정성 검증 해시는 SQLite 파일 바이트가
-    아니라 정렬된 행의 정규화 직렬화(wall-clock 제외)로 산출한다.
+11. **결정성.** 같은 설정 입력·같은 원천 데이터·같은 seed는 언제나 같은 Evidence를 낸다. 결정성 검증 해시는
+    SQLite 파일 바이트가 아니라 정렬된 행의 정규화 직렬화(wall-clock 제외)로 산출하며, 설정이 같아도 원천 데이터
+    해시가 다르면 재현 대조 대상에서 제외한다.
 
 ## 설계 방향
 
@@ -1357,10 +1358,17 @@ enqueue에만 쓰며, 백테스트 판단 경로는 이 ENUM을 쓰지 않는다
 
 지표의 유일 구현처다. 다이어그램은 지표 명세 `IndicatorSpec`, 등록·조회 `IndicatorRegistry`, 증분 상태
 `IndicatorState`, look-ahead 계약 `contracts`, 공용 프리미티브 `primitives`와 그 관계를 담는다. 한 지표는 같은 값을 내는 두 가지 계산
-방식을 가진다. **벡터화 방식**(`compute_vectorized`)은 전 구간을 한 번에 계산하며, 백테스트 실행이 성능을 위해
-쓰는 기본 방식이다. **증분 방식**(`IndicatorState.update`)은 확정 캔들 하나마다 O(1)로 갱신하며, 라이브·페이퍼
-(signal-service)가 실제로 도는 방식이다. 두 방식의 값은 일치해야 한다 — 백테스트가 쓰는 벡터화 값이 라이브가
-쓰는 증분 값과 어긋나면 안 되며, 이를 일치 테스트로 못박는다.
+방식을 가진다. **벡터화 방식**(`compute_vectorized`)은 확정된 전 구간을 한 번에 계산하는 연구·일괄 계산
+인터페이스이자 증분 구현을 독립적으로 대조하는 일치 검증 기준이다. **증분 방식**(`IndicatorState.update`)은 확정
+캔들 하나마다 O(1)로 갱신하며, 백테스트·라이브·페이퍼 실행이 모두 실제로 쓰는 방식이다. 두 방식의 값은
+일치해야 하며, 이를 일치 테스트로 못박는다.
+
+**실행 경로의 명시적 설계 차이(발주자 확정 2026-07-24).** 벡터화 방식을 백테스트 실행의 기본으로 두었던
+원안과 달리, 실행은 증분 방식만 쓴다. 전 구간 벡터화를 실행에 넣으면 시각별로 `close_time ≤ 판단 시각`을
+지키는 일이 입력 구조 자체가 아니라 호출자가 미래 구간을 잘라 주는 규율에 의존한다. 증분 상태는 확정 캔들을
+한 칸씩만 받아 미래 캔들을 구조적으로 볼 수 없으므로 look-ahead 배제 수준이 더 강하다. 벡터화 방식은 없애지
+않고 연구용 일괄 계산과 증분 방식의 독립 일치 검증 기준으로 유지한다. 이 설계 차이는 look-ahead 구조적 배제
+불변식을 강화하는 판단으로 발주자가 확정했다(승인 이력은 `docs/design-revision-log.md`).
 
 **이 컴포넌트가 고정하는 것은 지표 목록이 아니라 관리 방식이다.** 어떤 지표든 예외 없이 같은 길을 지난다 —
 `IndicatorSpec`으로 `registry`에 등록되고, 벡터화·증분 두 계산 방식을 갖고, 확정 캔들 계약(`close_time ≤ 판단 시각`)을
@@ -1388,6 +1396,7 @@ classDiagram
         +list() list~IndicatorSpec~
         +compute_batch(list~Candle~, set~str~) dict
         +resolve_enabled(mode, declared, explicit) set~str~
+        +resolve_specs(mode, declared, explicit) list~IndicatorSpec~
     }
     class IndicatorState {
         +int min_history
@@ -1440,16 +1449,19 @@ classDiagram
     - `category` — 지표 계열(추세·모멘텀·변동성 등)이며, 아래 등록 지표 목록의 분류와 같다.
     - `required_inputs` — OHLCV 외에 추가로 필요한 입력 채널. 시장폭 지표만 값을 갖고, 대부분 지표는 비어 있다.
 - **메서드**
-    - `compute_vectorized` : 전 구간을 한 번에 계산해 시계열을 돌려준다(백테스트 실행이 쓰는 벡터화 방식).
-    - `make_state` : 이 지표의 증분 상태 객체(`IndicatorState`)를 만들어 준다. 라이브·페이퍼가 캔들마다 O(1)로
-      갱신하는 증분 방식의 진입점이다.
+    - `compute_vectorized` : 확정된 전 구간을 한 번에 계산해 시계열을 돌려준다. 연구용 일괄 계산과 증분 방식의
+      독립 일치 검증에 쓰며 실행 캔들 루프에는 넣지 않는다.
+    - `make_state` : 이 지표의 증분 상태 객체(`IndicatorState`)를 만들어 준다. 백테스트·라이브·페이퍼가 캔들마다
+      O(1)로 갱신하는 증분 방식의 진입점이다.
 - **불변식** — 명세는 불변이며 실행 중 상태를 갖지 않는다. 그래서 같은 명세는 언제나 같은 방식으로 계산되고, 변하는
   상태는 `make_state`가 만든 `IndicatorState`에만 있다.
 
 #### `IndicatorRegistry`
 
 - **개요** — 지표 등록·조회와 배치 계산을 맡는 곳.
-- **책임** — 등록된 명세를 조회해 주고, 한 run에서 실제로 계산할 지표 집합만 벡터화로 계산한다.
+- **책임** — 등록된 명세를 조회하고, 한 run에서 실제로 계산할 지표 집합을 한 곳에서 확정하며, 연구·일치 검증용
+  벡터화 계산을 제공한다. `auto`·`explicit`·`all`의 해석과 외부 이름·파라미터를 등록 명세로 바꾸는 일은 이
+  레지스트리만 맡고, `Engine`은 다시 해석하지 않는다.
 - **상속관계** — 없음.
 - **필드** — 없음(등록된 명세들을 보유하지만 스칼라 필드·상수는 없다).
 - **메서드**
@@ -1461,14 +1473,16 @@ classDiagram
         - `auto`(기본) — 활성 전략이 선언한 필요 지표만 계산한다(성능 기본값).
         - `explicit` — 명시 리스트를 계산한다(전략 필요분 + 손실원인 탐색용 추가 지표).
         - `all` — 등록된 지표 전량을 계산한다(전면 스캔용).
+    - `resolve_specs(mode, declared, explicit)` : 위 모드 해석과 이름·파라미터 조회, 중복 제거, 결정적 정렬을 한 번에
+      수행해 실행할 `IndicatorSpec` 목록을 돌려준다. `Engine`이 지표 대상을 얻는 유일한 진입점이다.
 - **불변식** — 계산 전에 세 가지를 검증한다: 요청 지표·파라미터가 등록돼 있는가, 워밍업(`min_history`)이 확보됐는가,
   시장폭 지표라면 별도 입력 채널이 있는가.
 
 #### `IndicatorState`
 
-- **개요** — 라이브·페이퍼(signal-service)가 실제로 도는 증분 계산 방식(캔들 하나당 O(1) 갱신).
-- **책임** — 라이브가 실제로 도는 계산 방식이라, 벡터화 방식과 값이 같은지 판정하는 기준점이 된다. 백테스트는 이
-  방식을 기준점 삼아 벡터화 값을 대조한다.
+- **개요** — 백테스트·라이브·페이퍼가 실제로 도는 증분 계산 방식(캔들 하나당 O(1) 갱신).
+- **책임** — 세 실행 환경의 확정 캔들을 같은 방식으로 처리한다. 벡터화 방식은 이 상태 구현과 같은 값을
+  내는지를 독립적으로 대조하는 검증 기준이다.
 - **상속관계** — 없음.
 - **필드** — `warmed_up`은 `min_history` 충족 여부다(`min_history`는 유효값에 필요한 최소 캔들 수).
 - **메서드**
@@ -1560,8 +1574,8 @@ classDiagram
 
 이 둘이 필요한 이유는 두 가지다. 첫째, 워밍업을 건너뛰고 초반 몇 캔들만으로 계산한 EMA(200) 같은 값은 사실상
 쓰레기값이라 진입·청산 판단의 근거로 쓸 수 없다. 그래서 평가를 시작하기 전에 충분한 캔들을 미리 채워 워밍업을
-끝낸 뒤에야 신호를 받아들인다. 둘째, 백테스트의 벡터화 방식과 라이브의 증분 방식이 같은 지표에서 같은 값을 내야
-하는데(일치 테스트), 재귀형 지표는 시작 상태가 다르면 초반 값이 갈린다. 두 방식이 같은 규칙으로 seed해야 첫
+끝낸 뒤에야 신호를 받아들인다. 둘째, 벡터화 방식과 증분 방식이 같은 지표에서 같은 값을 내야 하는데(일치 테스트),
+재귀형 지표는 시작 상태가 다르면 초반 값이 갈린다. 두 방식이 같은 규칙으로 seed해야 첫
 캔들부터 값이 어긋나지 않고, 이 일치가 look-ahead 방지와 재현성의 바탕이 된다.
 
 이를 지키는 규약은 다음과 같다.
@@ -1576,25 +1590,24 @@ classDiagram
 
 #### 지표 계산 플로우
 
-한 run에서 지표 값을 만드는 방식은 두 가지이고, 어느 쪽이든 같은 지표 구현·같은 프리미티브를 거쳐 값이 서로 같아야
-한다(일치 테스트로 못박는다). 아래가 두 방식과 그 공통 look-ahead 관문이다.
+한 run의 입력으로 지표 값을 만드는 방식은 두 가지이고, 어느 쪽이든 같은 지표 구현·같은 프리미티브를 거쳐 값이
+서로 같아야 한다(일치 테스트로 못박는다). 아래는 증분 실행의 look-ahead 관문과 벡터화 검증의 관계를 보인다.
 
 ```mermaid
 flowchart TD
-    CFG["run 설정: 계산 대상 모드<br/>auto · explicit · all"] --> RESOLVE["IndicatorRegistry.resolve_enabled<br/>계산할 지표 집합 확정"]
-    RESOLVE --> MODE{"계산 방식"}
-    MODE -->|"벡터화 기본"| VEC["compute_batch<br/>전 구간 1회 계산 · 시각별 캐싱<br/>백테스트 실행이 씀"]
-    MODE -->|"증분 라이브 동형"| INC["IndicatorState.seed 워밍업<br/>확정 캔들마다 update O(1)<br/>라이브·페이퍼(signal-service)가 씀"]
-    VEC --> GATE["contracts.assert_finalized<br/>close_time ≤ 판단 시각 T"]
-    INC --> GATE
+    CFG["run 설정: 계산 대상 모드<br/>auto · explicit · all"] --> RESOLVE["IndicatorRegistry.resolve_specs<br/>계산할 지표 명세 확정"]
+    RESOLVE --> INC["IndicatorState.seed 워밍업<br/>확정 캔들마다 update O(1)<br/>백테스트·라이브·페이퍼 실행"]
+    INC --> GATE["contracts.assert_finalized<br/>close_time ≤ 판단 시각 T"]
     GATE --> OUT["시각 t 지표 값<br/>전략 판단에 입력"]
-    VEC -. 일치 테스트 .-> INC
+    RESOLVE --> VEC["compute_batch<br/>확정 전 구간 일괄 계산<br/>연구·일치 검증 전용"]
+    VEC -. 독립 일치 테스트 .-> INC
 ```
 
-읽는 법: 계산 집합은 run 설정이 정하고(전량이 아니라 필요분), 두 방식 중 **벡터화가 백테스트 실행의 기본 방식**
-(전 구간 1회 계산·캐싱으로 성능 확보)이고, **증분이 라이브·페이퍼(signal-service)가 실제로 도는 방식**이자 벡터화
-값을 대조하는 검증 기준점이다. 두 방식 모두 `contracts`의 확정 캔들 계약(`close_time ≤ T`)을 통과해야 하며, 이 관문이 미래
-데이터 참조를 구조적으로 막는다. 계산은 전부 `float`이고 Decimal 변환은 이 컴포넌트 밖 체결 관문에서만 일어난다.
+읽는 법: 계산 집합은 run 설정이 정하고(전량이 아니라 필요분), 레지스트리가 그 해석을 한 번만 수행한다.
+**증분 방식이 백테스트·라이브·페이퍼의 실행 방식**이며, 확정 캔들 계약(`close_time ≤ T`)을 캔들마다 통과해 미래
+데이터 참조를 구조적으로 막는다. 벡터화 방식은 확정된 전 구간에 대한 연구·일괄 계산과 독립 일치 테스트에만
+쓰인다. 두 방식의 값은 같아야 한다. 계산은 전부 `float`이고 Decimal 변환은 이 컴포넌트 밖 체결 관문에서만
+일어난다.
 
 ## §4.2 전략 클래스 (+ config 해석 시퀀스)
 
@@ -1935,6 +1948,7 @@ classDiagram
         +apply(Fill) None
         +weighted_average(Fill) Decimal
         +reduce(Fill) Decimal
+        +apply_funding(Position, Decimal, Decimal) FundingMarginResult
         +check_liquidation(Position, Decimal) bool
         +bool skip_first_sl_check$
     }
@@ -1983,17 +1997,26 @@ classDiagram
       (매수 +, 매도 −). 마지막 인자 `fill_timing`은 `immediate`·`next_bar` 중 하나이며 백테스트 기본은 `next_bar`
       다. `t+1` 시가가 손절·청산 너머인 갭이면 시가에 체결하고 슬리피지를 가중한다. 같은 캔들 종가에서 청산 신호와
       반대 진입이 함께 나오면 `t+1` 시가에서 기존 포지션 청산 체결·정산을 먼저 하고 그 뒤 신규 진입 마진 검사·체결을
-      처리한다(리버설 순서. 마진 가용성은 청산 정산 후 기준).
+      처리한다(리버설 순서. 마진 가용성은 청산 정산 후 기준). next-bar 체결 시각은
+      `max(다음 캔들 open_time, 결정 캔들 close_time + 1ms)`이고, 다음 캔들의 여는 시각이 결정 캔들의 닫는 시각과
+      이어지지 않으면 그 주문은 이 메서드로 넘기지 않는다. 결측 구간을 건너 먼 미래 캔들에서 체결하는 것은 허용하지
+      않는다.
     - `resolve_triggers` : 손절·트레일링·익절·청산 채널·강제청산의 캔들 내 발동을 판정한다. 첫 검증 스코프에서는
       전략 TF 캔들 수준의 보수 판정이고(1분 하위 집행 피드는 유보), 1분 트리거 walk와 그 파리티 허용 편차는 Engine
       설계(§4.4)에서 확정한다. 어떤 포지션도 자기 체결 캔들 이전으로 소급 검사하지 않는다(`PositionBook`의
       `skip_first_sl_check`와 같은 규칙).
     - `recompute_qty_and_stop` : 수량과 최초 보호 스탑을 신호 캔들 종가가 아니라 실제 체결가 기준으로 재산정한다.
       갭으로 마진이 부족하면 주문 거부가 아니라 수량 절삭 후 Evidence에 기록한다. 반환은 `(재산정 수량, 재산정 최초
-      보호 스탑)` tuple이다.
+      보호 스탑)` tuple이다. 진입 가능 수량은 진입 마진·진입 수수료·강제청산 시 한 번 부과할 청산 수수료까지
+      감당하는 범위로 제한한다. 청산 수수료는 이때 즉시 차감하는 비용이 아니라 지급 능력 예약이며, 미래 펀딩 비용은
+      예약하지 않는다. 아직 관측하지 않은 정산 경계를 준비금으로 잡으면 같은 전략과 원천이라도 평가 창 길이에 따라
+      수량이 달라지기 때문이다.
 - **불변식**
     - **체결은 결정보다 나중(next-bar)** — 신호는 캔들 `t` 마감에 나고 체결은 `t+1` 시가라 `decision_ts <
       execution_ts`를 만족한다. 결정 캔들 종가로 체결하지 않는다.
+    - **체결 지연 상한** — 대응 판단이 있는 체결은 `execution_ts − decision_ts`가 전략 주기 한 개를 넘지 않는다.
+      이 상한은 결측 구간을 건넌 지연 체결을 시점의 대소 관계만으로 놓치지 않게 하며, Evidence의 시점 순서 검사가
+      다시 확인한다.
     - **동시 도달 손절 우선(보수적 최악 경로, OHLC-locked)** — 같은 캔들에서 손절과 익절이 모두 범위 안이면 손절
       우선이다(익절 우선으로 구현하면 승률·PF가 계통적으로 부풀려진다). 손절과 강제청산이 겹치면 정상 설정에서는
       손절가가 청산가보다 안쪽이라 손절 우선(청산 미발생)이고, 손절가가 청산가 바깥인 설정 오류만 청산 처리하며
@@ -2024,6 +2047,9 @@ classDiagram
     - `weighted_average` : 체결을 반영해 가중평균 진입가를 갱신한다. 평균가 계산 자체는 값 타입
       `Position.add_quantity`가 소유하고, 이 메서드는 어느 포지션에 적용할지의 장부 조율만 한다.
     - `reduce` : `reduce_only` 실현과 마진 반환을 처리한다.
+    - `apply_funding` : 선물 격리 포지션의 이론 펀딩 비용을 포지션 마진에 적용하고, 이론 비용·실제 적용 비용·마진
+      소진 여부를 `FundingMarginResult`로 돌려준다. 지급 비용은 남은 격리 마진을 넘지 못하고, 펀딩 수취는 마진을
+      늘린다. 적용 뒤 남은 마진으로 강제청산가를 다시 계산한다.
     - `check_liquidation` : Isolated를 우선해 청산을 판정한다 — 발동 비교 자체는 `costs.Liquidation.is_triggered`에
       위임하고(수식·비교 복제 방지) 이 메서드는 장부 차원의 적용만 한다.
 - **불변식** — 없음(회계 항등식 `cash + position = equity`는 `Accounting`이 강제한다).
@@ -2098,17 +2124,26 @@ classDiagram
 
 - **개요** — 펀딩 비용의 수식 표준(모듈). 이산 정산이 표준이다.
 - **책임** — UTC 정산 경계를 지나는 포지션에 펀딩을 부과한다. 이 모듈은 수식만 소유하고, rate는 과거 실측을
-  `DataFeed`로 주입받으며 실측이 없을 때만 `CostModel`의 fallback rate `0.0001`(0.01%)을 쓴다.
+  `DataFeed`로 주입받으며 실측이 없을 때만 `CostModel`의 fallback rate `0.0001`(0.01%)을 쓴다. 계산한 이론
+  비용은 현금이 아니라 `PositionBook.apply_funding`을 거쳐 격리 포지션 마진에 적용한다.
 - **상속관계** — 없음(모듈).
 - **필드** — 없음(모듈. rate 값은 주입).
 - **메서드**
-    - `settle(position, rate, price)` : UTC `0/8/16`시 경계를 보유 상태로 지나는 포지션에 `notional × rate`
-      전액을 부과한다. 경계를 지나지 않으면 실제 펀딩은 0이다. 정산가는 정산 경계를 포함하는 최소 가용 TF 캔들의
-      시가로 고정하고, 그 캔들이 없으면 직전 확정 캔들 종가를 쓴다. 경계 직전 보유분에만 부과하고, 동시각 신규
-      체결은 그 정산을 물지 않는다.
+    - `settle(position, rate, price)` : UTC `0/8/16`시 경계를 보유 상태로 지나는 포지션의 이론 펀딩 비용을
+      `notional × rate`로 계산한다. 경계를 지나지 않으면 실제 펀딩은 0이다. 정산가는 정산 경계를 포함하는 최소
+      가용 주기 캔들의 시가로 고정하고, 그 캔들이 없으면 직전 확정 캔들 종가를 쓴다. 경계 직전 보유분에만 부과하고,
+      동시각 신규 체결은 그 정산을 물지 않는다.
     - `is_boundary(t)` : 주어진 시각이 UTC `0/8/16`시 정산 경계인지 판정한다.
-- **불변식** — 이산 정산이 표준이다. `×보유시간/8h` pro-rata 식은 사전 추정용 참고로만 쓰고 실제 부과에는 쓰지
-  않는다.
+- **불변식**
+    - 이산 정산이 표준이다. `×보유시간/8h` pro-rata 식은 사전 추정용 참고로만 쓰고 실제 부과에는 쓰지 않는다.
+    - 지급 방향의 실제 적용 비용은 `min(이론 비용, 정산 직전 남은 격리 마진)`이다. 이론 비용과 실제 적용 비용을
+      모두 Evidence에 남긴다. 실제액이 이론액보다 작으면 한도 적용으로 남은 마진이 0임을 뜻하고, 이론액과 정확히
+      같더라도 적용 뒤 마진이 0이면 소진이다. 두 경우 모두 그 거래는 같은 경계의 `boundary + 1ms`에
+      `Fill(exit_reason=LIQUIDATION)`로 끝난다. 이 체결에는 일반 taker 청산 수수료를 부과해 거래의
+      `total_fee`에 정확히 한 번 합산하고 `liquidation_penalty`는 0으로 둔다. 별도 청산 손실을 다시 빼면 같은
+      사건을 이중 계상하므로 금지한다.
+    - 펀딩은 가용 현금에서 직접 빼지 않는다. 포지션 마진과 누적 펀딩만 바뀌며, 어떤 경로에서도 현금 잔고를 음수로
+      만들 수 없다.
 
 #### `Liquidation`
 
@@ -2585,11 +2620,17 @@ classDiagram
 - **메서드**
     - `check(evidence)` : 아래 여섯 가지를 검산해 `IntegrityResult`를 낸다.
         - **회계 항등식** — `cash + position = equity`가 모든 시점에 성립하는가.
-        - **시점 순서** — `feature_ts ≤ decision_ts < execution_ts`를 어긴 거래가 없는가(look-ahead 사후 검증).
+        - **시점 순서** — `feature_ts ≤ decision_ts < execution_ts`를 어긴 거래가 없는가. 대응 판단이 있는 체결은
+          `execution_ts − decision_ts`가 전략 주기 한 개를 넘지 않아야 하고, 판단 없는 체결은 `END_OF_DATA`만
+          허용한다(look-ahead와 결측 횡단 체결의 사후 검증).
         - **비용 1회 차감** — 각 비용이 중복 차감되지 않았는가.
         - **net-of-cost** — 기록된 손익이 net인가("비용 0 가정"의 잔재가 없는가).
-        - **결정성** — 같은 입력·같은 seed가 같은 정규화 해시를 내는가.
-        - **Evidence 완성도** — 판정에 필요한 시점별 기록이 빠짐없이 남았는가.
+        - **결정성** — 같은 `config_hash`와 같은 `source_data_hash`를 가진 비교 대상이 같은 정규화 Evidence 해시를
+          내는가. 설정이 같아도 원천 해시가 다르면 비결정성이 아니라 비교 대상 없음으로 다룬다.
+        - **Evidence 완성도** — 판정에 필요한 시점별 기록이 빠짐없이 남았는가. 전략 주기 격자는 정상 결측과 부분
+          버킷의 합집합만 제외하고 완전해야 하며, 상위 주기 run은 전략 주기 Source Data Snapshot과 정확히 한 건의
+          1분 Source Data Snapshot을 모두 가져야 한다. 1분 계약은 독립 원천 질의로 검증되고, 상위 주기의 정상
+          결측·부분 버킷 분류는 그 1분 계약과 서로 맞아야 한다.
 - **불변식** — 여섯 검사 중 하나라도 실패하면 파이프라인이 `diagnostic_only`로 멈춘다(유일한 정지). 통과 전에는
   `HardGate`·`Decision`으로 넘어가지 않는다.
 
@@ -2837,9 +2878,14 @@ classDiagram
     - `manager` — `Adapter Manager`(§4.2). `strategy_id`·파라미터로 Adaptee를 생성한다. 내부적으로 주입된
       `StrategyRegistry` 어댑터(§4.4.2)를 통해 전략 목록에 접근한다.
     - `config` — 검증을 마친 `RunConfig`(§4.4.3).
+    - `engine_version`·`core_lib_version` — 설치된 `backtest-service`와 `core-lib` 패키지 메타데이터에서 읽은
+      실행 코드 버전이다. 생성자가 명시적으로 덮어쓰는 검증 경로를 제외하면 사람이 별도 상수를 갱신하지 않으며,
+      같은 값이 카탈로그와 Evidence에 기록된다.
     - `pending` — 직전 캔들 종가에 산출해 다음 캔들 시가에 체결할 주문 요청 목록. 보통 0개(신호 없음)나 1개이고,
       리버설이면 청산 주문과 반대 진입 주문을 그 순서로 담는다. 이 한 칸 지연이 `decision_ts < execution_ts`를
       구조로 강제하며, `step_open`이 이 목록을 담긴 순서대로 체결한 뒤 비운다(이중 체결 방지).
+      직전 캔들의 닫는 시각과 다음 캔들의 여는 시각이 같을 때만 주문을 만들 수 있으며, 그 사이에 결측이 있으면
+      판단은 `next_candle_gap` 사유의 건너뜀으로 기록한다. 방어적으로 남은 주문이 결측 경계를 건너면 실행을 거부한다.
 - **메서드**
     - `run(config)` : run 하나를 처음부터 끝까지 구동해 `RunResult`를 낸다. 사전등록 기록과 `run_id` 발급으로 열고
       (§4.5의 저장 시퀀스), preload→캔들 루프→finalize 순으로 진행한다.
@@ -2854,7 +2900,8 @@ classDiagram
       체결 순서는 `Engine`이 이 순서로 소유하고, 각 체결의 atomic 규칙·마진 부족 시 수량 절삭은 `matcher`가 소유한다).
       그다음 `t` 구간의 1분 하위 캔들에 대해 `walk_triggers`로 기존 포지션의 손절·트레일링·익절·청산·강제청산을
       판정하고(발동하면 신호 없는 판단으로 Decision(`signal_id` 비움)과 Execution·Trade를 기록한다), UTC 정산 경계를
-      지나면 `costs.funding.settle`로 펀딩을 부과한다.
+      지나면 `costs.funding.settle`로 펀딩을 부과한다. 펀딩으로 격리 마진이 소진되면 그 정산 경계의 1밀리초 뒤에
+      `LIQUIDATION` 체결을 만들어 해당 포지션을 닫는다.
     - `step_close(t)` : 캔들 `t`가 닫히는 순간의 일. `Clock`이 `t` 종가로 전진한 뒤 호출된다. `DataFeed`로 `up_to =
       t.close`까지만 받아 지표를 갱신하고 Feature/Indicator Snapshot과 캔들 종가로 마킹한 Position·Portfolio/PnL
       행(캔들당 1회)을 기록한 뒤, `Adaptee.analyze(market_data[t],
@@ -2862,6 +2909,10 @@ classDiagram
       산출하고 `ExposureLimit`으로 한도를 검사한 뒤 float 주문 요청 `OrderRequest`를 만들어 `pending`에 넣는다(체결은
       다음 `step_open`). preload 구간이면 여기서 만든 신호·주문은 버린다. 진입 후보는 노출 한도 등에 막힌 경우까지
       Candidate Event로, 사전 선언 규칙이 잡은 놓친 기회는 Missed Opportunity로 함께 기록한다.
+      현재 캔들의 닫는 시각과 다음 캔들의 여는 시각이 이어지지 않으면 주문을 예약하지 않는다. 열린 포지션은 마지막
+      확정 가격으로 결측 직전에 `DATA_GAP` 청산하고 일반 청산과 같은 수수료·슬리피지를 적용한다. 그 뒤 결측이 삼킨
+      펀딩 경계는 도달 불가 경계로 세어 Source Data Snapshot과 run 요약에 남기므로, 펀딩 정산 완성도가 당시 포지션
+      보유 여부에 우연히 좌우되지 않는다.
     - `walk_triggers(position, subcandles)` : `t` 구간의 1분 하위 캔들을 시간 순서로 훑어 첫 발동을 찾는다. 대상은
       포지션의 체결 시점 이후 하위 캔들이다 — 체결 하위 캔들 이전은 소급 검사하지 않고, 방금 체결된 포지션은 자기
       체결 하위 캔들 다음 하위 캔들부터 검사 대상이다(legacy `skip_first_sl_check`와 같은 취지). 각 하위 캔들에서
@@ -2882,16 +2933,23 @@ classDiagram
       `EvidenceSink.finalize`로 결정적 파생(차트 요약·손실/급등 구간·결과 유형 분류·조건 서명·조건별 기대값)과
       무결성 검사·정규화 Evidence 해시를 만들고, `eval`의 성과 산출·판정 3단계를 호출한 뒤 `CatalogStore`에
       요약·판정·해시를 기록한다(§4.5의 저장 시퀀스. Evidence 경로는 `bind` 직후 이미 기록돼 있다). 반환은
-      `RunResult`다.
+      `RunResult`다. 판정 입력에는 관측 캔들 수·원천 부재 수·부분 버킷 수·커버리지·최장 연속 결측·도달 불가
+      펀딩 경계 수·`DATA_GAP` 청산 수가 포함된다. 커버리지가 `0.95`보다 낮거나 최장 연속 결측이 `86,400`초를
+      넘으면 무결성이 통과했더라도 Hard Gate A를 `not_promotable`로 만들고 최종 경로를 `retest`로 둔다. 두 기준은
+      판정 입력으로서 Evidence의 `data_quality_criteria_json`에 반드시 기록하고 결정성 해시에 포함한다. 사전등록
+      선언 사본인 `prereg_json`과 섞지 않으므로, 사전등록 해시 제외 원칙과 판정 입력의 재현성을 함께 지킨다.
 - **불변식**
     - **캔들 두 순간의 고정 순서가 look-ahead를 막는다** — `step_open`(지난 캔들 정산·트리거)과 `step_close`(이번
       캔들 판단)의 순서는 바꿀 수 없다. 판단은 종가에, 체결은 다음 시가에 일어나므로 결정에 쓴 캔들로 체결·검사하는
       일이 구조적으로 불가능하다.
     - **`decision_ts < execution_ts`** — 신호는 `step_close`에서, 체결은 다음 `step_open`에서 일어난다. `pending`의
       한 칸 지연이 이 순서를 강제한다.
+    - **결측은 미지의 값으로 남긴다** — 결측 구간을 보간하거나 미래 캔들로 주문을 이월하지 않는다. 결측 직전의
+      미체결 주문은 만들지 않고 열린 포지션은 `DATA_GAP`으로 닫아, 미관측 구간의 가격과 펀딩을 성과로 가정하지
+      않는다.
     - **워밍업 preload 구간 신호 discard** — preload 구간의 신호·주문은 성과에 반영하지 않는다.
-    - **결정성** — 시각은 `Clock`만 공급하고 wall-clock·무제어 난수를 쓰지 않는다. 같은 입력·같은 seed는 같은
-      정규화 Evidence 해시를 낸다.
+    - **결정성** — 시각은 `Clock`만 공급하고 wall-clock·무제어 난수를 쓰지 않는다. 같은 설정 입력·같은 원천
+      데이터·같은 seed는 같은 정규화 Evidence 해시를 낸다.
 
 캔들 루프의 두 순간이 어떤 순서로 무엇을 하는지를 한 캔들 `t`에 대해 보인다.
 
@@ -3032,6 +3090,7 @@ classDiagram
     class BacktestDataFeed {
         -Connection crypto_data
         +candles(str, str, datetime) list~Candle~
+        +source_open_times(str, datetime, datetime) tuple~datetime~
         +funding(str, datetime) Decimal
         +mark_price(str, datetime) Decimal
     }
@@ -3045,6 +3104,7 @@ classDiagram
     class BacktestClock {
         -datetime cursor
         -Iterator~datetime~ schedule
+        +from_candles(list~Candle~) BacktestClock
         +now() datetime
         +advance() None
     }
@@ -3082,15 +3142,24 @@ classDiagram
   캔들은 절대 내주지 않는다(look-ahead 구조 배제). 같은 메서드에 `tf = "1m"`을 주면 1분 하위 캔들도 공급하므로,
   1분 집행 피드는 포트 표면을 바꾸지 않고 이 어댑터가 그대로 낸다 — 다만 첫 검증 스코프는 소비 전략이 없어 표면을
   전략 TF 캔들 기준으로 쓴다(재유보). backtest는 읽기만 하고 `crypto_data`에 쓰지 않는다.
+  상위 주기 리샘플링은 해당 버킷의 1분 원천이 모두 있을 때만 캔들을 만들며, 일부만 있는 버킷은 정상 원천 부재와
+  구별해 부분 버킷으로 기록한다. 어느 경우에도 값을 채우거나 보간하지 않는다.
 - **상속관계** — `DataFeed`(§4.3.4 ABC)를 실현한다.
 - **필드** — `crypto_data`는 과거 OHLCV·펀딩을 읽는 읽기 전용 연결이다(쓰기 없음).
 - **메서드**
     - `candles(symbol, tf, up_to)` : `up_to` 이후 캔들을 반환하지 않는다. `tf`가 전략 TF면 판단용 캔들, `"1m"`이면
-      트리거 walk용 하위 캔들을 낸다.
-    - `funding(symbol, up_to)` : 그 시점 기준 과거 실측 펀딩 rate를 공급한다(실측값 소유).
-    - `mark_price(symbol, up_to)` : 그 시점 기준 마크 가격을 공급한다.
-- **불변식** — `candles`는 `up_to` 이후 캔들을 반환하지 않아 look-ahead를 구조적으로 막는다(ABC 계약을 그대로
-  지킨다).
+      트리거 walk용 하위 캔들을 낸다. 완전하지 않은 상위 주기 버킷은 반환하지 않는다.
+    - `source_open_times(symbol, start, end)` : 1분 캔들 목록을 만드는 경로와 독립된 원천 질의로 범위 안의 실제
+      여는 시각을 돌려준다. Evidence에 선언한 1분 원천 부재가 우리 기록 누락이 아님을 검증하는 대조 기준이다.
+    - `funding(symbol, up_to)` : 파생상품 심볼을 거래소 표준의 대문자 영숫자 심볼로 정규화하고,
+      `[up_to, up_to + 1초]`의 양 끝을 포함한 창에서 가장 이른 실측 펀딩 rate를 공급한다. 실측값이 없으면
+      `LookupError`를 내고 Engine은 설정된 fallback을 적용하되 그 미발견 사실을 Source Data Snapshot에 남긴다.
+    - `mark_price(symbol, up_to)` : 펀딩과 같은 심볼 정규화·포함 구간 계약으로 그 시점의 마크 가격을 공급한다.
+- **불변식**
+    - `candles`는 `up_to` 이후 캔들을 반환하지 않아 look-ahead를 구조적으로 막는다(ABC 계약을 그대로 지킨다).
+    - 상위 주기에서 빠진 버킷은 1분 원천이 전부 없는 정상 결측과 일부 있는 부분 버킷으로 나뉘며, 전략 주기
+      Evidence와 별도의 1분 Source Data Snapshot이 독립 원천 질의 결과와 정확히 일치해야 한다. 누락을 정상
+      결측으로 선언하거나 부분 버킷을 원천 부재로 바꾸면 Evidence 완성도 검사가 실패한다.
 
 #### `BacktestBroker`
 
@@ -3125,6 +3194,8 @@ classDiagram
     - `cursor` — 현재 시뮬 시각(캔들 시가 또는 종가 지점).
     - `schedule` — 캔들 두 순간을 시간 순서로 내는 결정적 시퀀스.
 - **메서드**
+    - `from_candles(candles)` : 실제 공급된 모든 캔들의 여는 시각과 닫는 시각의 합집합을 정렬해 `schedule`을 만든다.
+      산술적으로 완전한 시간 격자를 가정하지 않으므로 정상 결측이 있어도 시계 구성이 중단되지 않는다.
     - `now()` : 현재 시뮬 시각을 돌려준다.
     - `advance()` : 다음 순간(시가→종가→다음 시가)으로 시각을 옮긴다.
 - **불변식** — wall-clock·무제어 난수를 쓰지 않는다(결정성). ABC 계약 그대로다.
@@ -3291,7 +3362,8 @@ ER 다이어그램으로 확정한다 — 이 절은 각 클래스가 그 스키
 **여기서 강제하는 불변식.**
 
 - **결정성 Evidence 해시** — Evidence 해시는 SQLite 파일 바이트가 아니라 정렬된 행의 정규화 직렬화(wall-clock 제외)로
-  낸다. 같은 입력·같은 seed의 두 run이 같은 해시를 내야 한다.
+  낸다. 같은 설정 해시·같은 원천 데이터 해시·같은 seed의 두 run이 같은 해시를 내야 한다. 설정이 같아도 원천
+  데이터 해시가 다르면 결정성 비교 대상이 아니다.
 - **`run_id` 단독 발급** — `run_id`는 `CatalogStore`가 `backtest_db` 시퀀스로 단독 발급해 SQLite 파일명에 넣는다
   (병렬 스윕의 run_id 발급 경합·파일명 충돌 차단).
 - **카탈로그는 백테스트 전용** — `CatalogStore`는 backtest만 쓰고 라이브·페이퍼는 쓰지 않는다.
@@ -3317,6 +3389,7 @@ classDiagram
         -Connection backtest_db
         +save_prereg(object) None
         +register(object) str
+        +determinism_reference(str, str, str) object
         +upsert_summary(object) None
         +reconcile_orphaned() None
     }
@@ -3336,6 +3409,9 @@ classDiagram
       최대 편차 시점의 지표·국면)·Missed Opportunity(사전 선언 규칙이 있는 run에서만). Funding Settlement은 펀딩
       정산 경계를 지날 때마다 보유 포지션당 한 건을 적어, 펀딩이 경계마다 한 번만 부과됐음을 기록으로 검산할 수
       있게 한다(비용 1회 차감 불변식).
+      Source Data Snapshot은 전략 주기 OHLCV 계약과, 전략 주기가 1분이 아니면 그 근거가 되는 1분 OHLCV 계약을
+      각각 정확히 한 건 기록한다. 정상 원천 부재·부분 버킷·독립 원천 대조 결과와 결측이 삼킨 도달 불가 펀딩 경계
+      수를 함께 남긴다.
     - **finalize(결정적 파생)** — Chart Summary·Drawdown/Runup Episode·Outcome Bucket·(run 설정에 표준 조건 어휘
       판이 주어진 경우) Condition Signature·Conditional Expectancy·Integrity Check. 고정 규칙으로 원본 기록에서
       다시 만들 수 있는 값만 적고 해석은 넣지 않는다.
@@ -3381,10 +3457,17 @@ classDiagram
       감사 기준).
     - `register(run_meta)` : `run_id`를 `backtest_db` 시퀀스로 단독 발급하고 run 인덱스 헤더를 연다. 반환은
       발급된 `run_id`다. `run_meta`는 재현 입력 전부를 담는다 — 전략 신원 사본(`strategy_name`·`strategy_version`,
-      레지스트리 조회), `StrategyConfig`가 해석을 마친 확정 파라미터(`params_json`)와 스키마 버전, 실행 코드
+      레지스트리 조회), `StrategyConfig`가 해석을 마친 확정 파라미터(`params_json`)·해석된 지표 목록
+      (`resolved_indicators_json`)과 스키마 버전, 실행 코드
       버전(`engine_version`·`core_lib_version`), 그리고 Engine이 재현 입력을 카탈로그 규칙(§5.2.2)으로 직렬화해 낸
       `config_hash`. **그래서 config 해석은 register보다 먼저다.** Evidence 경로는 `run_id`의 순수 함수
       (`<run_id>.sqlite` 상대 경로)라 발급과 동시에 register가 채운다.
+    - `determinism_reference(run_id, config_hash, source_data_hash)` : 현재 run에 원천 데이터 해시를 저장하고,
+      완료·평가된 과거 run 중 두 해시가 모두 같은 가장 최근 run만 결정성 비교 대상으로 돌려준다. 같은 설정이라도
+      원천 해시가 다르면 비교 대상에서 제외한다. 상세 상태는 같은 설정의 선행 run 자체가 없으면
+      `no_prior_config_run`, 같은 설정은 있으나 원천 지문이 다르면 `source_changed`, 같은 설정·원천의 해시가
+      일치하면 `matched`로 구분한다. 같은 설정·원천인데 Evidence 해시가 다르면 `mismatched`로 기록하고 결정성
+      검사를 실패시킨다.
     - `upsert_summary(summary)` : 성과·판정 요약을 run 인덱스·요약·태그에 upsert한다(+ Evidence 해시·무결성 상태.
       경로는 `bind` 직후 이미 기록돼 있다). run을 열지 않고 순위·필터·집계에 쓰도록 SQLite 상세에서 산출한 값을
       복제한다.
@@ -3978,11 +4061,12 @@ flowchart TD
 
 | 기준선 | 내용 | 확인 방법 |
 |---|---|---|
-| 결정성 | 같은 입력·같은 seed는 언제나 같은 Evidence를 낸다 | 동일 run 2회 → 정규화 Evidence 해시(정렬 행 직렬화·wall-clock 제외) 동일 |
+| 결정성 | 같은 설정 입력·같은 원천 데이터·같은 seed는 언제나 같은 Evidence를 낸다 | 동일 `config_hash`·동일 `source_data_hash` run 2회 → 정규화 Evidence 해시(정렬 행 직렬화·wall-clock 제외) 동일 |
 | look-ahead 무결성 | 미래 데이터가 과거 판단에 스며들지 않는다 | 시계열 뒤에 미래 캔들을 덧붙여도 과거 신호·지표 값 불변 |
 | 지표·전략 골든 | 계산이 표준과 일치한다 | 지표별 1차 출처 교차대조 골든값, 벡터화↔증분 일치, 활성 전략 analyze 골든 |
 | 수식 골든 | 성과 지표 계산이 표준 수치를 재현한다 | 표준 재현 수치와 일치 — Sortino 2.4910·PF 3.4118·SQN 1.6647·MDD −3.50%·Calmar 3.2102. 입력 거래 집합은 성과 지표 표준 참조 `50_metrics_reference.md`의 재현 예제다(구현까지 유지되는 표준 참조 파일) |
 | 회계 실측 정확성 | 재구현 회계·손익·체결이 현실과 맞는다 | 거래소 실측 대비 대사 — 시작 기준은 금액 자릿수 반올림 안 차이 0(부록.4 골든 재수립 규칙 3) |
+| 실데이터 회귀 | 픽스처가 놓치는 데이터 범위·방향·펀딩·마진 경로가 실제 원천에서도 완주한다 | 통합 테스트의 명시적 회귀 매트릭스가 3일·10일·30일·45일·135일·180일·330일 창, 롱·숏, 양·음 펀딩 요율, 1배·3배·39배 레버리지를 분담해 검사한다. 짧은 등급은 일반 체결과 리버설을 상시 확인하고, 긴 등급은 요율 부호·펀딩 소진 청산·결측·창 길이 불변성을 확인한다. 음수 요율과 고레버리지의 직교 조합은 비용이 큰 전수 조합에서 의도적으로 빼되, 부호 산술은 1배에서 격리 마진 한도는 39배에서 각각 독립 검증한다 |
 | 세 모드 동등성 | 백테스트=페이퍼=라이브가 같은 판단을 낸다 | 동일 입력에서 세 실행 모드의 지표·신호 산출 일치(공유 코어 단일 구현의 검증) |
 | 통계 검증 | 과최적화를 걸러낸다 | Harness(§4.4.4)의 표본 내/외 분리(성능 저하 50% 미만)·워크포워드·몬테카를로·확률적 샤프(PSR ≥ 0.95) |
 
@@ -4059,17 +4143,17 @@ flowchart TD
 | §4.1 `types` | 단일 표준 값 타입·금액 정밀도(단일 정의처) · 캔들 검증(한 캔들 내부 `close_time=open_time+timeframe`·`high≥max(o,c)`·`low≤min(o,c)`·`price>0`·`volume≥0`은 타입 계층, 시계열 단조 `open_time` 엄격 증가는 적재 층이 강제) · 신호 판단 전용(방향·수량 필드 없음) |
 | §4.1 `indicators` | 지표는 공유 라이브러리에서 공통 방식으로 단 한 번 구현·DRY(계약은 관리 방식이며 개수가 아님 — 목록 증감은 registry 항목 증감) · look-ahead 구조적 배제(확정 캔들 전용 계약 `close_time ≤ T`) · 벡터화·증분 일치 · 시장폭 조건부 활성 · 워밍업 seed 규약 |
 | §4.2 전략 클래스 | 전략 판단 계약(`StrategyAdapter` — Adaptee는 판단 전용·stateless, look-ahead는 Engine이 통제) · 책임 분리(스키마 선언은 Adaptee, 해석은 `StrategyConfig`, 생성은 `Adapter Manager`) · config 불변·무순환 · 전략 프로파일 스키마 |
-| §4.3 `execution` | Decimal 단일 변환 관문(`normalizer` 한 곳, 모든 Broker `submit` 통과) · 시점 순서(next-bar, `decision_ts < execution_ts`) · 동시 도달 손절 우선(OHLC-locked) · 회계 항등식 `cash+position=equity`·비용 1회 차감 |
-| §4.3 `costs` | 모든 손익 net(4비용 수식) · 이산 펀딩·과거 실측 rate 주입 · 청산 Isolated 보수 방향 |
+| §4.3 `execution` | Decimal 단일 변환 관문(`normalizer` 한 곳, 모든 Broker `submit` 통과) · 시점 순서(next-bar, `decision_ts < execution_ts`, 체결 지연 한 주기 이하) · 결측 횡단 주문 금지 · 진입 지급 능력 예약(마진·진입 수수료·청산 수수료 1회, 미래 펀딩 제외) · 동시 도달 손절 우선(OHLC-locked) · 회계 항등식 `cash+position=equity`·비용 1회 차감 |
+| §4.3 `costs` | 모든 손익 net(4비용 수식) · 이산 펀딩·과거 실측 rate 주입 · 격리 마진 펀딩 한도와 소진 시 청산 · 청산 Isolated 보수 방향 |
 | §4.3 `sizing` | 생존 사이징 1R≤1% · Kelly 상한(Quarter~Half) · 노출·상관·방향 한도 · pct 경로 framework 비준수 플래그 |
 | §4.3 `ports` | 환경 차이는 포트로만 주입(7 ABC, 구현은 서비스) · look-ahead(`up_to` 경계) · wall-clock 금지 |
 | §4.3 `eval` | 성과 수식 표준 1곳·연율화 규약(일간 리샘플 후 √365) · 판정 3단계(무결성→Hard Gate→Decision) · 통과선 정본(형태 무관 구속/형태 의존)·프로파일 성숙도 |
-| §4.4 `Engine`·캔들 루프·1분 트리거 walk | 캔들 두 순간의 고정 순서가 look-ahead 방지(시가=지난 캔들 정산·트리거, 종가=이번 캔들 판단) · 시점 순서 `decision_ts < execution_ts`(종가 신호·다음 시가 체결, `pending` 한 칸 지연) · 캔들 내 트리거는 1분 집행 피드를 시간 순서로(동시 도달 손절 우선, 소급 금지) · 트레일링·1분 파리티 허용 편차 확정(거래별 상대 편차 `max(1 tick, 5bp)`·부호 평균 편차 `1bp`·소비 전략 없어 재유보) · 워밍업 preload 후 신호 discard · 결정성(Clock 주입·wall-clock 금지·동일 입력·seed→동일 Evidence) |
-| §4.4 입력·실행 포트 어댑터(`BacktestDataFeed`·`BacktestBroker`·`BacktestClock`·`BacktestCostModel`·`BacktestStrategyRegistry`) | 환경 차이는 포트로만 주입(5 입력·실행 포트 ABC의 backtest 구현) · look-ahead 구조적 배제(`DataFeed` `up_to` 경계) · Decimal 단일 변환 관문(`Broker.submit`이 `execution.normalizer` 통과, 어댑터 캐스팅 금지) · wall-clock 금지(`Clock`) · 비용은 값만 주입(수식은 `costs`, 실측 펀딩은 `DataFeed`) · 전략 목록 접근은 주입 포트(backtest 읽기 전용) |
+| §4.4 `Engine`·캔들 루프·1분 트리거 walk | 캔들 두 순간의 고정 순서가 look-ahead 방지(시가=지난 캔들 정산·트리거, 종가=이번 캔들 판단) · 시점 순서 `decision_ts < execution_ts`(종가 신호·다음 시가 체결, `pending` 한 칸 지연) · 결측 직전 주문 건너뜀과 `DATA_GAP` 청산 · 커버리지와 최장 결측의 Gate A 입력화 · 캔들 내 트리거는 1분 집행 피드를 시간 순서로(동시 도달 손절 우선, 소급 금지) · 트레일링·1분 파리티 허용 편차 확정(거래별 상대 편차 `max(1 tick, 5bp)`·부호 평균 편차 `1bp`·소비 전략 없어 재유보) · 워밍업 preload 후 신호 discard · 결정성(Clock 주입·wall-clock 금지·동일 설정·원천·seed→동일 Evidence) |
+| §4.4 입력·실행 포트 어댑터(`BacktestDataFeed`·`BacktestBroker`·`BacktestClock`·`BacktestCostModel`·`BacktestStrategyRegistry`) | 환경 차이는 포트로만 주입(5 입력·실행 포트 ABC의 backtest 구현) · look-ahead 구조적 배제(`DataFeed` `up_to` 경계) · 정상 원천 부재와 부분 버킷 분리·1분 원천 독립 대조·무보간 · 실제 캔들 여는·닫는 시각 합집합의 Clock 스케줄 · 펀딩 조회 포함 창·심볼 정규화·미발견 기록 · Decimal 단일 변환 관문(`Broker.submit`이 `execution.normalizer` 통과, 어댑터 캐스팅 금지) · wall-clock 금지(`Clock`) · 비용은 값만 주입(수식은 `costs`, 실측 펀딩은 `DataFeed`) · 전략 목록 접근은 주입 포트(backtest 읽기 전용) |
 | §4.4 `ConfigLayer`(`RunConfig`) | 같은 config가 backtest·라이브에서 동일 검증(전략 파라미터 스키마·검증은 `StrategyConfig` 단일 소유, 여기서 재정의 금지) · `fill_timing` 기본 `next_bar` · 지표 계산 모드(auto/explicit/all)·트리거 세밀도(tf_candle/m1_subcandle) run 설정화 |
 | §4.4 `Harness` | 과최적화 방어를 여러 run으로 산출(표본 내/외 분리·워크포워드·몬테카를로·확률적 샤프·파라미터 스윕) — 단일 run `eval`이 아니라 Harness가 산출·적용(단일 run `eval.HardGate`는 이 증거를 받지 않음) · 고정 seed(결정성) · 스윕 `run_id`는 Engine이 카탈로그 시퀀스로 단독 발급 |
-| §4.5 `BacktestEvidenceSink` | 연구 데이터·운영 DB 분리(무거운 시점별 상세는 run별 SQLite, 파일 하나로 자기완결) · 결정성 해시=정렬 행의 정규화 직렬화(파일 바이트 아님·wall-clock 제외) · 스키마는 데이터베이스 설계(§5)가 확정, 이 절은 쓰기 계약만 |
-| §4.5 `BacktestCatalogStore` | 연구 데이터·운영 DB 분리(가벼운 메타만 전용 `backtest_db`) · `run_id` 단독 발급(run_id 발급 경합·파일명 충돌 차단) · 백테스트 전용(라이브·페이퍼 미사용) · 서비스 경계는 값 ID 참조(FK 미강제) · 스키마는 데이터베이스 설계(§5)가 확정, 이 절은 쓰기 계약만 |
+| §4.5 `BacktestEvidenceSink` | 연구 데이터·운영 DB 분리(무거운 시점별 상세는 run별 SQLite, 파일 하나로 자기완결) · 전략 주기와 1분 OHLCV 결측 계약 기록 · 결정성 해시=정렬 행의 정규화 직렬화(파일 바이트 아님·wall-clock 제외) · 스키마는 데이터베이스 설계(§5)가 확정, 이 절은 쓰기 계약만 |
+| §4.5 `BacktestCatalogStore` | 연구 데이터·운영 DB 분리(가벼운 메타만 전용 `backtest_db`) · `run_id` 단독 발급(run_id 발급 경합·파일명 충돌 차단) · 결정성 대조는 설정 해시와 원천 데이터 해시가 모두 같은 run만 선정 · 백테스트 전용(라이브·페이퍼 미사용) · 서비스 경계는 값 ID 참조(FK 미강제) · 스키마는 데이터베이스 설계(§5)가 확정, 이 절은 쓰기 계약만 |
 | 부록.1·부록.2 | 프로덕션 접촉은 채택 절차뿐(설계 단계 미변경) · 채택은 무중단 re-export shim(로직 잔존 금지, 계약 변경 자리는 호출부 수정) · 표면별 게이트(보존=동등성·교정=실측 골든 재수립·트레일링 무접촉) · 단계 통제(단계별 커밋+코드 리뷰 게이트·발주자 최종 승인·국면 1 롤백 복귀) · 실거래 전환은 core-lib 버전 고정 산출물(§1.2 거버넌스와 정합) |
 | 부록.2 국면 2 | 라이브 지표 인소싱(사전계산 테이블 폐지·`core_lib.indicators` 증분 직접 계산·동등성 게이트·재기동 preload 워밍업) · 판단 트리거의 데이터 가용성 계약(캔들 가용 확인 후 판단·미도착 대기 fail-safe·대기 상한 초과 시 결번+경보) · 수집기 내부화(적재만·확정 캔들마다 1행 불변식) · 체결 시점 통일(`fill_timing` 기본값 전환으로 `decision_ts < execution_ts`) |
 | 부록.3 | 강제청산 출처·수렴 계약 준수(거래소가 집행·우리는 수신 정리만, `Fill(exit_reason=LIQUIDATION)` 동일 모양·단일 회계 경로·`Trade.liquidated`·종결 상태 이벤트 1회 생성·부분 체결-종료 처리·방향 기반 축소 판별) · `liquidation_penalty` 라이브 계상 규칙(수입 이력 수송 채널 지정·지정 채널 조회 후에만 0·이중 차감 금지) · `wallet_db` 스키마 인계(§5.1.4 위임 수령 — `liquidation_penalty`·`r0` 컬럼) · 누락 복구(재접속 catch-up·강제 주문 전용 조회·창 분할, 주기 대조 수량 일치 확장, 영속 워터마크·멱등) · 수동 개입 책임(운영자·조치 기록·불일치 해소 전 신규 진입 중지) · 실측 대사(청산 근사의 보수성 실측 확인 — 구↔신 대사 제외와 별개, 기록은 독립 라이브 Evidence SQLite·보존, 연구 데이터·운영 DB 분리 준수) · Decimal 단일 변환 관문(거래소 문자열 수치) |
