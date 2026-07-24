@@ -31,6 +31,16 @@ def universal() -> dict[str, float]:
     }
 
 
+def overfit() -> dict[str, float]:
+    """Return the Harness-applied cross-run overfitting thresholds."""
+    return {
+        "oos_degradation_limit": 0.50,
+        "psr_minimum": 0.95,
+        "ruin_drawdown": 0.60,
+        "risk_fraction": 0.01,
+    }
+
+
 def _below(value: float, limit: float) -> bool:
     return math.isnan(value) or value < limit
 

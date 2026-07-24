@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from statistics import NormalDist
 from typing import Protocol, runtime_checkable
 
+from core_lib.eval import thresholds
 from core_lib.ports import CatalogStore
 
 from backtest_service.config import RunConfig
@@ -17,10 +18,8 @@ from backtest_service.engine.engine import Engine, RunResult
 
 EngineFactory = Callable[[], Engine]
 
-OOS_DEGRADATION_LIMIT = 0.50
-PSR_MINIMUM = 0.95
-RUIN_DRAWDOWN = 0.60
-RISK_FRACTION = 0.01
+OOS_DEGRADATION_LIMIT = thresholds.overfit()["oos_degradation_limit"]
+PSR_MINIMUM = thresholds.overfit()["psr_minimum"]
 
 
 def _quantile(values: Sequence[float], probability: float) -> float:
@@ -78,6 +77,7 @@ class Harness:
             if in_score != 0.0
             else (0.0 if out_score >= 0.0 else 1.0)
         )
+        limits = thresholds.overfit()
         return {
             "representative_run_id": out_result.run_id,
             "in_sample_run_id": in_result.run_id,
@@ -88,7 +88,7 @@ class Harness:
             "in_sample_value": in_score,
             "out_of_sample_value": out_score,
             "oos_degradation": degradation,
-            "passed": degradation < OOS_DEGRADATION_LIMIT,
+            "passed": degradation < limits["oos_degradation_limit"],
         }
 
     def walk_forward(self, config: RunConfig, folds: int) -> dict[str, object]:
@@ -130,12 +130,13 @@ class Harness:
             }
             for index, result in enumerate(results)
         ]
+        limits = thresholds.overfit()
         return {
             "representative_run_id": results[-1].run_id,
             "folds": fold_evidence,
             "degradations": degradations,
             "maximum_degradation": max(degradations, default=0.0),
-            "passed": all(value < OOS_DEGRADATION_LIMIT for value in degradations),
+            "passed": all(value < limits["oos_degradation_limit"] for value in degradations),
         }
 
     def monte_carlo(
@@ -151,6 +152,8 @@ class Harness:
         if any(not math.isfinite(value) for value in r_multiples):
             raise ValueError("r_multiples must be finite")
         generator = random.Random(self._seed)
+        overfit_limits = thresholds.overfit()
+        universal_limits = thresholds.universal()
         terminal_r: list[float] = []
         ruin_count = 0
         for _ in range(iters):
@@ -161,9 +164,9 @@ class Harness:
             for _ in r_multiples:
                 outcome = generator.choice(r_multiples)
                 total_r += outcome
-                equity *= max(0.0, 1.0 + outcome * RISK_FRACTION)
+                equity *= max(0.0, 1.0 + outcome * overfit_limits["risk_fraction"])
                 peak = max(peak, equity)
-                if equity <= peak * (1.0 - RUIN_DRAWDOWN):
+                if equity <= peak * (1.0 - overfit_limits["ruin_drawdown"]):
                     ruined = True
             terminal_r.append(total_r)
             ruin_count += int(ruined)
@@ -174,7 +177,7 @@ class Harness:
             "terminal_r_p05": _quantile(terminal_r, 0.05),
             "terminal_r_p95": _quantile(terminal_r, 0.95),
             "ruin_probability": ruin_probability,
-            "passed": ruin_probability < 0.001,
+            "passed": ruin_probability < universal_limits["ror_max_exclusive"],
         }
 
     def psr(self, returns: list[float]) -> float:
@@ -215,16 +218,17 @@ class Harness:
             raise ValueError("degradation must be nonnegative")
         if not 0.0 <= psr <= 1.0:
             raise ValueError("psr must be between zero and one")
+        limits = thresholds.overfit()
         failed: list[str] = []
-        if degradation >= OOS_DEGRADATION_LIMIT:
+        if degradation >= limits["oos_degradation_limit"]:
             failed.append("oos_degradation")
-        if psr < PSR_MINIMUM:
+        if psr < limits["psr_minimum"]:
             failed.append("psr")
         return {
             "passed": not failed,
             "failed": failed,
-            "oos_degradation_limit": OOS_DEGRADATION_LIMIT,
-            "psr_minimum": PSR_MINIMUM,
+            "oos_degradation_limit": limits["oos_degradation_limit"],
+            "psr_minimum": limits["psr_minimum"],
         }
 
     @staticmethod

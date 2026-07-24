@@ -22,6 +22,7 @@ from backtest_service.config import RunConfig
 from backtest_service.engine import Engine, RunResult
 from backtest_service.harness import Harness
 from core_lib.eval import MetricSet
+from core_lib.eval import thresholds as evaluation_thresholds
 from core_lib.ports import CatalogStore, DataFeed, StrategyRegistry
 from core_lib.strategy import (
     AdapterManager,
@@ -1663,14 +1664,80 @@ def test_harness_is_fixed_seed_and_applies_cross_run_boundaries() -> None:
     assert oos["oos_degradation"] == pytest.approx(0.4)
     assert oos["passed"] is True
     assert catalog.events == ["reconcile"]
-    assert first == second
-    assert set(first) >= {
-        "terminal_r_p05",
-        "terminal_r_p95",
-        "ruin_probability",
-        "passed",
-    }
+    assert (
+        first
+        == second
+        == {
+            "iterations": 100,
+            "seed": 0,
+            "terminal_r_p05": -1.0,
+            "terminal_r_p95": 5.0,
+            "ruin_probability": 0.0,
+            "passed": True,
+        }
+    )
     assert harness.overfit_gate(degradation=0.499, psr=0.95)["passed"] is True
     failed = harness.overfit_gate(degradation=0.5, psr=0.949)
     assert failed["failed"] == ["oos_degradation", "psr"]
-    assert harness.psr([0.01, 0.02, -0.005, 0.03, 0.015]) > 0.5
+    assert harness.psr([0.01, 0.02, -0.005, 0.03, 0.015]) == pytest.approx(0.9345141116427946)
+
+    walk_engine = _HarnessEngine(
+        [
+            _run_result("wf-1", 2.0),
+            _run_result("wf-2", 1.2),
+            _run_result("wf-3", 1.0),
+        ]
+    )
+    walk = Harness(_Catalog(), lambda: cast(Engine, walk_engine)).walk_forward(
+        _config(run_name="walk"),
+        3,
+    )
+    assert walk["degradations"] == pytest.approx([0.4, 1.0 / 6.0])
+    assert walk["maximum_degradation"] == pytest.approx(0.4)
+    assert walk["passed"] is True
+
+
+def test_harness_reads_every_overfit_limit_from_shared_eval_thresholds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert evaluation_thresholds.overfit() == {
+        "oos_degradation_limit": 0.50,
+        "psr_minimum": 0.95,
+        "ruin_drawdown": 0.60,
+        "risk_fraction": 0.01,
+    }
+
+    class TrackingLimits(dict[str, float]):
+        def __init__(self) -> None:
+            super().__init__(
+                oos_degradation_limit=0.25,
+                psr_minimum=0.90,
+                ruin_drawdown=0.60,
+                risk_fraction=0.01,
+            )
+            self.accessed: set[str] = set()
+
+        def __getitem__(self, key: str) -> float:
+            self.accessed.add(key)
+            return super().__getitem__(key)
+
+    limits = TrackingLimits()
+    monkeypatch.setattr(evaluation_thresholds, "overfit", lambda: limits)
+    harness = Harness(_Catalog(), lambda: cast(Engine, _HarnessEngine([])))
+
+    gate = harness.overfit_gate(degradation=0.40, psr=0.91)
+    monte_carlo = harness.monte_carlo([1.0, -1.0, 2.0], 10)
+
+    assert gate == {
+        "passed": False,
+        "failed": ["oos_degradation"],
+        "oos_degradation_limit": 0.25,
+        "psr_minimum": 0.90,
+    }
+    assert monte_carlo["passed"] is True
+    assert {
+        "oos_degradation_limit",
+        "psr_minimum",
+        "ruin_drawdown",
+        "risk_fraction",
+    } <= limits.accessed
