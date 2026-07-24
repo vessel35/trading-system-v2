@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -71,18 +72,63 @@ def _candles() -> list[Candle]:
     ]
 
 
+def _minute_candles(candles: list[Candle]) -> list[Candle]:
+    result: list[Candle] = []
+    for candle in candles:
+        minute_count = int(
+            (candle.close_time - candle.open_time) / timedelta(minutes=1)
+        )
+        for index in range(minute_count):
+            opened = candle.open_time + timedelta(minutes=index)
+            result.append(
+                Candle(
+                    symbol=candle.symbol,
+                    exchange=candle.exchange,
+                    timeframe="1m",
+                    open_time=opened,
+                    close_time=opened + timedelta(minutes=1),
+                    open=candle.open if index == 0 else candle.close,
+                    high=candle.high,
+                    low=candle.low,
+                    close=candle.close,
+                    volume=candle.volume / minute_count,
+                    quote_volume=None,
+                    trade_count=None,
+                )
+            )
+    return result
+
+
 class _Feed(DataFeed):
     def __init__(self, candles: list[Candle]) -> None:
         self._candles = list(candles)
+        self._minute_candles = _minute_candles(candles)
         self.candle_calls = 0
 
     def candles(self, symbol: str, tf: str, up_to: datetime) -> list[Candle]:
         assert symbol == "BTCUSDT"
         self.candle_calls += 1
         if tf == "1m":
-            return []
+            return [
+                candle
+                for candle in self._minute_candles
+                if candle.close_time <= up_to
+            ]
         assert tf == "1h"
         return [candle for candle in self._candles if candle.close_time <= up_to]
+
+    def source_open_times(
+        self,
+        symbol: str,
+        range_start: datetime,
+        range_end: datetime,
+    ) -> tuple[datetime, ...]:
+        assert symbol == "BTCUSDT"
+        return tuple(
+            candle.open_time
+            for candle in self._minute_candles
+            if range_start <= candle.open_time and candle.close_time <= range_end
+        )
 
     def funding(self, symbol: str, at: datetime) -> Decimal:
         del symbol, at
@@ -133,14 +179,32 @@ class _DailyFeed(DataFeed):
         funding_rate: Decimal = Decimal("0.001"),
     ) -> None:
         self._candles = candles
+        self._minute_candles = _minute_candles(candles)
         self._funding_rate = funding_rate
 
     def candles(self, symbol: str, tf: str, up_to: datetime) -> list[Candle]:
         assert symbol == "BTCUSDT"
         if tf == "1m":
-            return []
+            return [
+                candle
+                for candle in self._minute_candles
+                if candle.close_time <= up_to
+            ]
         assert tf == "1d"
         return [candle for candle in self._candles if candle.close_time <= up_to]
+
+    def source_open_times(
+        self,
+        symbol: str,
+        range_start: datetime,
+        range_end: datetime,
+    ) -> tuple[datetime, ...]:
+        assert symbol == "BTCUSDT"
+        return tuple(
+            candle.open_time
+            for candle in self._minute_candles
+            if range_start <= candle.open_time and candle.close_time <= range_end
+        )
 
     def funding(self, symbol: str, at: datetime) -> Decimal:
         assert symbol == "BTCUSDT"
@@ -456,24 +520,32 @@ class _Catalog(CatalogStore):
         self,
         run_id: str,
         config_hash: str,
+        source_data_hash: str,
     ) -> DeterminismReference:
         current_matches = (
             self.runs[run_id]["config_hash"] == config_hash
             and not self.force_config_mismatch
         )
+        self.runs[run_id] = {
+            **self.runs[run_id],
+            "source_data_hash": source_data_hash,
+        }
         for summary in reversed(self.summaries):
             assert isinstance(summary, Mapping)
             previous_id = summary["run_id"]
             if (
                 previous_id != run_id
                 and self.runs[str(previous_id)]["config_hash"] == config_hash
+                and self.runs[str(previous_id)].get("source_data_hash")
+                == source_data_hash
             ):
                 return DeterminismReference(
                     current_matches,
+                    True,
                     str(previous_id),
                     self.comparison_hash_override or str(summary["evidence_hash"]),
                 )
-        return DeterminismReference(current_matches, None, None)
+        return DeterminismReference(current_matches, True, None, None)
 
 
 class _Broker(BacktestBroker):
@@ -703,6 +775,15 @@ def test_engine_orders_configure_before_submit_and_persists_timing(
             WHERE source_kind = 'funding'
             """
         ).fetchone() == (1,)
+        prereg = json.loads(
+            connection.execute(
+                "SELECT prereg_json FROM BACKTEST_RUN_LOCAL"
+            ).fetchone()[0]
+        )
+        assert prereg["data_quality_criteria"] == {
+            "min_coverage_ratio": 0.95,
+            "max_consecutive_gap_seconds": 86_400,
+        }
     assert result.integrity_status == "passed"
     assert feeds[0].candle_calls == 2
     assert catalog.events == ["reconcile", "register", "prereg", "summary"]
@@ -879,6 +960,47 @@ def test_engine_hash_parity_uses_different_catalog_run_ids(tmp_path: Path) -> No
         assert '"status":"matched"' in detail
 
 
+def test_same_config_with_different_source_is_not_a_determinism_target(
+    tmp_path: Path,
+) -> None:
+    catalog = _Catalog()
+    brokers: list[_Broker] = []
+    first = _engine(tmp_path / "one", catalog, brokers).run(_config())
+    changed = _candles()
+    original = changed[0]
+    changed[0] = replace(
+        original,
+        open=original.open + 0.25,
+        high=original.high + 0.25,
+        low=original.low + 0.25,
+        close=original.close + 0.25,
+    )
+
+    second = _engine(
+        tmp_path / "two",
+        catalog,
+        brokers,
+        candles=changed,
+    ).run(_config())
+
+    assert first.evidence_hash != second.evidence_hash
+    assert first.integrity_status == second.integrity_status == "passed"
+    assert (
+        catalog.runs[first.run_id]["source_data_hash"]
+        != catalog.runs[second.run_id]["source_data_hash"]
+    )
+    with sqlite3.connect(second.evidence_path) as connection:
+        passed, detail = connection.execute(
+            """
+            SELECT passed, detail_json
+            FROM INTEGRITY_CHECK
+            WHERE check_name = 'deterministic'
+            """
+        ).fetchone()
+    assert passed == 1
+    assert '"status":"no_comparison_target"' in detail
+
+
 def test_vessel_reference_end_to_end_dry_run_is_complete_and_deterministic(
     tmp_path: Path,
 ) -> None:
@@ -945,6 +1067,10 @@ def test_deterministic_check_fails_on_catalog_config_or_previous_hash_mismatch(
     catalog.comparison_hash_override = "f" * 64
     second = _engine(tmp_path / "two", catalog, brokers).run(_config())
     assert second.integrity_status == "diagnostic_only"
+    assert (
+        catalog.runs[first.run_id]["source_data_hash"]
+        == catalog.runs[second.run_id]["source_data_hash"]
+    )
     with sqlite3.connect(second.evidence_path) as connection:
         passed, detail = connection.execute(
             """
@@ -969,6 +1095,47 @@ def test_deterministic_check_fails_on_catalog_config_or_previous_hash_mismatch(
             """
         ).fetchone()[0]
         assert '"catalog_config_matches":false' in detail
+
+
+def test_missing_minute_source_snapshot_fails_evidence_completeness(
+    tmp_path: Path,
+) -> None:
+    sinks: list[BacktestEvidenceSink] = []
+    _engine(tmp_path, _Catalog(), [], sinks=sinks).run(_config())
+    sink = sinks[0]
+    sink.connection.execute(
+        "DELETE FROM SOURCE_DATA_SNAPSHOT WHERE timeframe = '1m'"
+    )
+    sink.connection.commit()
+
+    assert sink.audit(require_eval_decision=True)["evidence_complete"] is False
+    source_failures = cast(
+        Sequence[str],
+        sink.integrity_details["evidence_complete"]["source_failures"],
+    )
+    assert "minute_ohlcv_snapshot_count" in source_failures
+
+
+def test_missing_ohlcv_origin_contract_fails_evidence_completeness(
+    tmp_path: Path,
+) -> None:
+    sinks: list[BacktestEvidenceSink] = []
+    _engine(tmp_path, _Catalog(), [], sinks=sinks).run(_config())
+    sink = sinks[0]
+    sink.connection.execute(
+        "UPDATE SOURCE_DATA_SNAPSHOT SET note = NULL WHERE timeframe = '1m'"
+    )
+    sink.connection.commit()
+
+    assert sink.audit(require_eval_decision=True)["evidence_complete"] is False
+    source_failures = cast(
+        Sequence[str],
+        sink.integrity_details["evidence_complete"]["source_failures"],
+    )
+    assert any(
+        failure.startswith("ohlcv_gap_contract_missing:")
+        for failure in source_failures
+    )
 
 
 def test_integrity_audit_is_fail_closed_for_grid_indicator_source_and_slippage(
@@ -1078,10 +1245,7 @@ def test_coarse_candle_funding_charges_every_crossed_boundary_with_payment_sign(
         assert len(settlements) == 3
         assert all(payment < 0 for _, payment, _ in settlements)
         assert -sum(payment for _, payment, _ in settlements) == funding_cost
-        assert {source for _, _, source in settlements} == {
-            "boundary_open",
-            "prev_close",
-        }
+        assert {source for _, _, source in settlements} == {"boundary_open"}
         assert connection.execute(
             """
             SELECT passed

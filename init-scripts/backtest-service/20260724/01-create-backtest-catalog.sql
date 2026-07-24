@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS public.backtest_run (
     engine_version VARCHAR(40) NOT NULL,
     core_lib_version VARCHAR(40) NOT NULL,
     config_hash VARCHAR(64) NOT NULL,
+    source_data_hash VARCHAR(64),
     profile_ref VARCHAR(80),
     strategy_profile_json JSONB,
     envelope_status_declared VARCHAR(16),
@@ -138,6 +139,10 @@ CREATE TABLE IF NOT EXISTS public.backtest_run (
     CONSTRAINT ck_backtest_run_config_hash CHECK (
         config_hash ~ '^[0-9A-Fa-f]{64}$'
     ),
+    CONSTRAINT ck_backtest_run_source_data_hash CHECK (
+        source_data_hash IS NULL
+        OR source_data_hash ~ '^[0-9a-f]{64}$'
+    ),
     CONSTRAINT ck_backtest_run_envelope_status CHECK (
         envelope_status_declared IS NULL
         OR envelope_status_declared IN ('provisional', 'updating', 'established')
@@ -188,6 +193,8 @@ CREATE INDEX IF NOT EXISTS ix_backtest_run_sweep_id
     ON public.backtest_run (sweep_id);
 CREATE INDEX IF NOT EXISTS ix_backtest_run_config_hash
     ON public.backtest_run (config_hash);
+CREATE INDEX IF NOT EXISTS ix_backtest_run_determinism_key
+    ON public.backtest_run (config_hash, source_data_hash);
 CREATE INDEX IF NOT EXISTS ix_backtest_run_created_at_desc
     ON public.backtest_run (created_at DESC);
 

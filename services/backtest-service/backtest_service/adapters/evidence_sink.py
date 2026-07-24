@@ -140,8 +140,10 @@ class BacktestEvidenceSink(EvidenceSink):
         self._integrity: dict[str, bool] = {}
         self._integrity_details: dict[str, dict[str, object]] = {}
         self._catalog_config_matches = True
+        self._catalog_source_matches = True
         self._comparison_run_id: str | None = None
         self._comparison_hash: str | None = None
+        self._source_data_hash: str | None = None
 
     @property
     def path(self) -> str | None:
@@ -236,6 +238,8 @@ class BacktestEvidenceSink(EvidenceSink):
         self,
         *,
         catalog_config_matches: bool,
+        catalog_source_matches: bool,
+        source_data_hash: str,
         comparison_run_id: str | None,
         comparison_hash: str | None,
     ) -> None:
@@ -248,9 +252,45 @@ class BacktestEvidenceSink(EvidenceSink):
             or any(character not in "0123456789abcdef" for character in comparison_hash)
         ):
             raise ValueError("comparison hash must be lowercase SHA-256 hex")
+        if (
+            len(source_data_hash) != 64
+            or source_data_hash.lower() != source_data_hash
+            or any(character not in "0123456789abcdef" for character in source_data_hash)
+        ):
+            raise ValueError("source_data_hash must be lowercase SHA-256 hex")
         self._catalog_config_matches = catalog_config_matches
+        self._catalog_source_matches = catalog_source_matches
+        self._source_data_hash = source_data_hash
         self._comparison_run_id = comparison_run_id
         self._comparison_hash = comparison_hash
+
+    def source_data_hash(self) -> str:
+        """Hash the ordered persisted SOURCE_DATA_SNAPSHOT content identities."""
+        rows = self.connection.execute(
+            """
+            SELECT source_kind, source_ref, symbol, exchange, timeframe,
+                   range_start, range_end, content_hash
+            FROM SOURCE_DATA_SNAPSHOT
+            ORDER BY source_kind, source_ref, symbol, exchange,
+                     coalesce(timeframe, ''), range_start, range_end, snapshot_id
+            """
+        ).fetchall()
+        if not rows:
+            raise RuntimeError("source data hash requires at least one snapshot")
+        payload = [
+            {
+                "source_kind": row[0],
+                "source_ref": row[1],
+                "symbol": row[2],
+                "exchange": row[3],
+                "timeframe": row[4],
+                "range_start": row[5],
+                "range_end": row[6],
+                "content_hash": row[7],
+            }
+            for row in rows
+        ]
+        return hashlib.sha256(canonical_json(payload).encode()).hexdigest()
 
     def audit(self, *, require_eval_decision: bool = False) -> dict[str, bool]:
         """Compute the six standard integrity facts from persisted records."""
@@ -287,6 +327,19 @@ class BacktestEvidenceSink(EvidenceSink):
             timestamp_failures.extend(
                 ("execution_lag", *row) for row in lag_failures
             )
+        decisionless_executions = connection.execute(
+            """
+            SELECT execution_id, exit_reason
+            FROM EXECUTION
+            WHERE decision_id IS NULL
+            ORDER BY execution_id
+            """
+        ).fetchall()
+        timestamp_failures.extend(
+            ("unexpected_decisionless_execution", *row)
+            for row in decisionless_executions
+            if row[1] != "END_OF_DATA"
+        )
         timestamp_order = not timestamp_failures
         execution_cost_failures = connection.execute(
             """
@@ -378,6 +431,11 @@ class BacktestEvidenceSink(EvidenceSink):
             "timestamp_order": {
                 "failure_count": len(timestamp_failures),
                 "failures": [list(row) for row in timestamp_failures],
+                "allowed_decisionless_end_of_data": [
+                    row[0]
+                    for row in decisionless_executions
+                    if row[1] == "END_OF_DATA"
+                ],
             },
             "cost_once": {
                 "execution_total_failure_count": len(execution_cost_failures),
@@ -428,6 +486,7 @@ class BacktestEvidenceSink(EvidenceSink):
         results["deterministic"] = (
             serialization_stable
             and self._catalog_config_matches
+            and self._catalog_source_matches
             and previous_matches
         )
         if self._comparison_hash is None:
@@ -445,6 +504,8 @@ class BacktestEvidenceSink(EvidenceSink):
         self._integrity_details["deterministic"] = {
             "serialization_stable": serialization_stable,
             "catalog_config_matches": self._catalog_config_matches,
+            "catalog_source_matches": self._catalog_source_matches,
+            "source_data_hash": self._source_data_hash,
             "current_evidence_hash": evidence_hash,
             **comparison,
         }
@@ -635,8 +696,7 @@ class BacktestEvidenceSink(EvidenceSink):
         gap_count, note = source
         contract: OhlcvGapContract | None = None
         if note is None:
-            if gap_count != 0:
-                return ["missing_strategy_ohlcv_gap_contract"]
+            return ["missing_strategy_ohlcv_gap_contract"]
         else:
             try:
                 contract = decode_ohlcv_gap_contract(note)
@@ -737,6 +797,8 @@ class BacktestEvidenceSink(EvidenceSink):
         failures: list[str] = []
         if counts.get(("ohlcv", symbol, timeframe)) != 1:
             failures.append("strategy_ohlcv_snapshot_count")
+        if timeframe != "1m" and counts.get(("ohlcv", symbol, "1m")) != 1:
+            failures.append("minute_ohlcv_snapshot_count")
         if str(market_type).lower() == "futures":
             if counts.get(("funding", symbol, None)) != 1:
                 failures.append("funding_snapshot_count")
@@ -745,7 +807,7 @@ class BacktestEvidenceSink(EvidenceSink):
         for (
             snapshot_id,
             kind,
-            source_ref,
+            _source_ref,
             _row_symbol,
             row_timeframe,
             range_start,
@@ -770,18 +832,13 @@ class BacktestEvidenceSink(EvidenceSink):
                 failures.append(f"ohlcv_snapshot_count_identity:{snapshot_id}")
             if not (range_start <= period_start and period_end <= range_end):
                 failures.append(f"ohlcv_snapshot_evaluation_coverage:{snapshot_id}")
-            contract: OhlcvGapContract | None = None
             if note is None:
-                if gap_count != 0:
-                    failures.append(f"ohlcv_gap_contract_missing:{snapshot_id}")
-                    continue
-            else:
-                try:
-                    contract = decode_ohlcv_gap_contract(note)
-                except ValueError:
-                    failures.append(f"ohlcv_gap_contract_invalid:{snapshot_id}")
-                    continue
-            if contract is None:
+                failures.append(f"ohlcv_gap_contract_missing:{snapshot_id}")
+                continue
+            try:
+                contract = decode_ohlcv_gap_contract(note)
+            except ValueError:
+                failures.append(f"ohlcv_gap_contract_invalid:{snapshot_id}")
                 continue
             if contract.timeframe_ms != duration:
                 failures.append(f"ohlcv_gap_timeframe_mismatch:{snapshot_id}")
@@ -806,10 +863,7 @@ class BacktestEvidenceSink(EvidenceSink):
                 != expected_evaluation_gaps
             ):
                 failures.append(f"ohlcv_evaluation_gap_mismatch:{snapshot_id}")
-            if (
-                source_ref == "crypto_data.ohlcv_futures"
-                and contract.origin_validation_status != "verified"
-            ):
+            if contract.origin_validation_status != "verified":
                 failures.append(f"ohlcv_origin_unverified:{snapshot_id}")
             if (
                 row_timeframe == "1m"

@@ -1,3 +1,7 @@
+\set ON_ERROR_STOP on
+
+BEGIN;
+
 ALTER TABLE public.backtest_summary
     ADD COLUMN IF NOT EXISTS expected_candle_count INTEGER NOT NULL DEFAULT 0,
     ADD COLUMN IF NOT EXISTS observed_candle_count INTEGER NOT NULL DEFAULT 0,
@@ -28,3 +32,5 @@ ALTER TABLE public.backtest_summary
         AND unobservable_funding_boundary_count >= 0
         AND data_gap_exit_count >= 0
     );
+
+COMMIT;

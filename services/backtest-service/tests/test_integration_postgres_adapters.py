@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from datetime import UTC, datetime, timedelta
@@ -203,11 +204,14 @@ def test_catalog_issues_run_id_then_records_prereg_and_evaluated_metadata() -> N
     with _connect_writer("backtest_db") as connection:
         catalog = BacktestCatalogStore(cast(WriteConnection, connection))
         run_id = catalog.register(run_meta)
+        source_data_hash = hashlib.sha256(run_id.encode()).hexdigest()
         reference = catalog.determinism_reference(
             run_id,
             str(run_meta["config_hash"]),
+            source_data_hash,
         )
         assert reference.catalog_config_matches is True
+        assert reference.catalog_source_matches is True
         catalog.save_prereg(
             {
                 "run_id": run_id,
@@ -234,6 +238,44 @@ def test_catalog_issues_run_id_then_records_prereg_and_evaluated_metadata() -> N
                 "evidence_hash": "b" * 64,
             }
         )
+        same_source_run_id = catalog.register(run_meta)
+        same_source_reference = catalog.determinism_reference(
+            same_source_run_id,
+            str(run_meta["config_hash"]),
+            source_data_hash,
+        )
+        assert same_source_reference.comparison_run_id == run_id
+        assert same_source_reference.comparison_hash == "b" * 64
+
+        different_source_run_id = catalog.register(run_meta)
+        different_source_hash = hashlib.sha256(
+            different_source_run_id.encode()
+        ).hexdigest()
+        different_source_reference = catalog.determinism_reference(
+            different_source_run_id,
+            str(run_meta["config_hash"]),
+            different_source_hash,
+        )
+        assert different_source_reference.comparison_run_id is None
+        assert different_source_reference.comparison_hash is None
+        for completed_run_id, completed_evidence_hash in (
+            (same_source_run_id, "b" * 64),
+            (different_source_run_id, "c" * 64),
+        ):
+            catalog.upsert_summary(
+                {
+                    "run_id": completed_run_id,
+                    "trade_count": 0,
+                    "win_count": 0,
+                    "loss_count": 0,
+                    "r_excluded_count": 0,
+                    "initial_capital": Decimal("10000"),
+                    "integrity_passed": True,
+                    "integrity_status": "passed",
+                    "decision_route": "retest",
+                    "evidence_hash": completed_evidence_hash,
+                }
+            )
         row = connection.execute(
             """
             SELECT r.run_seq, r.run_id, r.status, r.evidence_path,
@@ -264,13 +306,48 @@ class _GapFreeVesselFeed(DataFeed):
 
     def __init__(self, candles: list[Candle]) -> None:
         self._candles = list(candles)
+        self._minute_candles = [
+            Candle(
+                symbol=candle.symbol,
+                exchange=candle.exchange,
+                timeframe="1m",
+                open_time=candle.open_time + timedelta(minutes=index),
+                close_time=candle.open_time + timedelta(minutes=index + 1),
+                open=candle.open if index == 0 else candle.close,
+                high=candle.high,
+                low=candle.low,
+                close=candle.close,
+                volume=candle.volume / 60,
+                quote_volume=None,
+                trade_count=None,
+            )
+            for candle in candles
+            for index in range(60)
+        ]
 
     def candles(self, symbol: str, tf: str, up_to: datetime) -> list[Candle]:
         assert symbol == "BTCUSDT"
         if tf == "1m":
-            return []
+            return [
+                candle
+                for candle in self._minute_candles
+                if candle.close_time <= up_to
+            ]
         assert tf == "1h"
         return [candle for candle in self._candles if candle.close_time <= up_to]
+
+    def source_open_times(
+        self,
+        symbol: str,
+        range_start: datetime,
+        range_end: datetime,
+    ) -> tuple[datetime, ...]:
+        assert symbol == "BTCUSDT"
+        return tuple(
+            candle.open_time
+            for candle in self._minute_candles
+            if range_start <= candle.open_time and candle.close_time <= range_end
+        )
 
     def funding(self, symbol: str, at: datetime) -> Decimal:
         del symbol, at

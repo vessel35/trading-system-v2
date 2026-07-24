@@ -9,7 +9,7 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Protocol, runtime_checkable
+from typing import Final, Protocol, runtime_checkable
 
 from core_lib.costs import (
     funding_boundaries_between,
@@ -75,11 +75,12 @@ from backtest_service.adapters.evidence_sink import (
 from backtest_service.adapters.ohlcv_gaps import (
     OhlcvGapContract,
     build_ohlcv_gap_contract,
-    timeframe_milliseconds,
 )
 from backtest_service.config import RunConfig
 
 _RUN_ID = re.compile(r"^BT_[0-9]{8}_(?P<seq>[0-9]+)_(?P<name>[a-z0-9-]+)$")
+MIN_DATA_COVERAGE_RATIO: Final = 0.95
+MAX_CONSECUTIVE_GAP_SECONDS: Final = 86_400
 
 
 @runtime_checkable
@@ -120,10 +121,15 @@ class _BoundEvidence(Protocol):
         self,
         *,
         catalog_config_matches: bool,
+        catalog_source_matches: bool,
+        source_data_hash: str,
         comparison_run_id: str | None,
         comparison_hash: str | None,
     ) -> None:
         """Bind a catalog-backed cross-run comparison."""
+
+    def source_data_hash(self) -> str:
+        """Return the comparison fingerprint of persisted source snapshots."""
 
 
 @runtime_checkable
@@ -132,6 +138,7 @@ class _DeterminismCatalog(Protocol):
         self,
         run_id: str,
         config_hash: str,
+        source_data_hash: str,
     ) -> DeterminismReference:
         """Return current-config and previous-hash catalog facts."""
 
@@ -222,7 +229,7 @@ class Engine:
         manager: AdapterManager,
         *,
         prereg: Mapping[str, object],
-        engine_version: str = "1.3.1",
+        engine_version: str = "1.4.0",
         core_lib_version: str = "0.2.0",
         thresholds: Mapping[str, float] | None = None,
     ) -> None:
@@ -579,11 +586,13 @@ class Engine:
             for name, failed in (
                 (
                     "data_coverage_ratio",
-                    float(self._gap_stats["data_coverage_ratio"]) < 0.95,
+                    float(self._gap_stats["data_coverage_ratio"])
+                    < MIN_DATA_COVERAGE_RATIO,
                 ),
                 (
                     "max_consecutive_gap",
-                    int(self._gap_stats["max_consecutive_gap_seconds"]) > 86_400,
+                    int(self._gap_stats["max_consecutive_gap_seconds"])
+                    > MAX_CONSECUTIVE_GAP_SECONDS,
                 ),
             )
             if failed
@@ -626,12 +635,16 @@ class Engine:
                 higher_is_better=bool(decision_inputs["higher_is_better"]),
             )
         )
+        source_data_hash = self.evidence.source_data_hash()
         reference = self.catalog.determinism_reference(
             self._require_run_id(),
             str(self._run_meta["config_hash"]),
+            source_data_hash,
         )
         self.evidence.set_determinism_reference(
             catalog_config_matches=reference.catalog_config_matches,
+            catalog_source_matches=reference.catalog_source_matches,
+            source_data_hash=source_data_hash,
             comparison_run_id=reference.comparison_run_id,
             comparison_hash=reference.comparison_hash,
         )
@@ -863,7 +876,7 @@ class Engine:
         self.broker.configure_execution(
             candle,
             [candle, terminal],
-            fill_timing="next_bar",
+            fill_timing=self._config().fill_timing,
             available_margin=self._cash,
             leverage=position.leverage,
         )
@@ -1676,6 +1689,10 @@ class Engine:
             for key, value in self.prereg.items()
             if key not in {"observed_value", "edge_distinguishable", "decision_route"}
         }
+        prereg_json["data_quality_criteria"] = {
+            "min_coverage_ratio": MIN_DATA_COVERAGE_RATIO,
+            "max_consecutive_gap_seconds": MAX_CONSECUTIVE_GAP_SECONDS,
+        }
         self.evidence.record(
             EvidenceRecord(
                 "BACKTEST_RUN_LOCAL",
@@ -1727,47 +1744,8 @@ class Engine:
             for candle in self._minute_history
             if range_start <= candle.open_time and candle.close_time <= self._config().end
         ]
-        if not minute_candles and self._config().timeframe != "1m":
-            if self._config().data_source == "crypto_data.ohlcv_futures":
-                raise ValueError("crypto_data run has no 1m origin snapshot")
-            duration_ms = timeframe_milliseconds(self._config().timeframe)
-            minute_ms = timeframe_milliseconds("1m")
-            start_ms = epoch_milliseconds(range_start)
-            end_ms = epoch_milliseconds(self._config().end)
-            actual_closes = {
-                epoch_milliseconds(candle.close_time)
-                for candle in self._history
-                if range_start <= candle.open_time
-                and candle.close_time <= self._config().end
-            }
-            fixture_minute_gaps = tuple(
-                minute_close
-                for close_time in range(start_ms + duration_ms, end_ms + 1, duration_ms)
-                if close_time not in actual_closes
-                for minute_close in range(
-                    close_time - duration_ms + minute_ms,
-                    close_time + 1,
-                    minute_ms,
-                )
-            )
-            strategy_candles = [
-                candle
-                for candle in self._history
-                if range_start <= candle.open_time
-                and candle.close_time <= self._config().end
-            ]
-            self._strategy_gap_contract = self._record_ohlcv_snapshot(
-                strategy_candles,
-                timeframe=self._config().timeframe,
-                range_start=range_start,
-                minute_gap_close_times=fixture_minute_gaps,
-                origin_status="fixture_unverified",
-                origin_count=0,
-                origin_hash=None,
-            )
-            self._set_gap_stats()
-            self._record_funding_snapshot()
-            return
+        if not minute_candles:
+            raise ValueError("run has no 1m origin snapshot")
         origin_status, origin_count, origin_hash = self._validate_minute_origin(
             minute_candles, range_start
         )
@@ -1922,11 +1900,8 @@ class Engine:
     ) -> tuple[str, int, str | None]:
         """Validate the declared 1m absence against a separate origin query."""
         origin_feed = self.feed if isinstance(self.feed, _SourceOrigin) else None
-        requires_origin = self._config().data_source == "crypto_data.ohlcv_futures"
         if origin_feed is None:
-            if requires_origin:
-                raise TypeError("crypto_data OHLCV requires independent origin validation")
-            return "fixture_unverified", len(minute_candles), None
+            raise TypeError("OHLCV feed requires independent origin validation")
         observed = origin_feed.source_open_times(
             self._config().symbol,
             range_start,
@@ -1962,7 +1937,10 @@ class Engine:
             previous = close_time
         coverage = (expected - missing) / expected
         max_gap_seconds = longest * contract.timeframe_ms // 1_000
-        passed = coverage >= 0.95 and max_gap_seconds <= 86_400
+        passed = (
+            coverage >= MIN_DATA_COVERAGE_RATIO
+            and max_gap_seconds <= MAX_CONSECUTIVE_GAP_SECONDS
+        )
         evaluation_gaps = set(contract.evaluation_grid_gap_close_times)
         self._gap_stats = {
             "expected_candle_count": expected,

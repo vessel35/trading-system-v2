@@ -16,6 +16,7 @@ from backtest_service.adapters.catalog_store import (
 )
 from backtest_service.adapters.evidence_schema import encode_eval_decision
 from backtest_service.adapters.evidence_sink import BacktestEvidenceSink, EvidenceRecord
+from backtest_service.adapters.ohlcv_gaps import OhlcvGapContract
 from core_lib.ports import CatalogStore, EvidenceSink
 
 
@@ -92,6 +93,25 @@ def _finalize(
 ) -> tuple[BacktestEvidenceSink, str]:
     sink = BacktestEvidenceSink(root)
     sink.bind(run_id)
+    origin_hash = "e" * 64
+    hourly_contract = OhlcvGapContract(
+        timeframe_ms=3_600_000,
+        normal_gap_close_times=(),
+        partial_bucket_close_times=(),
+        evaluation_grid_gap_close_times=(),
+        origin_validation_status="verified",
+        origin_minute_row_count=60,
+        origin_timestamp_hash=origin_hash,
+    )
+    minute_contract = OhlcvGapContract(
+        timeframe_ms=60_000,
+        normal_gap_close_times=(),
+        partial_bucket_close_times=(),
+        evaluation_grid_gap_close_times=(),
+        origin_validation_status="verified",
+        origin_minute_row_count=60,
+        origin_timestamp_hash=origin_hash,
+    )
     local_values = _local_values(run_seq)
     local_values.update({} if local_overrides is None else local_overrides)
     sink.record(EvidenceRecord("BACKTEST_RUN_LOCAL", local_values))
@@ -109,6 +129,7 @@ def _finalize(
                 "range_end": datetime(2026, 1, 1, 1, tzinfo=UTC),
                 "row_count": 1,
                 "content_hash": "b" * 64,
+                "note": hourly_contract.encode(),
             },
         )
     )
@@ -117,6 +138,24 @@ def _finalize(
             "SOURCE_DATA_SNAPSHOT",
             {
                 "snapshot_id": 2,
+                "source_kind": "ohlcv",
+                "source_ref": "fixture",
+                "symbol": "BTCUSDT",
+                "exchange": "binance",
+                "timeframe": "1m",
+                "range_start": datetime(2026, 1, 1, tzinfo=UTC),
+                "range_end": datetime(2026, 1, 1, 1, tzinfo=UTC),
+                "row_count": 60,
+                "content_hash": "d" * 64,
+                "note": minute_contract.encode(),
+            },
+        )
+    )
+    sink.record(
+        EvidenceRecord(
+            "SOURCE_DATA_SNAPSHOT",
+            {
+                "snapshot_id": 3,
                 "source_kind": "funding",
                 "source_ref": "fixture",
                 "symbol": "BTCUSDT",
