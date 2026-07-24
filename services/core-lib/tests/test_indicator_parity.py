@@ -152,10 +152,7 @@ def make_declining_candles(count: int = 600) -> list[Candle]:
 def make_large_price_candles(count: int = 120) -> list[Candle]:
     """Build large prices with representable millipoint-scale movement."""
     start = datetime(2025, 1, 1, tzinfo=UTC)
-    closes = [
-        100_000_000.0 + (index % 37) * 0.001 + index * 0.000001
-        for index in range(count)
-    ]
+    closes = [100_000_000.0 + (index % 37) * 0.001 + index * 0.000001 for index in range(count)]
     return [
         Candle(
             symbol="BTCUSDT",
@@ -233,8 +230,7 @@ def test_large_price_tiny_variation_stdev_and_bollinger_are_stable() -> None:
     first_window = closes[:period]
     expected_first = statistics.pstdev(first_window)
     old_one_pass_variance = (
-        sum(value * value for value in first_window) / period
-        - (sum(first_window) / period) ** 2
+        sum(value * value for value in first_window) / period - (sum(first_window) / period) ** 2
     )
     assert old_one_pass_variance == 0.0
     assert expected_first > 0.0

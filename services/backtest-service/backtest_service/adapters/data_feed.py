@@ -21,9 +21,7 @@ _MINUTE = timedelta(minutes=1)
 # window is deliberately capped at one second so no later funding event can be
 # pulled into the current eight-hour boundary.
 _FUNDING_COLLECTION_WINDOW = timedelta(seconds=1)
-_DERIVATIVE_SYMBOL = re.compile(
-    r"^(?P<base>[A-Z0-9]+)/(?P<quote>[A-Z0-9]+)(?::[A-Z0-9]+)?$"
-)
+_DERIVATIVE_SYMBOL = re.compile(r"^(?P<base>[A-Z0-9]+)/(?P<quote>[A-Z0-9]+)(?::[A-Z0-9]+)?$")
 
 _CANDLES_SQL = """
 SELECT time, open, high, low, close, volume, quote_volume, trade_count

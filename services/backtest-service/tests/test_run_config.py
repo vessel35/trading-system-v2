@@ -90,9 +90,7 @@ def test_explicit_indicator_mode_requires_a_well_formed_nonempty_selection() -> 
             "explicit_indicators": [{"name": "EMA", "params": {"period": 9}}],
         }
     )
-    assert config.explicit_indicators == [
-        {"name": "EMA", "params": {"period": 9}}
-    ]
+    assert config.explicit_indicators == [{"name": "EMA", "params": {"period": 9}}]
 
 
 def test_extra_run_keys_are_forbidden() -> None:

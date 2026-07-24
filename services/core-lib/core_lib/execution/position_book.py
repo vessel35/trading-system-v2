@@ -65,9 +65,7 @@ class PositionBook:
             return
 
         if leverage is None or margin_type is None:
-            raise ValueError(
-                "leverage and margin_type are required when opening a position"
-            )
+            raise ValueError("leverage and margin_type are required when opening a position")
         if isinstance(leverage, bool) or not isinstance(leverage, int) or leverage <= 0:
             raise ValueError("leverage must be a positive int")
         normalized_market_type = MarketType(market_type)
@@ -148,16 +146,12 @@ class PositionBook:
             raise TypeError("theoretical_cost must be Decimal")
         normalized_cost = quantize_amount(theoretical_cost)
         applied_cost = (
-            min(normalized_cost, position.margin)
-            if normalized_cost > ZERO
-            else normalized_cost
+            min(normalized_cost, position.margin) if normalized_cost > ZERO else normalized_cost
         )
         position.margin = quantize_amount(position.margin - applied_cost)
         if position.margin < ZERO:
             raise RuntimeError("funding must not make isolated margin negative")
-        position.funding_fee_total = quantize_amount(
-            position.funding_fee_total + applied_cost
-        )
+        position.funding_fee_total = quantize_amount(position.funding_fee_total + applied_cost)
         position.liquidation_price = price_from_margin(
             position,
             maintenance_margin_rate,

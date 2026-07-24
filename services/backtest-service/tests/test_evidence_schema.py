@@ -252,9 +252,7 @@ def test_schema_marks_deterministic_hash_boundaries() -> None:
         "INTEGRITY_CHECK": {"checked_at"},
         "FINDING_CLAIM": {"created_at"},
     }
-    assert HASH_EXCLUDED_ROWS == {
-        "INTEGRITY_CHECK": ("check_name <> 'deterministic'",)
-    }
+    assert HASH_EXCLUDED_ROWS == {"INTEGRITY_CHECK": ("check_name <> 'deterministic'",)}
     assert HASH_TABLES == tuple(sorted(set(EVIDENCE_TABLES) - HASH_EXCLUDED_TABLES))
     assert set(ENTITY_SORT_KEYS) == set(HASH_TABLES)
     assert "prereg_json" in HASH_EXCLUDED_COLUMNS["BACKTEST_RUN_LOCAL"]
@@ -582,9 +580,7 @@ def test_funding_settlement_allows_nonzero_rate_rounded_to_zero(
         """,
         (RUN_ID,),
     )
-    assert evidence_db.execute(
-        "SELECT payment_amount FROM FUNDING_SETTLEMENT"
-    ).fetchone() == (0,)
+    assert evidence_db.execute("SELECT payment_amount FROM FUNDING_SETTLEMENT").fetchone() == (0,)
 
 
 def test_finding_claim_requires_explicit_nonempty_evidence_references(

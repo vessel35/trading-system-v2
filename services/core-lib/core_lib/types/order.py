@@ -100,9 +100,7 @@ class Order:
     def _validate_fill_status(self) -> None:
         if self.filled_quantity == ZERO:
             if self.average_filled_price is not None:
-                raise ValueError(
-                    "average_filled_price must be None when filled_quantity is zero"
-                )
+                raise ValueError("average_filled_price must be None when filled_quantity is zero")
         elif self.average_filled_price is None or self.average_filled_price <= ZERO:
             raise ValueError(
                 "average_filled_price must be positive when filled_quantity is positive"
@@ -111,26 +109,27 @@ class Order:
         if self.status is OrderStatus.PARTIALLY_FILLED and not (
             ZERO < self.filled_quantity < self.quantity
         ):
-            raise ValueError(
-                "PARTIALLY_FILLED requires 0 < filled_quantity < quantity"
-            )
+            raise ValueError("PARTIALLY_FILLED requires 0 < filled_quantity < quantity")
         if self.status is OrderStatus.FILLED and self.filled_quantity != self.quantity:
             raise ValueError("FILLED requires filled_quantity to equal quantity")
         if self.status is not OrderStatus.FILLED and self.filled_quantity == self.quantity:
             raise ValueError("only FILLED may have the full quantity filled")
-        if self.status in {
-            OrderStatus.NEW,
-            OrderStatus.EXPIRED,
-            OrderStatus.REJECTED,
-        } and self.filled_quantity != ZERO:
+        if (
+            self.status
+            in {
+                OrderStatus.NEW,
+                OrderStatus.EXPIRED,
+                OrderStatus.REJECTED,
+            }
+            and self.filled_quantity != ZERO
+        ):
             raise ValueError(f"{self.status.value} orders cannot have filled quantity")
 
     def _transition_to(self, new_status: OrderStatus) -> None:
         normalized_status = OrderStatus(new_status)
         if normalized_status not in self.VALID_TRANSITIONS[self.status]:
             raise ValueError(
-                f"invalid order status transition: {self.status.value} -> "
-                f"{normalized_status.value}"
+                f"invalid order status transition: {self.status.value} -> {normalized_status.value}"
             )
         self.status = normalized_status
 

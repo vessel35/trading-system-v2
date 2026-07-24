@@ -110,13 +110,9 @@ def test_metrics_resample_daily_and_use_whole_n_sortino_denominator() -> None:
 
     daily_returns = [110.0 / 103.0 - 1.0, -0.05, 0.0]
     expected_downside = math.sqrt(sum(min(0.0, value) ** 2 for value in daily_returns) / 3)
-    expected_sortino = (
-        math.sqrt(365) * statistics.fmean(daily_returns) / expected_downside
-    )
+    expected_sortino = math.sqrt(365) * statistics.fmean(daily_returns) / expected_downside
     expected_sharpe = (
-        math.sqrt(365)
-        * statistics.fmean(daily_returns)
-        / statistics.stdev(daily_returns)
+        math.sqrt(365) * statistics.fmean(daily_returns) / statistics.stdev(daily_returns)
     )
     assert metrics.sortino == pytest.approx(expected_sortino)
     assert metrics.sharpe == pytest.approx(expected_sharpe)
@@ -153,20 +149,13 @@ def test_metrics_reject_naive_timestamps_before_daily_resampling() -> None:
 
 def test_sqn_uses_r_multiples_caps_n_at_100_and_rejects_short_samples() -> None:
     start = datetime(2025, 1, 1, tzinfo=UTC)
-    equity = {
-        start + timedelta(days=index): 100.0 + index
-        for index in range(121)
-    }
+    equity = {start + timedelta(days=index): 100.0 + index for index in range(121)}
     r_multiples = [2.0] * 90 + [-1.0] * 30
     metrics = compute(
         [make_trade(value, index) for index, value in enumerate(r_multiples)],
         equity,
     )
-    expected_sqn = (
-        math.sqrt(100)
-        * statistics.fmean(r_multiples)
-        / statistics.stdev(r_multiples)
-    )
+    expected_sqn = math.sqrt(100) * statistics.fmean(r_multiples) / statistics.stdev(r_multiples)
     assert metrics.sqn == pytest.approx(expected_sqn)
 
     short_metrics = compute(

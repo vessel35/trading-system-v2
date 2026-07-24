@@ -45,8 +45,7 @@ def is_pass(
     minimum_trades = int(limits["trade_count_min"])
     if metric_set.trade_count < minimum_trades:
         failed.append(
-            f"trade_count: insufficient sample "
-            f"({metric_set.trade_count} < {minimum_trades})"
+            f"trade_count: insufficient sample ({metric_set.trade_count} < {minimum_trades})"
         )
     if _below(metric_set.pf, limits["pf_min"]):
         failed.append("pf")
@@ -58,15 +57,11 @@ def is_pass(
         failed.append("sqn")
     if math.isnan(metric_set.mdd) or abs(metric_set.mdd) > limits["mdd_max"]:
         failed.append("mdd")
-    if (
-        math.isnan(metric_set.ror)
-        or metric_set.ror >= limits["ror_max_exclusive"]
-    ):
+    if math.isnan(metric_set.ror) or metric_set.ror >= limits["ror_max_exclusive"]:
         failed.append("ror")
     if (
         math.isnan(metric_set.expectancy_r)
-        or metric_set.expectancy_r
-        <= limits["expectancy_r_min_exclusive"]
+        or metric_set.expectancy_r <= limits["expectancy_r_min_exclusive"]
     ):
         failed.append("expectancy_r")
     return GateResult(

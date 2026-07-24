@@ -29,9 +29,7 @@ def test_each_limit_accepts_below_and_rejects_above(check: LimitCheck) -> None:
 def test_engine_can_compose_candidate_risk_across_all_three_limits() -> None:
     account_equity = 10_000.0
     candidate_quantity = size(0.01, account_equity, 100.0)
-    candidate_risk_pct = (
-        one_r(1_000.0, 900.0, candidate_quantity) / account_equity
-    )
+    candidate_risk_pct = one_r(1_000.0, 900.0, candidate_quantity) / account_equity
     checks = (
         exposure_limit.single_market([0.01, candidate_risk_pct], 0.02),
         exposure_limit.correlation_group([0.02, candidate_risk_pct], 0.03),

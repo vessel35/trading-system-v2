@@ -77,9 +77,7 @@ def _candles() -> list[Candle]:
 def _minute_candles(candles: list[Candle]) -> list[Candle]:
     result: list[Candle] = []
     for candle in candles:
-        minute_count = int(
-            (candle.close_time - candle.open_time) / timedelta(minutes=1)
-        )
+        minute_count = int((candle.close_time - candle.open_time) / timedelta(minutes=1))
         for index in range(minute_count):
             opened = candle.open_time + timedelta(minutes=index)
             result.append(
@@ -111,11 +109,7 @@ class _Feed(DataFeed):
         assert symbol == "BTCUSDT"
         self.candle_calls += 1
         if tf == "1m":
-            return [
-                candle
-                for candle in self._minute_candles
-                if candle.close_time <= up_to
-            ]
+            return [candle for candle in self._minute_candles if candle.close_time <= up_to]
         assert tf == "1h"
         return [candle for candle in self._candles if candle.close_time <= up_to]
 
@@ -167,11 +161,7 @@ class _DailyFeed(DataFeed):
     def candles(self, symbol: str, tf: str, up_to: datetime) -> list[Candle]:
         assert symbol == "BTCUSDT"
         if tf == "1m":
-            return [
-                candle
-                for candle in self._minute_candles
-                if candle.close_time <= up_to
-            ]
+            return [candle for candle in self._minute_candles if candle.close_time <= up_to]
         assert tf == "1d"
         return [candle for candle in self._candles if candle.close_time <= up_to]
 
@@ -573,8 +563,7 @@ class _Catalog(CatalogStore):
         source_data_hash: str,
     ) -> DeterminismReference:
         current_matches = (
-            self.runs[run_id]["config_hash"] == config_hash
-            and not self.force_config_mismatch
+            self.runs[run_id]["config_hash"] == config_hash and not self.force_config_mismatch
         )
         self.runs[run_id] = {
             **self.runs[run_id],
@@ -586,8 +575,7 @@ class _Catalog(CatalogStore):
             if (
                 previous_id != run_id
                 and self.runs[str(previous_id)]["config_hash"] == config_hash
-                and self.runs[str(previous_id)].get("source_data_hash")
-                == source_data_hash
+                and self.runs[str(previous_id)].get("source_data_hash") == source_data_hash
             ):
                 return DeterminismReference(
                     current_matches,
@@ -597,8 +585,7 @@ class _Catalog(CatalogStore):
                     self.comparison_hash_override or str(summary["evidence_hash"]),
                 )
         same_config_run_exists = any(
-            previous_id != run_id
-            and self.runs[str(previous_id)]["config_hash"] == config_hash
+            previous_id != run_id and self.runs[str(previous_id)]["config_hash"] == config_hash
             for summary in self.summaries
             if isinstance(summary, Mapping)
             for previous_id in (summary["run_id"],)
@@ -854,15 +841,11 @@ def test_reversal_closes_then_enters_with_separate_once_only_costs_and_margin(
     assert cash_after_exit > cash_before_exit
     reverse_entry = broker.fills[2]
     amount_quantum = Decimal("0.00000001")
-    reverse_notional = (reverse_entry.price * reverse_entry.quantity).quantize(
+    reverse_notional = (reverse_entry.price * reverse_entry.quantity).quantize(amount_quantum)
+    reverse_requirement = (reverse_notional + reverse_entry.fee * 2).quantize(amount_quantum)
+    next_notional = (reverse_entry.price * (reverse_entry.quantity + amount_quantum)).quantize(
         amount_quantum
     )
-    reverse_requirement = (reverse_notional + reverse_entry.fee * 2).quantize(
-        amount_quantum
-    )
-    next_notional = (
-        reverse_entry.price * (reverse_entry.quantity + amount_quantum)
-    ).quantize(amount_quantum)
     next_fee = (next_notional * Decimal("0.0004")).quantize(amount_quantum)
     next_requirement = (next_notional + next_fee * 2).quantize(amount_quantum)
     assert reverse_requirement <= cash_after_exit < next_requirement
@@ -921,9 +904,7 @@ def test_reversal_closes_then_enters_with_separate_once_only_costs_and_margin(
             "SELECT min(cash_balance) >= 0 FROM PORTFOLIO_PNL"
         ).fetchone() == (1,)
         assert dict(
-            connection.execute(
-                "SELECT check_name, passed FROM INTEGRITY_CHECK"
-            ).fetchall()
+            connection.execute("SELECT check_name, passed FROM INTEGRITY_CHECK").fetchall()
         ) == {
             "accounting_identity": 1,
             "timestamp_order": 1,
@@ -968,9 +949,7 @@ def test_engine_orders_configure_before_submit_and_persists_timing(
         assert order_rows
         assert all(feature <= decision < execution for feature, decision, execution in order_rows)
         checks = dict(
-            connection.execute(
-                "SELECT check_name, passed FROM INTEGRITY_CHECK"
-            ).fetchall()
+            connection.execute("SELECT check_name, passed FROM INTEGRITY_CHECK").fetchall()
         )
         assert checks == {
             "accounting_identity": 1,
@@ -980,15 +959,9 @@ def test_engine_orders_configure_before_submit_and_persists_timing(
             "deterministic": 1,
             "evidence_complete": 1,
         }
-        assert connection.execute(
-            "SELECT COUNT(*) FROM DRAWDOWN_RUNUP_EPISODE"
-        ).fetchone()[0] >= 1
-        assert connection.execute(
-            "SELECT COUNT(*) FROM INDICATOR_DEFINITION"
-        ).fetchone() == (1,)
-        assert connection.execute(
-            "SELECT COUNT(*) FROM INDICATOR_SNAPSHOT"
-        ).fetchone() == (4,)
+        assert connection.execute("SELECT COUNT(*) FROM DRAWDOWN_RUNUP_EPISODE").fetchone()[0] >= 1
+        assert connection.execute("SELECT COUNT(*) FROM INDICATOR_DEFINITION").fetchone() == (1,)
+        assert connection.execute("SELECT COUNT(*) FROM INDICATOR_SNAPSHOT").fetchone() == (4,)
         assert connection.execute(
             """
             SELECT COUNT(*)
@@ -1004,9 +977,7 @@ def test_engine_orders_configure_before_submit_and_persists_timing(
             """
         ).fetchone() == (1,)
         prereg = json.loads(
-            connection.execute(
-                "SELECT prereg_json FROM BACKTEST_RUN_LOCAL"
-            ).fetchone()[0]
+            connection.execute("SELECT prereg_json FROM BACKTEST_RUN_LOCAL").fetchone()[0]
         )
         assert "data_quality_criteria" not in prereg
         criteria = json.loads(
@@ -1026,11 +997,7 @@ def test_engine_orders_configure_before_submit_and_persists_timing(
 def test_declared_source_gap_passes_but_an_evidence_record_gap_fails(
     tmp_path: Path,
 ) -> None:
-    history = [
-        candle
-        for candle in _candles()
-        if candle.open_time != _BASE + timedelta(hours=1)
-    ]
+    history = [candle for candle in _candles() if candle.open_time != _BASE + timedelta(hours=1)]
     catalog = _Catalog()
     brokers: list[_Broker] = []
     sinks: list[BacktestEvidenceSink] = []
@@ -1056,9 +1023,7 @@ def test_declared_source_gap_passes_but_an_evidence_record_gap_fails(
     assert gap_count == 1
     assert gap_evidence["normal_gap_count"] == 1
     assert gap_evidence["evaluation_grid_gap_count"] == 1
-    assert sink.connection.execute(
-        "SELECT COUNT(*) FROM PORTFOLIO_PNL"
-    ).fetchone() == (3,)
+    assert sink.connection.execute("SELECT COUNT(*) FROM PORTFOLIO_PNL").fetchone() == (3,)
     assert sink.connection.execute(
         "SELECT action, skip_reason FROM DECISION ORDER BY decision_id"
     ).fetchall() == [("skip", "next_candle_gap")]
@@ -1106,11 +1071,7 @@ def test_execution_lag_over_one_timeframe_fails_timestamp_integrity(
 def test_open_position_is_closed_before_unobservable_gap_boundaries(
     tmp_path: Path,
 ) -> None:
-    history = [
-        candle
-        for candle in _candles()
-        if candle.open_time != _BASE + timedelta(hours=2)
-    ]
+    history = [candle for candle in _candles() if candle.open_time != _BASE + timedelta(hours=2)]
     sinks: list[BacktestEvidenceSink] = []
     result = _engine(
         tmp_path,
@@ -1130,15 +1091,11 @@ def test_open_position_is_closed_before_unobservable_gap_boundaries(
         WHERE exit_reason = 'DATA_GAP'
         """
     ).fetchone() == ("DATA_GAP", 1)
-    assert sink.connection.execute(
-        "SELECT COUNT(*) FROM FUNDING_SETTLEMENT"
-    ).fetchone() == (0,)
+    assert sink.connection.execute("SELECT COUNT(*) FROM FUNDING_SETTLEMENT").fetchone() == (0,)
 
 
 def test_crypto_data_snapshot_rejects_origin_query_divergence(tmp_path: Path) -> None:
-    config = _config().model_copy(
-        update={"data_source": "crypto_data.ohlcv_futures"}
-    )
+    config = _config().model_copy(update={"data_source": "crypto_data.ohlcv_futures"})
     costs = BacktestCostModel(config.cost_values)
     history = _candles()
     engine = Engine(
@@ -1170,9 +1127,9 @@ def test_engine_hash_parity_uses_different_catalog_run_ids(tmp_path: Path) -> No
     assert Path(first.evidence_path).name == f"{first.run_id}.sqlite"
     assert Path(second.evidence_path).name == f"{second.run_id}.sqlite"
     with sqlite3.connect(first.evidence_path) as connection:
-        assert connection.execute(
-            "SELECT run_id FROM BACKTEST_RUN_LOCAL"
-        ).fetchone() == (first.run_id,)
+        assert connection.execute("SELECT run_id FROM BACKTEST_RUN_LOCAL").fetchone() == (
+            first.run_id,
+        )
     assert first.evidence_hash == second.evidence_hash
     with sqlite3.connect(first.evidence_path) as connection:
         detail = connection.execute(
@@ -1270,12 +1227,8 @@ def test_vessel_reference_end_to_end_dry_run_is_complete_and_deterministic(
         assert local[1] == 21
         assert '"ATR"' in local[0]
         assert connection.execute("SELECT COUNT(*) FROM TRADE").fetchone() == (1,)
-        assert connection.execute(
-            "SELECT COUNT(*) FROM INDICATOR_SNAPSHOT"
-        ).fetchone() == (18,)
-        assert connection.execute(
-            "SELECT COUNT(*) FROM PORTFOLIO_PNL"
-        ).fetchone() == (6,)
+        assert connection.execute("SELECT COUNT(*) FROM INDICATOR_SNAPSHOT").fetchone() == (18,)
+        assert connection.execute("SELECT COUNT(*) FROM PORTFOLIO_PNL").fetchone() == (6,)
         snapshots = connection.execute(
             """
             SELECT indicator_key, value
@@ -1284,9 +1237,7 @@ def test_vessel_reference_end_to_end_dry_run_is_complete_and_deterministic(
             """
         ).fetchall()
         assert [key for key, _ in snapshots] == [
-            key
-            for _ in range(6)
-            for key in ("atr:period=14", "ema:period=21", "ema:period=9")
+            key for _ in range(6) for key in ("atr:period=14", "ema:period=21", "ema:period=9")
         ]
         assert [value for _, value in snapshots] == pytest.approx(
             [
@@ -1374,9 +1325,7 @@ def test_missing_minute_source_snapshot_fails_evidence_completeness(
     sinks: list[BacktestEvidenceSink] = []
     _engine(tmp_path, _Catalog(), [], sinks=sinks).run(_config())
     sink = sinks[0]
-    sink.connection.execute(
-        "DELETE FROM SOURCE_DATA_SNAPSHOT WHERE timeframe = '1m'"
-    )
+    sink.connection.execute("DELETE FROM SOURCE_DATA_SNAPSHOT WHERE timeframe = '1m'")
     sink.connection.commit()
 
     assert sink.audit(require_eval_decision=True)["evidence_complete"] is False
@@ -1393,9 +1342,7 @@ def test_missing_ohlcv_origin_contract_fails_evidence_completeness(
     sinks: list[BacktestEvidenceSink] = []
     _engine(tmp_path, _Catalog(), [], sinks=sinks).run(_config())
     sink = sinks[0]
-    sink.connection.execute(
-        "UPDATE SOURCE_DATA_SNAPSHOT SET note = NULL WHERE timeframe = '1m'"
-    )
+    sink.connection.execute("UPDATE SOURCE_DATA_SNAPSHOT SET note = NULL WHERE timeframe = '1m'")
     sink.connection.commit()
 
     assert sink.audit(require_eval_decision=True)["evidence_complete"] is False
@@ -1403,10 +1350,7 @@ def test_missing_ohlcv_origin_contract_fails_evidence_completeness(
         Sequence[str],
         sink.integrity_details["evidence_complete"]["source_failures"],
     )
-    assert any(
-        failure.startswith("ohlcv_gap_contract_missing:")
-        for failure in source_failures
-    )
+    assert any(failure.startswith("ohlcv_gap_contract_missing:") for failure in source_failures)
 
 
 def test_integrity_audit_is_fail_closed_for_grid_indicator_source_and_slippage(
@@ -1418,9 +1362,7 @@ def test_integrity_audit_is_fail_closed_for_grid_indicator_source_and_slippage(
     _engine(tmp_path, catalog, brokers, sinks=sinks).run(_config())
     sink = sinks[0]
 
-    sink.connection.execute(
-        "UPDATE EXECUTION SET slippage = 100 WHERE execution_id = 1"
-    )
+    sink.connection.execute("UPDATE EXECUTION SET slippage = 100 WHERE execution_id = 1")
     sink.connection.execute(
         """
         UPDATE TRADE
@@ -1434,9 +1376,7 @@ def test_integrity_audit_is_fail_closed_for_grid_indicator_source_and_slippage(
         WHERE snapshot_seq = (SELECT min(snapshot_seq) FROM INDICATOR_SNAPSHOT)
         """
     )
-    sink.connection.execute(
-        "DELETE FROM SOURCE_DATA_SNAPSHOT WHERE source_kind = 'funding'"
-    )
+    sink.connection.execute("DELETE FROM SOURCE_DATA_SNAPSHOT WHERE source_kind = 'funding'")
     sink.connection.execute(
         """
         DELETE FROM PORTFOLIO_PNL
@@ -1510,9 +1450,7 @@ def test_indicator_mode_changes_selection_and_longest_history_owns_warmup(
     with pytest.raises(ValueError, match="requires 21"):
         _engine(tmp_path / "insufficient", catalog, brokers).run(insufficient)
 
-    all_indicators = RunConfig.model_validate(
-        {**_config().model_dump(), "indicator_mode": "all"}
-    )
+    all_indicators = RunConfig.model_validate({**_config().model_dump(), "indicator_mode": "all"})
     with pytest.raises(ValueError, match="requires 200"):
         _engine(tmp_path / "all", catalog, brokers).run(all_indicators)
 
@@ -1534,9 +1472,7 @@ def test_coarse_candle_funding_charges_every_crossed_boundary_with_payment_sign(
             ORDER BY settled_at
             """
         ).fetchall()
-        funding_cost = connection.execute(
-            "SELECT funding_cost FROM TRADE"
-        ).fetchone()[0]
+        funding_cost = connection.execute("SELECT funding_cost FROM TRADE").fetchone()[0]
         assert len(settlements) == 3
         assert all(payment < 0 for _, payment, _ in settlements)
         assert -sum(payment for _, payment, _ in settlements) == funding_cost
@@ -1618,17 +1554,14 @@ def test_funding_margin_exhaustion_liquidates_without_negative_cash(
             1,
         )
         assert connection.execute(
-            "SELECT min(cash_balance), min(position_value), min(total_equity) "
-            "FROM PORTFOLIO_PNL"
+            "SELECT min(cash_balance), min(position_value), min(total_equity) FROM PORTFOLIO_PNL"
         ).fetchone() == (
             899_920_000_000,
             0,
             899_920_000_000,
         )
         assert set(
-            connection.execute(
-                "SELECT check_name FROM INTEGRITY_CHECK WHERE passed = 1"
-            ).fetchall()
+            connection.execute("SELECT check_name FROM INTEGRITY_CHECK WHERE passed = 1").fetchall()
         ) == {
             ("accounting_identity",),
             ("timestamp_order",),

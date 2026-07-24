@@ -19,9 +19,7 @@ ROR_RISK_FRACTION = 0.01
 ROR_DRAWDOWN = 0.60
 
 type EquityValue = float | Decimal
-type EquitySeries = (
-    Mapping[datetime, EquityValue] | Sequence[tuple[datetime, EquityValue]]
-)
+type EquitySeries = Mapping[datetime, EquityValue] | Sequence[tuple[datetime, EquityValue]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,8 +107,7 @@ def _sortino(daily_returns: Sequence[float], target: float = 0.0) -> float:
     if not daily_returns:
         return math.nan
     downside_deviation = math.sqrt(
-        sum(min(0.0, value - target) ** 2 for value in daily_returns)
-        / len(daily_returns)
+        sum(min(0.0, value - target) ** 2 for value in daily_returns) / len(daily_returns)
     )
     return math.sqrt(ANNUALIZATION_DAYS) * _ratio(
         statistics.fmean(daily_returns) - target,
@@ -156,9 +153,7 @@ def _calmar_or_mar(points: Sequence[tuple[datetime, float]]) -> float:
 
 def _r_multiples(trades: Sequence[Trade]) -> list[float]:
     return [
-        float(trade.net_pnl / trade.r0)
-        for trade in trades
-        if trade.r0 is not None and trade.r0 > 0
+        float(trade.net_pnl / trade.r0) for trade in trades if trade.r0 is not None and trade.r0 > 0
     ]
 
 
@@ -222,14 +217,11 @@ def compute(trades: list[Trade], equity: EquitySeries) -> MetricSet:
     r_average_win = statistics.fmean(positive_r) if positive_r else 0.0
     r_average_loss = statistics.fmean(negative_r) if negative_r else 0.0
     expectancy_r = (
-        r_win_rate * r_average_win - (1.0 - r_win_rate) * r_average_loss
-        if r_count
-        else math.nan
+        r_win_rate * r_average_win - (1.0 - r_win_rate) * r_average_loss if r_count else math.nan
     )
     r_std = _sample_std(r_multiples)
     sqn = (
-        math.sqrt(min(r_count, MAX_SQN_TRADES))
-        * _ratio(statistics.fmean(r_multiples), r_std)
+        math.sqrt(min(r_count, MAX_SQN_TRADES)) * _ratio(statistics.fmean(r_multiples), r_std)
         if r_count >= MIN_SQN_TRADES
         else math.nan
     )

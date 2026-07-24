@@ -100,9 +100,7 @@ class VesselReference:
         leverage = self._integer_param("leverage")
 
         if current_position is not None:
-            should_exit = (
-                current_position.side is PositionSide.LONG and fast <= slow
-            ) or (
+            should_exit = (current_position.side is PositionSide.LONG and fast <= slow) or (
                 current_position.side is PositionSide.SHORT and fast >= slow
             )
             if not should_exit:

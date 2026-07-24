@@ -89,9 +89,7 @@ class RunConfig(BaseModel):
             params = item["params"]
             if not isinstance(name, str) or not name:
                 raise ValueError(f"explicit_indicators[{index}].name must be non-empty")
-            if not isinstance(params, dict) or any(
-                not isinstance(key, str) for key in params
-            ):
+            if not isinstance(params, dict) or any(not isinstance(key, str) for key in params):
                 raise ValueError(
                     f"explicit_indicators[{index}].params must be a string-keyed mapping"
                 )
@@ -111,9 +109,7 @@ class RunConfig(BaseModel):
         if self.indicator_mode == "explicit" and not self.explicit_indicators:
             raise ValueError("explicit indicator_mode requires explicit_indicators")
         if self.indicator_mode != "explicit" and self.explicit_indicators:
-            raise ValueError(
-                "explicit_indicators may be set only when indicator_mode is explicit"
-            )
+            raise ValueError("explicit_indicators may be set only when indicator_mode is explicit")
         if self.sizing_method == "risk_based":
             if self.position_size_pct is not None:
                 raise ValueError("risk_based sizing requires position_size_pct to be absent")

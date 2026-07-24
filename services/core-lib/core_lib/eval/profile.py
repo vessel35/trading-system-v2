@@ -40,11 +40,7 @@ class EnvelopeResult:
 
 
 def _outside(value: float, expected: tuple[float, float], tolerance: float) -> bool:
-    return (
-        math.isnan(value)
-        or value < expected[0] - tolerance
-        or value > expected[1] + tolerance
-    )
+    return math.isnan(value) or value < expected[0] - tolerance or value > expected[1] + tolerance
 
 
 def check_envelope(

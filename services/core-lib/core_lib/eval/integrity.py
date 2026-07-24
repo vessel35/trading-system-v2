@@ -25,9 +25,6 @@ class IntegrityResult:
 def check(evidence: Mapping[str, bool]) -> IntegrityResult:
     """Check the six mandatory evidence facts and optional trailing parity."""
     failed = [name for name in REQUIRED_CHECKS if evidence.get(name) is not True]
-    if (
-        TRAILING_PARITY_CHECK in evidence
-        and evidence[TRAILING_PARITY_CHECK] is not True
-    ):
+    if TRAILING_PARITY_CHECK in evidence and evidence[TRAILING_PARITY_CHECK] is not True:
         failed.append(TRAILING_PARITY_CHECK)
     return IntegrityResult(passed=not failed, failed_checks=failed)

@@ -56,9 +56,7 @@ def normalize_order(
         symbol=request.symbol,
         quantity=to_decimal(request.quantity),
         price=(
-            None
-            if request.price is None
-            else to_decimal(request.price, quantizer=quantize_price)
+            None if request.price is None else to_decimal(request.price, quantizer=quantize_price)
         ),
         filled_quantity=quantize_amount(ZERO),
         average_filled_price=None,

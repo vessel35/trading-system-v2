@@ -159,9 +159,7 @@ _REAL_DATA_REGRESSION_MATRIX = (
 
 
 def _matrix_case(case_id: str) -> _RealDataRegressionCase:
-    matches = [
-        case for case in _REAL_DATA_REGRESSION_MATRIX if case.case_id == case_id
-    ]
+    matches = [case for case in _REAL_DATA_REGRESSION_MATRIX if case.case_id == case_id]
     if len(matches) != 1:
         raise AssertionError(f"real-data matrix case must be unique: {case_id}")
     return matches[0]
@@ -173,24 +171,18 @@ def test_real_data_regression_matrix_covers_every_contract_axis() -> None:
     )
     assert {case.tier for case in _REAL_DATA_REGRESSION_MATRIX} == {"short", "long"}
     assert {
-        direction
-        for case in _REAL_DATA_REGRESSION_MATRIX
-        for direction in case.directions
+        direction for case in _REAL_DATA_REGRESSION_MATRIX for direction in case.directions
     } == {"LONG", "SHORT"}
-    assert {
-        sign
-        for case in _REAL_DATA_REGRESSION_MATRIX
-        for sign in case.funding_rate_signs
-    } == {"positive", "negative"}
-    assert {
-        leverage
-        for case in _REAL_DATA_REGRESSION_MATRIX
-        for leverage in case.leverages
-    } == {1, 3, 39}
-    assert {
-        (case.case_id, case.contract)
-        for case in _REAL_DATA_REGRESSION_MATRIX
-    } == {
+    assert {sign for case in _REAL_DATA_REGRESSION_MATRIX for sign in case.funding_rate_signs} == {
+        "positive",
+        "negative",
+    }
+    assert {leverage for case in _REAL_DATA_REGRESSION_MATRIX for leverage in case.leverages} == {
+        1,
+        3,
+        39,
+    }
+    assert {(case.case_id, case.contract) for case in _REAL_DATA_REGRESSION_MATRIX} == {
         ("baseline-3d", "bounded feed, measured funding, fees, and catalog"),
         ("reversal-3d", "real-price close-before-open reversal"),
         ("window-3d", "entry reservation window invariance"),
@@ -330,9 +322,7 @@ def test_signal_registry_adapter_reads_only_registry_table() -> None:
         assert entry["min_history"] == 21
         assert entry["is_active"] is True
         assert entry["is_deprecated"] is False
-        assert VESSEL_STRATEGY_ID in [
-            row["strategy_id"] for row in registry.list()
-        ]
+        assert VESSEL_STRATEGY_ID in [row["strategy_id"] for row in registry.list()]
 
 
 def test_catalog_issues_run_id_then_records_prereg_and_evaluated_metadata() -> None:
@@ -343,9 +333,7 @@ def test_catalog_issues_run_id_then_records_prereg_and_evaluated_metadata() -> N
         "strategy_name": "M9Fixture",
         "strategy_version": "1.0.0",
         "params_json": {},
-        "resolved_indicators_json": [
-            {"name": "EMA", "params": {"period": 9}, "version": "1.0.0"}
-        ],
+        "resolved_indicators_json": [{"name": "EMA", "params": {"period": 9}, "version": "1.0.0"}],
         "params_schema_version": "1.0.0",
         "symbol": "BTCUSDT",
         "exchange": "binance",
@@ -425,9 +413,7 @@ def test_catalog_issues_run_id_then_records_prereg_and_evaluated_metadata() -> N
         assert same_source_reference.same_config_run_exists is True
 
         different_source_run_id = catalog.register(run_meta)
-        different_source_hash = hashlib.sha256(
-            different_source_run_id.encode()
-        ).hexdigest()
+        different_source_hash = hashlib.sha256(different_source_run_id.encode()).hexdigest()
         different_source_reference = catalog.determinism_reference(
             different_source_run_id,
             str(run_meta["config_hash"]),
@@ -722,11 +708,7 @@ class _GapFreeVesselFeed(DataFeed):
     def candles(self, symbol: str, tf: str, up_to: datetime) -> list[Candle]:
         assert symbol == "BTCUSDT"
         if tf == "1m":
-            return [
-                candle
-                for candle in self._minute_candles
-                if candle.close_time <= up_to
-            ]
+            return [candle for candle in self._minute_candles if candle.close_time <= up_to]
         assert tf == "1h"
         return [candle for candle in self._candles if candle.close_time <= up_to]
 
@@ -847,9 +829,7 @@ def _run_real_vessel(root: Path, config: RunConfig) -> RunResult:
             costs,
             BacktestEvidenceSink(root),
             BacktestCatalogStore(cast(WriteConnection, catalog_connection)),
-            _vessel_manager(
-                BacktestStrategyRegistry(cast(ReadConnection, signal_connection))
-            ),
+            _vessel_manager(BacktestStrategyRegistry(cast(ReadConnection, signal_connection))),
             prereg=prereg,
         ).run(config)
         catalog_row = catalog_connection.execute(
@@ -967,9 +947,7 @@ def test_vessel_e2e_writes_evidence_and_real_catalog_with_hash_parity(
         assert detail["comparison_run_id"] == first_result.run_id
     for result in results:
         with sqlite3.connect(result.evidence_path) as evidence:
-            assert evidence.execute(
-                "SELECT COUNT(*) FROM BACKTEST_RUN_LOCAL"
-            ).fetchone() == (1,)
+            assert evidence.execute("SELECT COUNT(*) FROM BACKTEST_RUN_LOCAL").fetchone() == (1,)
             assert evidence.execute("SELECT COUNT(*) FROM TRADE").fetchone() == (1,)
 
 
@@ -1022,9 +1000,7 @@ def test_vessel_engine_traverses_real_crypto_data_feed(
         )
         history = feed.candles(config.symbol, config.timeframe, config.end)
         evaluation = [
-            candle
-            for candle in history
-            if candle.open_time >= start and candle.close_time <= end
+            candle for candle in history if candle.open_time >= start and candle.close_time <= end
         ]
         assert len(evaluation) == 72
         assert all(
@@ -1039,9 +1015,7 @@ def test_vessel_engine_traverses_real_crypto_data_feed(
             costs,
             BacktestEvidenceSink(tmp_path / "real-data-feed"),
             BacktestCatalogStore(cast(WriteConnection, catalog_connection)),
-            _vessel_manager(
-                BacktestStrategyRegistry(cast(ReadConnection, signal_connection))
-            ),
+            _vessel_manager(BacktestStrategyRegistry(cast(ReadConnection, signal_connection))),
             prereg=prereg,
         ).run(config)
         catalog_row = catalog_connection.execute(
@@ -1105,21 +1079,20 @@ def test_vessel_engine_traverses_real_crypto_data_feed(
         assert first_entry[0] >= 100_000 * 100_000_000
         assert first_entry[2] > 0
         assert first_entry[3] == 1
-        assert evidence.execute(
-            "SELECT min(cash_balance) >= 0 FROM PORTFOLIO_PNL"
-        ).fetchone() == (1,)
-        assert evidence.execute(
-            "SELECT COUNT(*) FROM PORTFOLIO_PNL"
-        ).fetchone() == (72,)
+        assert evidence.execute("SELECT min(cash_balance) >= 0 FROM PORTFOLIO_PNL").fetchone() == (
+            1,
+        )
+        assert evidence.execute("SELECT COUNT(*) FROM PORTFOLIO_PNL").fetchone() == (72,)
         assert {
             row[0]
-            for row in evidence.execute(
-                "SELECT DISTINCT position_side FROM EXECUTION"
-            ).fetchall()
+            for row in evidence.execute("SELECT DISTINCT position_side FROM EXECUTION").fetchall()
         } == set(case.directions)
-        assert evidence.execute(
-            "SELECT COUNT(*) FROM FUNDING_SETTLEMENT WHERE funding_rate > 0"
-        ).fetchone()[0] > 0
+        assert (
+            evidence.execute(
+                "SELECT COUNT(*) FROM FUNDING_SETTLEMENT WHERE funding_rate > 0"
+            ).fetchone()[0]
+            > 0
+        )
 
 
 def test_real_data_matrix_reversal_closes_before_opposite_entry(
@@ -1202,17 +1175,18 @@ def test_real_data_matrix_reversal_closes_before_opposite_entry(
         ]
         assert {
             row[0]
-            for row in evidence.execute(
-                "SELECT DISTINCT position_side FROM EXECUTION"
-            ).fetchall()
+            for row in evidence.execute("SELECT DISTINCT position_side FROM EXECUTION").fetchall()
         } == set(case.directions)
         assert evidence.execute(
             "SELECT COUNT(*) FROM TRADE WHERE leverage = ?",
             (leverage,),
         ).fetchone() == (2,)
-        assert evidence.execute(
-            "SELECT COUNT(*) FROM FUNDING_SETTLEMENT WHERE funding_rate > 0"
-        ).fetchone()[0] > 0
+        assert (
+            evidence.execute(
+                "SELECT COUNT(*) FROM FUNDING_SETTLEMENT WHERE funding_rate > 0"
+            ).fetchone()[0]
+            > 0
+        )
         assert evidence.execute(
             """
             SELECT COUNT(*)
@@ -1338,18 +1312,14 @@ def test_measured_funding_exhaustion_liquidates_a_natural_real_data_position(
         assert liquidation is not None
         assert trade is not None
 
-        assert entry[0] == int(
-            datetime(2025, 6, 22, 15, tzinfo=UTC).timestamp() * 1_000
-        ) + 1
+        assert entry[0] == int(datetime(2025, 6, 22, 15, tzinfo=UTC).timestamp() * 1_000) + 1
         assert evidence.execute(
             """
             SELECT COUNT(*), SUM(rate_source = 'measured')
             FROM FUNDING_SETTLEMENT
             """
         ).fetchone() == (405, 405)
-        settled_at, rate, rate_source, settle_price, price_source, payment, theoretical = (
-            settlement
-        )
+        settled_at, rate, rate_source, settle_price, price_source, payment, theoretical = settlement
         assert rate == pytest.approx(0.00005808)
         assert rate_source == "measured"
         assert price_source == "boundary_open"
@@ -1382,13 +1352,11 @@ def test_measured_funding_exhaustion_liquidates_a_natural_real_data_position(
         assert funding_cost == round(entry[1] / leverage)
         assert liquidation_penalty == 0
         assert net_pnl == recomputed_net
-        assert evidence.execute(
-            "SELECT min(cash_balance) >= 0 FROM PORTFOLIO_PNL"
-        ).fetchone() == (1,)
+        assert evidence.execute("SELECT min(cash_balance) >= 0 FROM PORTFOLIO_PNL").fetchone() == (
+            1,
+        )
         assert dict(
-            evidence.execute(
-                "SELECT check_name, passed FROM INTEGRITY_CHECK"
-            ).fetchall()
+            evidence.execute("SELECT check_name, passed FROM INTEGRITY_CHECK").fetchall()
         ) == {
             "accounting_identity": 1,
             "timestamp_order": 1,
@@ -1449,9 +1417,9 @@ def test_real_funding_sign_matrix_completes_without_negative_cash(
     )
     with sqlite3.connect(result.evidence_path) as evidence:
         assert evidence.execute(target_sql).fetchone()[0] > 0
-        assert evidence.execute(
-            "SELECT min(cash_balance) >= 0 FROM PORTFOLIO_PNL"
-        ).fetchone() == (1,)
+        assert evidence.execute("SELECT min(cash_balance) >= 0 FROM PORTFOLIO_PNL").fetchone() == (
+            1,
+        )
         assert evidence.execute(
             """
             SELECT COUNT(*)
@@ -1496,14 +1464,10 @@ def test_real_missing_candles_complete_330_day_evidence(
         hourly_gap_evidence = json.loads(hourly_note)
         minute_gap_evidence = json.loads(minute_note)
         integrity = dict(
-            evidence.execute(
-                "SELECT check_name, passed FROM INTEGRITY_CHECK"
-            ).fetchall()
+            evidence.execute("SELECT check_name, passed FROM INTEGRITY_CHECK").fetchall()
         )
 
-        assert evidence.execute(
-            "SELECT COUNT(*) FROM PORTFOLIO_PNL"
-        ).fetchone() == (7_457,)
+        assert evidence.execute("SELECT COUNT(*) FROM PORTFOLIO_PNL").fetchone() == (7_457,)
         assert evidence.execute("SELECT COUNT(*) FROM TRADE").fetchone() == (563,)
         assert evidence.execute(
             "SELECT COUNT(*) FROM EXECUTION WHERE exit_reason = 'DATA_GAP'"

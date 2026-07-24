@@ -245,9 +245,7 @@ class Engine:
         if not isinstance(evidence, _BoundEvidence):
             raise TypeError("Engine requires an EvidenceSink with bind/audit lifecycle")
         if not isinstance(catalog, _DeterminismCatalog):
-            raise TypeError(
-                "Engine requires a CatalogStore with determinism_reference"
-            )
+            raise TypeError("Engine requires a CatalogStore with determinism_reference")
         self.feed = feed
         self.broker = broker
         self.clock = clock
@@ -334,9 +332,7 @@ class Engine:
             metadata.required_indicators,
             config.explicit_indicators,
         )
-        longest_indicator_history = max(
-            spec.min_history for spec in self._indicator_specs
-        )
+        longest_indicator_history = max(spec.min_history for spec in self._indicator_specs)
         required_warmup = max(metadata.min_history, longest_indicator_history)
 
         self._history = sorted(
@@ -536,9 +532,7 @@ class Engine:
         """Run the reserved interface in conservative TF-candle mode only."""
         if self._config().trigger_feed != "tf_candle":
             raise NotImplementedError("m1_subcandle trigger walk remains reserved")
-        entry_time = (
-            None if self._active_trade is None else self._active_trade.entry_fill.timestamp
-        )
+        entry_time = None if self._active_trade is None else self._active_trade.entry_fill.timestamp
         return resolve_triggers(
             position,
             subcandles,
@@ -560,7 +554,8 @@ class Engine:
                 exchange=last.exchange,
                 timeframe=last.timeframe,
                 open_time=last.close_time + timedelta(milliseconds=1),
-                close_time=last.close_time + timedelta(milliseconds=1)
+                close_time=last.close_time
+                + timedelta(milliseconds=1)
                 + (last.close_time - last.open_time),
                 open=last.close,
                 high=last.close,
@@ -594,8 +589,7 @@ class Engine:
             for name, failed in (
                 (
                     "data_coverage_ratio",
-                    float(self._gap_stats["data_coverage_ratio"])
-                    < MIN_DATA_COVERAGE_RATIO,
+                    float(self._gap_stats["data_coverage_ratio"]) < MIN_DATA_COVERAGE_RATIO,
                 ),
                 (
                     "max_consecutive_gap",
@@ -861,9 +855,7 @@ class Engine:
                     "action": "exit",
                     "intended_side": position.side.name,
                     "intended_qty": float(position.quantity),
-                    "framework_compliant": (
-                        self._config().sizing_method == "risk_based"
-                    ),
+                    "framework_compliant": (self._config().sizing_method == "risk_based"),
                     "planned_execution_ts": execution_time,
                 },
             )
@@ -985,13 +977,9 @@ class Engine:
                 if self._market_type() is MarketType.FUTURES
                 else notional
             )
-            projected_entry_cash = quantize_amount(
-                self._cash - added_margin - fill.fee
-            )
+            projected_entry_cash = quantize_amount(self._cash - added_margin - fill.fee)
             if projected_entry_cash < ZERO:
-                raise ValueError(
-                    "entry margin plus fee exceeds available cash after truncation"
-                )
+                raise ValueError("entry margin plus fee exceeds available cash after truncation")
         execution_id = self._next("execution")
         self.evidence.record(
             EvidenceRecord(
@@ -1134,9 +1122,7 @@ class Engine:
         )
         gross = quantize_amount(reference_delta * exit_fill.quantity)
         penalty = quantize_amount(ZERO)
-        net = quantize_amount(
-            gross - active.total_fee - active.slippage - active.funding - penalty
-        )
+        net = quantize_amount(gross - active.total_fee - active.slippage - active.funding - penalty)
         basis = quantize_amount(active.entry_fill.reference_price * active.entry_fill.quantity)
         return_pct = quantize_percent(net / basis * Decimal("100"))
         exit_reason = exit_fill.exit_reason or ExitReason.SIGNAL_EXIT
@@ -1265,9 +1251,7 @@ class Engine:
                         "phase": phase,
                         "ts": timestamp,
                         "features_json": features,
-                        "excursion_r": (
-                            None if excursion_r is None else float(excursion_r)
-                        ),
+                        "excursion_r": (None if excursion_r is None else float(excursion_r)),
                     },
                 )
             )
@@ -1372,10 +1356,7 @@ class Engine:
         )
 
     def _settle_at_boundary(self, boundary: datetime) -> None:
-        if (
-            self._market_type() is not MarketType.FUTURES
-            or not is_funding_boundary(boundary)
-        ):
+        if self._market_type() is not MarketType.FUTURES or not is_funding_boundary(boundary):
             return
         position = self._current_position()
         active = self._active_trade
@@ -1439,9 +1420,7 @@ class Engine:
                         "action": "exit",
                         "intended_side": position.side.name,
                         "intended_qty": float(position.quantity),
-                        "framework_compliant": (
-                            self._config().sizing_method == "risk_based"
-                        ),
+                        "framework_compliant": (self._config().sizing_method == "risk_based"),
                         "planned_execution_ts": execution_time,
                     },
                 )
@@ -1488,14 +1467,8 @@ class Engine:
             )
         if self._market_type() is not MarketType.FUTURES:
             return
-        diagnostics_feed = (
-            self.feed if isinstance(self.feed, _FundingDiagnostics) else None
-        )
-        before = (
-            diagnostics_feed.funding_diagnostics()
-            if diagnostics_feed is not None
-            else None
-        )
+        diagnostics_feed = self.feed if isinstance(self.feed, _FundingDiagnostics) else None
+        before = diagnostics_feed.funding_diagnostics() if diagnostics_feed is not None else None
         for boundary in funding_boundaries_between(
             self._config().start,
             self._config().end,
@@ -1511,15 +1484,12 @@ class Engine:
             assert diagnostics_feed is not None
             after = diagnostics_feed.funding_diagnostics()
             self._funding_diagnostics = {
-                name: after[name] - before[name]
-                for name in self._funding_diagnostics
+                name: after[name] - before[name] for name in self._funding_diagnostics
             }
             if any(value < 0 for value in self._funding_diagnostics.values()):
                 raise RuntimeError("funding diagnostic counters moved backwards")
         else:
-            fallback_count = sum(
-                source == "fallback" for _, source in self._funding_rates.values()
-            )
+            fallback_count = sum(source == "fallback" for _, source in self._funding_rates.values())
             self._funding_diagnostics = {
                 "exact_count": len(self._funding_rates) - fallback_count,
                 "normalized_count": 0,
@@ -1588,8 +1558,7 @@ class Engine:
     def _indicator_key(spec: IndicatorSpec) -> str:
         name = re.sub(r"[^a-z0-9]+", "_", spec.name.casefold()).strip("_")
         params = ",".join(
-            f"{key}={Engine._indicator_param(value)}"
-            for key, value in sorted(spec.params.items())
+            f"{key}={Engine._indicator_param(value)}" for key, value in sorted(spec.params.items())
         )
         return name if not params else f"{name}:{params}"
 
@@ -1621,18 +1590,14 @@ class Engine:
             active.mae_ts = candle.close_time
             active.mae_features = features
             active.mae_r = (
-                None
-                if active.r0 in {None, ZERO}
-                else quantize_amount(adverse / active.r0)
+                None if active.r0 in {None, ZERO} else quantize_amount(adverse / active.r0)
             )
         if active.mfe_pnl is None or favorable > active.mfe_pnl:
             active.mfe_pnl = favorable
             active.mfe_ts = candle.close_time
             active.mfe_features = features
             active.mfe_r = (
-                None
-                if active.r0 in {None, ZERO}
-                else quantize_amount(favorable / active.r0)
+                None if active.r0 in {None, ZERO} else quantize_amount(favorable / active.r0)
             )
 
     def _record_local_run(self, profile_json: Mapping[str, object]) -> None:
@@ -1655,9 +1620,7 @@ class Engine:
                     "strategy_name": self._run_meta["strategy_name"],
                     "strategy_version": self._run_meta["strategy_version"],
                     "params_json": self._run_meta["params_json"],
-                    "resolved_indicators_json": self._run_meta[
-                        "resolved_indicators_json"
-                    ],
+                    "resolved_indicators_json": self._run_meta["resolved_indicators_json"],
                     "params_schema_version": self._run_meta["params_schema_version"],
                     "symbol": config.symbol,
                     "exchange": config.exchange,
@@ -1744,13 +1707,9 @@ class Engine:
                 }
                 for boundary, (rate, source) in sorted(self._funding_rates.items())
             ]
-            fallback_count = sum(
-                source == "fallback" for _, source in self._funding_rates.values()
-            )
+            fallback_count = sum(source == "fallback" for _, source in self._funding_rates.values())
             if self._funding_diagnostics["missing_count"] != fallback_count:
-                raise RuntimeError(
-                    "funding fallback count diverged from feed diagnostics"
-                )
+                raise RuntimeError("funding fallback count diverged from feed diagnostics")
             note = (
                 f"measured_exact={self._funding_diagnostics['exact_count']}; "
                 "measured_jitter_normalized="
@@ -1867,9 +1826,7 @@ class Engine:
         if observed != expected:
             raise ValueError("1m OHLCV Evidence diverges from independent origin query")
         timestamp_hash = hashlib.sha256(
-            canonical_json(
-                [epoch_milliseconds(candle.open_time) for candle in observed]
-            ).encode()
+            canonical_json([epoch_milliseconds(candle.open_time) for candle in observed]).encode()
         ).hexdigest()
         return "verified", len(observed), timestamp_hash
 
@@ -1896,20 +1853,21 @@ class Engine:
         coverage = (expected - missing) / expected
         max_gap_seconds = longest * contract.timeframe_ms // 1_000
         passed = (
-            coverage >= MIN_DATA_COVERAGE_RATIO
-            and max_gap_seconds <= MAX_CONSECUTIVE_GAP_SECONDS
+            coverage >= MIN_DATA_COVERAGE_RATIO and max_gap_seconds <= MAX_CONSECUTIVE_GAP_SECONDS
         )
         evaluation_gaps = set(contract.evaluation_grid_gap_close_times)
         self._gap_stats = {
             "expected_candle_count": expected,
             "observed_candle_count": expected - missing,
             "source_absent_gap_count": sum(
-                self._config().start.timestamp() * 1_000 < value
+                self._config().start.timestamp() * 1_000
+                < value
                 <= self._config().end.timestamp() * 1_000
                 for value in contract.normal_gap_close_times
             ),
             "partial_bucket_count": sum(
-                self._config().start.timestamp() * 1_000 < value
+                self._config().start.timestamp() * 1_000
+                < value
                 <= self._config().end.timestamp() * 1_000
                 for value in contract.partial_bucket_close_times
             ),
@@ -1918,10 +1876,8 @@ class Engine:
             "max_consecutive_gap_seconds": max_gap_seconds,
             "data_coverage_passed": passed,
             "unobservable_funding_boundary_count": sum(
-                epoch_milliseconds(boundary)
-                in evaluation_gaps
-                and epoch_milliseconds(boundary) + contract.timeframe_ms
-                in evaluation_gaps
+                epoch_milliseconds(boundary) in evaluation_gaps
+                and epoch_milliseconds(boundary) + contract.timeframe_ms in evaluation_gaps
                 for boundary in funding_boundaries_between(
                     self._config().start,
                     self._config().end,
@@ -1943,9 +1899,7 @@ class Engine:
             "failure_criteria_json": {
                 "threshold": self.prereg.get("failure_threshold", 0.0),
             },
-            "profile_update_declared": bool(
-                self.prereg.get("profile_update_declared", False)
-            ),
+            "profile_update_declared": bool(self.prereg.get("profile_update_declared", False)),
             "related_finding_ref": self.prereg.get("related_finding_ref"),
             "declared_by": str(self.prereg.get("declared_by", "backtest-harness")),
             "declared_at": self.prereg.get("declared_at", config.start),
@@ -1976,11 +1930,7 @@ class Engine:
                     "intended_qty": quantity,
                     "stop_price": None if signal is None else signal.stop_loss,
                     "take_profit_price": None if signal is None else signal.take_profit,
-                    "risk_amount": (
-                        None
-                        if stop_distance is None
-                        else stop_distance * quantity
-                    ),
+                    "risk_amount": (None if stop_distance is None else stop_distance * quantity),
                     "stop_distance": stop_distance,
                     "sizing_method": self._config().sizing_method,
                     "framework_compliant": self._config().sizing_method == "risk_based",
@@ -2074,9 +2024,7 @@ class Engine:
             "loss_count": losses,
             "r_excluded_count": sum(trade.r0 in {None, ZERO} for trade in self._trades),
             **metric_values,
-            "mdd": (
-                None if not math.isfinite(metrics.mdd) else abs(metrics.mdd)
-            ),
+            "mdd": (None if not math.isfinite(metrics.mdd) else abs(metrics.mdd)),
             "calmar_basis": "mar",
             "annualization": "daily_resample_sqrt365",
             "initial_capital": quantize_amount(self._config().initial_capital),

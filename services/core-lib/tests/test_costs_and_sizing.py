@@ -82,17 +82,13 @@ def make_position(side: PositionSide = PositionSide.LONG) -> Position:
         margin=Decimal("20"),
         entry_price=Decimal("100"),
         mark_price=Decimal("100"),
-        liquidation_price=(
-            Decimal("90.4") if side is PositionSide.LONG else Decimal("109.6")
-        ),
+        liquidation_price=(Decimal("90.4") if side is PositionSide.LONG else Decimal("109.6")),
         funding_fee_total=Decimal("0"),
     )
 
 
 def test_fee_and_signed_slippage_costs_are_deterministic() -> None:
-    assert calculate_fee(Decimal("1000"), Decimal("0.0005")) == Decimal(
-        "0.50000000"
-    )
+    assert calculate_fee(Decimal("1000"), Decimal("0.0005")) == Decimal("0.50000000")
     order = normalize_order(
         OrderRequest(
             symbol="BTCUSDT",
@@ -109,12 +105,12 @@ def test_fee_and_signed_slippage_costs_are_deterministic() -> None:
         )
     )
     model = FixedSlippageModel(SlippageParams(fixed_rate=Decimal("0.001")))
-    assert apply_slippage(
-        Decimal("1000"), OrderSide.BUY, model, order=order
-    ) == Decimal("1.00000000")
-    assert apply_slippage(
-        Decimal("1000"), OrderSide.SELL, model, order=order
-    ) == Decimal("-1.00000000")
+    assert apply_slippage(Decimal("1000"), OrderSide.BUY, model, order=order) == Decimal(
+        "1.00000000"
+    )
+    assert apply_slippage(Decimal("1000"), OrderSide.SELL, model, order=order) == Decimal(
+        "-1.00000000"
+    )
     stress_model = FixedSlippageModel(
         SlippageParams(
             spread_rate=Decimal("0.002"),
@@ -134,9 +130,7 @@ def test_funding_is_discrete_at_utc_boundaries_and_directional() -> None:
     assert is_funding_boundary(datetime(2026, 1, 1, 8, tzinfo=UTC))
     assert not is_funding_boundary(datetime(2026, 1, 1, 8, 1, tzinfo=UTC))
     rate = Decimal("0.00008750")
-    assert settle_funding(make_position(), rate, Decimal("100")) == Decimal(
-        "0.01750000"
-    )
+    assert settle_funding(make_position(), rate, Decimal("100")) == Decimal("0.01750000")
     assert settle_funding(
         make_position(PositionSide.SHORT),
         rate,
@@ -156,10 +150,13 @@ def test_funding_boundaries_cover_coarse_intervals_without_double_charging() -> 
         datetime(2026, 1, 2, 8, tzinfo=UTC),
         datetime(2026, 1, 2, 16, tzinfo=UTC),
     )
-    assert funding_boundaries_between(
-        datetime(2026, 1, 1, 8, tzinfo=UTC),
-        datetime(2026, 1, 1, 8, tzinfo=UTC),
-    ) == ()
+    assert (
+        funding_boundaries_between(
+            datetime(2026, 1, 1, 8, tzinfo=UTC),
+            datetime(2026, 1, 1, 8, tzinfo=UTC),
+        )
+        == ()
+    )
 
 
 def test_liquidation_price_and_trigger_are_conservative_by_side() -> None:

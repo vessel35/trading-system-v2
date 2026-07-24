@@ -74,11 +74,7 @@ class _RollingPopulationStdev:
 
     def current(self) -> float:
         """Return sqrt(M2/n) for a complete valid window, otherwise NaN."""
-        if (
-            len(self._window) != self.period
-            or self._invalid
-            or self._count != self.period
-        ):
+        if len(self._window) != self.period or self._invalid or self._count != self.period:
             return NAN
         return sqrt(max(0.0, self._m2) / self.period)
 

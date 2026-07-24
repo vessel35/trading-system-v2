@@ -29,9 +29,7 @@ def _local_values(run_seq: int) -> dict[str, object]:
         "strategy_name": "FakeBreakout",
         "strategy_version": "1.0.0",
         "params_json": {"period": 20},
-        "resolved_indicators_json": [
-            {"name": "EMA", "params": {"period": 9}, "version": "1.0.0"}
-        ],
+        "resolved_indicators_json": [{"name": "EMA", "params": {"period": 9}, "version": "1.0.0"}],
         "params_schema_version": "1.0.0",
         "symbol": "BTCUSDT",
         "exchange": "binance",
@@ -398,9 +396,7 @@ def _run_meta() -> dict[str, object]:
         "strategy_name": "FakeBreakout",
         "strategy_version": "1.0.0",
         "params_json": {"period": 20},
-        "resolved_indicators_json": [
-            {"name": "EMA", "params": {"period": 9}, "version": "1.0.0"}
-        ],
+        "resolved_indicators_json": [{"name": "EMA", "params": {"period": 9}, "version": "1.0.0"}],
         "params_schema_version": "1.0.0",
         "symbol": "BTCUSDT",
         "exchange": "binance",

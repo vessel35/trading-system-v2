@@ -41,16 +41,8 @@ def decide(
     if not isinstance(edge_distinguishable, bool):
         raise TypeError("prereg.edge_distinguishable must be bool")
 
-    success = (
-        observed >= success_threshold
-        if higher_is_better
-        else observed <= success_threshold
-    )
-    failed = (
-        observed <= failure_threshold
-        if higher_is_better
-        else observed >= failure_threshold
-    )
+    success = observed >= success_threshold if higher_is_better else observed <= success_threshold
+    failed = observed <= failure_threshold if higher_is_better else observed >= failure_threshold
     if success:
         route = "promote"
         reason = "met the preregistered success threshold"

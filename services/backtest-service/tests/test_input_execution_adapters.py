@@ -249,9 +249,7 @@ def test_data_feed_funding_fails_closed_outside_jitter_window() -> None:
 
     outside = BacktestDataFeed(
         StubConnection(
-            lambda query, params: [
-                (at + timedelta(seconds=1, milliseconds=1), Decimal("0.0001"))
-            ]
+            lambda query, params: [(at + timedelta(seconds=1, milliseconds=1), Decimal("0.0001"))]
         )
     )
     with pytest.raises(ValueError, match="outside the collection window"):

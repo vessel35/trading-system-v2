@@ -135,16 +135,14 @@ class IndicatorRegistry:
             raise TypeError("indicator descriptor name/params have invalid types")
         normalized_params = dict(params)
         if any(
-            not isinstance(key, str)
-            or not isinstance(value, bool | float | int | str)
+            not isinstance(key, str) or not isinstance(value, bool | float | int | str)
             for key, value in normalized_params.items()
         ):
             raise TypeError("indicator params must use scalar registry values")
         matches = [
             spec
             for spec in self._specs.values()
-            if spec.name.casefold() == name.casefold()
-            and dict(spec.params) == normalized_params
+            if spec.name.casefold() == name.casefold() and dict(spec.params) == normalized_params
         ]
         if len(matches) != 1:
             raise KeyError(f"indicator is not registered: {name} {normalized_params}")
@@ -220,12 +218,8 @@ class IndicatorRegistry:
         explicit: Collection[Mapping[str, object]],
     ) -> builtins.list[IndicatorSpec]:
         """Resolve external descriptors and calculation mode through one registry path."""
-        declared_ids = {
-            self._descriptor_spec(descriptor).identifier for descriptor in declared
-        }
-        explicit_ids = {
-            self._descriptor_spec(descriptor).identifier for descriptor in explicit
-        }
+        declared_ids = {self._descriptor_spec(descriptor).identifier for descriptor in declared}
+        explicit_ids = {self._descriptor_spec(descriptor).identifier for descriptor in explicit}
         enabled = self.resolve_enabled(mode, declared_ids, explicit_ids)
         specs = self.specs_for(enabled)
         if not specs:

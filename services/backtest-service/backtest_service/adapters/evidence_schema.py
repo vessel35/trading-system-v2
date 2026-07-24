@@ -76,9 +76,7 @@ HASH_TABLES: Final = tuple(
 HASH_GLOBAL_EXCLUDED_COLUMNS: Final = frozenset({"run_id", "backtest_run_id"})
 HASH_EXCLUDED_COLUMNS: Final = MappingProxyType(
     {
-        "BACKTEST_RUN_LOCAL": frozenset(
-            {"run_seq", "run_name", "prereg_json", "created_at"}
-        ),
+        "BACKTEST_RUN_LOCAL": frozenset({"run_seq", "run_name", "prereg_json", "created_at"}),
         "INTEGRITY_CHECK": frozenset({"checked_at"}),
         "FINDING_CLAIM": frozenset({"created_at"}),
     }

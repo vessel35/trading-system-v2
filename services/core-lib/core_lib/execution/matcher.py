@@ -315,9 +315,7 @@ def match(
     remaining = order.remaining_quantity()
     quantity = remaining
     new_stop: Decimal | None = None
-    entry_margin = (
-        None if order.reduce_only or order.close_position else available_margin
-    )
+    entry_margin = None if order.reduce_only or order.close_position else available_margin
     for _ in range(32):
         preview_price, _ = _execution_price(
             order,
@@ -386,11 +384,7 @@ def _protection_reference(
 ) -> tuple[Decimal, bool]:
     open_price = _price(candle.open)
     if reason is ExitReason.LIQUIDATION:
-        gap = (
-            open_price < level
-            if position.side is PositionSide.LONG
-            else open_price > level
-        )
+        gap = open_price < level if position.side is PositionSide.LONG else open_price > level
         return level, gap
     if position.side is PositionSide.LONG:
         return min(level, open_price), open_price < level
@@ -454,9 +448,7 @@ def resolve_triggers(
             liq_params = cost_model.liq_params()
             maintenance_margin_rate = liq_params.get("maintenance_margin_rate")
             if not isinstance(maintenance_margin_rate, Decimal):
-                raise TypeError(
-                    "liq_params.maintenance_margin_rate must be Decimal"
-                )
+                raise TypeError("liq_params.maintenance_margin_rate must be Decimal")
             liquidation_level = liquidation.price(
                 position.entry_price,
                 position.leverage,
@@ -473,32 +465,21 @@ def resolve_triggers(
             liquidation_position,
             adverse_extreme,
         )
-        stop_hit = (
-            stop_price is not None
-            and (
-                low <= stop_price
-                if position.side is PositionSide.LONG
-                else high >= stop_price
-            )
+        stop_hit = stop_price is not None and (
+            low <= stop_price if position.side is PositionSide.LONG else high >= stop_price
         )
-        take_hit = (
-            take_profit_price is not None
-            and (
-                high >= take_profit_price
-                if position.side is PositionSide.LONG
-                else low <= take_profit_price
-            )
+        take_hit = take_profit_price is not None and (
+            high >= take_profit_price
+            if position.side is PositionSide.LONG
+            else low <= take_profit_price
         )
 
         reason: ExitReason | None = None
         level: Decimal | None = None
-        invalid_stop = (
-            stop_price is not None
-            and (
-                stop_price < liquidation_level
-                if position.side is PositionSide.LONG
-                else stop_price > liquidation_level
-            )
+        invalid_stop = stop_price is not None and (
+            stop_price < liquidation_level
+            if position.side is PositionSide.LONG
+            else stop_price > liquidation_level
         )
         if stop_hit and liquidation_hit and invalid_stop:
             reason, level = ExitReason.LIQUIDATION, liquidation_level

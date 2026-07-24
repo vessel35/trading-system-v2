@@ -18,11 +18,7 @@ class BacktestClock(Clock):
     def from_candles(cls, candles: Iterable[Candle]) -> Self:
         """Build the canonical union of every candle open and close instant."""
         schedule = sorted(
-            {
-                instant
-                for candle in candles
-                for instant in (candle.open_time, candle.close_time)
-            }
+            {instant for candle in candles for instant in (candle.open_time, candle.close_time)}
         )
         return cls(schedule)
 

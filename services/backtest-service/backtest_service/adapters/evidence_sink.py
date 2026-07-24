@@ -308,9 +308,7 @@ class BacktestEvidenceSink(EvidenceSink):
         ).fetchall()
         accounting_identity = not accounting_failures
         timestamp_failures = connection.execute(TIMESTAMP_ORDER_AUDIT_SQL).fetchall()
-        local_timeframe = connection.execute(
-            "SELECT timeframe FROM BACKTEST_RUN_LOCAL"
-        ).fetchone()
+        local_timeframe = connection.execute("SELECT timeframe FROM BACKTEST_RUN_LOCAL").fetchone()
         if local_timeframe is not None:
             try:
                 max_execution_lag = timeframe_milliseconds(local_timeframe[0])
@@ -327,9 +325,7 @@ class BacktestEvidenceSink(EvidenceSink):
                 """,
                 (max_execution_lag,),
             ).fetchall()
-            timestamp_failures.extend(
-                ("execution_lag", *row) for row in lag_failures
-            )
+            timestamp_failures.extend(("execution_lag", *row) for row in lag_failures)
         decisionless_executions = connection.execute(
             """
             SELECT execution_id, exit_reason
@@ -359,11 +355,7 @@ class BacktestEvidenceSink(EvidenceSink):
         ).fetchall()
         slippage_failures = self._slippage_failures()
         funding_failures = self._funding_failures()
-        cost_once = (
-            not execution_cost_failures
-            and not slippage_failures
-            and not funding_failures
-        )
+        cost_once = not execution_cost_failures and not slippage_failures and not funding_failures
         net_failures = connection.execute(
             """
             SELECT trade_id
@@ -435,9 +427,7 @@ class BacktestEvidenceSink(EvidenceSink):
                 "failure_count": len(timestamp_failures),
                 "failures": [list(row) for row in timestamp_failures],
                 "allowed_decisionless_end_of_data": [
-                    row[0]
-                    for row in decisionless_executions
-                    if row[1] == "END_OF_DATA"
+                    row[0] for row in decisionless_executions if row[1] == "END_OF_DATA"
                 ],
             },
             "cost_once": {
@@ -483,9 +473,7 @@ class BacktestEvidenceSink(EvidenceSink):
         second = self.normalized_bytes()
         evidence_hash = hashlib.sha256(first).hexdigest()
         serialization_stable = first == second
-        previous_matches = (
-            self._comparison_hash is None or self._comparison_hash == evidence_hash
-        )
+        previous_matches = self._comparison_hash is None or self._comparison_hash == evidence_hash
         results["deterministic"] = (
             serialization_stable
             and self._catalog_config_matches
@@ -495,9 +483,7 @@ class BacktestEvidenceSink(EvidenceSink):
         if self._comparison_hash is None:
             comparison: dict[str, object] = {
                 "status": (
-                    "source_changed"
-                    if self._same_config_run_exists
-                    else "no_prior_config_run"
+                    "source_changed" if self._same_config_run_exists else "no_prior_config_run"
                 ),
                 "comparison_run_id": None,
                 "comparison_hash": None,
@@ -609,9 +595,7 @@ class BacktestEvidenceSink(EvidenceSink):
             liquidated,
         ) in trades:
             if exit_time is None or funding_cost is None:
-                failures.append(
-                    {"trade_id": trade_id, "reason": "unfinalized_trade"}
-                )
+                failures.append({"trade_id": trade_id, "reason": "unfinalized_trade"})
                 continue
             expected = (
                 {
@@ -639,13 +623,7 @@ class BacktestEvidenceSink(EvidenceSink):
                 settled_at
                 for settled_at, payment, theoretical in actual_rows
                 if abs(payment) > abs(theoretical)
-                or (
-                    payment != theoretical
-                    and (
-                        liquidated != 1
-                        or exit_time != settled_at + 1
-                    )
-                )
+                or (payment != theoretical and (liquidated != 1 or exit_time != settled_at + 1))
             ]
             if invalid_caps:
                 reasons.append("isolated_margin_cap")
@@ -682,10 +660,7 @@ class BacktestEvidenceSink(EvidenceSink):
         if span <= 0 or span % duration:
             failures.append("period_not_aligned_to_timeframe")
             return failures
-        full_grid = [
-            period_start + duration * index
-            for index in range(1, span // duration + 1)
-        ]
+        full_grid = [period_start + duration * index for index in range(1, span // duration + 1)]
         source_rows = self.connection.execute(
             """
             SELECT gap_count, note
@@ -713,11 +688,7 @@ class BacktestEvidenceSink(EvidenceSink):
         allowed_gaps = set(contract.evaluation_grid_gap_close_times)
         if not allowed_gaps <= set(full_grid):
             return ["strategy_ohlcv_gap_outside_evaluation_grid"]
-        expected = [
-            close_time
-            for close_time in full_grid
-            if close_time not in allowed_gaps
-        ]
+        expected = [close_time for close_time in full_grid if close_time not in allowed_gaps]
         actual = [
             row[0]
             for row in self.connection.execute(
@@ -847,23 +818,18 @@ class BacktestEvidenceSink(EvidenceSink):
             if contract.snapshot_gap_count != gap_count:
                 failures.append(f"ohlcv_gap_count_mismatch:{snapshot_id}")
             if any(
-                not range_start < close_time <= range_end
-                or (close_time - range_start) % duration
+                not range_start < close_time <= range_end or (close_time - range_start) % duration
                 for close_time in contract.normal_gap_close_times
             ):
                 failures.append(f"ohlcv_normal_gap_off_grid:{snapshot_id}")
             expected_evaluation_gaps = tuple(
                 close_time
                 for close_time in sorted(
-                    contract.normal_gap_close_times
-                    + contract.partial_bucket_close_times
+                    contract.normal_gap_close_times + contract.partial_bucket_close_times
                 )
                 if period_start < close_time <= period_end
             )
-            if (
-                contract.evaluation_grid_gap_close_times
-                != expected_evaluation_gaps
-            ):
+            if contract.evaluation_grid_gap_close_times != expected_evaluation_gaps:
                 failures.append(f"ohlcv_evaluation_gap_mismatch:{snapshot_id}")
             if contract.origin_validation_status != "verified":
                 failures.append(f"ohlcv_origin_unverified:{snapshot_id}")
@@ -890,8 +856,7 @@ class BacktestEvidenceSink(EvidenceSink):
                 != minute_contract.origin_validation_status
                 or strategy_contract.origin_minute_row_count
                 != minute_contract.origin_minute_row_count
-                or strategy_contract.origin_timestamp_hash
-                != minute_contract.origin_timestamp_hash
+                or strategy_contract.origin_timestamp_hash != minute_contract.origin_timestamp_hash
             ):
                 failures.append("ohlcv_origin_contract_mismatch")
             if str(timeframe) != "1m":
@@ -906,28 +871,22 @@ class BacktestEvidenceSink(EvidenceSink):
                     + strategy_contract.partial_bucket_close_times
                 ):
                     count = sum(
-                        close_time - strategy_contract.timeframe_ms
-                        + offset * minute_duration
+                        close_time - strategy_contract.timeframe_ms + offset * minute_duration
                         in minute_gaps
                         for offset in range(
                             1,
                             strategy_contract.timeframe_ms // minute_duration + 1,
                         )
                     )
-                    classified_normal = (
-                        close_time in strategy_contract.normal_gap_close_times
-                    )
+                    classified_normal = close_time in strategy_contract.normal_gap_close_times
                     if (
                         classified_normal
-                        and count * minute_duration
-                        != strategy_contract.timeframe_ms
+                        and count * minute_duration != strategy_contract.timeframe_ms
                     ) or (
                         not classified_normal
                         and not 0 < count * minute_duration < strategy_contract.timeframe_ms
                     ):
-                        failures.append(
-                            f"ohlcv_resample_gap_classification:{close_time}"
-                        )
+                        failures.append(f"ohlcv_resample_gap_classification:{close_time}")
                 for minute_close in minute_contract.evaluation_grid_gap_close_times:
                     offset = minute_close - period_start
                     upper_close = (
@@ -939,9 +898,7 @@ class BacktestEvidenceSink(EvidenceSink):
                         * strategy_contract.timeframe_ms
                     )
                     if upper_close not in strategy_gaps:
-                        failures.append(
-                            f"ohlcv_minute_gap_without_resample_gap:{minute_close}"
-                        )
+                        failures.append(f"ohlcv_minute_gap_without_resample_gap:{minute_close}")
         return failures
 
     def _trade_feature_failures(self) -> list[str]:
@@ -968,8 +925,7 @@ class BacktestEvidenceSink(EvidenceSink):
                 failures.append(f"trade_feature_phases:{trade_id}")
                 continue
             if any(
-                not isinstance(json.loads(row[1]), dict) or json.loads(row[1]) == {}
-                for row in rows
+                not isinstance(json.loads(row[1]), dict) or json.loads(row[1]) == {} for row in rows
             ):
                 failures.append(f"empty_trade_features:{trade_id}")
         return failures
@@ -1110,9 +1066,7 @@ class BacktestEvidenceSink(EvidenceSink):
             moved_against_anchor = (
                 equity < anchor_equity if kind == "drawdown" else equity > anchor_equity
             )
-            recovered = (
-                equity >= anchor_equity if kind == "drawdown" else equity <= anchor_equity
-            )
+            recovered = equity >= anchor_equity if kind == "drawdown" else equity <= anchor_equity
             if not active and moved_against_anchor:
                 active = True
                 extreme_ts, extreme_equity = timestamp, equity

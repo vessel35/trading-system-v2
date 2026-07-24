@@ -118,9 +118,7 @@ class OhlcvGapContract:
                 "contract": OHLCV_GAP_CONTRACT,
                 "timeframe_ms": self.timeframe_ms,
                 "normal_gap_count": self.normal_gap_count,
-                "normal_gap_ranges": _encode_ranges(
-                    self.normal_gap_close_times, self.timeframe_ms
-                ),
+                "normal_gap_ranges": _encode_ranges(self.normal_gap_close_times, self.timeframe_ms),
                 "partial_bucket_count": self.partial_bucket_count,
                 "partial_bucket_ranges": _encode_ranges(
                     self.partial_bucket_close_times, self.timeframe_ms
@@ -167,9 +165,8 @@ def build_ohlcv_gap_contract(
         raise ValueError("OHLCV origin must be independently verified")
     if origin_minute_row_count < 0:
         raise ValueError("origin minute row count must be non-negative")
-    if (
-        len(origin_timestamp_hash) != 64
-        or any(character not in "0123456789abcdef" for character in origin_timestamp_hash)
+    if len(origin_timestamp_hash) != 64 or any(
+        character not in "0123456789abcdef" for character in origin_timestamp_hash
     ):
         raise ValueError("verified origin requires a lowercase SHA-256 timestamp hash")
 
@@ -211,9 +208,7 @@ def build_ohlcv_gap_contract(
             elif missing:
                 partial.append(close_time)
             else:
-                raise ValueError(
-                    "resampler omitted a bucket whose complete 1m origin exists"
-                )
+                raise ValueError("resampler omitted a bucket whose complete 1m origin exists")
         normal_gaps = tuple(normal)
         partial_buckets = tuple(partial)
 
@@ -259,9 +254,9 @@ def decode_ohlcv_gap_contract(note: str) -> OhlcvGapContract:
         raise ValueError("OHLCV normal gap count does not match its ranges")
     if _strict_int(raw["partial_bucket_count"], name="partial_bucket_count") != len(partial):
         raise ValueError("OHLCV partial bucket count does not match its ranges")
-    if _strict_int(
-        raw["evaluation_grid_gap_count"], name="evaluation_grid_gap_count"
-    ) != len(evaluation):
+    if _strict_int(raw["evaluation_grid_gap_count"], name="evaluation_grid_gap_count") != len(
+        evaluation
+    ):
         raise ValueError("OHLCV evaluation gap count does not match its ranges")
     if set(normal) & set(partial):
         raise ValueError("normal and partial OHLCV gaps must be disjoint")

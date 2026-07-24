@@ -46,9 +46,7 @@ class ParameterSchema:
 def _freeze(value: object) -> object:
     if isinstance(value, Mapping):
         sorted_items = sorted(value.items(), key=lambda pair: str(pair[0]))
-        return MappingProxyType(
-            {str(key): _freeze(item) for key, item in sorted_items}
-        )
+        return MappingProxyType({str(key): _freeze(item) for key, item in sorted_items})
     if isinstance(value, (list, tuple)):
         return tuple(_freeze(item) for item in value)
     if isinstance(value, (set, frozenset)):

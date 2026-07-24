@@ -231,8 +231,7 @@ def normalized_config_hash(run_meta: Mapping[str, object]) -> str:
     values = [
         _hash_scalar(
             run_meta[field],
-            json_field=field
-            in {"params_json", "resolved_indicators_json", "cost_values_json"},
+            json_field=field in {"params_json", "resolved_indicators_json", "cost_values_json"},
         )
         for field in _CONFIG_HASH_FIELDS
     ]
@@ -429,9 +428,7 @@ class BacktestCatalogStore(CatalogStore):
                 (source_data_hash, run_id, source_data_hash),
             ).fetchone()
             current_config_matches = current is not None and current[0] == config_hash
-            current_source_matches = (
-                current is not None and current[1] == source_data_hash
-            )
+            current_source_matches = current is not None and current[1] == source_data_hash
             previous = self._connection.execute(
                 """
                 SELECT run_id, evidence_hash

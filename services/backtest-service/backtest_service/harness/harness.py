@@ -98,9 +98,9 @@ class Harness:
         duration = config.end - config.start
         if duration.total_seconds() < folds / 1_000:
             raise ValueError("period is too short for millisecond-separated folds")
-        boundaries = [
-            config.start + duration * (index / folds) for index in range(folds)
-        ] + [config.end]
+        boundaries = [config.start + duration * (index / folds) for index in range(folds)] + [
+            config.end
+        ]
         configs = [
             self._segment_config(
                 config,
@@ -192,11 +192,7 @@ class Harness:
         centered = [(value - mean) / standard_deviation for value in returns]
         skew = sum(value**3 for value in centered) / count
         kurtosis = sum(value**4 for value in centered) / count
-        variance_adjustment = (
-            1.0
-            - skew * sharpe
-            + ((kurtosis - 1.0) / 4.0) * sharpe * sharpe
-        )
+        variance_adjustment = 1.0 - skew * sharpe + ((kurtosis - 1.0) / 4.0) * sharpe * sharpe
         if variance_adjustment <= 0.0:
             raise ValueError("PSR variance adjustment is not positive")
         statistic = sharpe * math.sqrt(count - 1) / math.sqrt(variance_adjustment)
