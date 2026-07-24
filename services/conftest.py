@@ -6,10 +6,14 @@ import pytest
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Register the shared integration marker even without a root config file."""
+    """Register shared markers even without a root config file."""
     config.addinivalue_line(
         "markers",
         "integration: uses the local development PostgreSQL instance",
+    )
+    config.addinivalue_line(
+        "markers",
+        "real_data_long: runs the long-window real-data regression tier",
     )
 
 
