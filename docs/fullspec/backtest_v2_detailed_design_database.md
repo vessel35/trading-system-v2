@@ -1183,6 +1183,7 @@ erDiagram
         text strategy_profile_json "형태 선언 사본"
         text envelope_status_declared
         text prereg_json "사전등록 사본"
+        text eval_decision_json "판정 결과 사본 · 해시 대상"
         text evidence_schema_version
         integer created_at "벽시계 · 해시 제외"
     }
@@ -1321,8 +1322,8 @@ erDiagram
         integer gross_pnl
         integer total_fee
         integer slippage
-        integer funding_cost
         integer liquidation_penalty
+        integer funding_cost
         integer net_pnl
         real return_pct
         integer r0
@@ -1442,6 +1443,7 @@ erDiagram
 | `strategy_profile_json` | JSON 객체 문자열 | 허용 | 없음 | 그 시점 형태 선언 사본(전략군·기대 승률/손익비 범위·꼬리 형태·보유 지평·주 지표·보존할 수익 구조·허용오차). **파일만으로 형태 대조를 재검산하려면 이 사본이 있어야 한다** |
 | `envelope_status_declared` | `provisional`·`updating`·`established` 중 하나 | 허용 | 없음 | run 시점의 프로파일 성숙도 사본 |
 | `prereg_json` | JSON 객체 문자열 | 허용 | 없음 | 사전등록 사본(가설·주 지표·성공/실패 기준·선언 시각). 최종 라우팅의 대조값을 파일 안에서 확인하기 위한 사본이며 결정성 해시에서는 제외된다. 사전등록 무결성은 카탈로그의 잠긴 행이 보증한다. 데이터 품질 판정 입력은 해시 대상인 별도 컬럼에 둔다 |
+| `eval_decision_json` | JSON 객체 문자열 | 허용 | 없음 | 판정 결과 사본(무결성·Hard Gate·Decision 3단계 판정의 결과와 최종 라우팅, 기준이 판정에 실제로 미친 영향). `prereg_json`과 달리 **결정성 해시에 포함된다** — 같은 입력이면 판정 결과도 같아야 하기 때문이다. finalize 시점에 적히므로 진행 중 run에서는 비어 있을 수 있다 |
 | `evidence_schema_version` | 문자열 | 불가 | 없음 | 이 파일의 스키마 버전. 현재 `1.3.0`이며, 이 버전에서 필수 해시 대상 `data_quality_criteria_json`을 추가했다. 직전 `1.2.0`은 펀딩 이론 부과액 컬럼과 그 한도 제약을 추가한 버전이다. 나중에 엔티티가 늘어도 옛 파일을 읽을 수 있게 한다 |
 | `created_at` | 정수 (epoch ms, UTC). **벽시계이며 해시에서 제외** | 불가 | 현재 시각 | 파일 생성 시각 |
 

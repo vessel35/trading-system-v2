@@ -346,6 +346,7 @@ services/core-lib/
       turtle_unit.py                 #   터틀 인스턴스(N 사이징·0.5N 피라미딩·유닛 한도) — 전략이 선택 조합
       wallet_pct.py                  #   pct 방식(호환) — framework 비준수 플래그 의무
       kelly.py                       #   Half/Quarter-Kelly 상한
+      exposure_limit.py              #   노출 한도 검사(단일 시장·상관군·단일 방향 위험 합 한도) — §4.3.3 ExposureLimit
     costs/                           # [컴포넌트] net 손익 4개 비용 수식 표준(값은 CostModel 주입)
       fee.py                         #   수수료(maker/taker, notional×rate)
       slippage.py                    #   슬리피지(고정 bps + 스프레드/충격)
@@ -386,9 +387,14 @@ services/core-lib/
 역참조가 없다. 맨 아래는 `types`이며, 나머지 모듈이 값 타입을 여기서 가져다 쓴다. 그 위의 구조는 세 가지만 따로
 읽으면 정확히 보인다.
 
-첫째, `ports`와 `eval`은 `types`만 참조하는 잎(leaf)이다. 이 둘을 실제로 쓰는 쪽은 `backtest-service`의 Engine 같은
-서비스 계층이라, core_lib 안쪽만 그린 이 그림에는 그 소비자가 나타나지 않는다(서비스가 core_lib에 의존하는 관계는
-§1.1에 그려져 있다).
+첫째, `ports`와 `eval`은 아래로는 `types`만 참조한다(둘 다 다른 core_lib 모듈을 참조하지 않는다). `eval`은 core_lib
+안에서 이를 소비하는 모듈이 없고 실제 소비자가 `backtest-service`의 Engine 같은 서비스 계층뿐이라, core_lib 안쪽만
+그린 이 그림에는 그 소비자가 나타나지 않는다. `ports`는 다르다 — 여섯 환경 포트의 구현 어댑터는 서비스 계층이
+주입하지만, 그중 `CostModel` 추상 계약은 `costs`와 `execution`이, `StrategyRegistry` 추상 계약은 `Adapter Manager`가
+core_lib 안에서 값·타입으로 소비하므로 이 세 참조가 아래 그림에 내부 엣지로 나타난다(재복제 가드 테스트
+`tests/test_no_reduplication.py`도 이 세 엣지를 허용 목록으로 인정한다). 이 소비는 모두 아래 방향(`ports`는 여전히
+`types`만 참조)이라 `types` 바닥·역참조 없음 불변식은 그대로다. 서비스가 core_lib에 의존하는 관계는 §1.1에 그려져
+있다.
 
 둘째, `Adapter Manager`가 가리키는 것은 `ports/strategy_registry.py`의 접근 포트(ABC)일 뿐이다. `signal_db`에
 실제로 붙는 구체 어댑터는 backtest·signal 서비스가 주입하므로, `core_lib` 자체는 어떤 DB에도 직접 묶이지 않는다.
@@ -418,12 +424,14 @@ flowchart TD
     IND --> TYPES
     SIZ --> TYPES
     CST --> TYPES
+    CST -->|CostModel 값 소비| PORT
     EVAL --> TYPES
     PORT --> TYPES
     STRAT --> TYPES
     STRAT -->|지표 값 소비| IND
     EXE --> TYPES
     EXE --> CST
+    EXE -->|CostModel 값 소비| PORT
     MGR --> STRAT
     MGR --> CFG
     MGR --> REG
@@ -496,10 +504,13 @@ services/backtest-service/
 정의해 모든 소비자가 참조한다. 아래 다이어그램이 열 컴포넌트와 그 내부 의존 방향을 담는다 — `types`가 바닥이고,
 화살표는 "참조한다(의존)"를 뜻하며 역방향은 없다. `strategy/adaptees/`의 구현 전략(Adaptee)은 플랫폼 컴포넌트가
 아니라 참조 플러그인이므로 이 뷰에 컴포넌트로 등장하지 않는다 — 플랫폼은 전략을 끼우는 계약(`StrategyAdapter`)만
-그린다. `ports`·`eval`은 `types`만 참조하는 잎이다. `eval`과 여섯 환경 포트(`DataFeed`·`Broker`·`Clock`·
-`CostModel`·`EvidenceSink`·`CatalogStore`)의 소비자는 서비스 계층(Engine 등)이라 이 내부 뷰가 아니라 §3.2·§3.3의
-소비 화살표에 나타나지만, 일곱 번째 포트인 `StrategyRegistry`(Adaptee 카탈로그 주입 포트)만은 `Adapter Manager`가
-core_lib 안에서 소비하므로 아래 다이어그램에 내부 엣지(`Adapter Manager` → `ports`)로 나타난다.
+그린다. `ports`·`eval`은 아래로는 `types`만 참조한다. `eval`의 소비자는 서비스 계층(Engine 등)뿐이라 이 내부 뷰가 아니라
+§3.2·§3.3의 소비 화살표에 나타난다. 여섯 환경 포트 중 `DataFeed`·`Broker`·`Clock`·`EvidenceSink`·`CatalogStore`
+다섯의 소비자도 서비스 계층이라 여기 나타나지 않지만, `CostModel`은 `costs`와 `execution`이 core_lib 안에서
+소비하고 일곱 번째 포트인 `StrategyRegistry`(Adaptee 카탈로그 주입 포트)는 `Adapter Manager`가 소비하므로, 이 셋만은
+아래 다이어그램에 내부 엣지(`costs`가 `ports`를, `execution`이 `ports`를, `Adapter Manager`가 `ports`를 참조)로
+나타난다. 재복제 가드 테스트 `tests/test_no_reduplication.py`도 이 세 엣지를 허용 목록으로 인정하며, 소비가 모두
+아래 방향이라 `types` 바닥·역참조 없음 불변식은 그대로다.
 
 core-lib 내부 컴포넌트와 의존 방향.
 
@@ -522,8 +533,10 @@ flowchart TD
     STRAT -->|지표 값 소비| IND
     SIZ --> TYPES
     CST --> TYPES
+    CST -->|CostModel 값 소비| PORT
     EXE --> TYPES
     EXE --> CST
+    EXE -->|CostModel 값 소비| PORT
     PORT --> TYPES
     EVAL --> TYPES
     MGR -->|스키마 취득·Adaptee 생성| STRAT
@@ -540,7 +553,7 @@ flowchart TD
 | `types` | 세 실행 모드가 공유하는 값 타입·금액 정밀도의 유일한 정의처 | 공개: `Candle`·`TradingSignal`(판단 전용, 수량·방향 필드 없음)·`Order`·`Position`·`Trade`(`r0` 포함)·`Fill`·enums·`money`(ZERO·Q_*·quantize_*). 하지 않음: 계산·IO 없음; 캔들 검증(한 캔들 내부 `high ≥ max(open,close)`·`low ≤ min(open,close)`는 타입 계층, 시계열 단조는 적재 층이 강제) | `types/`의 candle·signal·order·position·trade·fill·enums·money |
 | `indicators` | 공용 프리미티브 + 지표 표준(벡터화·증분 두 계산 방식). 계약은 등록된 지표를 **공통 방식으로 관리**하는 것이며 지표 개수가 아니다(목록·단위는 §4.1) | 공개: `registry.get(name, params)`·`compute_batch(candles, enabled_set)`·`IndicatorState.update(candle)`·`contracts.assert_finalized`. 하지 않음: 확정 캔들만 입력(`close_time ≤ 판단 시각`); 계산은 float64(Decimal 변환은 `execution` 관문 소관); 계산 대상은 run 설정이 결정 | `indicators/`의 primitives·지표군 9파일·donchian·registry·contracts |
 | `StrategyAdapter` | 전략을 끼우는 판단 계약(Strategy 패턴)의 선언 | 공개: `StrategyAdapter`(`typing.Protocol`) — `get_metadata()`·`get_parameter_schema()`·`analyze(market_data, position?) → TradingSignal`; metadata에 `required_indicators`·`min_history`·`timeframe`·프로파일 선언. 하지 않음: 판단만(읽기·저장·루프 없음); Adaptee는 stateless; 미래 데이터 자가 인출 없음(look-ahead는 Engine 피드 경계가 통제); 파라미터 스키마는 선언만(해석은 `StrategyConfig`); 진입·청산 엣지는 각 Adaptee 소유(범위 밖); 트레일링은 순수 함수 호출(상속 아님·유보) | `strategy/base.py`·`profile.py`·`trailing/`(유보) |
-| `sizing` | 거래당 위험 규율과 사이징 인스턴스 | 공개: `risk_money.size(equity, stop_distance, risk_per_trade ≤ 1%)`·`turtle_unit`·`wallet_pct.size`(호환)·`kelly.cap`. 하지 않음: 엣지 창조 없음(엣지는 진입 신호); `1R = |체결가 − 최초 보호 스탑| × 수량`이고 `1R ≤ 1%`; pct 경로는 보장 실패 시 비준수 플래그 의무 | `sizing/`의 risk_money·turtle_unit·wallet_pct·kelly |
+| `sizing` | 거래당 위험 규율과 사이징 인스턴스 | 공개: `risk_money.size(equity, stop_distance, risk_per_trade ≤ 1%)`·`turtle_unit`·`wallet_pct.size`(호환)·`kelly.cap`·`exposure_limit`(단일 시장·상관군·단일 방향 위험 합 한도 검사). 하지 않음: 엣지 창조 없음(엣지는 진입 신호); `1R = |체결가 − 최초 보호 스탑| × 수량`이고 `1R ≤ 1%`; pct 경로는 보장 실패 시 비준수 플래그 의무 | `sizing/`의 risk_money·turtle_unit·wallet_pct·kelly·exposure_limit |
 | `costs` | net 손익 4개 비용 수식 표준(값은 주입) | 공개: `fee.calc`·`slippage.apply`·`funding.settle`·`liquidation.price/is_triggered`. 하지 않음: 비용 값 미보유(전량 `CostModel` 주입); 펀딩은 이산 정산(UTC 경계, 정산가 = 경계 포함 최소 가용 TF 캔들 시가); 청산은 Isolated 우선·보수 방향 | `costs/`의 fee·slippage·funding·liquidation |
 | `execution` | 주문 라이프사이클·결정적 체결·포지션 장부·회계 + Decimal 단일 변환 관문 | 공개: `order_lifecycle`(VALID_TRANSITIONS)·`matcher`(체결 규칙)·`position_book`·`accounting.recompute`·`normalizer`. 하지 않음: `cash + position = equity` 유지·비용 1회 차감; float→Decimal 단일 변환은 `normalizer` 한 곳에서만(모든 Broker 어댑터가 `submit()`에서 통과, 어댑터별 캐스팅 금지); `decision_ts < execution_ts` 강제 | `execution/`의 order_lifecycle·matcher·position_book·accounting·normalizer |
 | `ports` | 환경별 관심사의 어댑터 경계(전부 ABC, 구현은 서비스 주입) | 공개: 7 ABC — `DataFeed`·`Broker`·`Clock`·`CostModel`·`EvidenceSink`·`CatalogStore`·`StrategyRegistry`. 하지 않음: 추상 계약만 선언(`types`만 참조, `execution` 미참조); wall-clock·네트워크·파일 IO는 구현 어댑터 안에만; 특정 DB 직접 의존 없음(레지스트리도 주입 포트) | `ports/`의 7파일 |
@@ -1020,7 +1033,7 @@ classDiagram
         +Decimal liquidation_penalty
         +Decimal net_pnl
         +Decimal return_pct
-        +Decimal r0
+        +Optional~Decimal~ r0
         +int leverage
         +bool liquidated
         +Optional~str~ wallet_id
@@ -1341,6 +1354,7 @@ classDiagram
   것이 아니다(§4.3.2).
 - `SIGNAL_EXIT` — 전략이 낸 청산 신호(위 방향·행동 도출 규칙의 EXIT 갈래).
 - `REVERSAL` — 반대 진입 때문에 먼저 청산된 경우.
+- `DATA_GAP` — 데이터 결측 구간을 만나 포지션을 강제로 정리한 경우(§4.4의 결측 직전 주문 건너뜀·`DATA_GAP` 청산 규약).
 - `END_OF_DATA` — 백테스트 구간이 끝나 강제로 정리한 경우.
 
 #### `SignalType` (ENUM)
@@ -3090,7 +3104,7 @@ classDiagram
     class BacktestDataFeed {
         -Connection crypto_data
         +candles(str, str, datetime) list~Candle~
-        +source_open_times(str, datetime, datetime) tuple~datetime~
+        +source_candles(str, datetime, datetime) tuple~Candle~
         +funding(str, datetime) Decimal
         +mark_price(str, datetime) Decimal
     }
@@ -3149,8 +3163,9 @@ classDiagram
 - **메서드**
     - `candles(symbol, tf, up_to)` : `up_to` 이후 캔들을 반환하지 않는다. `tf`가 전략 TF면 판단용 캔들, `"1m"`이면
       트리거 walk용 하위 캔들을 낸다. 완전하지 않은 상위 주기 버킷은 반환하지 않는다.
-    - `source_open_times(symbol, start, end)` : 1분 캔들 목록을 만드는 경로와 독립된 원천 질의로 범위 안의 실제
-      여는 시각을 돌려준다. Evidence에 선언한 1분 원천 부재가 우리 기록 누락이 아님을 검증하는 대조 기준이다.
+    - `source_candles(symbol, range_start, range_end)` : 1분 캔들 목록을 만드는 경로와 독립된 원천 질의로 범위 안의
+      실제 1분 캔들을 돌려준다(여는 시각만이 아니라 캔들 값 자체). Evidence에 선언한 1분 원천 부재가 우리 기록
+      누락이 아님을 검증하는 대조 기준이다.
     - `funding(symbol, up_to)` : 파생상품 심볼을 거래소 표준의 대문자 영숫자 심볼로 정규화하고,
       `[up_to, up_to + 1초]`의 양 끝을 포함한 창에서 가장 이른 실측 펀딩 rate를 공급한다. 실측값이 없으면
       `LookupError`를 내고 Engine은 설정된 fallback을 적용하되 그 미발견 사실을 Source Data Snapshot에 남긴다.
@@ -3258,11 +3273,12 @@ classDiagram
         +Optional~float~ position_size_pct
         +dict cost_values
         +str indicator_mode
+        +list~dict~ explicit_indicators
         +str trigger_feed
         +str fill_timing
         +str profile_ref
         +Optional~dict~ sweep
-        +validate() None
+        +revalidate() None
         +selection() dict
     }
 ```
@@ -3287,6 +3303,9 @@ classDiagram
       방식의 비율 값. 위험 기반이면 `risk_per_trade`(0.01 이하)만 채우고, 비율 방식이면 `position_size_pct`만 채운다.
     - `cost_values` — `CostModel` 시작 기본값을 덮어쓰는 run별 비용 값(수수료·mmr·펀딩 fallback·슬리피지 등).
     - `indicator_mode` — 지표 계산 대상. `{auto, explicit, all}` 중이며 기본은 `auto`(활성 전략 필요 지표만).
+    - `explicit_indicators` — `indicator_mode = explicit`일 때 계산할 지표를 이름·파라미터 쌍의 목록으로 지정한다.
+      explicit 모드에서는 비어 있을 수 없고 그 밖의 모드에서는 비어 있어야 하며, 각 항목은 `name`과 `params` 둘만
+      담는다.
     - `trigger_feed` — 캔들 내 트리거 세밀도. `{tf_candle, m1_subcandle}` 중이며 기본은 `tf_candle`(첫 검증 스코프의
       보수적 판정). `m1_subcandle`은 트레일링·1분 경로를 소비하는 전략이 활성일 때 켠다.
     - `fill_timing` — 체결 시점. `{immediate, next_bar}` 중이며 백테스트 기본은 `next_bar`(`decision_ts <
@@ -3294,8 +3313,8 @@ classDiagram
     - `profile_ref` — 전략 프로파일(§4.2 `StrategyProfile`) 선택.
     - `sweep` — 파라미터 스윕 설정. 없으면 단일 run이다.
 - **메서드**
-    - `validate()` : 필드 타입·범위·상호 정합(예: `start < end`, `trigger_feed = m1_subcandle`이면 1분 데이터 구간
-      가용)을 검증하고, 백테스트는 `fill_timing = next_bar`만 허용해 `immediate`를 거부한다(캔들 두 순간 구조는
+    - `revalidate()` : 이미 만들어진 인스턴스에 대해 필드 타입·범위·상호 정합(예: `start < end`, `trigger_feed =
+      m1_subcandle`이면 1분 데이터 구간 가용)을 다시 검증하고, 백테스트는 `fill_timing = next_bar`만 허용해 `immediate`를 거부한다(캔들 두 순간 구조는
       next-bar 전용이며 `immediate`는 페이퍼의 라이브 정합 전 호환 값이다). 전략 파라미터 값 검증은 여기서 하지 않고
       `StrategyConfig`에 위임한다.
     - `selection()` : 전략 선택값(`strategy_id`·`params`·`symbol`·`timeframe`)만 추려 `Adapter Manager`에 넘길
