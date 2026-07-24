@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -165,6 +166,9 @@ def test_gap_contract_classifies_partial_resample_and_is_compact() -> None:
             int((base + timedelta(hours=2, minutes=index)).timestamp() * 1_000)
             for index in range(1, 61)
         ],
+        origin_validation_status="verified",
+        origin_minute_row_count=108,
+        origin_timestamp_hash="a" * 64,
     )
 
     assert contract.partial_bucket_count == 1
@@ -172,18 +176,25 @@ def test_gap_contract_classifies_partial_resample_and_is_compact() -> None:
     assert contract.evaluation_grid_gap_count == 2
     assert decode_ohlcv_gap_contract(contract.encode()) == contract
     assert len(contract.encode()) < 600
+    unverified = replace(contract, origin_validation_status="fixture_unverified")
+    with pytest.raises(ValueError, match="independently verified"):
+        decode_ohlcv_gap_contract(unverified.encode())
 
 
-def test_source_open_times_uses_an_independent_bounded_query() -> None:
+def test_source_candles_use_an_independent_bounded_value_query() -> None:
     base = datetime(2026, 1, 1, tzinfo=UTC)
-    rows: list[Sequence[object]] = [(base,), (base + timedelta(minutes=1),)]
+    rows: list[Sequence[object]] = [
+        _minute_row(base, 100),
+        _minute_row(base + timedelta(minutes=1), 101),
+    ]
     connection = StubConnection(lambda query, params: rows)
     feed = BacktestDataFeed(connection)
 
-    assert feed.source_open_times(
-        "BTCUSDT", base, base + timedelta(minutes=2)
-    ) == tuple(row[0] for row in rows)
+    source = feed.source_candles("BTCUSDT", base, base + timedelta(minutes=2))
+    assert [candle.open_time for candle in source] == [row[0] for row in rows]
+    assert [candle.close for candle in source] == [101.0, 102.0]
     query, params = connection.calls[0]
+    assert "open, high, low, close, volume" in query
     assert "time >= %s" in query and "time < %s" in query
     assert params == ("BTCUSDT", "binance", base, base + timedelta(minutes=2))
 

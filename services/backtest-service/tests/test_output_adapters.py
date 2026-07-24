@@ -48,6 +48,10 @@ def _local_values(run_seq: int) -> dict[str, object]:
         "risk_per_trade": 0.01,
         "framework_compliant": True,
         "cost_values_json": {"fee": Decimal("0.0005")},
+        "data_quality_criteria_json": {
+            "min_coverage_ratio": 0.95,
+            "max_consecutive_gap_seconds": 86_400,
+        },
         "seed": 7,
         "engine_version": "1.0.0",
         "core_lib_version": "0.1.0",
@@ -313,6 +317,31 @@ def test_hash_ignores_prereg_wording_when_eval_decision_is_unchanged(
     assert first_payload[1] == second_payload[1]
     first.close()
     second.close()
+
+
+def test_hash_seals_data_quality_criteria_outside_preregistration(
+    tmp_path: Path,
+) -> None:
+    first, first_hash = _finalize(
+        tmp_path / "first",
+        "BT_20260101_000001_quality",
+        1,
+    )
+    changed, changed_hash = _finalize(
+        tmp_path / "changed",
+        "BT_20260102_000002_quality",
+        2,
+        local_overrides={
+            "data_quality_criteria_json": {
+                "min_coverage_ratio": 0.96,
+                "max_consecutive_gap_seconds": 86_400,
+            }
+        },
+    )
+
+    assert changed_hash != first_hash
+    first.close()
+    changed.close()
 
 
 def test_eval_decision_rejects_noncanonical_or_incomplete_json(tmp_path: Path) -> None:

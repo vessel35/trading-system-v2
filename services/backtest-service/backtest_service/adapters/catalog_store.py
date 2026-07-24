@@ -177,6 +177,7 @@ class DeterminismReference:
 
     catalog_config_matches: bool
     catalog_source_matches: bool
+    same_config_run_exists: bool
     comparison_run_id: str | None
     comparison_hash: str | None
 
@@ -445,14 +446,29 @@ class BacktestCatalogStore(CatalogStore):
                 """,
                 (config_hash, source_data_hash, run_id),
             ).fetchone()
+            same_config = self._connection.execute(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM public.backtest_run
+                    WHERE config_hash = %s
+                      AND run_id <> %s
+                      AND evidence_hash IS NOT NULL
+                      AND status IN ('COMPLETED', 'EVALUATED')
+                )
+                """,
+                (config_hash, run_id),
+            ).fetchone()
             self._connection.commit()
         except Exception:
             self._connection.rollback()
             raise
+        same_config_run_exists = bool(same_config is not None and same_config[0])
         if previous is None:
             return DeterminismReference(
                 current_config_matches,
                 current_source_matches,
+                same_config_run_exists,
                 None,
                 None,
             )
@@ -462,6 +478,7 @@ class BacktestCatalogStore(CatalogStore):
         return DeterminismReference(
             current_config_matches,
             current_source_matches,
+            same_config_run_exists,
             previous_run_id,
             previous_hash,
         )

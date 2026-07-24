@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Final, Protocol, runtime_checkable
 
+from core_lib import __version__ as CORE_LIB_VERSION
 from core_lib.costs import (
     funding_boundaries_between,
     is_funding_boundary,
@@ -59,6 +60,7 @@ from core_lib.types import (
     quantize_price,
 )
 
+from backtest_service import __version__ as BACKTEST_SERVICE_VERSION
 from backtest_service.adapters.catalog_store import (
     DeterminismReference,
     normalized_config_hash,
@@ -126,6 +128,7 @@ class _BoundEvidence(Protocol):
         *,
         catalog_config_matches: bool,
         catalog_source_matches: bool,
+        same_config_run_exists: bool,
         source_data_hash: str,
         comparison_run_id: str | None,
         comparison_hash: str | None,
@@ -161,13 +164,13 @@ class _FundingDiagnostics(Protocol):
 
 @runtime_checkable
 class _SourceOrigin(Protocol):
-    def source_open_times(
+    def source_candles(
         self,
         symbol: str,
         range_start: datetime,
         range_end: datetime,
-    ) -> tuple[datetime, ...]:
-        """Return an independent query of 1m source timestamps."""
+    ) -> tuple[Candle, ...]:
+        """Return an independent query of bounded 1m source values."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -233,8 +236,8 @@ class Engine:
         manager: AdapterManager,
         *,
         prereg: Mapping[str, object],
-        engine_version: str = "1.4.0",
-        core_lib_version: str = "0.2.0",
+        engine_version: str = BACKTEST_SERVICE_VERSION,
+        core_lib_version: str = CORE_LIB_VERSION,
         thresholds: Mapping[str, float] | None = None,
     ) -> None:
         if not isinstance(broker, _ExecutionBroker):
@@ -649,6 +652,7 @@ class Engine:
         self.evidence.set_determinism_reference(
             catalog_config_matches=reference.catalog_config_matches,
             catalog_source_matches=reference.catalog_source_matches,
+            same_config_run_exists=reference.same_config_run_exists,
             source_data_hash=source_data_hash,
             comparison_run_id=reference.comparison_run_id,
             comparison_hash=reference.comparison_hash,
@@ -1641,10 +1645,6 @@ class Engine:
             for key, value in self.prereg.items()
             if key not in {"observed_value", "edge_distinguishable", "decision_route"}
         }
-        prereg_json["data_quality_criteria"] = {
-            "min_coverage_ratio": MIN_DATA_COVERAGE_RATIO,
-            "max_consecutive_gap_seconds": MAX_CONSECUTIVE_GAP_SECONDS,
-        }
         self.evidence.record(
             EvidenceRecord(
                 "BACKTEST_RUN_LOCAL",
@@ -1676,6 +1676,10 @@ class Engine:
                     "position_size_pct": config.position_size_pct,
                     "framework_compliant": config.sizing_method == "risk_based",
                     "cost_values_json": dict(config.cost_values),
+                    "data_quality_criteria_json": {
+                        "min_coverage_ratio": MIN_DATA_COVERAGE_RATIO,
+                        "max_consecutive_gap_seconds": MAX_CONSECUTIVE_GAP_SECONDS,
+                    },
                     "seed": config.seed,
                     "engine_version": self.engine_version,
                     "core_lib_version": self.core_lib_version,
@@ -1792,7 +1796,7 @@ class Engine:
         minute_gap_close_times: tuple[int, ...] | None = None,
         origin_status: str,
         origin_count: int,
-        origin_hash: str | None,
+        origin_hash: str,
     ) -> OhlcvGapContract:
         if not candles:
             raise ValueError("OHLCV snapshot cannot be empty")
@@ -1849,21 +1853,23 @@ class Engine:
         self,
         minute_candles: list[Candle],
         range_start: datetime,
-    ) -> tuple[str, int, str | None]:
-        """Validate the declared 1m absence against a separate origin query."""
+    ) -> tuple[str, int, str]:
+        """Validate 1m timestamps and values against a separate origin query."""
         origin_feed = self.feed if isinstance(self.feed, _SourceOrigin) else None
         if origin_feed is None:
             raise TypeError("OHLCV feed requires independent origin validation")
-        observed = origin_feed.source_open_times(
+        observed = origin_feed.source_candles(
             self._config().symbol,
             range_start,
             self._config().end,
         )
-        expected = tuple(candle.open_time for candle in minute_candles)
+        expected = tuple(minute_candles)
         if observed != expected:
             raise ValueError("1m OHLCV Evidence diverges from independent origin query")
         timestamp_hash = hashlib.sha256(
-            canonical_json([epoch_milliseconds(value) for value in observed]).encode()
+            canonical_json(
+                [epoch_milliseconds(candle.open_time) for candle in observed]
+            ).encode()
         ).hexdigest()
         return "verified", len(observed), timestamp_hash
 

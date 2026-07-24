@@ -8,6 +8,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from importlib.metadata import version
 from pathlib import Path
 from typing import ClassVar, cast
 
@@ -118,15 +119,15 @@ class _Feed(DataFeed):
         assert tf == "1h"
         return [candle for candle in self._candles if candle.close_time <= up_to]
 
-    def source_open_times(
+    def source_candles(
         self,
         symbol: str,
         range_start: datetime,
         range_end: datetime,
-    ) -> tuple[datetime, ...]:
+    ) -> tuple[Candle, ...]:
         assert symbol == "BTCUSDT"
         return tuple(
-            candle.open_time
+            candle
             for candle in self._minute_candles
             if range_start <= candle.open_time and candle.close_time <= range_end
         )
@@ -141,35 +142,15 @@ class _Feed(DataFeed):
 
 
 class _OriginMismatchFeed(_Feed):
-    def candles(self, symbol: str, tf: str, up_to: datetime) -> list[Candle]:
-        if tf != "1m":
-            return super().candles(symbol, tf, up_to)
-        opened = _BASE - timedelta(hours=9)
-        return [
-            Candle(
-                symbol=symbol,
-                exchange="binance",
-                timeframe="1m",
-                open_time=opened,
-                close_time=opened + timedelta(minutes=1),
-                open=100.0,
-                high=100.0,
-                low=100.0,
-                close=100.0,
-                volume=1.0,
-                quote_volume=None,
-                trade_count=None,
-            )
-        ]
-
-    def source_open_times(
+    def source_candles(
         self,
         symbol: str,
         range_start: datetime,
         range_end: datetime,
-    ) -> tuple[datetime, ...]:
-        del symbol, range_end
-        return (range_start, range_start + timedelta(minutes=1))
+    ) -> tuple[Candle, ...]:
+        observed = list(super().source_candles(symbol, range_start, range_end))
+        observed[0] = replace(observed[0], close=observed[0].close + 0.25)
+        return tuple(observed)
 
 
 class _DailyFeed(DataFeed):
@@ -194,15 +175,15 @@ class _DailyFeed(DataFeed):
         assert tf == "1d"
         return [candle for candle in self._candles if candle.close_time <= up_to]
 
-    def source_open_times(
+    def source_candles(
         self,
         symbol: str,
         range_start: datetime,
         range_end: datetime,
-    ) -> tuple[datetime, ...]:
+    ) -> tuple[Candle, ...]:
         assert symbol == "BTCUSDT"
         return tuple(
-            candle.open_time
+            candle
             for candle in self._minute_candles
             if range_start <= candle.open_time and candle.close_time <= range_end
         )
@@ -611,10 +592,24 @@ class _Catalog(CatalogStore):
                 return DeterminismReference(
                     current_matches,
                     True,
+                    True,
                     str(previous_id),
                     self.comparison_hash_override or str(summary["evidence_hash"]),
                 )
-        return DeterminismReference(current_matches, True, None, None)
+        same_config_run_exists = any(
+            previous_id != run_id
+            and self.runs[str(previous_id)]["config_hash"] == config_hash
+            for summary in self.summaries
+            if isinstance(summary, Mapping)
+            for previous_id in (summary["run_id"],)
+        )
+        return DeterminismReference(
+            current_matches,
+            True,
+            same_config_run_exists,
+            None,
+            None,
+        )
 
 
 class _Broker(BacktestBroker):
@@ -939,6 +934,13 @@ def test_reversal_closes_then_enters_with_separate_once_only_costs_and_margin(
         }
 
 
+def test_engine_defaults_come_from_installed_package_metadata(tmp_path: Path) -> None:
+    engine = _engine(tmp_path, _Catalog(), [])
+
+    assert engine.engine_version == version("backtest-service")
+    assert engine.core_lib_version == version("core-lib")
+
+
 def test_engine_orders_configure_before_submit_and_persists_timing(
     tmp_path: Path,
 ) -> None:
@@ -1006,7 +1008,13 @@ def test_engine_orders_configure_before_submit_and_persists_timing(
                 "SELECT prereg_json FROM BACKTEST_RUN_LOCAL"
             ).fetchone()[0]
         )
-        assert prereg["data_quality_criteria"] == {
+        assert "data_quality_criteria" not in prereg
+        criteria = json.loads(
+            connection.execute(
+                "SELECT data_quality_criteria_json FROM BACKTEST_RUN_LOCAL"
+            ).fetchone()[0]
+        )
+        assert criteria == {
             "min_coverage_ratio": 0.95,
             "max_consecutive_gap_seconds": 86_400,
         }
@@ -1174,7 +1182,7 @@ def test_engine_hash_parity_uses_different_catalog_run_ids(tmp_path: Path) -> No
             WHERE check_name = 'deterministic'
             """
         ).fetchone()[0]
-        assert '"status":"no_comparison_target"' in detail
+        assert '"status":"no_prior_config_run"' in detail
     with sqlite3.connect(second.evidence_path) as connection:
         detail = connection.execute(
             """
@@ -1224,7 +1232,7 @@ def test_same_config_with_different_source_is_not_a_determinism_target(
             """
         ).fetchone()
     assert passed == 1
-    assert '"status":"no_comparison_target"' in detail
+    assert '"status":"source_changed"' in detail
 
 
 def test_vessel_reference_end_to_end_dry_run_is_complete_and_deterministic(

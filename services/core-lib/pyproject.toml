@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "core-lib"
-version = "0.1.0"
+version = "0.2.0"
 description = "Shared domain standards for backtest, paper, and live trading modes."
 requires-python = ">=3.12"
 dependencies = []
@@ -33,6 +33,7 @@ addopts = [
 ]
 markers = [
     "integration: uses the local development PostgreSQL instance",
+    "real_data_long: runs the long-window real-data regression tier",
 ]
 testpaths = ["tests"]
 

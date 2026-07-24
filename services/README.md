@@ -7,13 +7,14 @@ Run these commands from the repository root:
 ```bash
 python3.12 -m venv .venv
 .venv/bin/python -m pip install --upgrade pip
-.venv/bin/python -m pip install \
-  -e './services/core-lib[dev]' \
-  -e './services/backtest-service[dev]'
+.venv/bin/python -m pip install -r services/requirements-dev.txt
 ```
 
-`backtest-service` declares `core-lib` as a project dependency, and its uv source
-configuration keeps the sibling package editable.
+`backtest-service` pins the compatible `core-lib` release. The pip requirements
+file supplies both sibling projects in one resolver transaction, while the uv
+source configuration keeps the same sibling package editable. Do not install
+`backtest-service` alone from the repository: the requirements file is the
+index-confusion guard for local development.
 
 ## Quality checks
 
@@ -25,6 +26,7 @@ explicitly selected.
 ```bash
 .venv/bin/pytest services/core-lib/tests services/backtest-service/tests
 .venv/bin/ruff check services/core-lib services/backtest-service
+.venv/bin/ruff format --check services/core-lib services/backtest-service
 (cd services/core-lib && ../../.venv/bin/mypy)
 (cd services/backtest-service && ../../.venv/bin/mypy)
 ```

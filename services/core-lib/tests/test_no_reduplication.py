@@ -1,6 +1,7 @@
 """Guard shared standards against service-local reimplementation."""
 
 import ast
+import tomllib
 from pathlib import Path
 
 
@@ -87,3 +88,26 @@ def test_core_lib_dependencies_follow_the_one_way_component_graph() -> None:
                     f"{path.relative_to(core_package)} -> {target_component}"
                 )
     assert violations == []
+
+
+def test_pip_bootstrap_resolves_both_workspace_projects_together() -> None:
+    """Keep pip from resolving the sibling core-lib name through an index."""
+    repository_root = Path(__file__).resolve().parents[3]
+    requirements = (
+        repository_root / "services" / "requirements-dev.txt"
+    ).read_text().splitlines()
+    editable = {
+        line
+        for raw_line in requirements
+        if (line := raw_line.strip()) and not line.startswith("#")
+    }
+    assert editable == {
+        "-e ./services/core-lib[dev]",
+        "-e ./services/backtest-service[dev]",
+    }
+    backtest_project = tomllib.loads(
+        (
+            repository_root / "services" / "backtest-service" / "pyproject.toml"
+        ).read_text()
+    )["project"]
+    assert "core-lib==0.2.0" in backtest_project["dependencies"]

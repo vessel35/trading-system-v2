@@ -141,6 +141,7 @@ class BacktestEvidenceSink(EvidenceSink):
         self._integrity_details: dict[str, dict[str, object]] = {}
         self._catalog_config_matches = True
         self._catalog_source_matches = True
+        self._same_config_run_exists = False
         self._comparison_run_id: str | None = None
         self._comparison_hash: str | None = None
         self._source_data_hash: str | None = None
@@ -239,6 +240,7 @@ class BacktestEvidenceSink(EvidenceSink):
         *,
         catalog_config_matches: bool,
         catalog_source_matches: bool,
+        same_config_run_exists: bool,
         source_data_hash: str,
         comparison_run_id: str | None,
         comparison_hash: str | None,
@@ -260,6 +262,7 @@ class BacktestEvidenceSink(EvidenceSink):
             raise ValueError("source_data_hash must be lowercase SHA-256 hex")
         self._catalog_config_matches = catalog_config_matches
         self._catalog_source_matches = catalog_source_matches
+        self._same_config_run_exists = same_config_run_exists
         self._source_data_hash = source_data_hash
         self._comparison_run_id = comparison_run_id
         self._comparison_hash = comparison_hash
@@ -491,7 +494,11 @@ class BacktestEvidenceSink(EvidenceSink):
         )
         if self._comparison_hash is None:
             comparison: dict[str, object] = {
-                "status": "no_comparison_target",
+                "status": (
+                    "source_changed"
+                    if self._same_config_run_exists
+                    else "no_prior_config_run"
+                ),
                 "comparison_run_id": None,
                 "comparison_hash": None,
             }
@@ -505,6 +512,7 @@ class BacktestEvidenceSink(EvidenceSink):
             "serialization_stable": serialization_stable,
             "catalog_config_matches": self._catalog_config_matches,
             "catalog_source_matches": self._catalog_source_matches,
+            "same_config_run_exists": self._same_config_run_exists,
             "source_data_hash": self._source_data_hash,
             "current_evidence_hash": evidence_hash,
             **comparison,
@@ -694,21 +702,15 @@ class BacktestEvidenceSink(EvidenceSink):
         if source is None:
             return ["missing_strategy_ohlcv_snapshot"]
         gap_count, note = source
-        contract: OhlcvGapContract | None = None
         if note is None:
             return ["missing_strategy_ohlcv_gap_contract"]
-        else:
-            try:
-                contract = decode_ohlcv_gap_contract(note)
-            except ValueError:
-                return ["invalid_strategy_ohlcv_gap_contract"]
-        if contract is not None and contract.snapshot_gap_count != gap_count:
+        try:
+            contract = decode_ohlcv_gap_contract(note)
+        except ValueError:
+            return ["invalid_strategy_ohlcv_gap_contract"]
+        if contract.snapshot_gap_count != gap_count:
             return ["strategy_ohlcv_gap_count_mismatch"]
-        allowed_gaps = (
-            set()
-            if contract is None
-            else set(contract.evaluation_grid_gap_close_times)
-        )
+        allowed_gaps = set(contract.evaluation_grid_gap_close_times)
         if not allowed_gaps <= set(full_grid):
             return ["strategy_ohlcv_gap_outside_evaluation_grid"]
         expected = [

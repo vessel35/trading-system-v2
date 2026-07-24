@@ -34,8 +34,8 @@ WHERE symbol = %s
   AND time < %s
 ORDER BY time
 """
-_SOURCE_OPEN_TIMES_SQL = """
-SELECT time
+_SOURCE_CANDLES_SQL = """
+SELECT time, open, high, low, close, volume, quote_volume, trade_count
 FROM public.ohlcv_futures
 WHERE symbol = %s
   AND exchange = %s
@@ -230,27 +230,39 @@ class BacktestDataFeed(DataFeed):
             )
         return result
 
-    def source_open_times(
+    def source_candles(
         self,
         symbol: str,
         range_start: datetime,
         range_end: datetime,
-    ) -> tuple[datetime, ...]:
-        """Query the 1m origin independently for Evidence gap validation."""
+    ) -> tuple[Candle, ...]:
+        """Query bounded 1m values independently for Evidence validation."""
         start = _utc(range_start, name="range_start")
         end = _utc(range_end, name="range_end")
         if start >= end:
             raise ValueError("source validation range must be positive")
         rows = self._connection.execute(
-            _SOURCE_OPEN_TIMES_SQL,
+            _SOURCE_CANDLES_SQL,
             (symbol, self._exchange, start, end),
         ).fetchall()
-        result: list[datetime] = []
+        result: list[Candle] = []
         for row in rows:
-            if len(row) != 1 or not isinstance(row[0], datetime):
-                raise TypeError("ohlcv_futures source timestamp query returned invalid rows")
-            result.append(_utc(row[0], name="ohlcv_futures.time"))
-        if any(left >= right for left, right in zip(result, result[1:], strict=False)):
+            if len(row) != 8 or not isinstance(row[0], datetime):
+                raise TypeError("ohlcv_futures source value query returned invalid rows")
+            opened = _utc(row[0], name="ohlcv_futures.time")
+            result.append(
+                self._build_candle(
+                    symbol,
+                    "1m",
+                    opened,
+                    _MINUTE,
+                    [row],
+                )
+            )
+        if any(
+            left.open_time >= right.open_time
+            for left, right in zip(result, result[1:], strict=False)
+        ):
             raise ValueError("1m origin timestamps must be strictly increasing")
         return tuple(result)
 

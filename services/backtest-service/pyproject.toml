@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "backtest-service"
-version = "0.1.0"
+version = "1.5.0"
 description = "Deterministic backtest orchestration service."
 requires-python = ">=3.12"
 dependencies = [
-    "core-lib>=0.1.0",
+    "core-lib==0.2.0",
     "psycopg[binary]>=3.2",
     "pydantic>=2.10",
 ]
@@ -37,6 +37,7 @@ addopts = [
 ]
 markers = [
     "integration: uses the local development PostgreSQL instance",
+    "real_data_long: runs the long-window real-data regression tier",
 ]
 testpaths = ["tests"]
 

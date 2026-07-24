@@ -17,7 +17,6 @@ OHLCV_GAP_CONTRACT: Final = "ohlcv-gap-v2"
 _TIMEFRAME: Final = re.compile(r"^(?P<count>[1-9]\d*)(?P<unit>[mhd])$")
 _TIMEFRAME_MS: Final = {"m": 60_000, "h": 3_600_000, "d": 86_400_000}
 _MINUTE_MS: Final = 60_000
-_ORIGIN_STATUSES: Final = {"verified", "fixture_unverified"}
 _NOTE_KEYS: Final = {
     "contract",
     "timeframe_ms",
@@ -90,7 +89,7 @@ class OhlcvGapContract:
     evaluation_grid_gap_close_times: tuple[int, ...]
     origin_validation_status: str
     origin_minute_row_count: int
-    origin_timestamp_hash: str | None
+    origin_timestamp_hash: str
 
     @property
     def normal_gap_count(self) -> int:
@@ -146,9 +145,9 @@ def build_ohlcv_gap_contract(
     evaluation_start: datetime,
     evaluation_end: datetime,
     minute_gap_close_times: Sequence[int] | None = None,
-    origin_validation_status: str = "fixture_unverified",
-    origin_minute_row_count: int = 0,
-    origin_timestamp_hash: str | None = None,
+    origin_validation_status: str,
+    origin_minute_row_count: int,
+    origin_timestamp_hash: str,
 ) -> OhlcvGapContract:
     """Derive gaps and classify them without manufacturing candle values."""
     duration = timeframe_milliseconds(timeframe)
@@ -164,12 +163,15 @@ def build_ohlcv_gap_contract(
         raise ValueError("OHLCV evaluation range must align to its timeframe")
     if not (range_start_ms <= evaluation_start_ms and evaluation_end_ms <= range_end_ms):
         raise ValueError("OHLCV snapshot range must cover the evaluation range")
-    if origin_validation_status not in _ORIGIN_STATUSES:
-        raise ValueError("unsupported origin validation status")
+    if origin_validation_status != "verified":
+        raise ValueError("OHLCV origin must be independently verified")
     if origin_minute_row_count < 0:
         raise ValueError("origin minute row count must be non-negative")
-    if (origin_validation_status == "verified") != (origin_timestamp_hash is not None):
-        raise ValueError("verified origin requires a timestamp hash, fixtures must omit it")
+    if (
+        len(origin_timestamp_hash) != 64
+        or any(character not in "0123456789abcdef" for character in origin_timestamp_hash)
+    ):
+        raise ValueError("verified origin requires a lowercase SHA-256 timestamp hash")
 
     actual: set[int] = set()
     for candle in candles:
@@ -266,11 +268,11 @@ def decode_ohlcv_gap_contract(note: str) -> OhlcvGapContract:
     if not set(evaluation) <= set(normal) | set(partial):
         raise ValueError("evaluation gaps must be classified snapshot gaps")
     status = raw["origin_validation_status"]
-    if not isinstance(status, str) or status not in _ORIGIN_STATUSES:
-        raise ValueError("unsupported origin validation status")
+    if status != "verified":
+        raise ValueError("OHLCV origin must be independently verified")
     row_count = _strict_int(raw["origin_minute_row_count"], name="origin_minute_row_count")
     origin_hash = raw["origin_timestamp_hash"]
-    if origin_hash is not None and (
+    if (
         not isinstance(origin_hash, str)
         or len(origin_hash) != 64
         or any(character not in "0123456789abcdef" for character in origin_hash)
@@ -279,7 +281,7 @@ def decode_ohlcv_gap_contract(note: str) -> OhlcvGapContract:
     contract = OhlcvGapContract(
         duration, normal, partial, evaluation, status, row_count, origin_hash
     )
-    if row_count < 0 or (status == "verified") != (origin_hash is not None):
+    if row_count < 0:
         raise ValueError("invalid origin verification facts")
     if contract.encode() != note:
         raise ValueError("OHLCV gap note must use canonical JSON")

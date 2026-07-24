@@ -42,7 +42,8 @@ EXPECTED_COLUMNS = {
         period_start period_end
         warmup_start warmup_candles indicator_mode trigger_feed fill_timing initial_capital
         sizing_method risk_per_trade position_size_pct framework_compliant cost_values_json
-        seed engine_version core_lib_version config_hash profile_ref strategy_profile_json
+        data_quality_criteria_json seed engine_version core_lib_version config_hash
+        profile_ref strategy_profile_json
         envelope_status_declared prereg_json eval_decision_json evidence_schema_version created_at
     """.split(),
     "SOURCE_DATA_SNAPSHOT": """
@@ -163,6 +164,7 @@ def _insert_run(connection: sqlite3.Connection) -> None:
             initial_capital,
             sizing_method,
             risk_per_trade,
+            data_quality_criteria_json,
             engine_version,
             core_lib_version,
             config_hash,
@@ -170,10 +172,16 @@ def _insert_run(connection: sqlite3.Connection) -> None:
             evidence_schema_version
         ) VALUES (?, 1, 'run', 'fake', 'Fake', '1.0', '1', 'BTCUSDT', 'BINANCE',
                   '1h', 'futures', 1000, 5000, 0, 10, 100000000000,
-                  'risk_based', 0.01, '1.0', '1.0', ?, ?, '1.0.0')
+                  'risk_based', 0.01, ?, '1.0', '1.0', ?, ?, '1.0.0')
         """,
         (
             RUN_ID,
+            canonical_json(
+                {
+                    "max_consecutive_gap_seconds": 86_400,
+                    "min_coverage_ratio": 0.95,
+                }
+            ),
             HASH,
             canonical_json(
                 {

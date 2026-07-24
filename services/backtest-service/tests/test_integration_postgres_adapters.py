@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -37,9 +38,175 @@ from core_lib.strategy import (
 )
 from core_lib.strategy.adaptees import STRATEGY_ID as VESSEL_STRATEGY_ID
 from core_lib.strategy.adaptees import VesselReference
-from core_lib.types import Candle, MarketType, Position, TradingSignal
+from core_lib.types import Candle, MarketType, Position, PositionSide, TradingSignal
 
 pytestmark = pytest.mark.integration
+
+
+@dataclass(frozen=True, slots=True)
+class _RealDataRegressionCase:
+    """One visible cell in the bounded real-data regression matrix."""
+
+    case_id: str
+    tier: str
+    start: datetime
+    end: datetime
+    directions: tuple[str, ...]
+    funding_rate_signs: tuple[str, ...]
+    leverages: tuple[int, ...]
+    contract: str
+
+
+_MATRIX_START = datetime(2025, 7, 1, tzinfo=UTC)
+# This is a coverage matrix, not a Cartesian benchmark explosion.  The short
+# tier exercises ordinary execution and real-price reversal on every run; the
+# long tier owns sign-specific funding, high-leverage exhaustion, missing data,
+# and window invariance.  Negative funding at high leverage is intentionally
+# omitted because crypto_data has no stable natural candidate fixed by contract:
+# its sign arithmetic is covered at 1x and its margin cap is covered at 39x.
+_REAL_DATA_REGRESSION_MATRIX = (
+    _RealDataRegressionCase(
+        "baseline-3d",
+        "short",
+        _MATRIX_START,
+        _MATRIX_START + timedelta(days=3),
+        ("LONG", "SHORT"),
+        ("positive",),
+        (1,),
+        "bounded feed, measured funding, fees, and catalog",
+    ),
+    _RealDataRegressionCase(
+        "reversal-3d",
+        "short",
+        _MATRIX_START,
+        _MATRIX_START + timedelta(days=3),
+        ("LONG", "SHORT"),
+        ("positive",),
+        (3,),
+        "real-price close-before-open reversal",
+    ),
+    _RealDataRegressionCase(
+        "window-3d",
+        "long",
+        datetime(2025, 10, 1, tzinfo=UTC),
+        datetime(2025, 10, 4, tzinfo=UTC),
+        ("LONG",),
+        ("positive",),
+        (1,),
+        "entry reservation window invariance",
+    ),
+    _RealDataRegressionCase(
+        "window-10d",
+        "long",
+        datetime(2025, 10, 1, tzinfo=UTC),
+        datetime(2025, 10, 11, tzinfo=UTC),
+        ("LONG",),
+        ("positive",),
+        (1,),
+        "entry reservation window invariance",
+    ),
+    _RealDataRegressionCase(
+        "funding-long-positive-30d",
+        "long",
+        _MATRIX_START,
+        _MATRIX_START + timedelta(days=30),
+        ("LONG",),
+        ("positive",),
+        (1,),
+        "positive-rate long debit",
+    ),
+    _RealDataRegressionCase(
+        "window-45d",
+        "long",
+        datetime(2025, 10, 1, tzinfo=UTC),
+        datetime(2025, 11, 15, tzinfo=UTC),
+        ("LONG",),
+        ("positive", "negative"),
+        (1,),
+        "entry reservation window invariance",
+    ),
+    _RealDataRegressionCase(
+        "funding-exhaustion-135d",
+        "long",
+        datetime(2025, 6, 22, 14, tzinfo=UTC),
+        datetime(2025, 11, 4, 10, tzinfo=UTC),
+        ("LONG",),
+        ("positive", "negative"),
+        (39,),
+        "measured funding exhausts isolated margin",
+    ),
+    _RealDataRegressionCase(
+        "funding-short-negative-180d",
+        "long",
+        _MATRIX_START,
+        _MATRIX_START + timedelta(days=180),
+        ("SHORT",),
+        ("negative",),
+        (1,),
+        "negative-rate short debit",
+    ),
+    _RealDataRegressionCase(
+        "missing-data-330d",
+        "long",
+        _MATRIX_START,
+        _MATRIX_START + timedelta(days=330),
+        ("LONG", "SHORT"),
+        ("positive", "negative"),
+        (1,),
+        "declared gaps, DATA_GAP exits, and full Evidence",
+    ),
+)
+
+
+def _matrix_case(case_id: str) -> _RealDataRegressionCase:
+    matches = [
+        case for case in _REAL_DATA_REGRESSION_MATRIX if case.case_id == case_id
+    ]
+    if len(matches) != 1:
+        raise AssertionError(f"real-data matrix case must be unique: {case_id}")
+    return matches[0]
+
+
+def test_real_data_regression_matrix_covers_every_contract_axis() -> None:
+    assert len({case.case_id for case in _REAL_DATA_REGRESSION_MATRIX}) == len(
+        _REAL_DATA_REGRESSION_MATRIX
+    )
+    assert {case.tier for case in _REAL_DATA_REGRESSION_MATRIX} == {"short", "long"}
+    assert {
+        direction
+        for case in _REAL_DATA_REGRESSION_MATRIX
+        for direction in case.directions
+    } == {"LONG", "SHORT"}
+    assert {
+        sign
+        for case in _REAL_DATA_REGRESSION_MATRIX
+        for sign in case.funding_rate_signs
+    } == {"positive", "negative"}
+    assert {
+        leverage
+        for case in _REAL_DATA_REGRESSION_MATRIX
+        for leverage in case.leverages
+    } == {1, 3, 39}
+    assert {
+        (case.case_id, case.contract)
+        for case in _REAL_DATA_REGRESSION_MATRIX
+    } == {
+        ("baseline-3d", "bounded feed, measured funding, fees, and catalog"),
+        ("reversal-3d", "real-price close-before-open reversal"),
+        ("window-3d", "entry reservation window invariance"),
+        ("window-10d", "entry reservation window invariance"),
+        ("funding-long-positive-30d", "positive-rate long debit"),
+        ("window-45d", "entry reservation window invariance"),
+        (
+            "funding-exhaustion-135d",
+            "measured funding exhausts isolated margin",
+        ),
+        ("funding-short-negative-180d", "negative-rate short debit"),
+        (
+            "missing-data-330d",
+            "declared gaps, DATA_GAP exits, and full Evidence",
+        ),
+    }
 
 
 def _env() -> dict[str, str]:
@@ -220,6 +387,7 @@ def test_catalog_issues_run_id_then_records_prereg_and_evaluated_metadata() -> N
         )
         assert reference.catalog_config_matches is True
         assert reference.catalog_source_matches is True
+        assert isinstance(reference.same_config_run_exists, bool)
         catalog.save_prereg(
             {
                 "run_id": run_id,
@@ -254,6 +422,7 @@ def test_catalog_issues_run_id_then_records_prereg_and_evaluated_metadata() -> N
         )
         assert same_source_reference.comparison_run_id == run_id
         assert same_source_reference.comparison_hash == "b" * 64
+        assert same_source_reference.same_config_run_exists is True
 
         different_source_run_id = catalog.register(run_meta)
         different_source_hash = hashlib.sha256(
@@ -266,6 +435,7 @@ def test_catalog_issues_run_id_then_records_prereg_and_evaluated_metadata() -> N
         )
         assert different_source_reference.comparison_run_id is None
         assert different_source_reference.comparison_hash is None
+        assert different_source_reference.same_config_run_exists is True
         for completed_run_id, completed_evidence_hash in (
             (same_source_run_id, "b" * 64),
             (different_source_run_id, "c" * 64),
@@ -311,6 +481,8 @@ def test_catalog_issues_run_id_then_records_prereg_and_evaluated_metadata() -> N
 
 _FUNDING_PROBE_ID = "funding-exhaustion-probe"
 _FUNDING_PROBE_DECISION_OPEN = datetime(2025, 6, 22, 14, tzinfo=UTC)
+_MATRIX_REVERSAL_ID = "real-data-reversal-probe"
+_MATRIX_REVERSAL_OPEN = _MATRIX_START
 
 
 class _FundingExhaustionProbe:
@@ -413,6 +585,116 @@ def _funding_probe_manager() -> AdapterManager:
     return AdapterManager(_FundingProbeCatalog(), plugins)
 
 
+class _RealDataReversalProbe:
+    """Drive the existing reversal intent over immutable real OHLCV."""
+
+    VERSION: ClassVar[str] = "1.0.0"
+
+    def __init__(self, config: ResolvedConfig) -> None:
+        if config.strategy_id != _MATRIX_REVERSAL_ID:
+            raise ValueError("reversal probe received a mismatched strategy id")
+        self.config = config
+
+    @classmethod
+    def get_metadata(cls) -> StrategyMetadata:
+        return StrategyMetadata(
+            required_indicators=[{"name": "EMA", "params": {"period": 9}}],
+            min_history=9,
+            supported_timeframes=["1h"],
+            profile=StrategyProfile(
+                id="real-data-reversal-v1",
+                family="verification",
+                bar="1h",
+                expected_win_rate=(0.0, 1.0),
+                expected_payoff=(0.0, 100.0),
+                tail_shape="symmetric",
+                holding_horizon="multi_boundary",
+                primary_metric="calmar",
+                risk_adjusted_pref="sortino",
+                profit_structure_to_preserve="reversal-accounting",
+                envelope_tolerance=1.0,
+                envelope_status="provisional",
+            ),
+        )
+
+    @classmethod
+    def get_parameter_schema(cls) -> ParameterSchema:
+        return ParameterSchema(
+            fields={
+                "leverage": FieldSpec(type="integer", default=3, range=(1, 100)),
+                "scenario": FieldSpec(type="string", default="real-price-reversal"),
+            }
+        )
+
+    def analyze(
+        self,
+        market_data: dict[str, object],
+        current_position: Position | None,
+    ) -> TradingSignal | None:
+        candle = market_data.get("candle")
+        if not isinstance(candle, Candle):
+            raise TypeError("market_data.candle must be Candle")
+        leverage = self.config.params["leverage"]
+        if isinstance(leverage, bool) or not isinstance(leverage, int):
+            raise TypeError("resolved leverage must be an int")
+        if candle.open_time == _MATRIX_REVERSAL_OPEN and current_position is None:
+            return TradingSignal(
+                symbol=candle.symbol,
+                timestamp=candle.close_time,
+                confidence=1.0,
+                price=candle.close,
+                stop_loss=candle.close * 0.01,
+                take_profit=candle.close * 10.0,
+                market_type=MarketType.FUTURES,
+                leverage=leverage,
+                reason="real-data-reversal-long",
+                metadata={"adaptee": _MATRIX_REVERSAL_ID},
+            )
+        if (
+            candle.open_time == _MATRIX_REVERSAL_OPEN + timedelta(days=1)
+            and current_position is not None
+            and current_position.side is PositionSide.LONG
+        ):
+            return TradingSignal(
+                symbol=candle.symbol,
+                timestamp=candle.close_time,
+                confidence=1.0,
+                price=candle.close,
+                stop_loss=candle.close * 10.0,
+                take_profit=candle.close * 0.01,
+                market_type=MarketType.FUTURES,
+                leverage=leverage,
+                reason="real-data-reversal-short",
+                metadata={"adaptee": _MATRIX_REVERSAL_ID},
+            )
+        return None
+
+
+class _RealDataReversalCatalog(StrategyRegistry):
+    def get(self, strategy_id: str) -> dict[str, object]:
+        assert strategy_id == _MATRIX_REVERSAL_ID
+        return {
+            "strategy_id": strategy_id,
+            "class_name": _RealDataReversalProbe.__name__,
+            "module_path": _RealDataReversalProbe.__module__,
+            "is_active": True,
+            "is_deprecated": False,
+        }
+
+    def list(self) -> list[dict[str, object]]:
+        return [self.get(_MATRIX_REVERSAL_ID)]
+
+    def register(self, strategy_id: str, meta: dict[str, object]) -> None:
+        del strategy_id, meta
+        raise PermissionError("read-only fixture")
+
+
+def _real_data_reversal_manager() -> AdapterManager:
+    plugins = InProcessStrategyRegistry()
+    plugins.register(_MATRIX_REVERSAL_ID, _RealDataReversalProbe)
+    return AdapterManager(_RealDataReversalCatalog(), plugins)
+
+
 class _GapFreeVesselFeed(DataFeed):
     """Serve one immutable, explicitly contiguous fixture without future exposure."""
 
@@ -448,15 +730,15 @@ class _GapFreeVesselFeed(DataFeed):
         assert tf == "1h"
         return [candle for candle in self._candles if candle.close_time <= up_to]
 
-    def source_open_times(
+    def source_candles(
         self,
         symbol: str,
         range_start: datetime,
         range_end: datetime,
-    ) -> tuple[datetime, ...]:
+    ) -> tuple[Candle, ...]:
         assert symbol == "BTCUSDT"
         return tuple(
-            candle.open_time
+            candle
             for candle in self._minute_candles
             if range_start <= candle.open_time and candle.close_time <= range_end
         )
@@ -695,8 +977,9 @@ def test_vessel_engine_traverses_real_crypto_data_feed(
     tmp_path: Path,
 ) -> None:
     """Complete a fee-bearing three-day run through both real input catalogs."""
-    start = datetime(2025, 7, 1, tzinfo=UTC)
-    end = start + timedelta(days=3)
+    case = _matrix_case("baseline-3d")
+    start = case.start
+    end = case.end
     config = RunConfig(
         run_name="m10-real-data-feed",
         strategy_id=VESSEL_STRATEGY_ID,
@@ -828,14 +1111,134 @@ def test_vessel_engine_traverses_real_crypto_data_feed(
         assert evidence.execute(
             "SELECT COUNT(*) FROM PORTFOLIO_PNL"
         ).fetchone() == (72,)
+        assert {
+            row[0]
+            for row in evidence.execute(
+                "SELECT DISTINCT position_side FROM EXECUTION"
+            ).fetchall()
+        } == set(case.directions)
+        assert evidence.execute(
+            "SELECT COUNT(*) FROM FUNDING_SETTLEMENT WHERE funding_rate > 0"
+        ).fetchone()[0] > 0
 
 
+def test_real_data_matrix_reversal_closes_before_opposite_entry(
+    tmp_path: Path,
+) -> None:
+    case = _matrix_case("reversal-3d")
+    leverage = case.leverages[0]
+    config = RunConfig(
+        run_name="matrix-reversal-3d",
+        strategy_id=_MATRIX_REVERSAL_ID,
+        params={"leverage": leverage, "scenario": "real-price-reversal"},
+        symbol="BTC/USDT:USDT",
+        exchange="binance",
+        timeframe="1h",
+        market_type="futures",
+        data_source="crypto_data.ohlcv_futures",
+        start=case.start,
+        end=case.end,
+        initial_capital=Decimal("10000"),
+        risk_per_trade=0.01,
+        seed=17,
+        cost_values={
+            "futures_taker_fee_rate": Decimal("0.0004"),
+            "futures_entry_slippage_rate": Decimal("0"),
+            "exit_slippage_rate": Decimal("0"),
+            "funding_fallback_rate": Decimal("0"),
+        },
+        profile_ref="real-data-reversal-v1",
+    )
+    prereg = {
+        "hypothesis": "real-price reversal preserves ordering and accounting",
+        "primary_metric": "pf",
+        "success_threshold": 0.0,
+        "failure_threshold": -1.0,
+        "edge_distinguishable": True,
+        "higher_is_better": True,
+    }
+    with (
+        _connect("crypto_data") as crypto_connection,
+        _connect_writer("backtest_db") as catalog_connection,
+    ):
+        feed = BacktestDataFeed(
+            cast(ReadConnection, crypto_connection),
+            exchange=config.exchange,
+        )
+        history = feed.candles(config.symbol, config.timeframe, config.end)
+        costs = BacktestCostModel(config.cost_values)
+        result = Engine(
+            feed,
+            BacktestBroker(costs),
+            BacktestClock.from_candles(history),
+            costs,
+            BacktestEvidenceSink(tmp_path / case.case_id),
+            BacktestCatalogStore(cast(WriteConnection, catalog_connection)),
+            _real_data_reversal_manager(),
+            prereg=prereg,
+        ).run(config)
+
+    assert result.integrity_status == "passed"
+    with sqlite3.connect(result.evidence_path) as evidence:
+        decision = evidence.execute(
+            "SELECT decision_id, decision_ts FROM DECISION WHERE action = 'reverse'"
+        ).fetchone()
+        assert decision is not None
+        fills = evidence.execute(
+            """
+            SELECT execution_ts, position_side, reduce_only, exit_reason
+            FROM EXECUTION
+            WHERE decision_id = ?
+            ORDER BY execution_id
+            """,
+            (decision[0],),
+        ).fetchall()
+        assert len(fills) == 2
+        execution_ts = fills[0][0]
+        assert execution_ts - decision[1] == 1
+        assert fills == [
+            (execution_ts, "LONG", 1, "REVERSAL"),
+            (execution_ts, "SHORT", 0, None),
+        ]
+        assert {
+            row[0]
+            for row in evidence.execute(
+                "SELECT DISTINCT position_side FROM EXECUTION"
+            ).fetchall()
+        } == set(case.directions)
+        assert evidence.execute(
+            "SELECT COUNT(*) FROM TRADE WHERE leverage = ?",
+            (leverage,),
+        ).fetchone() == (2,)
+        assert evidence.execute(
+            "SELECT COUNT(*) FROM FUNDING_SETTLEMENT WHERE funding_rate > 0"
+        ).fetchone()[0] > 0
+        assert evidence.execute(
+            """
+            SELECT COUNT(*)
+            FROM TRADE AS t
+            JOIN EXECUTION AS entry ON entry.execution_id = t.entry_execution_id
+            JOIN EXECUTION AS exit ON exit.execution_id = t.exit_execution_id
+            WHERE t.total_fee <> entry.fee + exit.fee
+               OR t.net_pnl <> (
+                   t.gross_pnl - t.total_fee - t.slippage
+                   - t.funding_cost - t.liquidation_penalty
+               )
+            """
+        ).fetchone() == (0,)
+        assert evidence.execute(
+            "SELECT COUNT(*) FROM INTEGRITY_CHECK WHERE passed = 0"
+        ).fetchone() == (0,)
+
+
+@pytest.mark.real_data_long
 def test_measured_funding_exhaustion_liquidates_a_natural_real_data_position(
     tmp_path: Path,
 ) -> None:
-    start = _FUNDING_PROBE_DECISION_OPEN
-    end = datetime(2025, 11, 4, 10, tzinfo=UTC)
-    leverage = 39
+    case = _matrix_case("funding-exhaustion-135d")
+    start = case.start
+    end = case.end
+    leverage = case.leverages[0]
     config = RunConfig(
         run_name="funding-exhaustion",
         strategy_id=_FUNDING_PROBE_ID,
@@ -996,14 +1399,13 @@ def test_measured_funding_exhaustion_liquidates_a_natural_real_data_position(
         }
 
 
-def test_real_funding_sign_regressions_complete_without_negative_cash(
-    tmp_path: Path,
-) -> None:
-    start = datetime(2025, 7, 1, tzinfo=UTC)
-    scenarios = (
+@pytest.mark.real_data_long
+@pytest.mark.parametrize(
+    ("case_id", "run_name", "fallback", "target_sql"),
+    (
         (
-            "cto3-funding-short-180d",
-            timedelta(days=180),
+            "funding-short-negative-180d",
+            "fund-short-neg-180d",
             Decimal("0.0001"),
             """
             SELECT COUNT(*)
@@ -1014,8 +1416,8 @@ def test_real_funding_sign_regressions_complete_without_negative_cash(
             """,
         ),
         (
-            "cto3-funding-long-30d",
-            timedelta(days=30),
+            "funding-long-positive-30d",
+            "fund-long-pos-30d",
             Decimal("0.00001"),
             """
             SELECT COUNT(*)
@@ -1025,44 +1427,54 @@ def test_real_funding_sign_regressions_complete_without_negative_cash(
               AND payment_amount < 0
             """,
         ),
+    ),
+    ids=("short-negative-180d", "long-positive-30d"),
+)
+def test_real_funding_sign_matrix_completes_without_negative_cash(
+    tmp_path: Path,
+    case_id: str,
+    run_name: str,
+    fallback: Decimal,
+    target_sql: str,
+) -> None:
+    case = _matrix_case(case_id)
+    result = _run_real_vessel(
+        tmp_path / case.case_id,
+        _real_vessel_config(
+            run_name=run_name,
+            start=case.start,
+            end=case.end,
+            funding_fallback_rate=fallback,
+        ),
     )
-    for run_name, duration, fallback, target_sql in scenarios:
-        result = _run_real_vessel(
-            tmp_path / run_name,
-            _real_vessel_config(
-                run_name=run_name,
-                start=start,
-                end=start + duration,
-                funding_fallback_rate=fallback,
-            ),
-        )
-        with sqlite3.connect(result.evidence_path) as evidence:
-            assert evidence.execute(target_sql).fetchone()[0] > 0
-            assert evidence.execute(
-                "SELECT min(cash_balance) >= 0 FROM PORTFOLIO_PNL"
-            ).fetchone() == (1,)
-            assert evidence.execute(
-                """
-                SELECT COUNT(*)
-                FROM FUNDING_SETTLEMENT
-                WHERE abs(payment_amount) > abs(theoretical_payment_amount)
-                """
-            ).fetchone() == (0,)
-            assert evidence.execute(
-                "SELECT COUNT(*) FROM INTEGRITY_CHECK WHERE passed = 0"
-            ).fetchone() == (0,)
+    with sqlite3.connect(result.evidence_path) as evidence:
+        assert evidence.execute(target_sql).fetchone()[0] > 0
+        assert evidence.execute(
+            "SELECT min(cash_balance) >= 0 FROM PORTFOLIO_PNL"
+        ).fetchone() == (1,)
+        assert evidence.execute(
+            """
+            SELECT COUNT(*)
+            FROM FUNDING_SETTLEMENT
+            WHERE abs(payment_amount) > abs(theoretical_payment_amount)
+            """
+        ).fetchone() == (0,)
+        assert evidence.execute(
+            "SELECT COUNT(*) FROM INTEGRITY_CHECK WHERE passed = 0"
+        ).fetchone() == (0,)
 
 
+@pytest.mark.real_data_long
 def test_real_missing_candles_complete_330_day_evidence(
     tmp_path: Path,
 ) -> None:
-    start = datetime(2025, 7, 1, tzinfo=UTC)
+    case = _matrix_case("missing-data-330d")
     result = _run_real_vessel(
         tmp_path / "cto-gap-330d",
         _real_vessel_config(
             run_name="cto-gap-330d",
-            start=start,
-            end=start + timedelta(days=330),
+            start=case.start,
+            end=case.end,
         ),
     )
 
@@ -1150,18 +1562,24 @@ def test_real_missing_candles_complete_330_day_evidence(
     assert result.decision.route == "retest"
 
 
+@pytest.mark.real_data_long
 def test_entry_quantity_is_independent_of_remaining_run_window(
     tmp_path: Path,
 ) -> None:
-    start = datetime(2025, 10, 1, tzinfo=UTC)
+    first_case = _matrix_case("window-3d")
+    middle_case = _matrix_case("window-10d")
+    long_case = _matrix_case("window-45d")
+    start = first_case.start
+    assert middle_case.start == long_case.start == start
     first_entries: list[tuple[int, int, int]] = []
-    for days in (3, 10, 45):
+    for case in (first_case, middle_case, long_case):
+        days = (case.end - case.start).days
         result = _run_real_vessel(
             tmp_path / f"window-{days}",
             _real_vessel_config(
                 run_name=f"cto3-window-{days}d",
-                start=start,
-                end=start + timedelta(days=days),
+                start=case.start,
+                end=case.end,
             ),
         )
         with sqlite3.connect(result.evidence_path) as evidence:

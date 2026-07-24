@@ -10,7 +10,7 @@ from decimal import Decimal
 from types import MappingProxyType
 from typing import Final
 
-EVIDENCE_SCHEMA_VERSION: Final = "1.2.0"
+EVIDENCE_SCHEMA_VERSION: Final = "1.3.0"
 MINIMUM_SQLITE_VERSION: Final = (3, 37, 0)
 DECIMAL_PLACES: Final = 8
 DECIMAL_SCALE: Final = Decimal(10) ** DECIMAL_PLACES
@@ -170,6 +170,7 @@ CREATE TABLE IF NOT EXISTS BACKTEST_RUN_LOCAL (
     framework_compliant INTEGER NOT NULL DEFAULT 1
         CHECK (framework_compliant IN (0, 1)),
     cost_values_json TEXT NOT NULL DEFAULT '{{}}',
+    data_quality_criteria_json TEXT NOT NULL,
     seed INTEGER NOT NULL DEFAULT 0,
     engine_version TEXT NOT NULL,
     core_lib_version TEXT NOT NULL,
