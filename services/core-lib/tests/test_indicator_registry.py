@@ -107,10 +107,7 @@ def test_register_rejects_duplicate_identity() -> None:
 
 def test_resolve_enabled_supports_auto_explicit_and_all() -> None:
     assert DEFAULT_REGISTRY.resolve_enabled("auto", {"RSI"}, {"ATR"}) == {"RSI"}
-    assert DEFAULT_REGISTRY.resolve_enabled("explicit", {"RSI"}, {"ATR"}) == {
-        "RSI",
-        "ATR",
-    }
+    assert DEFAULT_REGISTRY.resolve_enabled("explicit", {"RSI"}, {"ATR"}) == {"ATR"}
     assert len(DEFAULT_REGISTRY.resolve_enabled("all", set(), set())) == 9
     with pytest.raises(ValueError, match="auto, explicit, or all"):
         DEFAULT_REGISTRY.resolve_enabled("unknown", set(), set())
@@ -125,10 +122,7 @@ def test_resolve_specs_is_the_single_descriptor_and_mode_interpreter() -> None:
     all_specs = DEFAULT_REGISTRY.resolve_specs("all", declared, ())
 
     assert [spec.identifier for spec in auto] == ["EMA(period=9)"]
-    assert [spec.identifier for spec in selected] == [
-        "ATR(period=14)",
-        "EMA(period=9)",
-    ]
+    assert [spec.identifier for spec in selected] == ["ATR(period=14)"]
     assert len(all_specs) == 9
 
 

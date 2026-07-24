@@ -1415,6 +1415,7 @@ def test_indicator_mode_changes_selection_and_longest_history_owns_warmup(
             **_config().model_dump(),
             "indicator_mode": "explicit",
             "explicit_indicators": [
+                {"name": "EMA", "params": {"period": 9}},
                 {"name": "EMA", "params": {"period": 21}},
             ],
         }
@@ -1443,6 +1444,7 @@ def test_indicator_mode_changes_selection_and_longest_history_owns_warmup(
             **_config().model_dump(),
             "indicator_mode": "explicit",
             "explicit_indicators": [
+                {"name": "EMA", "params": {"period": 9}},
                 {"name": "EMA", "params": {"period": 21}},
             ],
         }
@@ -1453,6 +1455,42 @@ def test_indicator_mode_changes_selection_and_longest_history_owns_warmup(
     all_indicators = RunConfig.model_validate({**_config().model_dump(), "indicator_mode": "all"})
     with pytest.raises(ValueError, match="requires 200"):
         _engine(tmp_path / "all", catalog, brokers).run(all_indicators)
+
+
+def test_explicit_indicator_mode_rejects_missing_strategy_requirement(
+    tmp_path: Path,
+) -> None:
+    catalog = _Catalog()
+    brokers: list[_Broker] = []
+    oldest = _candles()[0]
+    extended_history = [
+        replace(
+            oldest,
+            open_time=oldest.open_time - timedelta(hours=offset),
+            close_time=oldest.close_time - timedelta(hours=offset),
+        )
+        for offset in range(12, 0, -1)
+    ] + _candles()
+    missing_required = RunConfig.model_validate(
+        {
+            **_config().model_dump(),
+            "indicator_mode": "explicit",
+            "explicit_indicators": [
+                {"name": "EMA", "params": {"period": 21}},
+            ],
+        }
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"missing strategy-required indicators: EMA\(period=9\)",
+    ):
+        _engine(
+            tmp_path,
+            catalog,
+            brokers,
+            candles=extended_history,
+        ).run(missing_required)
 
 
 def test_coarse_candle_funding_charges_every_crossed_boundary_with_payment_sign(

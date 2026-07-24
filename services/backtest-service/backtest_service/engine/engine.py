@@ -332,6 +332,18 @@ class Engine:
             metadata.required_indicators,
             config.explicit_indicators,
         )
+        if config.indicator_mode == "explicit":
+            required_ids = {
+                spec.identifier
+                for spec in DEFAULT_REGISTRY.specs_from_descriptors(metadata.required_indicators)
+            }
+            explicit_ids = {spec.identifier for spec in self._indicator_specs}
+            missing_required = sorted(required_ids - explicit_ids)
+            if missing_required:
+                raise ValueError(
+                    "explicit_indicators missing strategy-required indicators: "
+                    + ", ".join(missing_required)
+                )
         longest_indicator_history = max(spec.min_history for spec in self._indicator_specs)
         required_warmup = max(metadata.min_history, longest_indicator_history)
 

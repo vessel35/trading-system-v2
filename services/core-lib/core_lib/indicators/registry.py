@@ -159,6 +159,17 @@ class IndicatorRegistry:
                 selected[spec.identifier] = spec
         return [selected[identifier] for identifier in sorted(selected)]
 
+    def specs_from_descriptors(
+        self,
+        descriptors: Collection[Mapping[str, object]],
+    ) -> builtins.list[IndicatorSpec]:
+        """Resolve descriptors to deterministic, de-duplicated registry specs."""
+        selected: dict[str, IndicatorSpec] = {}
+        for descriptor in descriptors:
+            spec = self._descriptor_spec(descriptor)
+            selected[spec.identifier] = spec
+        return [selected[identifier] for identifier in sorted(selected)]
+
     def compute_batch(
         self,
         candles: Sequence[Candle],
@@ -202,7 +213,7 @@ class IndicatorRegistry:
         if mode == "auto":
             resolved = set(declared)
         elif mode == "explicit":
-            resolved = set(declared) | set(explicit)
+            resolved = set(explicit)
         elif mode == "all":
             resolved = {spec.identifier for spec in self._specs.values()}
         else:
@@ -218,8 +229,8 @@ class IndicatorRegistry:
         explicit: Collection[Mapping[str, object]],
     ) -> builtins.list[IndicatorSpec]:
         """Resolve external descriptors and calculation mode through one registry path."""
-        declared_ids = {self._descriptor_spec(descriptor).identifier for descriptor in declared}
-        explicit_ids = {self._descriptor_spec(descriptor).identifier for descriptor in explicit}
+        declared_ids = {spec.identifier for spec in self.specs_from_descriptors(declared)}
+        explicit_ids = {spec.identifier for spec in self.specs_from_descriptors(explicit)}
         enabled = self.resolve_enabled(mode, declared_ids, explicit_ids)
         specs = self.specs_for(enabled)
         if not specs:
