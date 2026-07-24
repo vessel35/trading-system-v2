@@ -13,6 +13,10 @@ def pytest_configure(config: pytest.Config) -> None:
     )
     config.addinivalue_line(
         "markers",
+        "acceptance: exercises the operator-assembled backtest against development data",
+    )
+    config.addinivalue_line(
+        "markers",
         "real_data_long: runs the long-window real-data regression tier",
     )
 
@@ -21,16 +25,27 @@ def pytest_collection_modifyitems(
     config: pytest.Config,
     items: list[pytest.Item],
 ) -> None:
-    """Skip integration tests unless the invocation explicitly selects them."""
+    """Skip database-backed tiers unless the invocation explicitly selects them."""
     expression = config.option.markexpr
-    explicitly_selected = (
-        isinstance(expression, str)
-        and "integration" in expression
-        and "not integration" not in expression
+    selected = expression if isinstance(expression, str) else ""
+    integration_selected = (
+        "integration" in selected and "not integration" not in selected
     )
-    if explicitly_selected:
-        return
-    skip = pytest.mark.skip(reason="integration tests require explicit -m integration")
+    acceptance_selected = "acceptance" in selected and "not acceptance" not in selected
+    skip_integration = pytest.mark.skip(
+        reason="integration tests require explicit -m integration"
+    )
+    skip_acceptance = pytest.mark.skip(
+        reason="acceptance tests require explicit -m acceptance"
+    )
     for item in items:
-        if item.get_closest_marker("integration") is not None:
-            item.add_marker(skip)
+        if (
+            not integration_selected
+            and item.get_closest_marker("integration") is not None
+        ):
+            item.add_marker(skip_integration)
+        if (
+            not acceptance_selected
+            and item.get_closest_marker("acceptance") is not None
+        ):
+            item.add_marker(skip_acceptance)
