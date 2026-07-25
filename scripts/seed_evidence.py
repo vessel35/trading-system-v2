@@ -39,10 +39,12 @@ def parse_args() -> argparse.Namespace:
             "data and write only backtest_db plus var/evidence."
         )
     )
-    parser.add_argument("--run-name", default="webui-p1-evidence-seed")
+    parser.add_argument("--run-name", default="p1-seed-btc-60d")
     parser.add_argument("--start", default="2025-07-01T00:00:00+00:00")
-    parser.add_argument("--days", type=int, default=60)
+    parser.add_argument("--days", type=int, default=62)
     parser.add_argument("--seed", type=int, default=976)
+    parser.add_argument("--atr-stop-multiple", type=float)
+    parser.add_argument("--reward-risk", type=float)
     parser.add_argument(
         "--evidence-root",
         type=Path,
@@ -55,10 +57,18 @@ def main() -> int:
     args = parse_args()
     start = datetime.fromisoformat(args.start).astimezone(UTC)
     end = start + timedelta(days=args.days)
+    params = {
+        key: value
+        for key, value in {
+            "atr_stop_multiple": args.atr_stop_multiple,
+            "reward_risk": args.reward_risk,
+        }.items()
+        if value is not None
+    }
     config = RunConfig(
         run_name=args.run_name,
         strategy_id=STRATEGY_ID,
-        params={},
+        params=params,
         symbol="BTC/USDT:USDT",
         exchange="binance",
         timeframe="1h",

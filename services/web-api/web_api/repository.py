@@ -1,16 +1,23 @@
 """SQL repository for P0 catalog reads."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
-from web_api.database import CatalogConnection, get_settings
+from web_api.database import CatalogConnection, CryptoConnection, get_settings
 from web_api.models import (
+    Candle,
+    CandleCollection,
+    CandlePage,
     CatalogHealth,
     HealthResponse,
     Page,
+    Preregistration,
+    PreregistrationResponse,
+    RunComparisonItem,
+    RunComparisonResponse,
     RunHeader,
     RunListItem,
     RunListResponse,
@@ -242,6 +249,72 @@ class CatalogRepository:
         value = row["evidence_path"]
         return True, str(value) if value is not None else None
 
+    def get_prereg(self, run_id: str) -> PreregistrationResponse | None:
+        exists = self._connection.execute(
+            "SELECT 1 FROM public.backtest_run WHERE run_id = %s",
+            (run_id,),
+        ).fetchone()
+        if exists is None:
+            return None
+        row = self._connection.execute(
+            """
+            SELECT run_id, hypothesis, weakness_addressed, primary_metric,
+                   success_criteria_json, failure_criteria_json,
+                   profile_update_declared, related_finding_ref, declared_by,
+                   declared_at, locked_at
+            FROM public.backtest_prereg
+            WHERE run_id = %s
+            """,
+            (run_id,),
+        ).fetchone()
+        prereg = Preregistration.model_validate(row) if row is not None else None
+        return PreregistrationResponse(run_id=run_id, prereg=prereg)
+
+    def compare_runs(
+        self,
+        *,
+        run_ids: list[str] | None,
+        sweep_id: str | None,
+    ) -> RunComparisonResponse:
+        compared_by: Literal["run_ids", "sweep_id"] = (
+            "run_ids" if run_ids is not None else "sweep_id"
+        )
+        selected_ids = run_ids
+        if selected_ids is None:
+            rows = self._connection.execute(
+                """
+                SELECT run_id
+                FROM public.backtest_run
+                WHERE sweep_id = %s
+                ORDER BY run_seq
+                """,
+                (sweep_id,),
+            ).fetchall()
+            selected_ids = [str(row["run_id"]) for row in rows]
+
+        items: list[RunComparisonItem] = []
+        missing: list[str] = []
+        for run_id in selected_ids:
+            run = self.get_run(run_id)
+            summary_response = self.get_summary(run_id)
+            if run is None or summary_response is None:
+                missing.append(run_id)
+                continue
+            items.append(
+                RunComparisonItem(
+                    run=run,
+                    summary_status=summary_response.summary_status,
+                    summary=summary_response.summary,
+                )
+            )
+        if missing:
+            raise KeyError(",".join(missing))
+        return RunComparisonResponse(
+            data=items,
+            compared_by=compared_by,
+            sweep_id=sweep_id,
+        )
+
     def health(self, *, core_lib_version: str, web_api_version: str) -> HealthResponse:
         probe = self._connection.execute(
             """
@@ -283,3 +356,138 @@ class CatalogRepository:
             core_lib_version=core_lib_version,
             web_api_version=web_api_version,
         )
+
+
+class MarketDataRepository:
+    """Whitelisted, read-only OHLCV aggregation matching the backtest feed."""
+
+    def __init__(self, connection: CryptoConnection) -> None:
+        self._connection = connection
+
+    def candles(
+        self,
+        *,
+        symbol: str,
+        exchange: str,
+        timeframe: str,
+        data_source: str,
+        from_ts: datetime,
+        to_ts: datetime,
+        limit: int,
+    ) -> CandleCollection:
+        duration = self._timeframe_duration(timeframe)
+        expected_count = int(duration / timedelta(minutes=1))
+        table = self._source_table(data_source)
+        duration_seconds = int(duration.total_seconds())
+        query = f"""
+            WITH source AS (
+                SELECT time, open, high, low, close, volume, quote_volume, trade_count,
+                       date_bin(
+                           make_interval(secs => %s),
+                           time,
+                           TIMESTAMPTZ '1970-01-01 00:00:00+00'
+                       ) AS bucket
+                FROM public.{table}
+                WHERE symbol = %s
+                  AND exchange = %s
+                  AND timeframe = '1m'
+                  AND time >= %s
+                  AND time < %s
+            ),
+            aggregated AS (
+                SELECT bucket,
+                       (array_agg(open ORDER BY time))[1] AS open,
+                       max(high) AS high,
+                       min(low) AS low,
+                       (array_agg(close ORDER BY time DESC))[1] AS close,
+                       sum(volume) AS volume,
+                       CASE WHEN count(quote_volume) = count(*)
+                            THEN sum(quote_volume) END AS quote_volume,
+                       CASE WHEN count(trade_count) = count(*)
+                            THEN sum(trade_count) END AS trade_count,
+                       count(*) AS row_count,
+                       min(time) AS first_time,
+                       max(time) AS last_time,
+                       bool_and(date_trunc('minute', time) = time) AS minute_aligned
+                FROM source
+                GROUP BY bucket
+            ),
+            complete AS (
+                SELECT *, count(*) OVER () AS total
+                FROM aggregated
+                WHERE row_count = %s
+                  AND minute_aligned
+                  AND first_time = bucket
+                  AND last_time = bucket + make_interval(secs => %s) - interval '1 minute'
+                  AND bucket + make_interval(secs => %s) <= %s
+            )
+            SELECT *
+            FROM complete
+            ORDER BY bucket
+            LIMIT %s
+        """
+        rows = self._connection.execute(
+            query,
+            (
+                duration_seconds,
+                symbol,
+                exchange,
+                from_ts,
+                to_ts,
+                expected_count,
+                duration_seconds,
+                duration_seconds,
+                to_ts,
+                limit + 1,
+            ),
+        ).fetchall()
+        total = int(rows[0]["total"]) if rows else 0
+        selected = rows[:limit]
+        data = [
+            Candle(
+                open_time=row["bucket"],
+                close_time=row["bucket"] + duration,
+                open=float(row["open"]),
+                high=float(row["high"]),
+                low=float(row["low"]),
+                close=float(row["close"]),
+                volume=float(row["volume"]),
+                quote_volume=(
+                    float(row["quote_volume"]) if row["quote_volume"] is not None else None
+                ),
+                trade_count=(int(row["trade_count"]) if row["trade_count"] is not None else None),
+            )
+            for row in selected
+        ]
+        return CandleCollection(
+            data=data,
+            page=CandlePage(
+                limit=limit,
+                total=total,
+                has_more=len(rows) > limit,
+                truncated=len(rows) > limit,
+                window_clamped=False,
+                from_ts=from_ts,
+                to_ts=to_ts,
+                timeframe=timeframe,
+            ),
+        )
+
+    @staticmethod
+    def _source_table(data_source: str) -> str:
+        if data_source.endswith(".ohlcv_futures"):
+            return "ohlcv_futures"
+        if data_source.endswith(".ohlcv"):
+            return "ohlcv"
+        raise ValueError("run data_source is not a supported OHLCV table")
+
+    @staticmethod
+    def _timeframe_duration(timeframe: str) -> timedelta:
+        if len(timeframe) < 2 or not timeframe[:-1].isdigit():
+            raise ValueError("unsupported run timeframe")
+        count = int(timeframe[:-1])
+        seconds_per_unit = {"m": 60, "h": 3600, "d": 86400}
+        unit_seconds = seconds_per_unit.get(timeframe[-1])
+        if count < 1 or unit_seconds is None:
+            raise ValueError("unsupported run timeframe")
+        return timedelta(seconds=count * unit_seconds)

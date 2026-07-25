@@ -18,7 +18,9 @@ from web_api import __version__ as web_api_version
 from web_api.database import (
     CatalogConfigurationError,
     CatalogConnection,
+    CryptoConnection,
     catalog_connection,
+    crypto_connection,
 )
 from web_api.evidence import (
     EvidenceRepository,
@@ -27,24 +29,33 @@ from web_api.evidence import (
 )
 from web_api.models import (
     CandidateEvent,
+    CandleCollection,
     ChartSummary,
+    ConditionalExpectancy,
+    Decision,
     DrawdownEpisode,
     EquityPoint,
     ErrorResponse,
     EvidenceCollection,
     Execution,
+    FindingsCollection,
     FundingSettlement,
     HealthResponse,
+    IndicatorSnapshot,
     IntegrityCheck,
+    MissedOpportunity,
     OutcomeBucket,
     Position,
+    PreregistrationResponse,
+    RunComparisonResponse,
     RunHeader,
     RunListResponse,
     RunSummaryResponse,
+    Signal,
     Trade,
     TradeFeature,
 )
-from web_api.repository import CatalogRepository, RunListQuery
+from web_api.repository import CatalogRepository, MarketDataRepository, RunListQuery
 
 
 class ApiError(Exception):
@@ -204,6 +215,12 @@ def repository(
     return CatalogRepository(connection)
 
 
+def market_repository(
+    connection: Annotated[CryptoConnection, Depends(crypto_connection)],
+) -> MarketDataRepository:
+    return MarketDataRepository(connection)
+
+
 def not_found(run_id: str) -> NoReturn:
     raise ApiError(
         status_code=404,
@@ -300,6 +317,61 @@ def list_runs(
 
 
 @app.get(
+    "/api/v1/runs:compare",
+    response_model=RunComparisonResponse,
+    responses={
+        400: {"model": ErrorResponse},
+        404: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+def compare_runs(
+    repo: Annotated[CatalogRepository, Depends(repository)],
+    run_ids: Annotated[list[str] | None, Query()] = None,
+    sweep_id: str | None = None,
+) -> RunComparisonResponse:
+    if (run_ids is None) == (sweep_id is None):
+        raise ApiError(
+            status_code=400,
+            code="invalid_query",
+            message="Provide exactly one of run_ids or sweep_id.",
+        )
+    normalized_ids: list[str] | None = None
+    if run_ids is not None:
+        normalized_ids = [
+            item
+            for value in run_ids
+            for item in (part.strip() for part in value.split(","))
+            if item
+        ]
+        normalized_ids = list(dict.fromkeys(normalized_ids))
+        if not 2 <= len(normalized_ids) <= 12:
+            raise ApiError(
+                status_code=400,
+                code="invalid_query",
+                message="run_ids must contain between 2 and 12 unique run IDs.",
+            )
+    try:
+        response = repo.compare_runs(run_ids=normalized_ids, sweep_id=sweep_id)
+    except KeyError as exc:
+        missing = str(exc.args[0]).split(",")
+        raise ApiError(
+            status_code=404,
+            code="run_not_found",
+            message="One or more comparison runs do not exist.",
+            details={"run_ids": missing},
+        ) from exc
+    if not response.data:
+        raise ApiError(
+            status_code=404,
+            code="comparison_not_found",
+            message="No runs were found for the requested comparison.",
+            details={"sweep_id": sweep_id},
+        )
+    return response
+
+
+@app.get(
     "/api/v1/runs/{run_id}",
     response_model=RunHeader,
     responses={404: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
@@ -327,6 +399,97 @@ def get_run_summary(
     if summary is None:
         not_found(run_id)
     return summary
+
+
+@app.get(
+    "/api/v1/runs/{run_id}/prereg",
+    response_model=PreregistrationResponse,
+    responses={404: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+)
+def get_run_prereg(
+    run_id: str,
+    repo: Annotated[CatalogRepository, Depends(repository)],
+) -> PreregistrationResponse:
+    prereg = repo.get_prereg(run_id)
+    if prereg is None:
+        not_found(run_id)
+    return prereg
+
+
+@app.get(
+    "/api/v1/runs/{run_id}/candles",
+    response_model=CandleCollection,
+    responses={
+        400: {"model": ErrorResponse},
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+def get_candles(
+    run_id: str,
+    repo: Annotated[CatalogRepository, Depends(repository)],
+    market: Annotated[MarketDataRepository, Depends(market_repository)],
+    from_ts: Annotated[datetime | None, Query(alias="from")] = None,
+    to_ts: Annotated[datetime | None, Query(alias="to")] = None,
+    limit: Annotated[int, Query(ge=1, le=5000)] = 5000,
+) -> CandleCollection:
+    run = repo.get_run(run_id)
+    if run is None:
+        not_found(run_id)
+    with evidence_repository(repo, run_id) as evidence:
+        source_from, source_to = evidence.source_range(run.timeframe)
+    requested_start = _utc_datetime(from_ts) or source_from
+    requested_end = _utc_datetime(to_ts) or source_to
+    if requested_start >= requested_end:
+        raise ApiError(
+            status_code=400,
+            code="invalid_query",
+            message="'from' must be earlier than 'to'.",
+        )
+    explicit_window = from_ts is not None or to_ts is not None
+    if explicit_window:
+        allowed_start = max(run.period_start, source_from)
+        allowed_end = min(run.period_end, source_to)
+        start = max(requested_start, allowed_start)
+        end = min(requested_end, allowed_end)
+        if start >= end:
+            raise ApiError(
+                status_code=400,
+                code="candle_window_outside_run",
+                message="The requested candle window does not overlap this run.",
+                details={
+                    "requested_from": requested_start,
+                    "requested_to": requested_end,
+                    "allowed_from": allowed_start,
+                    "allowed_to": allowed_end,
+                },
+            )
+    else:
+        start, end = source_from, source_to
+    try:
+        collection = market.candles(
+            symbol=run.symbol,
+            exchange=run.exchange,
+            timeframe=run.timeframe,
+            data_source=run.data_source,
+            from_ts=start,
+            to_ts=end,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise ApiError(
+            status_code=400,
+            code="unsupported_candle_source",
+            message=str(exc),
+        ) from exc
+    return collection.model_copy(
+        update={
+            "page": collection.page.model_copy(
+                update={"window_clamped": (start != requested_start or end != requested_end)}
+            )
+        }
+    )
 
 
 @app.get(
@@ -589,6 +752,7 @@ def get_candidate_events(
     limit: Annotated[int, Query(ge=1, le=200)] = 200,
     linked_trade_id: Annotated[int | None, Query(ge=1)] = None,
     realized: bool | None = None,
+    blocked_by: str | None = None,
 ) -> EvidenceCollection[CandidateEvent]:
     with evidence_repository(repo, run_id) as evidence:
         return evidence.candidate_events(
@@ -596,6 +760,181 @@ def get_candidate_events(
             limit=limit,
             linked_trade_id=linked_trade_id,
             realized=realized,
+            blocked_by=blocked_by,
+        )
+
+
+@app.get(
+    "/api/v1/runs/{run_id}/signals",
+    response_model=EvidenceCollection[Signal],
+    responses={
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+def get_signals(
+    run_id: str,
+    repo: Annotated[CatalogRepository, Depends(repository)],
+    after_seq: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=200)] = 200,
+    derived_intent: str | None = None,
+    derived_side: str | None = None,
+    is_warmup: bool | None = None,
+    decision_time_from: datetime | None = None,
+    decision_time_to: datetime | None = None,
+) -> EvidenceCollection[Signal]:
+    with evidence_repository(repo, run_id) as evidence:
+        return evidence.signals(
+            after_seq=after_seq,
+            limit=limit,
+            derived_intent=derived_intent,
+            derived_side=derived_side,
+            is_warmup=is_warmup,
+            decision_time_from=_epoch_ms(decision_time_from),
+            decision_time_to=_epoch_ms(decision_time_to),
+        )
+
+
+@app.get(
+    "/api/v1/runs/{run_id}/decisions",
+    response_model=EvidenceCollection[Decision],
+    responses={
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+def get_decisions(
+    run_id: str,
+    repo: Annotated[CatalogRepository, Depends(repository)],
+    after_seq: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=200)] = 200,
+    action: str | None = None,
+    skip_reason: str | None = None,
+    signal_id: Annotated[int | None, Query(ge=1)] = None,
+    decision_time_from: datetime | None = None,
+    decision_time_to: datetime | None = None,
+) -> EvidenceCollection[Decision]:
+    with evidence_repository(repo, run_id) as evidence:
+        return evidence.decisions(
+            after_seq=after_seq,
+            limit=limit,
+            action=action,
+            skip_reason=skip_reason,
+            signal_id=signal_id,
+            decision_time_from=_epoch_ms(decision_time_from),
+            decision_time_to=_epoch_ms(decision_time_to),
+        )
+
+
+@app.get(
+    "/api/v1/runs/{run_id}/indicator-snapshots",
+    response_model=EvidenceCollection[IndicatorSnapshot],
+    responses={
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+def get_indicator_snapshots(
+    run_id: str,
+    repo: Annotated[CatalogRepository, Depends(repository)],
+    after_seq: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=200)] = 200,
+    indicator_key: str | None = None,
+    is_warmup: bool | None = None,
+    feature_time_from: datetime | None = None,
+    feature_time_to: datetime | None = None,
+) -> EvidenceCollection[IndicatorSnapshot]:
+    with evidence_repository(repo, run_id) as evidence:
+        return evidence.indicator_snapshots(
+            after_seq=after_seq,
+            limit=limit,
+            indicator_key=indicator_key,
+            is_warmup=is_warmup,
+            feature_time_from=_epoch_ms(feature_time_from),
+            feature_time_to=_epoch_ms(feature_time_to),
+        )
+
+
+@app.get(
+    "/api/v1/runs/{run_id}/missed-opportunities",
+    response_model=EvidenceCollection[MissedOpportunity],
+    responses={
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+def get_missed_opportunities(
+    run_id: str,
+    repo: Annotated[CatalogRepository, Depends(repository)],
+    after_seq: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=200)] = 200,
+    missing_reason: str | None = None,
+    time_from: datetime | None = None,
+    time_to: datetime | None = None,
+) -> EvidenceCollection[MissedOpportunity]:
+    with evidence_repository(repo, run_id) as evidence:
+        return evidence.missed_opportunities(
+            after_seq=after_seq,
+            limit=limit,
+            missing_reason=missing_reason,
+            time_from=_epoch_ms(time_from),
+            time_to=_epoch_ms(time_to),
+        )
+
+
+@app.get(
+    "/api/v1/runs/{run_id}/conditional-expectancy",
+    response_model=EvidenceCollection[ConditionalExpectancy],
+    responses={
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+def get_conditional_expectancy(
+    run_id: str,
+    repo: Annotated[CatalogRepository, Depends(repository)],
+    after_seq: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=200)] = 200,
+    subject_kind: str | None = None,
+    is_significant: bool | None = None,
+    min_sample_count: Annotated[int | None, Query(ge=1)] = None,
+) -> EvidenceCollection[ConditionalExpectancy]:
+    with evidence_repository(repo, run_id) as evidence:
+        return evidence.conditional_expectancy(
+            after_seq=after_seq,
+            limit=limit,
+            subject_kind=subject_kind,
+            is_significant=is_significant,
+            min_sample_count=min_sample_count,
+        )
+
+
+@app.get(
+    "/api/v1/runs/{run_id}/findings",
+    response_model=FindingsCollection,
+    responses={
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+def get_findings(
+    run_id: str,
+    repo: Annotated[CatalogRepository, Depends(repository)],
+    after_seq: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=200)] = 200,
+    confidence: str | None = None,
+) -> FindingsCollection:
+    with evidence_repository(repo, run_id) as evidence:
+        return evidence.findings(
+            after_seq=after_seq,
+            limit=limit,
+            confidence=confidence,
         )
 
 

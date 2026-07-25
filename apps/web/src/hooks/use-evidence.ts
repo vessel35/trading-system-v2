@@ -4,14 +4,22 @@ import {
   apiClient,
   apiRequestError,
   type CandidateEvent,
+  type CandleCollection,
   type ChartSummary,
+  type ConditionalExpectancy,
+  type Decision,
   type DrawdownEpisode,
   type EquityPoint,
   type Execution,
   type FundingSettlement,
   type IntegrityCheck,
+  type IndicatorSnapshot,
+  type Finding,
+  type MissedOpportunity,
   type OutcomeBucket,
   type Position,
+  type PreregistrationResponse,
+  type Signal,
   type Trade,
   type TradeFeature,
 } from "../api/client";
@@ -24,7 +32,7 @@ type CursorResponse<T> = {
   };
 };
 
-async function allPages<T>(
+export async function allPages<T>(
   request: (afterSeq: number) => Promise<CursorResponse<T>>,
 ): Promise<T[]> {
   const rows: T[] = [];
@@ -37,6 +45,16 @@ async function allPages<T>(
     }
     afterSeq = page.page.next_after_seq;
   }
+}
+
+function cursorQuery<T>(
+  queryKey: readonly unknown[],
+  request: (afterSeq: number) => Promise<CursorResponse<T>>,
+) {
+  return useQuery({
+    queryKey,
+    queryFn: () => allPages(request),
+  });
 }
 
 export function useTrades(runId: string) {
@@ -264,4 +282,141 @@ export function useTradeDrawerEvidence(runId: string, tradeId: number | null) {
     enabled,
   });
   return { funding, features, candidates, positions };
+}
+
+export function useChartEvidence(runId: string) {
+  const candles = useQuery({
+    queryKey: ["evidence", runId, "candles"],
+    queryFn: async () => {
+      const { data, error } = await apiClient.GET(
+        "/api/v1/runs/{run_id}/candles",
+        {
+          params: { path: { run_id: runId }, query: { limit: 5000 } },
+        },
+      );
+      if (error) throw apiRequestError(error);
+      if (!data) throw new Error("캔들 응답이 비어 있습니다.");
+      return data as CandleCollection;
+    },
+  });
+  const indicators = cursorQuery<IndicatorSnapshot>(
+    ["evidence", runId, "indicator-snapshots"],
+    async (after_seq) => {
+      const { data, error } = await apiClient.GET(
+        "/api/v1/runs/{run_id}/indicator-snapshots",
+        {
+          params: { path: { run_id: runId }, query: { after_seq, limit: 200 } },
+        },
+      );
+      if (error) throw apiRequestError(error);
+      if (!data) throw new Error("지표 스냅샷 응답이 비어 있습니다.");
+      return data;
+    },
+  );
+  const signals = useSignals(runId);
+  const candidates = useCandidateEvents(runId);
+  const executions = useExecutions(runId);
+  return { candles, indicators, signals, candidates, executions };
+}
+
+export function useSignals(runId: string) {
+  return cursorQuery<Signal>(["evidence", runId, "signals"], async (after_seq) => {
+    const { data, error } = await apiClient.GET("/api/v1/runs/{run_id}/signals", {
+      params: { path: { run_id: runId }, query: { after_seq, limit: 200 } },
+    });
+    if (error) throw apiRequestError(error);
+    if (!data) throw new Error("신호 Evidence 응답이 비어 있습니다.");
+    return data;
+  });
+}
+
+export function useDecisions(runId: string) {
+  return cursorQuery<Decision>(
+    ["evidence", runId, "decisions"],
+    async (after_seq) => {
+      const { data, error } = await apiClient.GET(
+        "/api/v1/runs/{run_id}/decisions",
+        {
+          params: { path: { run_id: runId }, query: { after_seq, limit: 200 } },
+        },
+      );
+      if (error) throw apiRequestError(error);
+      if (!data) throw new Error("의사결정 Evidence 응답이 비어 있습니다.");
+      return data;
+    },
+  );
+}
+
+export function useCandidateEvents(runId: string) {
+  return cursorQuery<CandidateEvent>(
+    ["evidence", runId, "candidate-events", "all"],
+    async (after_seq) => {
+      const { data, error } = await apiClient.GET(
+        "/api/v1/runs/{run_id}/candidate-events",
+        {
+          params: { path: { run_id: runId }, query: { after_seq, limit: 200 } },
+        },
+      );
+      if (error) throw apiRequestError(error);
+      if (!data) throw new Error("후보 Evidence 응답이 비어 있습니다.");
+      return data;
+    },
+  );
+}
+
+export function useMissedOpportunities(runId: string) {
+  return cursorQuery<MissedOpportunity>(
+    ["evidence", runId, "missed-opportunities"],
+    async (after_seq) => {
+      const { data, error } = await apiClient.GET(
+        "/api/v1/runs/{run_id}/missed-opportunities",
+        {
+          params: { path: { run_id: runId }, query: { after_seq, limit: 200 } },
+        },
+      );
+      if (error) throw apiRequestError(error);
+      if (!data) throw new Error("놓친 기회 Evidence 응답이 비어 있습니다.");
+      return data;
+    },
+  );
+}
+
+export function useResearchEvidence(runId: string) {
+  const conditional = cursorQuery<ConditionalExpectancy>(
+    ["evidence", runId, "conditional-expectancy"],
+    async (after_seq) => {
+      const { data, error } = await apiClient.GET(
+        "/api/v1/runs/{run_id}/conditional-expectancy",
+        {
+          params: { path: { run_id: runId }, query: { after_seq, limit: 200 } },
+        },
+      );
+      if (error) throw apiRequestError(error);
+      if (!data) throw new Error("조건부 기대값 응답이 비어 있습니다.");
+      return data;
+    },
+  );
+  const findings = cursorQuery<Finding>(
+    ["evidence", runId, "findings"],
+    async (after_seq) => {
+      const { data, error } = await apiClient.GET("/api/v1/runs/{run_id}/findings", {
+        params: { path: { run_id: runId }, query: { after_seq, limit: 200 } },
+      });
+      if (error) throw apiRequestError(error);
+      if (!data) throw new Error("연구 노트 응답이 비어 있습니다.");
+      return data;
+    },
+  );
+  const prereg = useQuery({
+    queryKey: ["catalog", runId, "prereg"],
+    queryFn: async () => {
+      const { data, error } = await apiClient.GET("/api/v1/runs/{run_id}/prereg", {
+        params: { path: { run_id: runId } },
+      });
+      if (error) throw apiRequestError(error);
+      if (!data) throw new Error("사전등록 응답이 비어 있습니다.");
+      return data as PreregistrationResponse;
+    },
+  });
+  return { conditional, findings, prereg };
 }

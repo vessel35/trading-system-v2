@@ -14,8 +14,9 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from web_api.database import get_settings
+from web_api.database import connect_crypto, get_settings
 from web_api.main import _epoch_ms, _utc_datetime, app
+from web_api.repository import MarketDataRepository
 
 pytestmark = pytest.mark.integration
 
@@ -32,6 +33,12 @@ ENDPOINT_TABLES = {
     "drawdown-episodes": "DRAWDOWN_RUNUP_EPISODE",
     "trade-features": "TRADE_FEATURE_SNAPSHOT",
     "candidate-events": "CANDIDATE_EVENT",
+    "signals": "SIGNAL",
+    "decisions": "DECISION",
+    "indicator-snapshots": "INDICATOR_SNAPSHOT",
+    "missed-opportunities": "MISSED_OPPORTUNITY",
+    "conditional-expectancy": "CONDITIONAL_EXPECTANCY",
+    "findings": "FINDING_CLAIM",
 }
 
 
@@ -41,9 +48,13 @@ class SeededEvidence:
     run_id: str
     path: Path
     counts: dict[str, int]
+    comparison_run_id: str
 
 
-def _seed_with_script(evidence_root: Path) -> tuple[str, Path]:
+def _seed_with_script(
+    evidence_root: Path,
+    *extra_args: str,
+) -> tuple[str, Path]:
     """Run the public seed command with its documented deterministic defaults."""
 
     completed = subprocess.run(
@@ -52,6 +63,7 @@ def _seed_with_script(evidence_root: Path) -> tuple[str, Path]:
             str(REPOSITORY_ROOT / "scripts" / "seed_evidence.py"),
             "--evidence-root",
             str(evidence_root),
+            *extra_args,
         ],
         cwd=REPOSITORY_ROOT,
         capture_output=True,
@@ -81,6 +93,13 @@ def _seed_with_script(evidence_root: Path) -> tuple[str, Path]:
 def seeded_evidence(tmp_path_factory: pytest.TempPathFactory) -> Iterator[SeededEvidence]:
     evidence_root = tmp_path_factory.mktemp("webapi-evidence")
     run_id, path = _seed_with_script(evidence_root)
+    comparison_run_id, _ = _seed_with_script(
+        evidence_root,
+        "--run-name",
+        "p1-seed-reward-risk-2-5",
+        "--reward-risk",
+        "2.5",
+    )
     with sqlite3.connect(path) as connection:
         counts = {
             endpoint: int(connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0])
@@ -93,7 +112,13 @@ def seeded_evidence(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Seeded
     try:
         assert Path(get_settings().evidence_root).resolve() == evidence_root.resolve()
         with TestClient(app) as client:
-            yield SeededEvidence(client=client, run_id=run_id, path=path, counts=counts)
+            yield SeededEvidence(
+                client=client,
+                run_id=run_id,
+                path=path,
+                counts=counts,
+                comparison_run_id=comparison_run_id,
+            )
     finally:
         if previous_root is None:
             os.environ.pop("WEBAPI_EVIDENCE_ROOT", None)
@@ -119,7 +144,7 @@ def test_seed_evidence_endpoint_counts_and_cursor_contract(
     assert body["page"]["after_seq"] == 0
     assert len(body["data"]) == min(expected, 17)
     assert body["page"]["has_more"] is (expected > 17)
-    assert body["page"]["next_after_seq"] is not None
+    assert (body["page"]["next_after_seq"] is not None) is (expected > 0)
 
     if expected > 17:
         following = seeded_evidence.client.get(
@@ -138,6 +163,11 @@ def test_seed_evidence_endpoint_counts_and_cursor_contract(
 def test_scaled_decimals_timestamps_json_and_real_values_are_typed(
     seeded_evidence: SeededEvidence,
 ) -> None:
+    assert seeded_evidence.counts["signals"] == 154
+    assert seeded_evidence.counts["decisions"] == 211
+    assert seeded_evidence.counts["candidate-events"] == 106
+    assert seeded_evidence.counts["indicator-snapshots"] == 4464
+
     trade = seeded_evidence.client.get(
         f"/api/v1/runs/{seeded_evidence.run_id}/trades",
         params={"limit": 1},
@@ -171,6 +201,23 @@ def test_scaled_decimals_timestamps_json_and_real_values_are_typed(
     ).json()["data"][0]
     assert isinstance(episode["peak_equity"], str)
     assert isinstance(episode["contributing_trades_json"], list)
+
+    signal = seeded_evidence.client.get(
+        f"/api/v1/runs/{seeded_evidence.run_id}/signals",
+        params={"limit": 1},
+    ).json()["data"][0]
+    assert isinstance(signal["price"], float)
+    assert isinstance(signal["is_warmup"], bool)
+    assert isinstance(signal["metadata_json"], dict)
+    assert signal["decision_ts"].endswith(("Z", "+00:00"))
+
+    snapshot = seeded_evidence.client.get(
+        f"/api/v1/runs/{seeded_evidence.run_id}/indicator-snapshots",
+        params={"limit": 1},
+    ).json()["data"][0]
+    assert snapshot["indicator_name"] in {"EMA", "ATR"}
+    assert isinstance(snapshot["params_json"], dict)
+    assert isinstance(snapshot["pinned_impl"], bool)
 
 
 def test_filters_support_core_tabs_and_trade_drawer(
@@ -416,3 +463,130 @@ def test_openapi_exposes_p1a_and_decimal_formats(
     schemas = document["components"]["schemas"]
     assert schemas["Trade"]["properties"]["entry_price"]["format"] == "decimal"
     assert schemas["EquityPoint"]["properties"]["total_equity"]["format"] == "decimal"
+
+
+def test_candles_use_read_only_crypto_data_and_feed_compatible_aggregation(
+    seeded_evidence: SeededEvidence,
+) -> None:
+    header = seeded_evidence.client.get(f"/api/v1/runs/{seeded_evidence.run_id}").json()
+    default_response = seeded_evidence.client.get(f"/api/v1/runs/{seeded_evidence.run_id}/candles")
+    assert default_response.status_code == 200
+    default_body = default_response.json()
+    assert default_body["page"]["source_timeframe"] == "1m"
+    assert default_body["page"]["timeframe"] == "1h"
+    assert default_body["page"]["total"] == 1509
+    assert default_body["page"]["has_more"] is False
+    assert default_body["page"]["truncated"] is False
+    assert default_body["page"]["window_clamped"] is False
+    assert len(default_body["data"]) == 1509
+    first = default_body["data"][0]
+    assert all(isinstance(first[field], float) for field in ("open", "high", "low", "close"))
+    assert (
+        datetime.fromisoformat(first["close_time"]) - datetime.fromisoformat(first["open_time"])
+    ).total_seconds() == 3600
+
+    period_response = seeded_evidence.client.get(
+        f"/api/v1/runs/{seeded_evidence.run_id}/candles",
+        params={"from": header["period_start"], "to": header["period_end"]},
+    )
+    assert period_response.status_code == 200
+    period_page = period_response.json()["page"]
+    assert period_page["total"] == 1488
+    assert period_page["window_clamped"] is False
+
+    clamped_response = seeded_evidence.client.get(
+        f"/api/v1/runs/{seeded_evidence.run_id}/candles",
+        params={
+            "from": "2025-06-01T00:00:00Z",
+            "to": "2025-07-02T00:00:00Z",
+        },
+    )
+    assert clamped_response.status_code == 200
+    clamped_page = clamped_response.json()["page"]
+    assert clamped_page["from_ts"] == header["period_start"]
+    assert clamped_page["to_ts"] == "2025-07-02T00:00:00Z"
+    assert clamped_page["total"] == 24
+    assert clamped_page["window_clamped"] is True
+
+    outside_response = seeded_evidence.client.get(
+        f"/api/v1/runs/{seeded_evidence.run_id}/candles",
+        params={
+            "from": "2025-06-01T00:00:00Z",
+            "to": "2025-06-02T00:00:00Z",
+        },
+    )
+    assert outside_response.status_code == 400
+    assert outside_response.json()["error"]["code"] == "candle_window_outside_run"
+
+    with connect_crypto() as connection:
+        read_only = connection.execute(
+            "SELECT current_setting('transaction_read_only') AS value"
+        ).fetchone()
+        assert read_only is not None
+        assert read_only["value"] == "on"
+        source_count = connection.execute(
+            """
+            SELECT count(*) AS total
+            FROM public.ohlcv_futures
+            WHERE symbol = %s AND exchange = %s AND timeframe = '1m'
+              AND time >= %s AND time < %s
+            """,
+            (
+                header["symbol"],
+                header["exchange"],
+                header["period_start"],
+                header["period_end"],
+            ),
+        ).fetchone()
+        truncated = MarketDataRepository(connection).candles(
+            symbol=header["symbol"],
+            exchange=header["exchange"],
+            timeframe="1m",
+            data_source=header["data_source"],
+            from_ts=datetime.fromisoformat(header["period_start"]),
+            to_ts=datetime.fromisoformat(header["period_end"]),
+            limit=5000,
+        )
+    assert source_count is not None
+    assert int(source_count["total"]) == 89280
+    assert len(truncated.data) == 5000
+    assert truncated.page.total == 89280
+    assert truncated.page.has_more is True
+    assert truncated.page.truncated is True
+
+
+def test_prereg_compare_empty_extensions_and_findings_metadata(
+    seeded_evidence: SeededEvidence,
+) -> None:
+    prereg = seeded_evidence.client.get(f"/api/v1/runs/{seeded_evidence.run_id}/prereg")
+    assert prereg.status_code == 200
+    preregistration = prereg.json()["prereg"]
+    assert preregistration["hypothesis"] == "Reproducible WebUI Evidence seed"
+    assert preregistration["locked_at"] is not None
+
+    for endpoint in (
+        "missed-opportunities",
+        "conditional-expectancy",
+        "findings",
+    ):
+        body = seeded_evidence.client.get(
+            f"/api/v1/runs/{seeded_evidence.run_id}/{endpoint}"
+        ).json()
+        assert body["data"] == []
+        assert body["page"]["total"] == 0
+    findings = seeded_evidence.client.get(f"/api/v1/runs/{seeded_evidence.run_id}/findings").json()
+    assert findings["meta"]["hash_excluded"] is True
+    assert findings["meta"]["deterministic"] is False
+
+    compared = seeded_evidence.client.get(
+        "/api/v1/runs:compare",
+        params=[
+            ("run_ids", seeded_evidence.run_id),
+            ("run_ids", seeded_evidence.comparison_run_id),
+        ],
+    )
+    assert compared.status_code == 200
+    items = compared.json()["data"]
+    assert len(items) == 2
+    assert items[0]["run"]["config_hash"] != items[1]["run"]["config_hash"]
+    assert all(item["summary"] is not None for item in items)
