@@ -187,11 +187,16 @@ export function TradeDrawer({
                 {features.length > 0 && (
                   <Section title="거래 특징">
                     {excursion.length > 0 && (
-                      <div className="mb-3 h-24">
+                      <div className="mb-3 h-32">
                         <ResponsiveContainer width="100%" height="100%">
                           <BarChart data={excursion} layout="vertical">
                             <XAxis type="number" />
-                            <YAxis type="category" dataKey="phase" width={44} />
+                            <YAxis
+                              type="category"
+                              dataKey="phase"
+                              width={44}
+                              interval={0}
+                            />
                             <Tooltip />
                             <Bar dataKey="value" fill="#2dd4bf" isAnimationActive={false} />
                           </BarChart>

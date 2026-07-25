@@ -253,9 +253,18 @@ class EvidenceRepository:
             filters=(("t.trade_id = ?", trade_id),),
             select="e.*, t.trade_id AS trade_id",
             joins="""
-                LEFT JOIN TRADE AS t
-                  ON t.entry_execution_id = e.execution_id
-                  OR t.exit_execution_id = e.execution_id
+                LEFT JOIN (
+                    SELECT execution_id, MIN(trade_id) AS trade_id
+                    FROM (
+                        SELECT entry_execution_id AS execution_id, trade_id
+                        FROM TRADE
+                        UNION ALL
+                        SELECT exit_execution_id AS execution_id, trade_id
+                        FROM TRADE
+                        WHERE exit_execution_id IS NOT NULL
+                    ) AS execution_trade_links
+                    GROUP BY execution_id
+                ) AS t ON t.execution_id = e.execution_id
             """,
         )
 

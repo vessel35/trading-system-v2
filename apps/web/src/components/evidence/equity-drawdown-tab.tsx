@@ -221,6 +221,9 @@ export function EquityDrawdownTab({
   const episodes = useDrawdownEpisodes(runId);
   const [markersVisible, setMarkersVisible] = useState(true);
   const [logarithmic, setLogarithmic] = useState(false);
+  const deepestEpisode = episodes.data?.reduce((deepest, episode) =>
+    episode.depth_pct < deepest.depth_pct ? episode : deepest,
+  );
 
   const equitySeries = useMemo(() => {
     const stored = (chart.data ?? []).filter((point) => point.series_name === "equity");
@@ -358,10 +361,10 @@ export function EquityDrawdownTab({
               드로다운 사건이 없습니다.
             </p>
           )}
-          {episodes.data?.[0] && (
+          {deepestEpisode && (
             <p className="mt-3 text-[10px] text-muted-foreground">
-              첫 사건 peak {formatDecimalString(episodes.data[0].peak_equity)} · trough{" "}
-              {formatDecimalString(episodes.data[0].trough_equity)}
+              가장 깊은 사건 peak {formatDecimalString(deepestEpisode.peak_equity)} · trough{" "}
+              {formatDecimalString(deepestEpisode.trough_equity)}
             </p>
           )}
         </CardContent>

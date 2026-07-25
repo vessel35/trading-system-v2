@@ -3,7 +3,7 @@
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated, Any, NoReturn
 
 import psycopg
@@ -225,8 +225,19 @@ def evidence_repository(
         yield EvidenceRepository(connection)
 
 
+def _utc_datetime(value: datetime | None) -> datetime | None:
+    """Normalize temporal filters, treating offset-free ISO input as UTC."""
+
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
 def _epoch_ms(value: datetime | None) -> int | None:
-    return int(value.timestamp() * 1000) if value is not None else None
+    normalized = _utc_datetime(value)
+    return int(normalized.timestamp() * 1000) if normalized is not None else None
 
 
 @app.get(
@@ -267,12 +278,12 @@ def list_runs(
         gate_passed=gate_passed,
         sweep_id=sweep_id,
         config_hash=config_hash,
-        created_at_from=created_at_from,
-        created_at_to=created_at_to,
-        period_start_from=period_start_from,
-        period_start_to=period_start_to,
-        period_end_from=period_end_from,
-        period_end_to=period_end_to,
+        created_at_from=_utc_datetime(created_at_from),
+        created_at_to=_utc_datetime(created_at_to),
+        period_start_from=_utc_datetime(period_start_from),
+        period_start_to=_utc_datetime(period_start_to),
+        period_end_from=_utc_datetime(period_end_from),
+        period_end_to=_utc_datetime(period_end_to),
         sort=sort,
         limit=limit,
         offset=offset,
