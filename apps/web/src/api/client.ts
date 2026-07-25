@@ -12,21 +12,61 @@ export type RunHeader = components["schemas"]["RunHeader"];
 export type RunSummaryResponse = components["schemas"]["RunSummaryResponse"];
 export type RunSummary = components["schemas"]["RunSummary"];
 export type HealthResponse = components["schemas"]["HealthResponse"];
+export type Trade = components["schemas"]["Trade"];
+export type Execution = components["schemas"]["Execution"];
+export type FundingSettlement = components["schemas"]["FundingSettlement"];
+export type EquityPoint = components["schemas"]["EquityPoint"];
+export type ChartSummary = components["schemas"]["ChartSummary"];
+export type Position = components["schemas"]["Position"];
+export type IntegrityCheck = components["schemas"]["IntegrityCheck"];
+export type OutcomeBucket = components["schemas"]["OutcomeBucket"];
+export type DrawdownEpisode = components["schemas"]["DrawdownEpisode"];
+export type TradeFeature = components["schemas"]["TradeFeature"];
+export type CandidateEvent = components["schemas"]["CandidateEvent"];
 export type RunQuery = NonNullable<
   operations["list_runs_api_v1_runs_get"]["parameters"]["query"]
 >;
 
-export function requestErrorMessage(error: unknown): string {
+export class ApiRequestError extends Error {
+  constructor(
+    message: string,
+    readonly code: string | null,
+  ) {
+    super(message);
+    this.name = "ApiRequestError";
+  }
+}
+
+function errorDetails(error: unknown): { message: string; code: string | null } {
   if (
     typeof error === "object" &&
     error !== null &&
     "error" in error &&
     typeof error.error === "object" &&
-    error.error !== null &&
-    "message" in error.error &&
-    typeof error.error.message === "string"
+    error.error !== null
   ) {
-    return error.error.message;
+    const message =
+      "message" in error.error && typeof error.error.message === "string"
+        ? error.error.message
+        : "카탈로그 요청을 완료하지 못했습니다.";
+    const code =
+      "code" in error.error && typeof error.error.code === "string"
+        ? error.error.code
+        : null;
+    return { message, code };
   }
-  return "카탈로그 요청을 완료하지 못했습니다.";
+  return { message: "카탈로그 요청을 완료하지 못했습니다.", code: null };
+}
+
+export function requestErrorMessage(error: unknown): string {
+  return errorDetails(error).message;
+}
+
+export function apiRequestError(error: unknown): ApiRequestError {
+  const details = errorDetails(error);
+  return new ApiRequestError(details.message, details.code);
+}
+
+export function isEvidenceUnavailable(error: unknown): boolean {
+  return error instanceof ApiRequestError && error.code === "evidence_unavailable";
 }
