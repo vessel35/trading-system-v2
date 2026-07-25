@@ -96,6 +96,7 @@ def test_pip_bootstrap_resolves_both_workspace_projects_together() -> None:
     assert editable == {
         "-e ./services/core-lib[dev]",
         "-e ./services/backtest-service[dev]",
+        "-e ./services/web-api[dev]",
     }
     backtest_project = tomllib.loads(
         (repository_root / "services" / "backtest-service" / "pyproject.toml").read_text()
