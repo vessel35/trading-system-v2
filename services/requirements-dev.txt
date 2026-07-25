@@ -3,3 +3,4 @@
 # workspace rather than from a package index.
 -e ./services/core-lib[dev]
 -e ./services/backtest-service[dev]
+-e ./services/web-api[dev]
