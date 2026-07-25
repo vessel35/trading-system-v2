@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Iterator
+from threading import Event, Timer
 from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
 import web_api.jobs as jobs
+from backtest_service.config import RunConfig
 from fastapi.testclient import TestClient
 from web_api.database import SignalConnection
 from web_api.main import app
@@ -86,6 +89,37 @@ def test_run_config_validation_normalizes_decimals_and_utc(
     response = client.post("/api/v1/run-config:validate", json=reserved)
     assert response.status_code == 422
     assert response.json()["error"]["details"][0]["field"] == "trigger_feed"
+
+
+@pytest.mark.parametrize(
+    "run_name",
+    [
+        "P2A-Review",
+        "p2a.review",
+        "p2a-review-name-longer-than-24",
+    ],
+)
+def test_catalog_run_name_rejected_before_trigger(
+    client: TestClient,
+    run_config_payload: dict[str, object],
+    run_name: str,
+) -> None:
+    invalid = dict(run_config_payload, run_name=run_name)
+    for path, payload in (
+        ("/api/v1/run-config:validate", invalid),
+        ("/api/v1/runs", {"config": invalid}),
+    ):
+        response = client.post(path, json=payload)
+        assert response.status_code == 422
+        error = response.json()["error"]
+        assert error["code"] == "invalid_run_config"
+        assert error["details"] == [
+            {
+                "field": "run_name",
+                "message": ("run_name must be at most 24 lowercase kebab-case characters"),
+                "type": "catalog_run_name",
+            }
+        ]
 
 
 def test_trigger_tracks_success_and_closes_sse_after_terminal_event(
@@ -174,6 +208,65 @@ def test_trigger_maps_prereg_and_reports_sanitized_failure(
     )
     assert unsupported.status_code == 422
     assert unsupported.json()["error"]["code"] == "invalid_run_config"
+
+
+def test_job_setup_exception_transitions_to_failed(
+    client: TestClient,
+    run_config_payload: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unavailable_environment() -> dict[str, str]:
+        raise RuntimeError("repository environment unavailable")
+
+    monkeypatch.setattr(jobs, "_repository_env", unavailable_environment)
+    response = client.post("/api/v1/runs", json={"config": run_config_payload})
+    assert response.status_code == 202
+    status = _wait_for_terminal(client, response.json()["job_id"])
+    assert status["status"] == "FAILED"
+    assert status["error"] == {
+        "code": "backtest_failed",
+        "message": "repository environment unavailable",
+    }
+
+
+def test_shutdown_cancels_queued_jobs_without_blocking_event_loop(
+    run_config_payload: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = Event()
+    release = Event()
+    executed: list[str] = []
+
+    def blocking_job(job_id: str, _config: RunConfig, _prereg: dict[str, object]) -> None:
+        started.set()
+        release.wait(timeout=2)
+        executed.append(job_id)
+
+    monkeypatch.setattr(jobs, "_run_job", blocking_job)
+    config = RunConfig.model_validate(run_config_payload)
+
+    async def exercise() -> None:
+        jobs.start_executor()
+        try:
+            for _ in range(4):
+                jobs.submit_job(config, {})
+            assert await asyncio.to_thread(started.wait, 1)
+            fallback_release = Timer(0.5, release.set)
+            fallback_release.start()
+            before = time.monotonic()
+            shutdown = asyncio.create_task(jobs.shutdown_executor())
+            await asyncio.sleep(0.05)
+            elapsed = time.monotonic() - before
+            release.set()
+            await asyncio.wait_for(shutdown, timeout=1)
+            fallback_release.cancel()
+            assert elapsed < 0.2
+        finally:
+            release.set()
+            await jobs.shutdown_executor()
+
+    asyncio.run(exercise())
+    assert len(executed) == 1
 
 
 def test_unknown_job_and_openapi_contract(

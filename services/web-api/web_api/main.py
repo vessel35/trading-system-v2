@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any, NoReturn
 
 import psycopg
+from backtest_service.adapters.catalog_store import validate_catalog_run_name
 from backtest_service.config import RunConfig
 from core_lib import __version__ as core_lib_version
 from fastapi import Body, Depends, FastAPI, Query, Request
@@ -102,7 +103,7 @@ async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
-        shutdown_executor()
+        await shutdown_executor()
 
 
 app = FastAPI(
@@ -282,13 +283,28 @@ def _validation_details(exc: ValidationError | RequestValidationError) -> list[d
 
 def _validated_run_config(value: object) -> RunConfig:
     try:
-        return RunConfig.model_validate(value)
+        config = RunConfig.model_validate(value)
+        validate_catalog_run_name(config.run_name)
+        return config
     except ValidationError as exc:
         raise ApiError(
             status_code=422,
             code="invalid_run_config",
             message="The run configuration is invalid.",
             details=_validation_details(exc),
+        ) from exc
+    except ValueError as exc:
+        raise ApiError(
+            status_code=422,
+            code="invalid_run_config",
+            message="The run configuration is invalid.",
+            details=[
+                {
+                    "field": "run_name",
+                    "message": str(exc),
+                    "type": "catalog_run_name",
+                }
+            ],
         ) from exc
     except NotImplementedError as exc:
         raise ApiError(

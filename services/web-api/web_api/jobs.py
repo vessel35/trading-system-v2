@@ -149,13 +149,17 @@ def start_executor() -> None:
         _executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="webapi-dry-run")
 
 
-def shutdown_executor() -> None:
-    """Drain accepted work before application shutdown."""
+async def shutdown_executor() -> None:
+    """Cancel queued work and drain only the running job without blocking the loop."""
 
     global _executor
     executor, _executor = _executor, None
     if executor is not None:
-        executor.shutdown(wait=True, cancel_futures=False)
+        await asyncio.to_thread(
+            executor.shutdown,
+            wait=True,
+            cancel_futures=True,
+        )
 
 
 def _safe_error_message(error: Exception, env: dict[str, str]) -> str:
@@ -167,17 +171,26 @@ def _safe_error_message(error: Exception, env: dict[str, str]) -> str:
 
 
 def _run_job(job_id: str, config: RunConfig, prereg: dict[str, object]) -> None:
-    registry.update(job_id, "RUNNING")
-    env = _repository_env()
-    evidence_root = Path(
-        env.get("WEBAPI_EVIDENCE_ROOT", str(REPOSITORY_ROOT / "var" / "evidence"))
-    ).expanduser()
+    env: dict[str, str] = {}
     try:
+        registry.update(job_id, "RUNNING")
+        env = _repository_env()
+        evidence_root = Path(
+            env.get("WEBAPI_EVIDENCE_ROOT", str(REPOSITORY_ROOT / "var" / "evidence"))
+        ).expanduser()
         result = run_backtest(
             config,
             prereg,
             evidence_root=evidence_root,
             env=env,
+        )
+        registry.update(
+            job_id,
+            "SUCCEEDED",
+            run_id=result.run_id,
+            evidence_hash=result.evidence_hash,
+            integrity_status=result.integrity_status,
+            summary_present=True,
         )
     except Exception as error:
         registry.update(
@@ -188,14 +201,26 @@ def _run_job(job_id: str, config: RunConfig, prereg: dict[str, object]) -> None:
                 message=_safe_error_message(error, env),
             ),
         )
+
+
+def _job_done(job_id: str, future: asyncio.Future[None]) -> None:
+    """Retrieve executor failures and make an unexpected escape terminal."""
+
+    if future.cancelled():
+        return
+    error = future.exception()
+    if error is None:
+        return
+    state = registry.get(job_id)
+    if state is None or state.status in TERMINAL_JOB_STATES:
         return
     registry.update(
         job_id,
-        "SUCCEEDED",
-        run_id=result.run_id,
-        evidence_hash=result.evidence_hash,
-        integrity_status=result.integrity_status,
-        summary_present=True,
+        "FAILED",
+        error=JobError(
+            code="backtest_failed",
+            message="The dry-run worker terminated unexpectedly.",
+        ),
     )
 
 
@@ -207,7 +232,8 @@ def submit_job(config: RunConfig, prereg: dict[str, object]) -> JobState:
     job_id = str(uuid4())
     state = registry.register(job_id)
     loop = asyncio.get_running_loop()
-    loop.run_in_executor(_executor, _run_job, job_id, config, prereg)
+    future = loop.run_in_executor(_executor, _run_job, job_id, config, prereg)
+    future.add_done_callback(lambda completed: _job_done(job_id, completed))
     return state
 
 

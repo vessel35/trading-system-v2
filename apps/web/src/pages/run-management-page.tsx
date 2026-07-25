@@ -471,11 +471,17 @@ export function RunManagementPage() {
             <CardContent className="space-y-6">
               <section className="grid gap-4 md:grid-cols-2">
                 <Label>
-                  실행 이름
+                  <span className="flex items-center justify-between gap-2">
+                    실행 이름
+                    <span className="font-normal text-muted-foreground">
+                      24자 이하 소문자 kebab-case
+                    </span>
+                  </span>
                   <Input
                     value={form.runName}
-                    maxLength={128}
-                    pattern="^[A-Za-z0-9][A-Za-z0-9._-]*$"
+                    maxLength={24}
+                    pattern="^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                    title="24자 이하 소문자 kebab-case로 입력하세요."
                     onChange={(event) => update("runName", event.target.value)}
                     required
                   />
@@ -835,6 +841,7 @@ export function RunManagementPage() {
                 <div
                   className={cn(
                     "rounded-lg border p-3 text-xs",
+                    "whitespace-pre-line",
                     notice.kind === "success"
                       ? "border-emerald-500/20 bg-emerald-500/5 text-emerald-200"
                       : "border-red-500/20 bg-red-500/5 text-red-200",
