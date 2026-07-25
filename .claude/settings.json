@@ -1,30 +1,30 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
-
   "model": "opus",
-  "_model_note": "Main session = ORCHESTRATOR on Opus 4.8 — it drives the active design stage, authors the inventory/design notes, and dispatches specialists. Subagents override via their own model: frontmatter. Reasoning-heavy nodes (spec-consistency-auditor, cto-reviewer) run on Opus 4.8 xhigh; reference-scout runs Opus 4.8 high (faithful code-contract extraction); cross-model-reviewer is a cheap Sonnet 5 driver for the Codex call. Pin exact IDs for reproducibility: claude-opus-4-8, claude-sonnet-5. NOTE: the `sonnet` alias resolves to Sonnet 5 (claude-sonnet-5) since v2.1.197, so a `model: sonnet` node runs on Sonnet 5; pin claude-sonnet-4-6 only if you need the prior Sonnet.",
-
-  "effortLevel": "xhigh",
-  "_effort_note": "Main session (orchestrator) runs at xhigh — Opus 4.8 supports it. Locking implementation contracts is the highest-ROI reasoning in the whole rewrite, so the author runs at max effort. Subagents set their own effort in frontmatter and override this default.",
-
+  "_model_note": "Main session = ORCHESTRATOR on Opus 4.8. Subagents override via their own model: frontmatter. Pin exact IDs in frontmatter for reproducibility: claude-opus-4-8, claude-haiku-4-5-20251001. NOTE: the `sonnet` alias resolves to Sonnet 5 (claude-sonnet-5) since v2.1.197, so `model: sonnet` nodes run on Sonnet 5 (native 1M); pin claude-sonnet-4-6 only if you need the prior Sonnet.",
   "disableAgentView": true,
-  "_view_note": "멀티 서브에이전트 dispatch이지만 --dangerously-skip-permissions가 dispatched bg session으로 전파되는 P0 위험을 피하려고 Agent View를 끈다. 정책상 필요하면 해제.",
-
+  "_view_note": "Multi-subagent dispatch이지만 --dangerously-skip-permissions가 dispatched bg session으로 전파되는 P0 위험을 회피하려고 v1에서 Agent View 비활성화. 정책상 필요해지면 해제.",
   "enabledPlugins": {
     "claude-mem@thedotmack": false
   },
-  "_plugins_note": "claude-mem은 PostToolUse matcher '*'로 모든 도구 호출마다 프로세스를 띄운다. 다회 fan-out에서는 끈다(전역·타 프로젝트 영향 없음). perf-audit 2026-06-05 항목 2.",
-
+  "_plugins_note": "claude-mem은 PostToolUse matcher '*'로 모든 도구 호출마다 bun 프로세스 2개(~0.3s)를 띄우고 SessionStart/compact마다 ~16KB를 주입한다. 속도가 중요한 quant 세션에서는 끈다(전역·타 프로젝트는 영향 없음). perf-audit 2026-06-05 항목 2.",
   "permissions": {
     "allow": [
+      "Bash(pytest:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(ruff:*)",
+      "Bash(black:*)",
+      "Bash(isort:*)",
+      "Bash(mypy:*)",
+      "Bash(python -m ruff:*)",
+      "Bash(python -m black:*)",
+      "Bash(python -m mypy:*)",
       "Bash(git status)",
       "Bash(git diff:*)",
       "Bash(git log:*)",
-      "Bash(git branch:*)",
+      "Bash(git branch)",
       "Bash(git show:*)",
-      "Bash(git checkout:*)",
-      "Bash(git add:*)",
-      "Bash(git commit:*)",
+      "Bash(git stash:*)",
       "Bash(ls:*)",
       "Bash(cat:*)",
       "Bash(head:*)",
@@ -32,14 +32,12 @@
       "Bash(wc:*)",
       "Bash(find:*)",
       "Bash(rg:*)",
-      "Bash(grep:*)",
-      "Bash(jq:*)",
-      "Bash(tree:*)",
-      "Bash(python:*)",
-      "Bash(python3:*)",
-      "Bash(sha256sum:*)",
-      "Bash(shasum:*)"
+      "Bash(jq:*)"
     ],
+    "ask": [
+      "Bash(git push:*)"
+    ],
+    "_ask_note": "git push는 차단(deny)이 아니라 확인 후 진행(ask). 리뷰 게이트(review-agent zero Blocking + 테스트 통과)를 지난 뒤 push하며, 권한 프롬프트가 human checkpoint 역할을 한다. git-pr skill 참조.",
     "deny": [
       "Bash(rm -rf:*)",
       "Bash(rm -fr:*)",
@@ -49,30 +47,83 @@
       "Bash(nc:*)",
       "Bash(ssh:*)",
       "Bash(scp:*)",
-      "Bash(psql:*)",
-      "Bash(pg_dump:*)",
-      "Bash(git push:*)",
       "Bash(git reset --hard:*)",
+      "Bash(git checkout -- :*)",
       "Bash(npm publish:*)",
       "Bash(pip install:*)",
+      "Bash(uv pip install:*)",
+      "Bash(poetry add:*)",
       "Bash(docker:*)",
       "Bash(kubectl:*)"
     ]
   },
-  "_permissions_note": "This is a READ-ONLY design phase: no product code is built, no DB is touched. Bash is limited to read/search/inspect (ls/cat/rg/grep/find/tree/wc, git read commands, python for scratch counting/diffing) plus git add/commit for committing design notes per part (dev_plan 커밋 규약). psql/pg_dump denied — the design produces schema *design*, never runs DDL. git push denied (human checkpoint). The legacy-repo + design-doc immutability boundary is write-scope.sh, not permissions.",
-
+  "sandbox": {
+    "network": {
+      "deniedDomains": [
+        "api.binance.com",
+        "fapi.binance.com",
+        "dapi.binance.com",
+        "api.bybit.com",
+        "api-testnet.bybit.com",
+        "api.bithumb.com",
+        "api.upbit.com",
+        "api.coinbase.com",
+        "api.exchange.coinbase.com",
+        "api.pro.coinbase.com",
+        "api.kraken.com",
+        "api.okx.com",
+        "www.okx.com",
+        "*.infura.io",
+        "*.alchemy.com",
+        "*.quicknode.com",
+        "mainnet.infura.io",
+        "rpc.ankr.com",
+        "etherscan.io",
+        "api.etherscan.io"
+      ]
+    },
+    "failIfUnavailable": false
+  },
   "hooks": {
     "SessionStart": [
-      { "hooks": [ { "type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/guardrails.sh" } ] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/guardrails.sh"
+          }
+        ]
+      }
     ],
     "PreToolUse": [
       {
         "matcher": "Write|Edit|MultiEdit",
         "hooks": [
-          { "type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/write-scope.sh" }
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/secret-scan.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/secret-scan.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/test-gate.sh"
+          }
         ]
       }
     ]
-  },
-  "_hooks_note": "Two hooks only, by policy: guardrails.sh (SessionStart — active stage objective + anti-drift/anti-hallucination hard rules; runs once, no per-tool cost) and write-scope.sh (PreToolUse — blocks writes under TRADING_SYSTEM_DIR, CRYPTO_DATA_HUB_DIR, and DESIGN_DOC_DIR (immutable inputs) and real .env files; only OUTPUT_DIR + the harness's own .claude/ are writable). No test-gate hook — this phase produces no code to test."
+  }
 }

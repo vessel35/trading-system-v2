@@ -1,67 +1,65 @@
-# Objective Index — Backtest v2 Design (8 grouped stages: Phase A + B)
+# Current Objective
 
-> This harness runs as EIGHT sequential sessions (Phase A analysis → Phase B top-down detailed
-> design). Pick the stage with `DESIGN_STAGE` and `guardrails.sh` injects that stage's full objective
-> (from `.claude/objectives/`) at SessionStart. Register that stage's Done-when block as a `/goal`.
-> Phase B builds ONE document `backtest_v2_detailed_design.md` section by section.
->
-> ```bash
-> DESIGN_STAGE=a-domain claude --model opus   # then a-infra, b-skeleton, b-components, ... b-adoption
-> ```
+> Edit this each sprint. `guardrails.sh` injects it at SessionStart.
+> After editing, register the Done-when block as a `/goal` so each turn auto-evaluates.
 
-| Stage | File | dev_plan | 설계서 절 | Output |
-|---|---|---|---|---|
-| a-domain | `objectives/a-domain.md` | A1·A2·A3 | — | inventory: indicators / strategies / execution·costs·sizing |
-| a-infra | `objectives/a-infra.md` | A4·A5·A6 | — | inventory: types·config·DB-creation / collector scope / removal + reconciliation-waiver |
-| b-skeleton | `objectives/b-skeleton.md` | B1·B2 | §1·§2 | service diagram + code tree (creates the design doc + reading map) |
-| b-components | `objectives/b-components.md` | B3·B4·B5 | §3.1-§3.3 | component diagrams: core-lib / backtest-service / adoption |
-| b-corelib-classes | `objectives/b-corelib-classes.md` | B6·B7·B8 | §4.1-§4.3 | core-lib classes: types·indicators / strategy+config / execution·eval (+ config/judgment flow) |
-| b-service-classes | `objectives/b-service-classes.md` | B9·B10 | §4.4-§4.5 | backtest-service classes: Engine + output (+ candle-loop/1m/run-save sequence) |
-| b-database | `objectives/b-database.md` | B11·B12·B13 | §5.1-§5.3 | DB ER diagrams: crypto_data/signal_db / backtest_db / Evidence SQLite (deferred fields) |
-| b-adoption | `objectives/b-adoption.md` | B14 | appendix | adoption + shim / regression / credential rotation (reconciliation WAIVED) |
+**Goal:** 인수 테스트가 드러낸 계약-구현 갭 두 건을 후속 스프린트로 닫는다. 둘 다 프로덕션
+변경이라 앞 스프린트에서 미조치로 남긴 것이며, 설계가 규정했으나 빠진 동작을 이행한다.
+설계 내용이 있으므로 설계 루프(strategy-architect가 두 수정을 설계 → 교차 리뷰 → 확정) 다음에
+구현 루프(Codex 구현 → QA → 독립 Claude 인수)로 진행한다. 새 브랜치 `fix/harness-persist-golden`.
 
-## Shared inputs (every stage — set per run; do NOT hardcode absolute paths in committed docs)
+**In scope (두 갭):**
+- **F-1. Harness 과최적화 집계의 대표-run 카탈로그 영속화.** 설계(데이터베이스 §5.2.3·상세 §4.4.4)는
+  oos_degradation·psr·harness_json을 번들 대표 run의 backtest_summary에 저장하도록 규정한다.
+  카탈로그 컬럼·`upsert_summary` 저장능력·Harness 계산은 모두 있으나, 집계를 계산하는
+  Harness(is_oos·walk_forward·monte_carlo·psr)가 대표 run summary에 써넣는 경로가 없다. 그 배선을
+  더한다(어느 run이 대표인지·무엇을 어떤 형태로 저장하는지는 설계가 정한다). 인수 스위트 E1~E3를
+  대표-run 카탈로그 집계 관측까지 승격한다.
+- **F-2. 지표 수식 골든 확립.** 정본 표준 참조
+  `/Users/vincent/Documents/X2.Mine/01.Trading/트레이딩시스템_개발지침/50_metrics_reference.md`가
+  존재하며 골든 입력(거래 손익 배열·월간 수익률 배열)과 NumPy 검증 기준값(PF 3.4118·SQN 1.6647·
+  Sortino 2.4910·MDD −3.50%·Calmar 3.2102 등)을 담는다. 설계는 이를 "구현까지 유지되는 표준 참조
+  파일"로 규정했는데 저장소에 미러되지 않았다. (a) 참조 파일을 저장소로 미러하고, (b) eval 지표
+  표준이 이 골든을 재현하는지 검증하는 수식 골든 테스트를 더한다. **주의(설계에서 확정할 점):**
+  생산 `metrics.compute`는 자산곡선을 일별 리샘플·√365 연율화하고 SQN은 거래 30건 이상을 요구한다.
+  참조 예시는 월간 √12·거래 10건이다. 참조 파일 자체가 "크립토 일봉은 √365 연율화"라고 명시하므로
+  생산 규약이 옳다. 연율화 무관 값(PF·MDD·Calmar)은 그대로 재현되나, 연율화 의존 값(Sortino·Sharpe)과
+  SQN은 규약·게이트가 다르다. 골든을 **정직하게** 검증하는 방식(공식 수준 재현 대 생산 래퍼 규약의
+  분리)을 설계가 정한다. 값 위조·근사로 통과시키지 않는다.
 
-- `DESIGN_STAGE` = <a-domain|a-infra|b-skeleton|b-components|b-corelib-classes|b-service-classes|b-database|b-adoption>  — the active stage
-- `TRADING_SYSTEM_DIR` = <fill in>   — trading-system repo root: signal-service + wallet-service (backtest/replay live here but are removal targets, NOT referenced) — READ-ONLY
-- `CRYPTO_DATA_HUB_DIR` = <fill in>  — crypto-data-hub repo root: collector service (A5 internalization scope) — READ-ONLY
-- `DESIGN_DOC_DIR` = <fill in>       — dir with backtest_v2_architecture.md / _diagrams.md / _dev_plan.md — READ-ONLY canonical input
-- `OUTPUT_DIR` = <fill in>           — where the design doc / inventories are written (the ONLY writable target)
-- `OPENAI_API_KEY` = <optional>      — cross-model-reviewer (Codex); b-corelib-classes / b-service-classes / b-database only
+**Out of scope (escalate if needed):**
+- `wallet_db` 접근, `crypto_data` 쓰기·스키마 변경, `signal_db`의 레지스트리 외 테이블.
+- 참조 파일의 값·규약을 임의로 바꾸는 것(정본은 개발지침 디렉터리, 저장소는 미러).
+- 비밀번호 평문을 코드·커밋·보고서에 쓰는 것(`.env` 참조만).
+- 설계가 정하지 않은 새 판정 규약을 임의로 도입하는 것.
 
-## Run order (Phase A feeds Phase B; Phase B builds ONE doc top-down, §1 → §5 → appendix)
+**Done when (transcript-verifiable, turn-capped):**
+- **설계 루프**: strategy-architect(Opus 4.8, xhigh)가 F-1·F-2 두 수정의 설계를 산출하고,
+  교차 리뷰(review-agent 또는 독립 리뷰)를 거쳐 확정됨이 이 transcript에서 관찰된다. F-2의 연율화·
+  게이트 규약 처리 방식이 설계에서 확정된다.
+- **구현 루프**: Codex 워커의 worker_done이 관찰된다 — F-1 배선 + F-2 미러·수식 골든 테스트 구현,
+  관련 테스트 green. F-1로 Harness 워크플로가 대표 run backtest_summary에 oos_degradation·psr·
+  harness_json을 실제로 쓰고, 인수 E1~E3가 그것을 카탈로그에서 관측함이 수치와 함께 보인다.
+  F-2 수식 골든이 참조 기준값을 재현함(연율화 무관 값은 정확히, 연율화 의존 값은 설계가 정한
+  방식대로)이 수치와 함께 보인다.
+- 저장소 루트 기본 `pytest services`가 마커 경고·수집 실패 없이 exit 0, ruff·ruff format·mypy exit 0.
+  기존 `-m acceptance`·`-m integration` 회귀 없음.
+- **인수 리뷰 1회**(독립 Claude Opus 4.8 터미널)의 worker_done이 APPROVE(Blocking 0건)로 관찰된다 —
+  두 수정이 설계대로이고 값 위조가 없으며 회귀가 없음을 적대적으로 확인.
+- Turn budget: ≤ 55 orchestrator turns. If exceeded → STOP and escalate.
+
+**Register with /goal:**
 
 ```
-a-domain ─▶ a-infra ─▶ b-skeleton ─▶ b-components ─▶ b-corelib-classes ─▶ b-service-classes ─▶ b-database ─▶ b-adoption
- (A1-A3)   (A4-A6)     (§1·§2)        (§3.1-3.3)      (§4.1-4.3)            (§4.4-4.5)             (§5.1-5.3)     (appendix)
-  └──── Phase A ────┘  └───────────────────────────── Phase B: backtest_v2_detailed_design.md ─────────────────────────┘
+/goal Close the two contract-vs-implementation gaps the acceptance testing surfaced (F-1 Harness aggregate persistence to the representative run's backtest_summary per design DB §5.2.3; F-2 mirror the golden metrics reference and add a formula-golden test), via a design loop (strategy-architect designs both, cross-reviewed) then a build loop (Codex implements, QA, independent Claude acceptance).
+  DONE iff (a) a design for both fixes is produced and cross-reviewed in this transcript, with F-2's
+  annualization/gate reconciliation decided, (b) a Codex worker_done shows F-1 wiring + F-2 mirror and
+  formula-golden test with the tests green, Harness workflows actually persisting oos_degradation/psr/
+  harness_json to the representative run and acceptance E1-E3 observing them in the catalog, and the
+  formula golden reproducing the reference values (annualization-independent exactly; annualization-
+  dependent per the decided method) — all shown with numbers, (c) repository-root `pytest services` exit 0
+  with no marker warnings and ruff+ruff-format+mypy exit 0, with no regression in `-m acceptance` or
+  `-m integration`, and (d) one independent Claude Opus 4.8 acceptance-review worker_done states APPROVE
+  with zero Blocking after confirming no value fabrication and no regression.
+  Hard stop at 55 orchestrator turns; report and wait.
 ```
-
-Do not start any b-* stage before both a-* stages are complete (dev_plan §0 stage order A→B→C; §4
-"Phase B takes Phase A inventories as input" — 원칙 1 itself gates Phase C, this extends its logic to A→B).
-
-## Invariants that hold across all eight stages
-
-- SELF-CONTAINED deliverables (TOP RULE): each design doc is standalone-implementable — a Phase C
-  implementer builds from it ALONE, never opening the guideline. Every field/formula/threshold/
-  signature/rule is written OUT IN FULL; the guideline is the STANDARD to absorb, not a reference to
-  cite. NO foreign-document label in the deliverable (architecture §N / dev_plan AN·BN·마이그N /
-  diagrams §N) — actual names + the design doc's own §1-§5; the closing Traceability table NAMES each
-  requirement it satisfies, never labels it.
-- TOP-DOWN UML-FIRST structure: every design doc leads with 제약사항·방향, then descends
-  service→component→class→sequence/flow (one component diagram per service, one class diagram per
-  component; shared elements separated); DB entities as ER diagrams; ALL UML in mermaid. UML-first —
-  the diagram is the primary representation: attributes+types, signatures, relationships+cardinality,
-  ER fields+keys, and flow order go INSIDE the diagram; prose supplies ONLY what UML cannot encode
-  (constraints, defaults, formulas, thresholds, enforced invariants, semantics, responsibility,
-  rationale). Never restate the diagram in prose; never hide structure in prose. Big structure before
-  detail; the reader never jumps to another doc/chapter. B1 is the entry doc.
-- Inputs are IMMUTABLE: never Write/Edit under `TRADING_SYSTEM_DIR`, `CRYPTO_DATA_HUB_DIR`, or `DESIGN_DOC_DIR`; notes go under `OUTPUT_DIR`.
-- Design NOTES only (contracts / fields / pseudocode) — no product code, no live DB, no executed DDL.
-- Preserve every hard invariant (look-ahead, decision_ts<execution_ts, Decimal single-cast gate,
-  net-of-cost, 1R≤1%, immutability, deterministic Evidence hash) — the design never re-decides them.
-- Finalize the doc's deferred items (backtest_db fields §9.3, SQLite Entity fields §9.6, port list
-  §4.3, trailing-parity tolerance) without changing their stated 용도.
-- Close each stage on 설계-정합 (spec-consistency-auditor PASS) + 리뷰 게이트 (cto-reviewer APPROVE),
-  not on parity — parity is a Phase C (implementation) gate.
-- Don't claim you read a file / extracted a contract you didn't actually read (anti-hallucination).

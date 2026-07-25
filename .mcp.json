@@ -1,10 +1,30 @@
 {
-  "_note": "This DESIGN harness needs NO database MCP — Phase A/B never connect to a live DB; they read init-scripts and legacy config as source files and produce the schema *design*, not executed DDL. The only server is codex-cli, an OPTIONAL cross-model (GPT-5.x via Codex) DESIGN critique used by the cross-model-reviewer node on the heavy Phase B stages (b-corelib-classes, b-service-classes, b-database). If OPENAI_API_KEY is unset, that node is skipped and the two in-repo gates (spec-consistency-auditor + cto-reviewer) still run. If a codex-cli MCP already exists globally, remove this declaration and use that one. Package version pinned (perf-audit 2026-06-05 P005).",
+  "_note": "패키지 버전 고정: npx -y <pkg>(latest)는 시작마다 레지스트리 해석 비용 + 재현성 문제. 버전 갱신은 의도적으로만. perf-audit 2026-06-05 항목 3.",
   "mcpServers": {
     "codex-cli": {
       "command": "npx",
       "args": ["-y", "codex-mcp-server@1.4.10"],
       "env": { "OPENAI_API_KEY": "${OPENAI_API_KEY}" }
+    },
+    "perplexity": {
+      "command": "npx",
+      "args": ["-y", "@perplexity-ai/mcp-server@0.9.0"],
+      "env": { "PERPLEXITY_API_KEY": "${PERPLEXITY_API_KEY}" }
+    },
+    "wallet_db": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-postgres@0.6.2"],
+      "env": { "DATABASE_URL": "${WALLET_DB_RO_URL}" }
+    },
+    "signal": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-postgres@0.6.2"],
+      "env": { "DATABASE_URL": "${SIGNAL_DB_RO_URL}" }
+    },
+    "crypto_data": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-postgres@0.6.2"],
+      "env": { "DATABASE_URL": "${CRYPTO_DATA_RO_URL}" }
     }
   }
 }
