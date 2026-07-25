@@ -1,10 +1,10 @@
 """Typed HTTP contracts for the P0 catalog API."""
 
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
 from backtest_service.config import RunConfig
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, SkipValidation
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, SkipValidation, model_validator
 
 DecimalString = Annotated[
     str,
@@ -560,6 +560,84 @@ class RunComparisonResponse(BaseModel):
     sweep_id: str | None
 
 
+class SweepResponse(BaseModel):
+    """Stored runs and the one stored representative aggregate for a sweep."""
+
+    sweep_id: str
+    representative_run_id: str
+    runs: list[RunComparisonItem]
+    oos_degradation: float | None
+    psr: float | None
+    harness_json: JsonValue | None
+
+
+TagType = Literal[
+    "classification",
+    "purpose",
+    "weakness",
+    "improvement",
+    "usability",
+]
+
+
+class BacktestTag(BaseModel):
+    tag_id: int
+    run_id: str
+    tag_type: TagType
+    tag_value: str
+    created_at: datetime
+
+
+class RunTagsResponse(BaseModel):
+    run_id: str
+    data: list[BacktestTag]
+
+
+class TagInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    tag_type: TagType
+    tag_value: str = Field(min_length=1, max_length=120)
+
+
+class TagMutationResponse(BaseModel):
+    tag: BacktestTag
+    created: bool
+
+
+class TagDeleteResponse(BaseModel):
+    run_id: str
+    tag_type: TagType
+    tag_value: str
+    removed: bool
+
+
+class TagFacetValue(BaseModel):
+    tag_value: str
+    count: int
+
+
+class TagFacet(BaseModel):
+    tag_type: TagType
+    values: list[TagFacetValue]
+
+
+class TagFacetsResponse(BaseModel):
+    data: list[TagFacet]
+
+
+class DataSourceCoverage(BaseModel):
+    data_source: str
+    symbol: str
+    exchange: str
+    source_timeframe: Literal["1m"] = "1m"
+    available_from: datetime | None
+    available_to: datetime | None
+    row_count: int
+    expected_1m_rows: int
+    missing_1m_rows: int
+
+
 class CatalogHealth(BaseModel):
     status: Literal["connected"]
     database: str
@@ -627,6 +705,52 @@ class RunSubmission(BaseModel):
     prereg: PreregistrationInput | None = None
 
 
+SweepType = Literal["grid", "walk_forward", "is_oos"]
+SweepAxisValue = str | int | float | bool
+
+
+class SweepAxis(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    parameter: str = Field(
+        min_length=1,
+        max_length=80,
+        pattern=r"^(?:params\.)?[A-Za-z_][A-Za-z0-9_.-]*$",
+    )
+    values: list[SweepAxisValue] = Field(min_length=2, max_length=20)
+
+
+class SweepSubmission(BaseModel):
+    """Validated multi-run dry-run request; no independent preregistration write."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: SweepType
+    config: SkipValidation[RunConfig]
+    axes: list[SweepAxis] = Field(default_factory=list, max_length=3)
+    folds: int | None = Field(default=None, ge=2, le=20)
+    split: float | None = Field(default=None, gt=0.0, lt=1.0)
+    prereg: PreregistrationInput | None = None
+
+    @model_validator(mode="after")
+    def _validate_mode_fields(self) -> Self:
+        if self.type == "grid":
+            if not self.axes:
+                raise ValueError("grid sweeps require at least one axis")
+            if self.folds is not None or self.split is not None:
+                raise ValueError("grid sweeps do not accept folds or split")
+        elif self.type == "walk_forward":
+            if self.folds is None:
+                raise ValueError("walk_forward sweeps require folds")
+            if self.axes or self.split is not None:
+                raise ValueError("walk_forward sweeps accept only folds")
+        elif self.split is None:
+            raise ValueError("is_oos sweeps require split")
+        elif self.axes or self.folds is not None:
+            raise ValueError("is_oos sweeps accept only split")
+        return self
+
+
 JobStatusValue = Literal["QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "ORPHANED"]
 
 
@@ -641,6 +765,8 @@ class JobStatus(BaseModel):
     catalog_status: str | None = None
     updated_at: datetime
     run_id: str | None = None
+    sweep_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    run_count: int | None = Field(default=None, exclude_if=lambda value: value is None)
     evidence_hash: str | None = None
     integrity_status: str | None = None
     summary_present: bool | None = None

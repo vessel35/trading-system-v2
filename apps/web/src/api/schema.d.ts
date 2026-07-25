@@ -39,6 +39,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sweeps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Trigger Sweep */
+        post: operations["trigger_sweep_api_v1_sweeps_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/jobs/{job_id}/status": {
         parameters: {
             query?: never;
@@ -82,6 +99,57 @@ export interface paths {
         };
         /** List Strategies */
         get: operations["list_strategies_api_v1_strategies_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sweeps/{sweep_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Sweep */
+        get: operations["get_sweep_api_v1_sweeps__sweep_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tags/facets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Tag Facets */
+        get: operations["get_tag_facets_api_v1_tags_facets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/data-sources/{data_source}/coverage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Data Source Coverage */
+        get: operations["get_data_source_coverage_api_v1_data_sources__data_source__coverage_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -153,6 +221,25 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Run Tags */
+        get: operations["get_run_tags_api_v1_runs__run_id__tags_get"];
+        put?: never;
+        /** Add Run Tag */
+        post: operations["add_run_tag_api_v1_runs__run_id__tags_post"];
+        /** Remove Run Tag */
+        delete: operations["remove_run_tag_api_v1_runs__run_id__tags_delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -485,6 +572,25 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** BacktestTag */
+        BacktestTag: {
+            /** Tag Id */
+            tag_id: number;
+            /** Run Id */
+            run_id: string;
+            /**
+             * Tag Type
+             * @enum {string}
+             */
+            tag_type: "classification" | "purpose" | "weakness" | "improvement" | "usability";
+            /** Tag Value */
+            tag_value: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /** CandidateEvent */
         CandidateEvent: {
             /** Candidate Id */
@@ -656,6 +762,31 @@ export interface components {
             total: number;
             /** Has More */
             has_more: boolean;
+        };
+        /** DataSourceCoverage */
+        DataSourceCoverage: {
+            /** Data Source */
+            data_source: string;
+            /** Symbol */
+            symbol: string;
+            /** Exchange */
+            exchange: string;
+            /**
+             * Source Timeframe
+             * @default 1m
+             * @constant
+             */
+            source_timeframe: "1m";
+            /** Available From */
+            available_from: string | null;
+            /** Available To */
+            available_to: string | null;
+            /** Row Count */
+            row_count: number;
+            /** Expected 1M Rows */
+            expected_1m_rows: number;
+            /** Missing 1M Rows */
+            missing_1m_rows: number;
         };
         /** Decision */
         Decision: {
@@ -1187,6 +1318,10 @@ export interface components {
             updated_at: string;
             /** Run Id */
             run_id?: string | null;
+            /** Sweep Id */
+            sweep_id?: string | null;
+            /** Run Count */
+            run_count?: number | null;
             /** Evidence Hash */
             evidence_hash?: string | null;
             /** Integrity Status */
@@ -1913,6 +2048,13 @@ export interface components {
             summary_status: "available" | "pending" | "failed" | "orphaned" | "missing";
             summary: components["schemas"]["RunSummary"] | null;
         };
+        /** RunTagsResponse */
+        RunTagsResponse: {
+            /** Run Id */
+            run_id: string;
+            /** Data */
+            data: components["schemas"]["BacktestTag"][];
+        };
         /** Signal */
         Signal: {
             /** Signal Id */
@@ -1997,6 +2139,186 @@ export interface components {
              * @enum {string}
              */
             source: "strategy_registry" | "code_registry";
+        };
+        /** SweepAxis */
+        SweepAxis: {
+            /** Parameter */
+            parameter: string;
+            /** Values */
+            values: (string | number | boolean)[];
+        };
+        /**
+         * SweepResponse
+         * @description Stored runs and the one stored representative aggregate for a sweep.
+         */
+        SweepResponse: {
+            /** Sweep Id */
+            sweep_id: string;
+            /** Representative Run Id */
+            representative_run_id: string;
+            /** Runs */
+            runs: components["schemas"]["RunComparisonItem"][];
+            /** Oos Degradation */
+            oos_degradation: number | null;
+            /** Psr */
+            psr: number | null;
+            harness_json: components["schemas"]["JsonValue"] | null;
+        };
+        /**
+         * SweepSubmission
+         * @description Validated multi-run dry-run request; no independent preregistration write.
+         */
+        SweepSubmission: {
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "grid" | "walk_forward" | "is_oos";
+            /**
+             * RunConfig
+             * @description A fully validated deterministic backtest-run configuration.
+             */
+            config: {
+                /** Run Name */
+                run_name: string;
+                /** Strategy Id */
+                strategy_id: string;
+                /** Params */
+                params?: {
+                    [key: string]: unknown;
+                };
+                /** Symbol */
+                symbol: string;
+                /** Exchange */
+                exchange: string;
+                /** Timeframe */
+                timeframe: string;
+                /**
+                 * Market Type
+                 * @enum {string}
+                 */
+                market_type: "spot" | "futures";
+                /** Data Source */
+                data_source: string;
+                /**
+                 * Start
+                 * Format: date-time
+                 */
+                start: string;
+                /**
+                 * End
+                 * Format: date-time
+                 */
+                end: string;
+                /** Initial Capital */
+                initial_capital: number | string;
+                /**
+                 * Seed
+                 * @default 0
+                 */
+                seed: number;
+                /**
+                 * Sizing Method
+                 * @default risk_based
+                 * @enum {string}
+                 */
+                sizing_method: "risk_based" | "pct";
+                /** Risk Per Trade */
+                risk_per_trade?: number | null;
+                /** Position Size Pct */
+                position_size_pct?: number | null;
+                /** Cost Values */
+                cost_values?: {
+                    [key: string]: number | string;
+                };
+                /**
+                 * Indicator Mode
+                 * @default auto
+                 * @enum {string}
+                 */
+                indicator_mode: "auto" | "explicit" | "all";
+                /** Explicit Indicators */
+                explicit_indicators?: {
+                    [key: string]: unknown;
+                }[];
+                /**
+                 * Trigger Feed
+                 * @default tf_candle
+                 * @enum {string}
+                 */
+                trigger_feed: "tf_candle" | "m1_subcandle";
+                /**
+                 * Fill Timing
+                 * @default next_bar
+                 * @enum {string}
+                 */
+                fill_timing: "immediate" | "next_bar";
+                /** Profile Ref */
+                profile_ref: string;
+                /** Sweep */
+                sweep?: {
+                    [key: string]: unknown;
+                } | null;
+            };
+            /** Axes */
+            axes?: components["schemas"]["SweepAxis"][];
+            /** Folds */
+            folds?: number | null;
+            /** Split */
+            split?: number | null;
+            prereg?: components["schemas"]["PreregistrationInput"] | null;
+        };
+        /** TagDeleteResponse */
+        TagDeleteResponse: {
+            /** Run Id */
+            run_id: string;
+            /**
+             * Tag Type
+             * @enum {string}
+             */
+            tag_type: "classification" | "purpose" | "weakness" | "improvement" | "usability";
+            /** Tag Value */
+            tag_value: string;
+            /** Removed */
+            removed: boolean;
+        };
+        /** TagFacet */
+        TagFacet: {
+            /**
+             * Tag Type
+             * @enum {string}
+             */
+            tag_type: "classification" | "purpose" | "weakness" | "improvement" | "usability";
+            /** Values */
+            values: components["schemas"]["TagFacetValue"][];
+        };
+        /** TagFacetValue */
+        TagFacetValue: {
+            /** Tag Value */
+            tag_value: string;
+            /** Count */
+            count: number;
+        };
+        /** TagFacetsResponse */
+        TagFacetsResponse: {
+            /** Data */
+            data: components["schemas"]["TagFacet"][];
+        };
+        /** TagInput */
+        TagInput: {
+            /**
+             * Tag Type
+             * @enum {string}
+             */
+            tag_type: "classification" | "purpose" | "weakness" | "improvement" | "usability";
+            /** Tag Value */
+            tag_value: string;
+        };
+        /** TagMutationResponse */
+        TagMutationResponse: {
+            tag: components["schemas"]["BacktestTag"];
+            /** Created */
+            created: boolean;
         };
         /** Trade */
         Trade: {
@@ -2262,6 +2584,8 @@ export interface operations {
                 gate_passed?: boolean | null;
                 sweep_id?: string | null;
                 config_hash?: string | null;
+                tag_type?: ("classification" | "purpose" | "weakness" | "improvement" | "usability") | null;
+                tag_value?: string | null;
                 created_at_from?: string | null;
                 created_at_to?: string | null;
                 period_start_from?: string | null;
@@ -2317,6 +2641,48 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["RunSubmission"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunAccepted"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    trigger_sweep_api_v1_sweeps_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SweepSubmission"];
             };
         };
         responses: {
@@ -2425,6 +2791,118 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StrategyListResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_sweep_api_v1_sweeps__sweep_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sweep_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SweepResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_tag_facets_api_v1_tags_facets_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TagFacetsResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_data_source_coverage_api_v1_data_sources__data_source__coverage_get: {
+        parameters: {
+            query: {
+                symbol: string;
+                exchange: string;
+            };
+            header?: never;
+            path: {
+                data_source: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataSourceCoverage"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Service Unavailable */
@@ -2586,6 +3064,134 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PreregistrationResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_run_tags_api_v1_runs__run_id__tags_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunTagsResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    add_run_tag_api_v1_runs__run_id__tags_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TagInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TagMutationResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    remove_run_tag_api_v1_runs__run_id__tags_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TagInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TagDeleteResponse"];
                 };
             };
             /** @description Not Found */

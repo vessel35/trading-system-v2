@@ -18,6 +18,8 @@ export type CatalogFilters = Pick<
   | "status"
   | "decision_route"
   | "gate_passed"
+  | "tag_type"
+  | "tag_value"
   | "period_start_from"
   | "period_end_to"
 >;

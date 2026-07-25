@@ -13,6 +13,7 @@ from psycopg import Connection
 from psycopg.rows import dict_row
 
 CatalogConnection = Connection[dict[str, Any]]
+CatalogWriterConnection = Connection[dict[str, Any]]
 CryptoConnection = Connection[dict[str, Any]]
 SignalConnection = Connection[dict[str, Any]]
 
@@ -100,6 +101,24 @@ def connect_catalog() -> Iterator[CatalogConnection]:
 
 def catalog_connection() -> Generator[CatalogConnection]:
     with connect_catalog() as connection:
+        yield connection
+
+
+@contextmanager
+def connect_catalog_writer() -> Iterator[CatalogWriterConnection]:
+    """Open the short-lived write connection reserved for backtest_tag mutations."""
+
+    settings = get_settings()
+    with psycopg.connect(
+        host=settings.host,
+        port=settings.port,
+        user=settings.user,
+        password=settings.password,
+        dbname=settings.database,
+        connect_timeout=5,
+        application_name="web-api-p2b-writer",
+        row_factory=dict_row,
+    ) as connection:
         yield connection
 
 

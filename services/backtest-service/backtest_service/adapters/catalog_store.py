@@ -260,7 +260,7 @@ def validate_catalog_run_name(run_name: object) -> str:
 
 
 class BacktestCatalogStore(CatalogStore):
-    """Write only the four backtest_db catalog entities behind the CatalogStore port."""
+    """Write only the approved backtest_db catalog entities behind one boundary."""
 
     def __init__(self, connection: WriteConnection) -> None:
         self._connection = connection
@@ -437,6 +437,43 @@ class BacktestCatalogStore(CatalogStore):
             if row is None:
                 raise RuntimeError("representative run summary is absent for harness aggregate")
             self._connection.commit()
+        except Exception:
+            self._connection.rollback()
+            raise
+
+    def add_tag(self, run_id: str, tag_type: str, tag_value: str) -> bool:
+        """Attach one tag, returning false when the unique tag already exists."""
+
+        try:
+            row = self._connection.execute(
+                """
+                INSERT INTO public.backtest_tag (run_id, tag_type, tag_value)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (run_id, tag_type, tag_value) DO NOTHING
+                RETURNING tag_id
+                """,
+                (run_id, tag_type, tag_value),
+            ).fetchone()
+            self._connection.commit()
+            return row is not None
+        except Exception:
+            self._connection.rollback()
+            raise
+
+    def remove_tag(self, run_id: str, tag_type: str, tag_value: str) -> bool:
+        """Remove one exact tag, returning false when it was already absent."""
+
+        try:
+            row = self._connection.execute(
+                """
+                DELETE FROM public.backtest_tag
+                WHERE run_id = %s AND tag_type = %s AND tag_value = %s
+                RETURNING tag_id
+                """,
+                (run_id, tag_type, tag_value),
+            ).fetchone()
+            self._connection.commit()
+            return row is not None
         except Exception:
             self._connection.rollback()
             raise

@@ -497,3 +497,41 @@ def test_catalog_rejects_a_missing_representative_summary() -> None:
 
     assert connection.commits == 0
     assert connection.rollbacks == 1
+
+
+def test_catalog_tag_mutations_are_parameterized_and_idempotent() -> None:
+    class TagConnection(_Connection):
+        def __init__(self) -> None:
+            super().__init__()
+            self.tag_present = False
+
+        def execute(
+            self,
+            query: str,
+            params: Sequence[object] = (),
+        ) -> _Result:
+            self.calls.append((query, params))
+            if "INSERT INTO public.backtest_tag" in query:
+                if self.tag_present:
+                    return _Result([])
+                self.tag_present = True
+                return _Result([(1,)])
+            if "DELETE FROM public.backtest_tag" in query:
+                if not self.tag_present:
+                    return _Result([])
+                self.tag_present = False
+                return _Result([(1,)])
+            return _Result([])
+
+    connection = TagConnection()
+    store = BacktestCatalogStore(connection)
+
+    assert store.add_tag("BT_tag", "purpose", "grid-review") is True
+    assert store.add_tag("BT_tag", "purpose", "grid-review") is False
+    assert store.remove_tag("BT_tag", "purpose", "grid-review") is True
+    assert store.remove_tag("BT_tag", "purpose", "grid-review") is False
+
+    assert all(params == ("BT_tag", "purpose", "grid-review") for _, params in connection.calls)
+    assert "ON CONFLICT (run_id, tag_type, tag_value) DO NOTHING" in connection.calls[0][0]
+    assert connection.commits == 4
+    assert connection.rollbacks == 0

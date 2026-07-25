@@ -20,7 +20,10 @@ import {
   type PreregistrationInput,
   type RunConfigInput,
   type RunSubmission,
+  type SweepAxis,
+  type SweepSubmission,
 } from "../api/client";
+import { SweepResults } from "../components/sweep-results";
 import { Badge, type BadgeProps } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import {
@@ -31,13 +34,19 @@ import {
   CardTitle,
 } from "../components/ui/card";
 import { Input } from "../components/ui/input";
-import { useRunJobs, type TrackedJob } from "../contexts/run-jobs";
+import {
+  useRunJobs,
+  type TrackedJob,
+  type TrackedSweep,
+} from "../contexts/run-jobs";
+import { useCoverage } from "../hooks/use-p2b";
 import { cn, formatTimestamp, shortHash } from "../lib/utils";
 
 type PrimaryMetric = NonNullable<PreregistrationInput["primary_metric"]>;
 type SizingMethod = NonNullable<RunConfigInput["sizing_method"]>;
 type IndicatorMode = NonNullable<RunConfigInput["indicator_mode"]>;
 type MarketType = RunConfigInput["market_type"];
+type SweepType = SweepSubmission["type"];
 
 interface FormState {
   runName: string;
@@ -139,6 +148,22 @@ function parseIndicators(value: string): Record<string, unknown>[] {
     throw new Error("명시 지표는 JSON 객체 배열이어야 합니다.");
   }
   return parsed as Record<string, unknown>[];
+}
+
+function parseAxisValues(value: string, label: string): SweepAxis["values"] {
+  const parsed: unknown = JSON.parse(value);
+  if (
+    !Array.isArray(parsed) ||
+    parsed.length < 2 ||
+    parsed.some(
+      (item) =>
+        !["string", "number", "boolean"].includes(typeof item) ||
+        (typeof item === "number" && !Number.isFinite(item)),
+    )
+  ) {
+    throw new Error(`${label} 값은 스칼라 두 개 이상의 JSON 배열이어야 합니다.`);
+  }
+  return parsed as SweepAxis["values"];
 }
 
 function utcIso(value: string, label: string): string {
@@ -298,10 +323,58 @@ function JobRow({
   );
 }
 
+function SweepJobRow({ sweep }: { sweep: TrackedSweep }) {
+  return (
+    <div className="rounded-lg border bg-background/45 p-4">
+      <div className="flex items-start gap-3">
+        <div className="mt-0.5">{statusIcon(sweep.status.status)}</div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="truncate text-sm font-semibold">
+              {sweep.submission.config.run_name} · {sweep.submission.type}
+            </p>
+            <Badge variant={statusVariant(sweep.status.status)}>
+              {sweep.status.status}
+            </Badge>
+          </div>
+          <p className="mt-1 font-mono text-[10px] text-muted-foreground">
+            job {shortHash(sweep.status.job_id, 20)} ·{" "}
+            {formatTimestamp(sweep.submittedAt)}
+          </p>
+          {sweep.status.status === "RUNNING" && (
+            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted">
+              <div className="h-full w-2/3 animate-pulse rounded-full bg-teal-400/80" />
+            </div>
+          )}
+          {sweep.status.error && (
+            <p className="mt-2 text-xs text-red-300">{sweep.status.error.message}</p>
+          )}
+          {sweep.status.sweep_id && (
+            <p className="mt-2 font-mono text-[10px] text-muted-foreground">
+              {sweep.status.sweep_id} · {sweep.status.run_count ?? "—"} runs ·
+              representative {shortHash(sweep.status.run_id, 18)}
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function RunManagementPage() {
-  const { jobs, track } = useRunJobs();
+  const { jobs, sweeps, track, trackSweep } = useRunJobs();
   const [form, setForm] = useState<FormState>(initialForm);
-  const [busy, setBusy] = useState<"validate" | "trigger" | null>(null);
+  const [busy, setBusy] = useState<"validate" | "trigger" | "sweep" | null>(
+    null,
+  );
+  const [sweepType, setSweepType] = useState<SweepType>("grid");
+  const [axisOneParameter, setAxisOneParameter] = useState("reward_risk");
+  const [axisOneValues, setAxisOneValues] = useState("[1.5, 2.0, 2.5]");
+  const [axisTwoEnabled, setAxisTwoEnabled] = useState(true);
+  const [axisTwoParameter, setAxisTwoParameter] = useState("atr_stop");
+  const [axisTwoValues, setAxisTwoValues] = useState("[1.5, 2.0]");
+  const [folds, setFolds] = useState("3");
+  const [split, setSplit] = useState("0.7");
   const [notice, setNotice] = useState<{
     kind: "success" | "error";
     message: string;
@@ -320,6 +393,21 @@ export function RunManagementPage() {
     () => strategies.data?.find((item) => item.strategy_id === form.strategyId),
     [form.strategyId, strategies.data],
   );
+  const coverage = useCoverage(form.dataSource, form.symbol, form.exchange);
+  const coverageWarning = useMemo(() => {
+    if (!coverage.data) return null;
+    if (!coverage.data.available_from || !coverage.data.available_to) {
+      return "선택한 데이터 소스·심볼·거래소 조합에는 1분봉이 없습니다.";
+    }
+    const requestedStart = new Date(form.start).getTime();
+    const requestedEnd = new Date(form.end).getTime();
+    const availableStart = new Date(coverage.data.available_from).getTime();
+    const availableEnd = new Date(coverage.data.available_to).getTime();
+    if (requestedStart < availableStart || requestedEnd > availableEnd) {
+      return "요청 기간이 데이터 가용 구간을 벗어납니다. 실행 전 기간을 조정하세요.";
+    }
+    return null;
+  }, [coverage.data, form.end, form.start]);
 
   useEffect(() => {
     if (!selectedStrategy || form.params !== "{}") return;
@@ -378,6 +466,57 @@ export function RunManagementPage() {
       setNotice({
         kind: "error",
         message: error instanceof Error ? error.message : "dry-run을 트리거하지 못했습니다.",
+      });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function triggerSweep() {
+    setBusy("sweep");
+    setNotice(null);
+    try {
+      const base = buildSubmission(form);
+      const submission: SweepSubmission = {
+        type: sweepType,
+        config: base.config,
+        prereg: base.prereg,
+        ...(sweepType === "grid"
+          ? {
+              axes: [
+                {
+                  parameter: axisOneParameter.trim(),
+                  values: parseAxisValues(axisOneValues, "첫 번째 축"),
+                },
+                ...(axisTwoEnabled
+                  ? [
+                      {
+                        parameter: axisTwoParameter.trim(),
+                        values: parseAxisValues(axisTwoValues, "두 번째 축"),
+                      },
+                    ]
+                  : []),
+              ],
+            }
+          : sweepType === "walk_forward"
+            ? { folds: Number(folds) }
+            : { split: Number(split) }),
+      };
+      const { data, error } = await apiClient.POST("/api/v1/sweeps", {
+        body: submission,
+      });
+      if (error) throw new Error(requestErrorMessage(error));
+      if (!data) throw new Error("스윕 트리거 응답이 비어 있습니다.");
+      trackSweep(data, submission);
+      setNotice({
+        kind: "success",
+        message: `스윕 dry-run이 큐에 등록되었습니다. job ${shortHash(data.job_id, 16)}`,
+      });
+    } catch (error) {
+      setNotice({
+        kind: "error",
+        message:
+          error instanceof Error ? error.message : "스윕을 트리거하지 못했습니다.",
       });
     } finally {
       setBusy(null);
@@ -596,6 +735,39 @@ export function RunManagementPage() {
                     required
                   />
                 </Label>
+                <div
+                  className={cn(
+                    "sm:col-span-2 lg:col-span-4 rounded-lg border p-3 text-xs",
+                    coverageWarning
+                      ? "border-amber-500/25 bg-amber-500/10 text-amber-200"
+                      : "bg-muted/20 text-muted-foreground",
+                  )}
+                >
+                  <div className="flex items-center gap-2">
+                    {coverage.isFetching && (
+                      <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                    )}
+                    {coverageWarning && <AlertTriangle className="h-3.5 w-3.5" />}
+                    <span className="font-medium">데이터 커버리지</span>
+                  </div>
+                  {coverage.data ? (
+                    <p className="mt-1">
+                      {coverage.data.available_from && coverage.data.available_to
+                        ? `${formatTimestamp(coverage.data.available_from)} → ${formatTimestamp(
+                            coverage.data.available_to,
+                          )}`
+                        : "가용 행 없음"}
+                      {" · "}1m {coverage.data.row_count.toLocaleString()}행
+                      {" · "}누락 추정{" "}
+                      {coverage.data.missing_1m_rows.toLocaleString()}행
+                    </p>
+                  ) : coverage.isError ? (
+                    <p className="mt-1 text-red-300">{coverage.error.message}</p>
+                  ) : (
+                    <p className="mt-1">가용 구간을 조회하고 있습니다.</p>
+                  )}
+                  {coverageWarning && <p className="mt-1 font-medium">{coverageWarning}</p>}
+                </div>
               </section>
 
               <section className="grid gap-4 border-t pt-5 sm:grid-cols-2 lg:grid-cols-4">
@@ -837,6 +1009,113 @@ export function RunManagementPage() {
                 )}
               </section>
 
+              <section className="border-t pt-5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold">스윕 빌더</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      위 기준 RunConfig와 인라인 사전등록을 그대로 재사용합니다.
+                    </p>
+                  </div>
+                  <Badge variant="outline">BATCH DRY-RUN</Badge>
+                </div>
+                <div className="mt-4 grid gap-4 rounded-lg border bg-muted/15 p-4 sm:grid-cols-2">
+                  <Label>
+                    유형
+                    <select
+                      className={selectClass}
+                      value={sweepType}
+                      onChange={(event) =>
+                        setSweepType(event.target.value as SweepType)
+                      }
+                    >
+                      <option value="grid">grid</option>
+                      <option value="walk_forward">walk_forward</option>
+                      <option value="is_oos">is_oos</option>
+                    </select>
+                  </Label>
+                  {sweepType === "walk_forward" && (
+                    <Label>
+                      folds (2–20)
+                      <Input
+                        type="number"
+                        min={2}
+                        max={20}
+                        value={folds}
+                        onChange={(event) => setFolds(event.target.value)}
+                      />
+                    </Label>
+                  )}
+                  {sweepType === "is_oos" && (
+                    <Label>
+                      split (0–1)
+                      <Input
+                        inputMode="decimal"
+                        value={split}
+                        onChange={(event) => setSplit(event.target.value)}
+                      />
+                    </Label>
+                  )}
+                  {sweepType === "grid" && (
+                    <>
+                      <div className="grid gap-3 rounded-md border p-3 sm:col-span-2 sm:grid-cols-2">
+                        <Label>
+                          축 1 파라미터
+                          <Input
+                            value={axisOneParameter}
+                            onChange={(event) =>
+                              setAxisOneParameter(event.target.value)
+                            }
+                            placeholder="reward_risk"
+                          />
+                        </Label>
+                        <Label>
+                          축 1 값 JSON 배열
+                          <Input
+                            value={axisOneValues}
+                            onChange={(event) => setAxisOneValues(event.target.value)}
+                            placeholder="[1.5, 2.0, 2.5]"
+                          />
+                        </Label>
+                      </div>
+                      <label className="flex items-center gap-2 text-xs font-medium sm:col-span-2">
+                        <input
+                          type="checkbox"
+                          checked={axisTwoEnabled}
+                          onChange={(event) => setAxisTwoEnabled(event.target.checked)}
+                          className="h-4 w-4 accent-teal-500"
+                        />
+                        두 번째 히트맵 축
+                      </label>
+                      {axisTwoEnabled && (
+                        <div className="grid gap-3 rounded-md border p-3 sm:col-span-2 sm:grid-cols-2">
+                          <Label>
+                            축 2 파라미터
+                            <Input
+                              value={axisTwoParameter}
+                              onChange={(event) =>
+                                setAxisTwoParameter(event.target.value)
+                              }
+                              placeholder="atr_stop"
+                            />
+                          </Label>
+                          <Label>
+                            축 2 값 JSON 배열
+                            <Input
+                              value={axisTwoValues}
+                              onChange={(event) =>
+                                setAxisTwoValues(event.target.value)
+                              }
+                              placeholder="[1.5, 2.0]"
+                            />
+                          </Label>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              </section>
+
               {notice && (
                 <div
                   className={cn(
@@ -866,7 +1145,12 @@ export function RunManagementPage() {
                   <Button
                     type="button"
                     onClick={() => void triggerRun()}
-                    disabled={busy !== null}
+                    disabled={busy !== null || Boolean(coverageWarning)}
+                    title={
+                      coverageWarning
+                        ? "데이터 커버리지 경고를 해소한 뒤 실행하세요."
+                        : undefined
+                    }
                   >
                     {busy === "trigger" ? (
                       <LoaderCircle className="mr-1.5 h-4 w-4 animate-spin" />
@@ -874,6 +1158,24 @@ export function RunManagementPage() {
                       <Play className="mr-1.5 h-4 w-4" />
                     )}
                     트리거(모의)
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => void triggerSweep()}
+                    disabled={busy !== null || Boolean(coverageWarning)}
+                    title={
+                      coverageWarning
+                        ? "데이터 커버리지 경고를 해소한 뒤 실행하세요."
+                        : undefined
+                    }
+                  >
+                    {busy === "sweep" ? (
+                      <LoaderCircle className="mr-1.5 h-4 w-4 animate-spin" />
+                    ) : (
+                      <FlaskConical className="mr-1.5 h-4 w-4" />
+                    )}
+                    스윕 트리거(모의)
                   </Button>
                 </div>
               </div>
@@ -888,12 +1190,12 @@ export function RunManagementPage() {
                 <CardTitle>실행 큐</CardTitle>
                 <CardDescription>SSE 상태 스트림 · 현재 브라우저 세션</CardDescription>
               </div>
-              <Badge variant="secondary">{jobs.length} jobs</Badge>
+              <Badge variant="secondary">{jobs.length + sweeps.length} jobs</Badge>
             </div>
           </CardHeader>
           <CardContent>
             <div className="max-h-[calc(100vh-12rem)] space-y-3 overflow-y-auto pr-1 scrollbar-thin">
-              {jobs.length === 0 ? (
+              {jobs.length === 0 && sweeps.length === 0 ? (
                 <div className="rounded-lg border border-dashed p-8 text-center">
                   <Clock3 className="mx-auto h-6 w-6 text-muted-foreground/60" />
                   <p className="mt-3 text-sm font-medium">추적 중인 실행이 없습니다</p>
@@ -902,14 +1204,24 @@ export function RunManagementPage() {
                   </p>
                 </div>
               ) : (
-                jobs.map((job) => (
-                  <JobRow key={job.accepted.job_id} job={job} onEdit={loadSubmission} />
-                ))
+                <>
+                  {sweeps.map((sweep) => (
+                    <SweepJobRow key={sweep.accepted.job_id} sweep={sweep} />
+                  ))}
+                  {jobs.map((job) => (
+                    <JobRow
+                      key={job.accepted.job_id}
+                      job={job}
+                      onEdit={loadSubmission}
+                    />
+                  ))}
+                </>
               )}
             </div>
           </CardContent>
         </Card>
       </div>
+      <SweepResults sweep={sweeps[0]} />
     </div>
   );
 }
