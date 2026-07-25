@@ -1007,7 +1007,7 @@ def test_e1_walk_forward_runs_three_real_folds_and_catalogs_representative(
     env: dict[str, str],
     evidence_root: Path,
 ) -> None:
-    """§4.4.4 E1: three folds persist; representative aggregate persistence is a known gap."""
+    """§4.4.4 E1: three folds persist and only the representative carries WF evidence."""
     walk = harness_facts.walk_forward
     folds = cast(list[dict[str, object]], walk["folds"])
     assert len(folds) == 3
@@ -1020,6 +1020,17 @@ def test_e1_walk_forward_runs_three_real_folds_and_catalogs_representative(
         assert row["status"] == "EVALUATED"
         assert row["fold_label"] == f"wf-{index}"
         assert (evidence_root / "harness" / cast(str, row["evidence_path"])).is_file()
+        if fold["run_id"] == representative:
+            assert row["oos_degradation"] == pytest.approx(walk["maximum_degradation"])
+            assert row["psr"] is None
+            harness_json = cast(Mapping[str, object], row["harness_json"])
+            assert harness_json["workflow"] == "walk_forward"
+            assert len(cast(list[object], harness_json["folds"])) == 3
+            assert len(cast(list[object], harness_json["degradations"])) == 2
+        else:
+            assert row["oos_degradation"] is None
+            assert row["psr"] is None
+            assert row["harness_json"] is None
 
 
 def test_e2_overfit_gate_rejects_boundary_and_accepts_robust_values(
@@ -1027,7 +1038,7 @@ def test_e2_overfit_gate_rejects_boundary_and_accepts_robust_values(
     env: dict[str, str],
     evidence_root: Path,
 ) -> None:
-    """§4.4.4 E2: OOS/PSR gate works; representative aggregate persistence is a known gap."""
+    """§4.4.4 E2: OOS/PSR gate works and the OOS run carries split evidence."""
     config = _vessel_config(
         "acc-overfit-gate",
         datetime(2025, 12, 3, tzinfo=UTC),
@@ -1062,12 +1073,21 @@ def test_e2_overfit_gate_rejects_boundary_and_accepts_robust_values(
         row = _catalog_row(env, run_id)
         assert row["status"] == "EVALUATED"
         assert (evidence_root / "harness" / cast(str, row["evidence_path"])).is_file()
+        if key == "out_of_sample_run_id":
+            assert row["oos_degradation"] == pytest.approx(harness_facts.is_oos["oos_degradation"])
+            assert row["psr"] is None
+            harness_json = cast(Mapping[str, object], row["harness_json"])
+            assert harness_json["workflow"] == "is_oos"
+        else:
+            assert row["oos_degradation"] is None
+            assert row["psr"] is None
+            assert row["harness_json"] is None
 
 
 def test_e3_monte_carlo_is_fixed_seed_deterministic(
     harness_facts: _HarnessFacts,
 ) -> None:
-    """§4.4.4 E3: MC is deterministic; representative aggregate persistence is a known gap."""
+    """§4.4.4 E3: Monte Carlo evidence is fixed-seed deterministic."""
     first = harness_facts.monte_carlo_first
     second = harness_facts.monte_carlo_second
     assert first == second
@@ -1076,3 +1096,66 @@ def test_e3_monte_carlo_is_fixed_seed_deterministic(
     assert math.isfinite(cast(float, first["terminal_r_p05"]))
     assert math.isfinite(cast(float, first["terminal_r_p95"]))
     assert 0.0 <= cast(float, first["ruin_probability"]) <= 1.0
+
+
+def test_e4_overfit_defense_bundle_persists_all_three_aggregates(
+    env: dict[str, str],
+    evidence_root: Path,
+) -> None:
+    """§4.4.4 E4: the last fold alone carries the complete overfit-defense bundle."""
+    start = datetime(2026, 2, 10, tzinfo=UTC)
+    end = datetime(2026, 2, 20, tzinfo=UTC)
+    _prepare_route_directions(env, start, end)
+    config = RunConfig(
+        run_name="acc-overfit-defense",
+        strategy_id=_ROUTE_PROBE_ID,
+        params={},
+        symbol=_SYMBOL,
+        exchange=_EXCHANGE,
+        timeframe="1h",
+        market_type="futures",
+        data_source="crypto_data.ohlcv_futures",
+        start=start,
+        end=end,
+        initial_capital=Decimal("10000"),
+        risk_per_trade=0.01,
+        seed=2002,
+        cost_values={
+            "futures_taker_fee_rate": _ZERO,
+            "futures_entry_slippage_rate": _ZERO,
+            "exit_slippage_rate": _ZERO,
+            "funding_fallback_rate": _ZERO,
+        },
+        profile_ref="acceptance-route-v1",
+    )
+    with build_harness(
+        config,
+        _prereg("complete overfit-defense bundle is cataloged once"),
+        evidence_root=evidence_root / "overfit-defense",
+        env=env,
+        seed=29,
+        manager_factory=_route_manager,
+    ) as harness:
+        bundle = harness.evaluate_overfit_defense(config, folds=3)
+
+    walk_forward = cast(Mapping[str, object], bundle["walk_forward"])
+    folds = cast(list[dict[str, object]], walk_forward["folds"])
+    representative = cast(str, bundle["representative_run_id"])
+    assert representative == folds[-1]["run_id"]
+    for fold in folds:
+        row = _catalog_row(env, cast(str, fold["run_id"]))
+        if fold["run_id"] == representative:
+            assert row["oos_degradation"] is not None
+            assert row["psr"] is not None
+            assert 0.0 <= cast(float, row["psr"]) <= 1.0
+            harness_json = cast(Mapping[str, object], row["harness_json"])
+            assert harness_json["workflow"] == "overfit_defense"
+            assert cast(Mapping[str, object], harness_json["walk_forward"])["folds"]
+            monte_carlo = cast(Mapping[str, object], harness_json["monte_carlo"])
+            for key in ("ruin_probability", "terminal_r_p05", "terminal_r_p95"):
+                assert key in monte_carlo
+            assert harness_json["psr"] == pytest.approx(row["psr"])
+        else:
+            assert row["oos_degradation"] is None
+            assert row["psr"] is None
+            assert row["harness_json"] is None

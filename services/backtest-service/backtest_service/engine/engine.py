@@ -28,6 +28,7 @@ from core_lib.eval import (
     judge,
     universal,
 )
+from core_lib.eval.metrics import daily_returns, trade_r_multiples
 from core_lib.execution import (
     PositionBook,
     liquidation_fill,
@@ -183,6 +184,8 @@ class RunResult:
     integrity_status: str
     metrics: MetricSet
     decision: DecisionResult
+    r_multiples: tuple[float, ...] = ()
+    period_returns: tuple[float, ...] = ()
 
 
 @dataclass(slots=True)
@@ -595,6 +598,8 @@ class Engine:
         terminal_ts = last.close_time + timedelta(milliseconds=1)
         self._equity_curve.append((terminal_ts, final_equity))
         metrics = compute(self._trades, self._equity_curve)
+        run_r_multiples = tuple(trade_r_multiples(self._trades))
+        run_period_returns = tuple(daily_returns(self._equity_curve))
         preliminary_integrity = check_integrity(self.evidence.audit())
         coverage_failed = [
             name
@@ -684,6 +689,8 @@ class Engine:
             integrity_status=integrity_status,
             metrics=metrics,
             decision=final_decision,
+            r_multiples=run_r_multiples,
+            period_returns=run_period_returns,
         )
 
     def _handle_signal(self, candle: Candle, signal: TradingSignal) -> None:

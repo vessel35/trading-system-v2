@@ -17,3 +17,14 @@ class CatalogStore(ABC):
     @abstractmethod
     def upsert_summary(self, summary: object) -> None:
         """Insert or update one run summary."""
+
+    @abstractmethod
+    def record_harness_aggregate(
+        self,
+        run_id: str,
+        *,
+        oos_degradation: float | None,
+        psr: float | None,
+        harness_json: object,
+    ) -> None:
+        """Stamp cross-run overfitting aggregates onto one representative run summary."""

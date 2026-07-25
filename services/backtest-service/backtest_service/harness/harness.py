@@ -8,7 +8,7 @@ import statistics
 from collections.abc import Callable, Sequence
 from datetime import datetime, timedelta
 from statistics import NormalDist
-from typing import Protocol, runtime_checkable
+from typing import Protocol, cast, runtime_checkable
 
 from core_lib.eval import thresholds
 from core_lib.ports import CatalogStore
@@ -78,7 +78,7 @@ class Harness:
             else (0.0 if out_score >= 0.0 else 1.0)
         )
         limits = thresholds.overfit()
-        return {
+        evidence = {
             "representative_run_id": out_result.run_id,
             "in_sample_run_id": in_result.run_id,
             "out_of_sample_run_id": out_result.run_id,
@@ -90,9 +90,50 @@ class Harness:
             "oos_degradation": degradation,
             "passed": degradation < limits["oos_degradation_limit"],
         }
+        self.catalog.record_harness_aggregate(
+            out_result.run_id,
+            oos_degradation=degradation,
+            psr=None,
+            harness_json={
+                "workflow": "is_oos",
+                "metric": "pf",
+                "split": split,
+                "boundary": boundary.isoformat(),
+                "in_sample_run_id": in_result.run_id,
+                "out_of_sample_run_id": out_result.run_id,
+                "in_sample_value": in_score,
+                "out_of_sample_value": out_score,
+                "oos_degradation": degradation,
+                "passed": evidence["passed"],
+            },
+        )
+        return evidence
 
     def walk_forward(self, config: RunConfig, folds: int) -> dict[str, object]:
         """Run chronological non-overlapping folds and apply the OOS gate per fold."""
+        evidence, results = self._run_walk_forward(config, folds)
+        max_degradation = cast(float, evidence["maximum_degradation"])
+        self.catalog.record_harness_aggregate(
+            results[-1].run_id,
+            oos_degradation=max_degradation,
+            psr=None,
+            harness_json={
+                "workflow": "walk_forward",
+                "metric": "pf",
+                "folds": evidence["folds"],
+                "degradations": evidence["degradations"],
+                "maximum_degradation": evidence["maximum_degradation"],
+                "passed": evidence["passed"],
+            },
+        )
+        return evidence
+
+    def _run_walk_forward(
+        self,
+        config: RunConfig,
+        folds: int,
+    ) -> tuple[dict[str, object], list[RunResult]]:
+        """Run chronological folds once and return their evidence and results."""
         if folds < 2:
             raise ValueError("walk-forward requires at least two folds")
         duration = config.end - config.start
@@ -131,13 +172,63 @@ class Harness:
             for index, result in enumerate(results)
         ]
         limits = thresholds.overfit()
-        return {
+        evidence = {
             "representative_run_id": results[-1].run_id,
             "folds": fold_evidence,
             "degradations": degradations,
             "maximum_degradation": max(degradations, default=0.0),
             "passed": all(value < limits["oos_degradation_limit"] for value in degradations),
         }
+        return evidence, results
+
+    def evaluate_overfit_defense(
+        self,
+        config: RunConfig,
+        *,
+        folds: int,
+        mc_iters: int = 10_000,
+    ) -> dict[str, object]:
+        """Compose the cross-run overfit-defense bundle and persist its aggregates."""
+        evidence, results = self._run_walk_forward(config, folds)
+        representative = results[-1]
+        max_degradation = cast(float, evidence["maximum_degradation"])
+
+        # _run_walk_forward sets _trial_count to folds; no sweep may intervene before PSR.
+        period_returns = list(representative.period_returns)
+        psr_value = self.psr(period_returns) if len(period_returns) >= 3 else None
+
+        r_multiples = list(representative.r_multiples)
+        mc_result = self.monte_carlo(r_multiples, mc_iters) if r_multiples else None
+
+        if psr_value is not None:
+            gate = self.overfit_gate(
+                degradation=max_degradation,
+                psr=psr_value,
+            )
+        else:
+            gate = {"passed": evidence["passed"], "psr": None}
+
+        harness_json = {
+            "workflow": "overfit_defense",
+            "metric": "pf",
+            "representative_run_id": representative.run_id,
+            "walk_forward": {
+                "folds": evidence["folds"],
+                "degradations": evidence["degradations"],
+                "maximum_degradation": max_degradation,
+            },
+            "oos_degradation": max_degradation,
+            "psr": psr_value,
+            "monte_carlo": mc_result,
+            "gate": gate,
+        }
+        self.catalog.record_harness_aggregate(
+            representative.run_id,
+            oos_degradation=max_degradation,
+            psr=psr_value,
+            harness_json=harness_json,
+        )
+        return harness_json
 
     def monte_carlo(
         self,
