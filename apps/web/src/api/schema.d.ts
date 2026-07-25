@@ -484,6 +484,10 @@ export interface components {
             total: number;
             /** Has More */
             has_more: boolean;
+            /** Truncated */
+            truncated: boolean;
+            /** Window Clamped */
+            window_clamped: boolean;
             /**
              * From Ts
              * Format: date-time

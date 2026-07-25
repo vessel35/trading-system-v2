@@ -74,6 +74,8 @@ function flattenSettings(item: RunComparisonItem): Record<string, string> {
     exchange: item.run.exchange,
     market_type: item.run.market_type,
     data_source: item.run.data_source,
+    period_start: item.run.period_start,
+    period_end: item.run.period_end,
     sizing_method: item.run.sizing_method,
     risk_per_trade: item.run.risk_per_trade ?? "—",
     position_size_pct: item.run.position_size_pct ?? "—",
@@ -229,6 +231,9 @@ export function ComparisonPage() {
       : keys;
   }, [diffOnly, settings]);
   const axes = new Set(runs.map((item) => `${item.run.symbol}|${item.run.timeframe}`));
+  const evaluationWindows = new Set(
+    runs.map((item) => `${item.run.period_start}|${item.run.period_end}`),
+  );
   const sameRerunIds = new Set(
     baseline
       ? runs
@@ -369,10 +374,16 @@ export function ComparisonPage() {
         </CardHeader>
       </Card>
 
-      {axes.size > 1 && (
+      {(axes.size > 1 || evaluationWindows.size > 1) && (
         <div className="flex items-center gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 p-3 text-sm text-amber-100">
           <AlertTriangle className="h-4 w-4 shrink-0" />
-          서로 다른 symbol/timeframe 축이 섞였습니다. 자본곡선 시간 범위를 직접 확인하세요.
+          {axes.size > 1
+            ? "서로 다른 symbol/timeframe 축이 섞였습니다. "
+            : ""}
+          {evaluationWindows.size > 1
+            ? "평가 구간(period_start/period_end)이 서로 다릅니다. "
+            : ""}
+          설정 diff와 자본곡선 시간 범위를 함께 확인하세요.
         </div>
       )}
       {sameRerunIds.size > 0 && (

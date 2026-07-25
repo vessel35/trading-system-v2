@@ -465,6 +465,8 @@ class MarketDataRepository:
                 limit=limit,
                 total=total,
                 has_more=len(rows) > limit,
+                truncated=len(rows) > limit,
+                window_clamped=False,
                 from_ts=from_ts,
                 to_ts=to_ts,
                 timeframe=timeframe,

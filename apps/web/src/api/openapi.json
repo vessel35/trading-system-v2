@@ -2951,6 +2951,14 @@
             "type": "boolean",
             "title": "Has More"
           },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated"
+          },
+          "window_clamped": {
+            "type": "boolean",
+            "title": "Window Clamped"
+          },
           "from_ts": {
             "type": "string",
             "format": "date-time",
@@ -2977,6 +2985,8 @@
           "limit",
           "total",
           "has_more",
+          "truncated",
+          "window_clamped",
           "from_ts",
           "to_ts",
           "timeframe"

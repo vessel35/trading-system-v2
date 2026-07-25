@@ -8,7 +8,7 @@ import {
   type SeriesMarker,
   type UTCTimestamp,
 } from "lightweight-charts";
-import { CandlestickChart, Layers3 } from "lucide-react";
+import { AlertTriangle, CandlestickChart, Layers3 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type {
@@ -261,7 +261,8 @@ export function ChartTab({
               </CardTitle>
               <CardDescription>
                 crypto_data 1m → {evidence.candles.data?.page.timeframe} 확정봉{" "}
-                {candles.length.toLocaleString()}개 · 지표 재계산 없음
+                {candles.length.toLocaleString()} /{" "}
+                {evidence.candles.data?.page.total.toLocaleString()}개 · 지표 재계산 없음
               </CardDescription>
             </div>
             <Badge variant="outline">UTC · READ ONLY</Badge>
@@ -302,6 +303,17 @@ export function ChartTab({
           </div>
         </CardHeader>
         <CardContent>
+          {evidence.candles.data?.page.truncated && (
+            <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 p-3 text-sm text-amber-100">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <p>
+                차트 표시 상한 {evidence.candles.data.page.limit.toLocaleString()}봉으로
+                앞부분만 표시 중입니다. 전체{" "}
+                {evidence.candles.data.page.total.toLocaleString()}봉이며, 전체 구간을
+                보려면 API 조회 기간을 좁혀 확인하세요.
+              </p>
+            </div>
+          )}
           {candles.length > 0 ? (
             <MarketChart
               candles={candles}

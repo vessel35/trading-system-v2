@@ -16,6 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 from web_api.database import connect_crypto, get_settings
 from web_api.main import _epoch_ms, _utc_datetime, app
+from web_api.repository import MarketDataRepository
 
 pytestmark = pytest.mark.integration
 
@@ -474,6 +475,9 @@ def test_candles_use_read_only_crypto_data_and_feed_compatible_aggregation(
     assert default_body["page"]["source_timeframe"] == "1m"
     assert default_body["page"]["timeframe"] == "1h"
     assert default_body["page"]["total"] == 1509
+    assert default_body["page"]["has_more"] is False
+    assert default_body["page"]["truncated"] is False
+    assert default_body["page"]["window_clamped"] is False
     assert len(default_body["data"]) == 1509
     first = default_body["data"][0]
     assert all(isinstance(first[field], float) for field in ("open", "high", "low", "close"))
@@ -486,7 +490,33 @@ def test_candles_use_read_only_crypto_data_and_feed_compatible_aggregation(
         params={"from": header["period_start"], "to": header["period_end"]},
     )
     assert period_response.status_code == 200
-    assert period_response.json()["page"]["total"] == 1488
+    period_page = period_response.json()["page"]
+    assert period_page["total"] == 1488
+    assert period_page["window_clamped"] is False
+
+    clamped_response = seeded_evidence.client.get(
+        f"/api/v1/runs/{seeded_evidence.run_id}/candles",
+        params={
+            "from": "2025-06-01T00:00:00Z",
+            "to": "2025-07-02T00:00:00Z",
+        },
+    )
+    assert clamped_response.status_code == 200
+    clamped_page = clamped_response.json()["page"]
+    assert clamped_page["from_ts"] == header["period_start"]
+    assert clamped_page["to_ts"] == "2025-07-02T00:00:00Z"
+    assert clamped_page["total"] == 24
+    assert clamped_page["window_clamped"] is True
+
+    outside_response = seeded_evidence.client.get(
+        f"/api/v1/runs/{seeded_evidence.run_id}/candles",
+        params={
+            "from": "2025-06-01T00:00:00Z",
+            "to": "2025-06-02T00:00:00Z",
+        },
+    )
+    assert outside_response.status_code == 400
+    assert outside_response.json()["error"]["code"] == "candle_window_outside_run"
 
     with connect_crypto() as connection:
         read_only = connection.execute(
@@ -508,8 +538,21 @@ def test_candles_use_read_only_crypto_data_and_feed_compatible_aggregation(
                 header["period_end"],
             ),
         ).fetchone()
+        truncated = MarketDataRepository(connection).candles(
+            symbol=header["symbol"],
+            exchange=header["exchange"],
+            timeframe="1m",
+            data_source=header["data_source"],
+            from_ts=datetime.fromisoformat(header["period_start"]),
+            to_ts=datetime.fromisoformat(header["period_end"]),
+            limit=5000,
+        )
     assert source_count is not None
     assert int(source_count["total"]) == 89280
+    assert len(truncated.data) == 5000
+    assert truncated.page.total == 89280
+    assert truncated.page.has_more is True
+    assert truncated.page.truncated is True
 
 
 def test_prereg_compare_empty_extensions_and_findings_metadata(

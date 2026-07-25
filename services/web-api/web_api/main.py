@@ -437,21 +437,38 @@ def get_candles(
     run = repo.get_run(run_id)
     if run is None:
         not_found(run_id)
-    if from_ts is None or to_ts is None:
-        with evidence_repository(repo, run_id) as evidence:
-            default_from, default_to = evidence.source_range(run.timeframe)
-    else:
-        default_from, default_to = run.period_start, run.period_end
-    start = _utc_datetime(from_ts) or default_from
-    end = _utc_datetime(to_ts) or default_to
-    if start >= end:
+    with evidence_repository(repo, run_id) as evidence:
+        source_from, source_to = evidence.source_range(run.timeframe)
+    requested_start = _utc_datetime(from_ts) or source_from
+    requested_end = _utc_datetime(to_ts) or source_to
+    if requested_start >= requested_end:
         raise ApiError(
             status_code=400,
             code="invalid_query",
             message="'from' must be earlier than 'to'.",
         )
+    explicit_window = from_ts is not None or to_ts is not None
+    if explicit_window:
+        allowed_start = max(run.period_start, source_from)
+        allowed_end = min(run.period_end, source_to)
+        start = max(requested_start, allowed_start)
+        end = min(requested_end, allowed_end)
+        if start >= end:
+            raise ApiError(
+                status_code=400,
+                code="candle_window_outside_run",
+                message="The requested candle window does not overlap this run.",
+                details={
+                    "requested_from": requested_start,
+                    "requested_to": requested_end,
+                    "allowed_from": allowed_start,
+                    "allowed_to": allowed_end,
+                },
+            )
+    else:
+        start, end = source_from, source_to
     try:
-        return market.candles(
+        collection = market.candles(
             symbol=run.symbol,
             exchange=run.exchange,
             timeframe=run.timeframe,
@@ -466,6 +483,13 @@ def get_candles(
             code="unsupported_candle_source",
             message=str(exc),
         ) from exc
+    return collection.model_copy(
+        update={
+            "page": collection.page.model_copy(
+                update={"window_clamped": (start != requested_start or end != requested_end)}
+            )
+        }
+    )
 
 
 @app.get(

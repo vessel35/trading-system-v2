@@ -355,6 +355,8 @@ class CandlePage(BaseModel):
     limit: int
     total: int
     has_more: bool
+    truncated: bool
+    window_clamped: bool
     from_ts: datetime
     to_ts: datetime
     timeframe: str
