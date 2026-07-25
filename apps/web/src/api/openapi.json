@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Backtest Research Web API",
-    "description": "Read-only P0 backend-for-frontend. Stored catalog summaries are returned without metric or decision recomputation.",
+    "description": "Read-only backend-for-frontend. Stored catalog summaries and immutable Evidence are returned without metric or decision recomputation.",
     "version": "0.1.0"
   },
   "paths": {
@@ -439,6 +439,1188 @@
         }
       }
     },
+    "/api/v1/runs/{run_id}/trades": {
+      "get": {
+        "summary": "Get Trades",
+        "operationId": "get_trades_api_v1_runs__run_id__trades_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "after_seq",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "After Seq"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 200,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "exit_reason",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Exit Reason"
+            }
+          },
+          {
+            "name": "side",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Side"
+            }
+          },
+          {
+            "name": "liquidated",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Liquidated"
+            }
+          },
+          {
+            "name": "entry_time_from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Entry Time From"
+            }
+          },
+          {
+            "name": "entry_time_to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Entry Time To"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceCollection_Trade_"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/runs/{run_id}/executions": {
+      "get": {
+        "summary": "Get Executions",
+        "operationId": "get_executions_api_v1_runs__run_id__executions_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "after_seq",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "After Seq"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 200,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "trade_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Trade Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceCollection_Execution_"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/runs/{run_id}/funding-settlements": {
+      "get": {
+        "summary": "Get Funding Settlements",
+        "operationId": "get_funding_settlements_api_v1_runs__run_id__funding_settlements_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "after_seq",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "After Seq"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 200,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "trade_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Trade Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceCollection_FundingSettlement_"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/runs/{run_id}/equity": {
+      "get": {
+        "summary": "Get Equity",
+        "operationId": "get_equity_api_v1_runs__run_id__equity_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "after_seq",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "After Seq"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 200,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceCollection_EquityPoint_"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/runs/{run_id}/chart-summaries": {
+      "get": {
+        "summary": "Get Chart Summaries",
+        "operationId": "get_chart_summaries_api_v1_runs__run_id__chart_summaries_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "after_seq",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "After Seq"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 200,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "series_name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Series Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceCollection_ChartSummary_"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/runs/{run_id}/positions": {
+      "get": {
+        "summary": "Get Positions",
+        "operationId": "get_positions_api_v1_runs__run_id__positions_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "after_seq",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "After Seq"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 200,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "trade_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Trade Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceCollection_Position_"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/runs/{run_id}/integrity-checks": {
+      "get": {
+        "summary": "Get Integrity Checks",
+        "operationId": "get_integrity_checks_api_v1_runs__run_id__integrity_checks_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "after_seq",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "After Seq"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 200,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceCollection_IntegrityCheck_"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/runs/{run_id}/outcome-buckets": {
+      "get": {
+        "summary": "Get Outcome Buckets",
+        "operationId": "get_outcome_buckets_api_v1_runs__run_id__outcome_buckets_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "after_seq",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "After Seq"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 200,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "subject_kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Subject Kind"
+            }
+          },
+          {
+            "name": "subject_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Subject Id"
+            }
+          },
+          {
+            "name": "bucket_name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Bucket Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceCollection_OutcomeBucket_"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/runs/{run_id}/drawdown-episodes": {
+      "get": {
+        "summary": "Get Drawdown Episodes",
+        "operationId": "get_drawdown_episodes_api_v1_runs__run_id__drawdown_episodes_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "after_seq",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "After Seq"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 200,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceCollection_DrawdownEpisode_"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/runs/{run_id}/trade-features": {
+      "get": {
+        "summary": "Get Trade Features",
+        "operationId": "get_trade_features_api_v1_runs__run_id__trade_features_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "after_seq",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "After Seq"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 200,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "trade_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Trade Id"
+            }
+          },
+          {
+            "name": "phase",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Phase"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceCollection_TradeFeature_"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/runs/{run_id}/candidate-events": {
+      "get": {
+        "summary": "Get Candidate Events",
+        "operationId": "get_candidate_events_api_v1_runs__run_id__candidate_events_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "after_seq",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "After Seq"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 200,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "linked_trade_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Linked Trade Id"
+            }
+          },
+          {
+            "name": "realized",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Realized"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceCollection_CandidateEvent_"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
     "/api/v1/health": {
       "get": {
         "summary": "Health",
@@ -470,6 +1652,99 @@
   },
   "components": {
     "schemas": {
+      "CandidateEvent": {
+        "properties": {
+          "candidate_id": {
+            "type": "integer",
+            "title": "Candidate Id"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "ts": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Ts"
+          },
+          "symbol": {
+            "type": "string",
+            "title": "Symbol"
+          },
+          "trigger_rule": {
+            "type": "string",
+            "title": "Trigger Rule"
+          },
+          "passed_filters_json": {
+            "$ref": "#/components/schemas/JsonValue"
+          },
+          "blocked_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blocked By"
+          },
+          "would_be_side": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Would Be Side"
+          },
+          "would_be_qty": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "decimal",
+                "description": "Exact fixed-point database value serialized without floating-point conversion."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Would Be Qty"
+          },
+          "realized": {
+            "type": "boolean",
+            "title": "Realized"
+          },
+          "linked_trade_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Linked Trade Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "candidate_id",
+          "run_id",
+          "ts",
+          "symbol",
+          "trigger_rule",
+          "passed_filters_json",
+          "blocked_by",
+          "would_be_side",
+          "would_be_qty",
+          "realized",
+          "linked_trade_id"
+        ],
+        "title": "CandidateEvent"
+      },
       "CatalogHealth": {
         "properties": {
           "status": {
@@ -511,6 +1786,298 @@
         ],
         "title": "CatalogHealth"
       },
+      "ChartSummary": {
+        "properties": {
+          "summary_seq": {
+            "type": "integer",
+            "title": "Summary Seq"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "series_name": {
+            "type": "string",
+            "title": "Series Name"
+          },
+          "bucket_ts": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Bucket Ts"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "payload_json": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JsonValue"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "summary_seq",
+          "run_id",
+          "series_name",
+          "bucket_ts",
+          "value",
+          "payload_json"
+        ],
+        "title": "ChartSummary"
+      },
+      "CursorPage": {
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "after_seq": {
+            "type": "integer",
+            "title": "After Seq"
+          },
+          "next_after_seq": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next After Seq"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          }
+        },
+        "type": "object",
+        "required": [
+          "limit",
+          "after_seq",
+          "next_after_seq",
+          "total",
+          "has_more"
+        ],
+        "title": "CursorPage",
+        "description": "Evidence cursor metadata."
+      },
+      "DrawdownEpisode": {
+        "properties": {
+          "episode_id": {
+            "type": "integer",
+            "title": "Episode Id"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "start_ts": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Start Ts"
+          },
+          "end_ts": {
+            "type": "string",
+            "format": "date-time",
+            "title": "End Ts"
+          },
+          "recovery_ts": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recovery Ts"
+          },
+          "peak_equity": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Peak Equity",
+            "description": "Exact fixed-point database value serialized without floating-point conversion."
+          },
+          "trough_equity": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Trough Equity",
+            "description": "Exact fixed-point database value serialized without floating-point conversion."
+          },
+          "depth_pct": {
+            "type": "number",
+            "title": "Depth Pct"
+          },
+          "duration_seconds": {
+            "type": "integer",
+            "title": "Duration Seconds"
+          },
+          "trade_count": {
+            "type": "integer",
+            "title": "Trade Count"
+          },
+          "contributing_trades_json": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JsonValue"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "episode_id",
+          "run_id",
+          "kind",
+          "start_ts",
+          "end_ts",
+          "recovery_ts",
+          "peak_equity",
+          "trough_equity",
+          "depth_pct",
+          "duration_seconds",
+          "trade_count",
+          "contributing_trades_json"
+        ],
+        "title": "DrawdownEpisode"
+      },
+      "EquityPoint": {
+        "properties": {
+          "equity_seq": {
+            "type": "integer",
+            "title": "Equity Seq"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "ts": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Ts"
+          },
+          "cash_balance": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Cash Balance",
+            "description": "Exact fixed-point database value serialized without floating-point conversion."
+          },
+          "position_value": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Position Value",
+            "description": "Exact fixed-point database value serialized without floating-point conversion."
+          },
+          "total_equity": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Total Equity",
+            "description": "Exact fixed-point database value serialized without floating-point conversion."
+          },
+          "intrabar_low_equity": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "decimal",
+                "description": "Exact fixed-point database value serialized without floating-point conversion."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intrabar Low Equity"
+          },
+          "realized_pnl_cum": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Realized Pnl Cum",
+            "description": "Exact fixed-point database value serialized without floating-point conversion."
+          },
+          "unrealized_pnl": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Unrealized Pnl",
+            "description": "Exact fixed-point database value serialized without floating-point conversion."
+          },
+          "fee_cum": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Fee Cum",
+            "description": "Exact fixed-point database value serialized without floating-point conversion."
+          },
+          "slippage_cum": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Slippage Cum",
+            "description": "Exact fixed-point database value serialized without floating-point conversion."
+          },
+          "funding_cum": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Funding Cum",
+            "description": "Exact fixed-point database value serialized without floating-point conversion."
+          },
+          "peak_equity": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Peak Equity",
+            "description": "Exact fixed-point database value serialized without floating-point conversion."
+          },
+          "drawdown_pct": {
+            "type": "number",
+            "title": "Drawdown Pct"
+          },
+          "open_positions": {
+            "type": "integer",
+            "title": "Open Positions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "equity_seq",
+          "run_id",
+          "ts",
+          "cash_balance",
+          "position_value",
+          "total_equity",
+          "intrabar_low_equity",
+          "realized_pnl_cum",
+          "unrealized_pnl",
+          "fee_cum",
+          "slippage_cum",
+          "funding_cum",
+          "peak_equity",
+          "drawdown_pct",
+          "open_positions"
+        ],
+        "title": "EquityPoint"
+      },
       "ErrorDetail": {
         "properties": {
           "code": {
@@ -550,6 +2117,468 @@
           "error"
         ],
         "title": "ErrorResponse"
+      },
+      "EvidenceCollection_CandidateEvent_": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/CandidateEvent"
+            },
+            "type": "array",
+            "title": "Data"
+          },
+          "page": {
+            "$ref": "#/components/schemas/CursorPage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data",
+          "page"
+        ],
+        "title": "EvidenceCollection[CandidateEvent]"
+      },
+      "EvidenceCollection_ChartSummary_": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ChartSummary"
+            },
+            "type": "array",
+            "title": "Data"
+          },
+          "page": {
+            "$ref": "#/components/schemas/CursorPage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data",
+          "page"
+        ],
+        "title": "EvidenceCollection[ChartSummary]"
+      },
+      "EvidenceCollection_DrawdownEpisode_": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/DrawdownEpisode"
+            },
+            "type": "array",
+            "title": "Data"
+          },
+          "page": {
+            "$ref": "#/components/schemas/CursorPage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data",
+          "page"
+        ],
+        "title": "EvidenceCollection[DrawdownEpisode]"
+      },
+      "EvidenceCollection_EquityPoint_": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/EquityPoint"
+            },
+            "type": "array",
+            "title": "Data"
+          },
+          "page": {
+            "$ref": "#/components/schemas/CursorPage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data",
+          "page"
+        ],
+        "title": "EvidenceCollection[EquityPoint]"
+      },
+      "EvidenceCollection_Execution_": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Execution"
+            },
+            "type": "array",
+            "title": "Data"
+          },
+          "page": {
+            "$ref": "#/components/schemas/CursorPage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data",
+          "page"
+        ],
+        "title": "EvidenceCollection[Execution]"
+      },
+      "EvidenceCollection_FundingSettlement_": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/FundingSettlement"
+            },
+            "type": "array",
+            "title": "Data"
+          },
+          "page": {
+            "$ref": "#/components/schemas/CursorPage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data",
+          "page"
+        ],
+        "title": "EvidenceCollection[FundingSettlement]"
+      },
+      "EvidenceCollection_IntegrityCheck_": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/IntegrityCheck"
+            },
+            "type": "array",
+            "title": "Data"
+          },
+          "page": {
+            "$ref": "#/components/schemas/CursorPage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data",
+          "page"
+        ],
+        "title": "EvidenceCollection[IntegrityCheck]"
+      },
+      "EvidenceCollection_OutcomeBucket_": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/OutcomeBucket"
+            },
+            "type": "array",
+            "title": "Data"
+          },
+          "page": {
+            "$ref": "#/components/schemas/CursorPage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data",
+          "page"
+        ],
+        "title": "EvidenceCollection[OutcomeBucket]"
+      },
+      "EvidenceCollection_Position_": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Position"
+            },
+            "type": "array",
+            "title": "Data"
+          },
+          "page": {
+            "$ref": "#/components/schemas/CursorPage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data",
+          "page"
+        ],
+        "title": "EvidenceCollection[Position]"
+      },
+      "EvidenceCollection_TradeFeature_": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/TradeFeature"
+            },
+            "type": "array",
+            "title": "Data"
+          },
+          "page": {
+            "$ref": "#/components/schemas/CursorPage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data",
+          "page"
+        ],
+        "title": "EvidenceCollection[TradeFeature]"
+      },
+      "EvidenceCollection_Trade_": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Trade"
+            },
+            "type": "array",
+            "title": "Data"
+          },
+          "page": {
+            "$ref": "#/components/schemas/CursorPage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data",
+          "page"
+        ],
+        "title": "EvidenceCollection[Trade]"
+      },
+      "Execution": {
+        "properties": {
+          "execution_id": {
+            "type": "integer",
+            "title": "Execution Id"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "trade_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trade Id"
+          },
+          "decision_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Id"
+          },
+          "order_id": {
+            "type": "string",
+            "title": "Order Id"
+          },
+          "execution_ts": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Execution Ts"
+          },
+          "trigger_subcandle_ts": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trigger Subcandle Ts"
+          },
+          "symbol": {
+            "type": "string",
+            "title": "Symbol"
+          },
+          "side": {
+            "type": "string",
+            "title": "Side"
+          },
+          "position_side": {
+            "type": "string",
+            "title": "Position Side"
+          },
+          "order_type": {
+            "type": "string",
+            "title": "Order Type"
+          },
+          "reference_price": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Reference Price",
+            "description": "Exact fixed-point database value serialized without floating-point conversion."
+          },
+          "price": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Price",
+            "description": "Exact fixed-point database value serialized without floating-point conversion."
+          },
+          "quantity": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Quantity",
+            "description": "Exact fixed-point database value serialized without floating-point conversion."
+          },
+          "notional": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Notional",
+            "description": "Exact fixed-point database value serialized without floating-point conversion."
+          },
+          "fee": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Fee",
+            "description": "Exact fixed-point database value serialized without floating-point conversion."
+          },
+          "slippage": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Slippage",
+            "description": "Exact fixed-point database value serialized without floating-point conversion."
+          },
+          "liquidity": {
+            "type": "string",
+            "title": "Liquidity"
+          },
+          "reduce_only": {
+            "type": "boolean",
+            "title": "Reduce Only"
+          },
+          "exit_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Reason"
+          },
+          "gap_filled": {
+            "type": "boolean",
+            "title": "Gap Filled"
+          },
+          "qty_truncated": {
+            "type": "boolean",
+            "title": "Qty Truncated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "execution_id",
+          "run_id",
+          "trade_id",
+          "decision_id",
+          "order_id",
+          "execution_ts",
+          "trigger_subcandle_ts",
+          "symbol",
+          "side",
+          "position_side",
+          "order_type",
+          "reference_price",
+          "price",
+          "quantity",
+          "notional",
+          "fee",
+          "slippage",
+          "liquidity",
+          "reduce_only",
+          "exit_reason",
+          "gap_filled",
+          "qty_truncated"
+        ],
+        "title": "Execution"
+      },
+      "FundingSettlement": {
+        "properties": {
+          "settlement_id": {
+            "type": "integer",
+            "title": "Settlement Id"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "trade_id": {
+            "type": "integer",
+            "title": "Trade Id"
+          },
+          "settled_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Settled At"
+          },
+          "symbol": {
+            "type": "string",
+            "title": "Symbol"
+          },
+          "position_side": {
+            "type": "string",
+            "title": "Position Side"
+          },
+          "funding_rate": {
+            "type": "number",
+            "title": "Funding Rate"
+          },
+          "rate_source": {
+            "type": "string",
+            "title": "Rate Source"
+          },
+          "settle_price": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Settle Price",
+            "description": "Exact fixed-point database value serialized without floating-point conversion."
+          },
+          "settle_price_source": {
+            "type": "string",
+            "title": "Settle Price Source"
+          },
+          "position_notional": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Position Notional",
+            "description": "Exact fixed-point database value serialized without floating-point conversion."
+          },
+          "payment_amount": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Payment Amount",
+            "description": "Exact fixed-point database value serialized without floating-point conversion."
+          },
+          "theoretical_payment_amount": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Theoretical Payment Amount",
+            "description": "Exact fixed-point database value serialized without floating-point conversion."
+          }
+        },
+        "type": "object",
+        "required": [
+          "settlement_id",
+          "run_id",
+          "trade_id",
+          "settled_at",
+          "symbol",
+          "position_side",
+          "funding_rate",
+          "rate_source",
+          "settle_price",
+          "settle_price_source",
+          "position_notional",
+          "payment_amount",
+          "theoretical_payment_amount"
+        ],
+        "title": "FundingSettlement"
       },
       "HTTPValidationError": {
         "properties": {
@@ -592,7 +2621,126 @@
         ],
         "title": "HealthResponse"
       },
+      "IntegrityCheck": {
+        "properties": {
+          "check_id": {
+            "type": "integer",
+            "title": "Check Id"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "check_name": {
+            "type": "string",
+            "title": "Check Name"
+          },
+          "passed": {
+            "type": "boolean",
+            "title": "Passed"
+          },
+          "detail_json": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JsonValue"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sample_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sample Ref"
+          },
+          "checked_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Checked At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "check_id",
+          "run_id",
+          "check_name",
+          "passed",
+          "detail_json",
+          "sample_ref",
+          "checked_at"
+        ],
+        "title": "IntegrityCheck"
+      },
       "JsonValue": {},
+      "OutcomeBucket": {
+        "properties": {
+          "bucket_id": {
+            "type": "integer",
+            "title": "Bucket Id"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "subject_kind": {
+            "type": "string",
+            "title": "Subject Kind"
+          },
+          "subject_id": {
+            "type": "integer",
+            "title": "Subject Id"
+          },
+          "bucket_name": {
+            "type": "string",
+            "title": "Bucket Name"
+          },
+          "bucket_value": {
+            "type": "string",
+            "title": "Bucket Value"
+          },
+          "r_multiple": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "R Multiple"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "bucket_id",
+          "run_id",
+          "subject_kind",
+          "subject_id",
+          "bucket_name",
+          "bucket_value",
+          "r_multiple",
+          "note"
+        ],
+        "title": "OutcomeBucket"
+      },
       "Page": {
         "properties": {
           "limit": {
@@ -621,6 +2769,151 @@
         ],
         "title": "Page",
         "description": "Offset page metadata."
+      },
+      "Position": {
+        "properties": {
+          "position_seq": {
+            "type": "integer",
+            "title": "Position Seq"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "trade_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trade Id"
+          },
+          "ts": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Ts"
+          },
+          "symbol": {
+            "type": "string",
+            "title": "Symbol"
+          },
+          "side": {
+            "type": "string",
+            "title": "Side"
+          },
+          "quantity": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Quantity",
+            "description": "Exact fixed-point database value serialized without floating-point conversion."
+          },
+          "average_price": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Average Price",
+            "description": "Exact fixed-point database value serialized without floating-point conversion."
+          },
+          "total_cost": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Total Cost",
+            "description": "Exact fixed-point database value serialized without floating-point conversion."
+          },
+          "current_price": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Current Price",
+            "description": "Exact fixed-point database value serialized without floating-point conversion."
+          },
+          "mark_price": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Mark Price",
+            "description": "Exact fixed-point database value serialized without floating-point conversion."
+          },
+          "mark_price_source": {
+            "type": "string",
+            "title": "Mark Price Source"
+          },
+          "unrealized_pnl": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Unrealized Pnl",
+            "description": "Exact fixed-point database value serialized without floating-point conversion."
+          },
+          "leverage": {
+            "type": "integer",
+            "title": "Leverage"
+          },
+          "margin_type": {
+            "type": "string",
+            "title": "Margin Type"
+          },
+          "margin": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Margin",
+            "description": "Exact fixed-point database value serialized without floating-point conversion."
+          },
+          "entry_price": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "decimal",
+                "description": "Exact fixed-point database value serialized without floating-point conversion."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entry Price"
+          },
+          "liquidation_price": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "decimal",
+                "description": "Exact fixed-point database value serialized without floating-point conversion."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Liquidation Price"
+          },
+          "funding_fee_total": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Funding Fee Total",
+            "description": "Exact fixed-point database value serialized without floating-point conversion."
+          }
+        },
+        "type": "object",
+        "required": [
+          "position_seq",
+          "run_id",
+          "trade_id",
+          "ts",
+          "symbol",
+          "side",
+          "quantity",
+          "average_price",
+          "total_cost",
+          "current_price",
+          "mark_price",
+          "mark_price_source",
+          "unrealized_pnl",
+          "leverage",
+          "margin_type",
+          "margin",
+          "entry_price",
+          "liquidation_price",
+          "funding_fee_total"
+        ],
+        "title": "Position"
       },
       "RunHeader": {
         "properties": {
@@ -721,7 +3014,7 @@
             "type": "string",
             "format": "decimal",
             "title": "Initial Capital",
-            "description": "Exact PostgreSQL NUMERIC value serialized without floating-point conversion."
+            "description": "Exact fixed-point database value serialized without floating-point conversion."
           },
           "sizing_method": {
             "type": "string",
@@ -732,7 +3025,7 @@
               {
                 "type": "string",
                 "format": "decimal",
-                "description": "Exact PostgreSQL NUMERIC value serialized without floating-point conversion."
+                "description": "Exact fixed-point database value serialized without floating-point conversion."
               },
               {
                 "type": "null"
@@ -745,7 +3038,7 @@
               {
                 "type": "string",
                 "format": "decimal",
-                "description": "Exact PostgreSQL NUMERIC value serialized without floating-point conversion."
+                "description": "Exact fixed-point database value serialized without floating-point conversion."
               },
               {
                 "type": "null"
@@ -1129,7 +3422,7 @@
               {
                 "type": "string",
                 "format": "decimal",
-                "description": "Exact PostgreSQL NUMERIC value serialized without floating-point conversion."
+                "description": "Exact fixed-point database value serialized without floating-point conversion."
               },
               {
                 "type": "null"
@@ -1414,14 +3707,14 @@
             "type": "string",
             "format": "decimal",
             "title": "Initial Capital",
-            "description": "Exact PostgreSQL NUMERIC value serialized without floating-point conversion."
+            "description": "Exact fixed-point database value serialized without floating-point conversion."
           },
           "final_equity": {
             "anyOf": [
               {
                 "type": "string",
                 "format": "decimal",
-                "description": "Exact PostgreSQL NUMERIC value serialized without floating-point conversion."
+                "description": "Exact fixed-point database value serialized without floating-point conversion."
               },
               {
                 "type": "null"
@@ -1434,7 +3727,7 @@
               {
                 "type": "string",
                 "format": "decimal",
-                "description": "Exact PostgreSQL NUMERIC value serialized without floating-point conversion."
+                "description": "Exact fixed-point database value serialized without floating-point conversion."
               },
               {
                 "type": "null"
@@ -1447,7 +3740,7 @@
               {
                 "type": "string",
                 "format": "decimal",
-                "description": "Exact PostgreSQL NUMERIC value serialized without floating-point conversion."
+                "description": "Exact fixed-point database value serialized without floating-point conversion."
               },
               {
                 "type": "null"
@@ -1460,7 +3753,7 @@
               {
                 "type": "string",
                 "format": "decimal",
-                "description": "Exact PostgreSQL NUMERIC value serialized without floating-point conversion."
+                "description": "Exact fixed-point database value serialized without floating-point conversion."
               },
               {
                 "type": "null"
@@ -1473,7 +3766,7 @@
               {
                 "type": "string",
                 "format": "decimal",
-                "description": "Exact PostgreSQL NUMERIC value serialized without floating-point conversion."
+                "description": "Exact fixed-point database value serialized without floating-point conversion."
               },
               {
                 "type": "null"
@@ -1486,7 +3779,7 @@
               {
                 "type": "string",
                 "format": "decimal",
-                "description": "Exact PostgreSQL NUMERIC value serialized without floating-point conversion."
+                "description": "Exact fixed-point database value serialized without floating-point conversion."
               },
               {
                 "type": "null"
@@ -1499,7 +3792,7 @@
               {
                 "type": "string",
                 "format": "decimal",
-                "description": "Exact PostgreSQL NUMERIC value serialized without floating-point conversion."
+                "description": "Exact fixed-point database value serialized without floating-point conversion."
               },
               {
                 "type": "null"
@@ -1788,6 +4081,351 @@
         ],
         "title": "RunSummaryResponse",
         "description": "0..1 stored summary with a status-derived absence explanation."
+      },
+      "Trade": {
+        "properties": {
+          "trade_id": {
+            "type": "integer",
+            "title": "Trade Id"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "backtest_run_id": {
+            "type": "string",
+            "title": "Backtest Run Id"
+          },
+          "source_type": {
+            "type": "string",
+            "title": "Source Type"
+          },
+          "symbol": {
+            "type": "string",
+            "title": "Symbol"
+          },
+          "side": {
+            "type": "string",
+            "title": "Side"
+          },
+          "market_type": {
+            "type": "string",
+            "title": "Market Type"
+          },
+          "entry_execution_id": {
+            "type": "integer",
+            "title": "Entry Execution Id"
+          },
+          "exit_execution_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Execution Id"
+          },
+          "entry_price": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Entry Price",
+            "description": "Exact fixed-point database value serialized without floating-point conversion."
+          },
+          "entry_quantity": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Entry Quantity",
+            "description": "Exact fixed-point database value serialized without floating-point conversion."
+          },
+          "entry_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Entry Time"
+          },
+          "exit_price": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "decimal",
+                "description": "Exact fixed-point database value serialized without floating-point conversion."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Price"
+          },
+          "exit_quantity": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "decimal",
+                "description": "Exact fixed-point database value serialized without floating-point conversion."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Quantity"
+          },
+          "exit_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Time"
+          },
+          "exit_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Reason"
+          },
+          "gross_pnl": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "decimal",
+                "description": "Exact fixed-point database value serialized without floating-point conversion."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gross Pnl"
+          },
+          "total_fee": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Total Fee",
+            "description": "Exact fixed-point database value serialized without floating-point conversion."
+          },
+          "slippage": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Slippage",
+            "description": "Exact fixed-point database value serialized without floating-point conversion."
+          },
+          "liquidation_penalty": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Liquidation Penalty",
+            "description": "Exact fixed-point database value serialized without floating-point conversion."
+          },
+          "funding_cost": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Funding Cost",
+            "description": "Exact fixed-point database value serialized without floating-point conversion."
+          },
+          "net_pnl": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "decimal",
+                "description": "Exact fixed-point database value serialized without floating-point conversion."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Net Pnl"
+          },
+          "return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return Pct"
+          },
+          "r0": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "decimal",
+                "description": "Exact fixed-point database value serialized without floating-point conversion."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "R0"
+          },
+          "r_multiple": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "R Multiple"
+          },
+          "leverage": {
+            "type": "integer",
+            "title": "Leverage"
+          },
+          "liquidated": {
+            "type": "boolean",
+            "title": "Liquidated"
+          },
+          "strategy_id": {
+            "type": "string",
+            "title": "Strategy Id"
+          },
+          "strategy_name": {
+            "type": "string",
+            "title": "Strategy Name"
+          },
+          "hold_duration_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hold Duration Seconds"
+          },
+          "signal_confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signal Confidence"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "trade_id",
+          "run_id",
+          "backtest_run_id",
+          "source_type",
+          "symbol",
+          "side",
+          "market_type",
+          "entry_execution_id",
+          "exit_execution_id",
+          "entry_price",
+          "entry_quantity",
+          "entry_time",
+          "exit_price",
+          "exit_quantity",
+          "exit_time",
+          "exit_reason",
+          "gross_pnl",
+          "total_fee",
+          "slippage",
+          "liquidation_penalty",
+          "funding_cost",
+          "net_pnl",
+          "return_pct",
+          "r0",
+          "r_multiple",
+          "leverage",
+          "liquidated",
+          "strategy_id",
+          "strategy_name",
+          "hold_duration_seconds",
+          "signal_confidence",
+          "reason"
+        ],
+        "title": "Trade"
+      },
+      "TradeFeature": {
+        "properties": {
+          "tfs_id": {
+            "type": "integer",
+            "title": "Tfs Id"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "trade_id": {
+            "type": "integer",
+            "title": "Trade Id"
+          },
+          "phase": {
+            "type": "string",
+            "title": "Phase"
+          },
+          "ts": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Ts"
+          },
+          "features_json": {
+            "$ref": "#/components/schemas/JsonValue"
+          },
+          "regime_tag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Regime Tag"
+          },
+          "excursion_r": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Excursion R"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tfs_id",
+          "run_id",
+          "trade_id",
+          "phase",
+          "ts",
+          "features_json",
+          "regime_tag",
+          "excursion_r"
+        ],
+        "title": "TradeFeature"
       },
       "ValidationError": {
         "properties": {

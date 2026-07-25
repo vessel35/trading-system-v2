@@ -1,6 +1,9 @@
 """FastAPI application for the P0 research catalog."""
 
-from datetime import datetime
+import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
+from datetime import UTC, datetime
 from typing import Annotated, Any, NoReturn
 
 import psycopg
@@ -17,12 +20,29 @@ from web_api.database import (
     CatalogConnection,
     catalog_connection,
 )
+from web_api.evidence import (
+    EvidenceRepository,
+    EvidenceUnavailableError,
+    open_evidence,
+)
 from web_api.models import (
+    CandidateEvent,
+    ChartSummary,
+    DrawdownEpisode,
+    EquityPoint,
     ErrorResponse,
+    EvidenceCollection,
+    Execution,
+    FundingSettlement,
     HealthResponse,
+    IntegrityCheck,
+    OutcomeBucket,
+    Position,
     RunHeader,
     RunListResponse,
     RunSummaryResponse,
+    Trade,
+    TradeFeature,
 )
 from web_api.repository import CatalogRepository, RunListQuery
 
@@ -47,8 +67,8 @@ app = FastAPI(
     title="Backtest Research Web API",
     version=web_api_version,
     description=(
-        "Read-only P0 backend-for-frontend. Stored catalog summaries are returned "
-        "without metric or decision recomputation."
+        "Read-only backend-for-frontend. Stored catalog summaries and immutable "
+        "Evidence are returned without metric or decision recomputation."
     ),
 )
 
@@ -144,6 +164,40 @@ async def runtime_configuration_error_handler(
     )
 
 
+@app.exception_handler(EvidenceUnavailableError)
+async def evidence_unavailable_error_handler(
+    _request: Request,
+    exc: EvidenceUnavailableError,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=409,
+        content={
+            "error": {
+                "code": "evidence_unavailable",
+                "message": "Detailed Evidence for this run is unavailable.",
+                "details": {"reason": exc.reason},
+            }
+        },
+    )
+
+
+@app.exception_handler(sqlite3.Error)
+async def evidence_database_error_handler(
+    _request: Request,
+    _exc: sqlite3.Error,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=409,
+        content={
+            "error": {
+                "code": "evidence_unavailable",
+                "message": "Detailed Evidence for this run is unavailable.",
+                "details": {"reason": "evidence_query_failed"},
+            }
+        },
+    )
+
+
 def repository(
     connection: Annotated[CatalogConnection, Depends(catalog_connection)],
 ) -> CatalogRepository:
@@ -157,6 +211,33 @@ def not_found(run_id: str) -> NoReturn:
         message=f"Backtest run '{run_id}' does not exist.",
         details={"run_id": run_id},
     )
+
+
+@contextmanager
+def evidence_repository(
+    catalog: CatalogRepository,
+    run_id: str,
+) -> Iterator[EvidenceRepository]:
+    found, evidence_path = catalog.get_evidence_path(run_id)
+    if not found:
+        not_found(run_id)
+    with open_evidence(evidence_path) as connection:
+        yield EvidenceRepository(connection)
+
+
+def _utc_datetime(value: datetime | None) -> datetime | None:
+    """Normalize temporal filters, treating offset-free ISO input as UTC."""
+
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _epoch_ms(value: datetime | None) -> int | None:
+    normalized = _utc_datetime(value)
+    return int(normalized.timestamp() * 1000) if normalized is not None else None
 
 
 @app.get(
@@ -197,12 +278,12 @@ def list_runs(
         gate_passed=gate_passed,
         sweep_id=sweep_id,
         config_hash=config_hash,
-        created_at_from=created_at_from,
-        created_at_to=created_at_to,
-        period_start_from=period_start_from,
-        period_start_to=period_start_to,
-        period_end_from=period_end_from,
-        period_end_to=period_end_to,
+        created_at_from=_utc_datetime(created_at_from),
+        created_at_to=_utc_datetime(created_at_to),
+        period_start_from=_utc_datetime(period_start_from),
+        period_start_to=_utc_datetime(period_start_to),
+        period_end_from=_utc_datetime(period_end_from),
+        period_end_to=_utc_datetime(period_end_to),
         sort=sort,
         limit=limit,
         offset=offset,
@@ -246,6 +327,276 @@ def get_run_summary(
     if summary is None:
         not_found(run_id)
     return summary
+
+
+@app.get(
+    "/api/v1/runs/{run_id}/trades",
+    response_model=EvidenceCollection[Trade],
+    responses={
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+def get_trades(
+    run_id: str,
+    repo: Annotated[CatalogRepository, Depends(repository)],
+    after_seq: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=200)] = 200,
+    exit_reason: str | None = None,
+    side: str | None = None,
+    liquidated: bool | None = None,
+    entry_time_from: datetime | None = None,
+    entry_time_to: datetime | None = None,
+) -> EvidenceCollection[Trade]:
+    with evidence_repository(repo, run_id) as evidence:
+        return evidence.trades(
+            after_seq=after_seq,
+            limit=limit,
+            exit_reason=exit_reason,
+            side=side,
+            liquidated=liquidated,
+            entry_time_from=_epoch_ms(entry_time_from),
+            entry_time_to=_epoch_ms(entry_time_to),
+        )
+
+
+@app.get(
+    "/api/v1/runs/{run_id}/executions",
+    response_model=EvidenceCollection[Execution],
+    responses={
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+def get_executions(
+    run_id: str,
+    repo: Annotated[CatalogRepository, Depends(repository)],
+    after_seq: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=200)] = 200,
+    trade_id: Annotated[int | None, Query(ge=1)] = None,
+) -> EvidenceCollection[Execution]:
+    with evidence_repository(repo, run_id) as evidence:
+        return evidence.executions(
+            after_seq=after_seq,
+            limit=limit,
+            trade_id=trade_id,
+        )
+
+
+@app.get(
+    "/api/v1/runs/{run_id}/funding-settlements",
+    response_model=EvidenceCollection[FundingSettlement],
+    responses={
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+def get_funding_settlements(
+    run_id: str,
+    repo: Annotated[CatalogRepository, Depends(repository)],
+    after_seq: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=200)] = 200,
+    trade_id: Annotated[int | None, Query(ge=1)] = None,
+) -> EvidenceCollection[FundingSettlement]:
+    with evidence_repository(repo, run_id) as evidence:
+        return evidence.funding_settlements(
+            after_seq=after_seq,
+            limit=limit,
+            trade_id=trade_id,
+        )
+
+
+@app.get(
+    "/api/v1/runs/{run_id}/equity",
+    response_model=EvidenceCollection[EquityPoint],
+    responses={
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+def get_equity(
+    run_id: str,
+    repo: Annotated[CatalogRepository, Depends(repository)],
+    after_seq: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=200)] = 200,
+) -> EvidenceCollection[EquityPoint]:
+    with evidence_repository(repo, run_id) as evidence:
+        return evidence.equity(after_seq=after_seq, limit=limit)
+
+
+@app.get(
+    "/api/v1/runs/{run_id}/chart-summaries",
+    response_model=EvidenceCollection[ChartSummary],
+    responses={
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+def get_chart_summaries(
+    run_id: str,
+    repo: Annotated[CatalogRepository, Depends(repository)],
+    after_seq: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=200)] = 200,
+    series_name: str | None = None,
+) -> EvidenceCollection[ChartSummary]:
+    with evidence_repository(repo, run_id) as evidence:
+        return evidence.chart_summaries(
+            after_seq=after_seq,
+            limit=limit,
+            series_name=series_name,
+        )
+
+
+@app.get(
+    "/api/v1/runs/{run_id}/positions",
+    response_model=EvidenceCollection[Position],
+    responses={
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+def get_positions(
+    run_id: str,
+    repo: Annotated[CatalogRepository, Depends(repository)],
+    after_seq: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=200)] = 200,
+    trade_id: Annotated[int | None, Query(ge=1)] = None,
+) -> EvidenceCollection[Position]:
+    with evidence_repository(repo, run_id) as evidence:
+        return evidence.positions(
+            after_seq=after_seq,
+            limit=limit,
+            trade_id=trade_id,
+        )
+
+
+@app.get(
+    "/api/v1/runs/{run_id}/integrity-checks",
+    response_model=EvidenceCollection[IntegrityCheck],
+    responses={
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+def get_integrity_checks(
+    run_id: str,
+    repo: Annotated[CatalogRepository, Depends(repository)],
+    after_seq: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=200)] = 200,
+) -> EvidenceCollection[IntegrityCheck]:
+    with evidence_repository(repo, run_id) as evidence:
+        return evidence.integrity_checks(after_seq=after_seq, limit=limit)
+
+
+@app.get(
+    "/api/v1/runs/{run_id}/outcome-buckets",
+    response_model=EvidenceCollection[OutcomeBucket],
+    responses={
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+def get_outcome_buckets(
+    run_id: str,
+    repo: Annotated[CatalogRepository, Depends(repository)],
+    after_seq: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=200)] = 200,
+    subject_kind: str | None = None,
+    subject_id: Annotated[int | None, Query(ge=1)] = None,
+    bucket_name: str | None = None,
+) -> EvidenceCollection[OutcomeBucket]:
+    with evidence_repository(repo, run_id) as evidence:
+        return evidence.outcome_buckets(
+            after_seq=after_seq,
+            limit=limit,
+            subject_kind=subject_kind,
+            subject_id=subject_id,
+            bucket_name=bucket_name,
+        )
+
+
+@app.get(
+    "/api/v1/runs/{run_id}/drawdown-episodes",
+    response_model=EvidenceCollection[DrawdownEpisode],
+    responses={
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+def get_drawdown_episodes(
+    run_id: str,
+    repo: Annotated[CatalogRepository, Depends(repository)],
+    after_seq: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=200)] = 200,
+    kind: str | None = None,
+) -> EvidenceCollection[DrawdownEpisode]:
+    with evidence_repository(repo, run_id) as evidence:
+        return evidence.drawdown_episodes(
+            after_seq=after_seq,
+            limit=limit,
+            kind=kind,
+        )
+
+
+@app.get(
+    "/api/v1/runs/{run_id}/trade-features",
+    response_model=EvidenceCollection[TradeFeature],
+    responses={
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+def get_trade_features(
+    run_id: str,
+    repo: Annotated[CatalogRepository, Depends(repository)],
+    after_seq: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=200)] = 200,
+    trade_id: Annotated[int | None, Query(ge=1)] = None,
+    phase: str | None = None,
+) -> EvidenceCollection[TradeFeature]:
+    with evidence_repository(repo, run_id) as evidence:
+        return evidence.trade_features(
+            after_seq=after_seq,
+            limit=limit,
+            trade_id=trade_id,
+            phase=phase,
+        )
+
+
+@app.get(
+    "/api/v1/runs/{run_id}/candidate-events",
+    response_model=EvidenceCollection[CandidateEvent],
+    responses={
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+def get_candidate_events(
+    run_id: str,
+    repo: Annotated[CatalogRepository, Depends(repository)],
+    after_seq: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=200)] = 200,
+    linked_trade_id: Annotated[int | None, Query(ge=1)] = None,
+    realized: bool | None = None,
+) -> EvidenceCollection[CandidateEvent]:
+    with evidence_repository(repo, run_id) as evidence:
+        return evidence.candidate_events(
+            after_seq=after_seq,
+            limit=limit,
+            linked_trade_id=linked_trade_id,
+            realized=realized,
+        )
 
 
 @app.get(

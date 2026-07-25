@@ -232,6 +232,16 @@ class CatalogRepository:
             summary=summary,
         )
 
+    def get_evidence_path(self, run_id: str) -> tuple[bool, str | None]:
+        row = self._connection.execute(
+            "SELECT evidence_path FROM public.backtest_run WHERE run_id = %s",
+            (run_id,),
+        ).fetchone()
+        if row is None:
+            return False, None
+        value = row["evidence_path"]
+        return True, str(value) if value is not None else None
+
     def health(self, *, core_lib_version: str, web_api_version: str) -> HealthResponse:
         probe = self._connection.execute(
             """

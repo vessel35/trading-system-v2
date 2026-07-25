@@ -55,6 +55,193 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runs/{run_id}/trades": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Trades */
+        get: operations["get_trades_api_v1_runs__run_id__trades_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/executions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Executions */
+        get: operations["get_executions_api_v1_runs__run_id__executions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/funding-settlements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Funding Settlements */
+        get: operations["get_funding_settlements_api_v1_runs__run_id__funding_settlements_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/equity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Equity */
+        get: operations["get_equity_api_v1_runs__run_id__equity_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/chart-summaries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Chart Summaries */
+        get: operations["get_chart_summaries_api_v1_runs__run_id__chart_summaries_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/positions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Positions */
+        get: operations["get_positions_api_v1_runs__run_id__positions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/integrity-checks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Integrity Checks */
+        get: operations["get_integrity_checks_api_v1_runs__run_id__integrity_checks_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/outcome-buckets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Outcome Buckets */
+        get: operations["get_outcome_buckets_api_v1_runs__run_id__outcome_buckets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/drawdown-episodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Drawdown Episodes */
+        get: operations["get_drawdown_episodes_api_v1_runs__run_id__drawdown_episodes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/trade-features": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Trade Features */
+        get: operations["get_trade_features_api_v1_runs__run_id__trade_features_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/candidate-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Candidate Events */
+        get: operations["get_candidate_events_api_v1_runs__run_id__candidate_events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health": {
         parameters: {
             query?: never;
@@ -76,6 +263,33 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** CandidateEvent */
+        CandidateEvent: {
+            /** Candidate Id */
+            candidate_id: number;
+            /** Run Id */
+            run_id: string;
+            /**
+             * Ts
+             * Format: date-time
+             */
+            ts: string;
+            /** Symbol */
+            symbol: string;
+            /** Trigger Rule */
+            trigger_rule: string;
+            passed_filters_json: components["schemas"]["JsonValue"];
+            /** Blocked By */
+            blocked_by: string | null;
+            /** Would Be Side */
+            would_be_side: string | null;
+            /** Would Be Qty */
+            would_be_qty: string | null;
+            /** Realized */
+            realized: boolean;
+            /** Linked Trade Id */
+            linked_trade_id: number | null;
+        };
         /** CatalogHealth */
         CatalogHealth: {
             /**
@@ -92,6 +306,151 @@ export interface components {
             /** Schema Version */
             schema_version: string | null;
         };
+        /** ChartSummary */
+        ChartSummary: {
+            /** Summary Seq */
+            summary_seq: number;
+            /** Run Id */
+            run_id: string;
+            /** Series Name */
+            series_name: string;
+            /**
+             * Bucket Ts
+             * Format: date-time
+             */
+            bucket_ts: string;
+            /** Value */
+            value: number | null;
+            payload_json: components["schemas"]["JsonValue"] | null;
+        };
+        /**
+         * CursorPage
+         * @description Evidence cursor metadata.
+         */
+        CursorPage: {
+            /** Limit */
+            limit: number;
+            /** After Seq */
+            after_seq: number;
+            /** Next After Seq */
+            next_after_seq: number | null;
+            /** Total */
+            total: number;
+            /** Has More */
+            has_more: boolean;
+        };
+        /** DrawdownEpisode */
+        DrawdownEpisode: {
+            /** Episode Id */
+            episode_id: number;
+            /** Run Id */
+            run_id: string;
+            /** Kind */
+            kind: string;
+            /**
+             * Start Ts
+             * Format: date-time
+             */
+            start_ts: string;
+            /**
+             * End Ts
+             * Format: date-time
+             */
+            end_ts: string;
+            /** Recovery Ts */
+            recovery_ts: string | null;
+            /**
+             * Peak Equity
+             * Format: decimal
+             * @description Exact fixed-point database value serialized without floating-point conversion.
+             */
+            peak_equity: string;
+            /**
+             * Trough Equity
+             * Format: decimal
+             * @description Exact fixed-point database value serialized without floating-point conversion.
+             */
+            trough_equity: string;
+            /** Depth Pct */
+            depth_pct: number;
+            /** Duration Seconds */
+            duration_seconds: number;
+            /** Trade Count */
+            trade_count: number;
+            contributing_trades_json: components["schemas"]["JsonValue"] | null;
+        };
+        /** EquityPoint */
+        EquityPoint: {
+            /** Equity Seq */
+            equity_seq: number;
+            /** Run Id */
+            run_id: string;
+            /**
+             * Ts
+             * Format: date-time
+             */
+            ts: string;
+            /**
+             * Cash Balance
+             * Format: decimal
+             * @description Exact fixed-point database value serialized without floating-point conversion.
+             */
+            cash_balance: string;
+            /**
+             * Position Value
+             * Format: decimal
+             * @description Exact fixed-point database value serialized without floating-point conversion.
+             */
+            position_value: string;
+            /**
+             * Total Equity
+             * Format: decimal
+             * @description Exact fixed-point database value serialized without floating-point conversion.
+             */
+            total_equity: string;
+            /** Intrabar Low Equity */
+            intrabar_low_equity: string | null;
+            /**
+             * Realized Pnl Cum
+             * Format: decimal
+             * @description Exact fixed-point database value serialized without floating-point conversion.
+             */
+            realized_pnl_cum: string;
+            /**
+             * Unrealized Pnl
+             * Format: decimal
+             * @description Exact fixed-point database value serialized without floating-point conversion.
+             */
+            unrealized_pnl: string;
+            /**
+             * Fee Cum
+             * Format: decimal
+             * @description Exact fixed-point database value serialized without floating-point conversion.
+             */
+            fee_cum: string;
+            /**
+             * Slippage Cum
+             * Format: decimal
+             * @description Exact fixed-point database value serialized without floating-point conversion.
+             */
+            slippage_cum: string;
+            /**
+             * Funding Cum
+             * Format: decimal
+             * @description Exact fixed-point database value serialized without floating-point conversion.
+             */
+            funding_cum: string;
+            /**
+             * Peak Equity
+             * Format: decimal
+             * @description Exact fixed-point database value serialized without floating-point conversion.
+             */
+            peak_equity: string;
+            /** Drawdown Pct */
+            drawdown_pct: number;
+            /** Open Positions */
+            open_positions: number;
+        };
         /** ErrorDetail */
         ErrorDetail: {
             /** Code */
@@ -103,6 +462,194 @@ export interface components {
         /** ErrorResponse */
         ErrorResponse: {
             error: components["schemas"]["ErrorDetail"];
+        };
+        /** EvidenceCollection[CandidateEvent] */
+        EvidenceCollection_CandidateEvent_: {
+            /** Data */
+            data: components["schemas"]["CandidateEvent"][];
+            page: components["schemas"]["CursorPage"];
+        };
+        /** EvidenceCollection[ChartSummary] */
+        EvidenceCollection_ChartSummary_: {
+            /** Data */
+            data: components["schemas"]["ChartSummary"][];
+            page: components["schemas"]["CursorPage"];
+        };
+        /** EvidenceCollection[DrawdownEpisode] */
+        EvidenceCollection_DrawdownEpisode_: {
+            /** Data */
+            data: components["schemas"]["DrawdownEpisode"][];
+            page: components["schemas"]["CursorPage"];
+        };
+        /** EvidenceCollection[EquityPoint] */
+        EvidenceCollection_EquityPoint_: {
+            /** Data */
+            data: components["schemas"]["EquityPoint"][];
+            page: components["schemas"]["CursorPage"];
+        };
+        /** EvidenceCollection[Execution] */
+        EvidenceCollection_Execution_: {
+            /** Data */
+            data: components["schemas"]["Execution"][];
+            page: components["schemas"]["CursorPage"];
+        };
+        /** EvidenceCollection[FundingSettlement] */
+        EvidenceCollection_FundingSettlement_: {
+            /** Data */
+            data: components["schemas"]["FundingSettlement"][];
+            page: components["schemas"]["CursorPage"];
+        };
+        /** EvidenceCollection[IntegrityCheck] */
+        EvidenceCollection_IntegrityCheck_: {
+            /** Data */
+            data: components["schemas"]["IntegrityCheck"][];
+            page: components["schemas"]["CursorPage"];
+        };
+        /** EvidenceCollection[OutcomeBucket] */
+        EvidenceCollection_OutcomeBucket_: {
+            /** Data */
+            data: components["schemas"]["OutcomeBucket"][];
+            page: components["schemas"]["CursorPage"];
+        };
+        /** EvidenceCollection[Position] */
+        EvidenceCollection_Position_: {
+            /** Data */
+            data: components["schemas"]["Position"][];
+            page: components["schemas"]["CursorPage"];
+        };
+        /** EvidenceCollection[TradeFeature] */
+        EvidenceCollection_TradeFeature_: {
+            /** Data */
+            data: components["schemas"]["TradeFeature"][];
+            page: components["schemas"]["CursorPage"];
+        };
+        /** EvidenceCollection[Trade] */
+        EvidenceCollection_Trade_: {
+            /** Data */
+            data: components["schemas"]["Trade"][];
+            page: components["schemas"]["CursorPage"];
+        };
+        /** Execution */
+        Execution: {
+            /** Execution Id */
+            execution_id: number;
+            /** Run Id */
+            run_id: string;
+            /** Trade Id */
+            trade_id: number | null;
+            /** Decision Id */
+            decision_id: number | null;
+            /** Order Id */
+            order_id: string;
+            /**
+             * Execution Ts
+             * Format: date-time
+             */
+            execution_ts: string;
+            /** Trigger Subcandle Ts */
+            trigger_subcandle_ts: string | null;
+            /** Symbol */
+            symbol: string;
+            /** Side */
+            side: string;
+            /** Position Side */
+            position_side: string;
+            /** Order Type */
+            order_type: string;
+            /**
+             * Reference Price
+             * Format: decimal
+             * @description Exact fixed-point database value serialized without floating-point conversion.
+             */
+            reference_price: string;
+            /**
+             * Price
+             * Format: decimal
+             * @description Exact fixed-point database value serialized without floating-point conversion.
+             */
+            price: string;
+            /**
+             * Quantity
+             * Format: decimal
+             * @description Exact fixed-point database value serialized without floating-point conversion.
+             */
+            quantity: string;
+            /**
+             * Notional
+             * Format: decimal
+             * @description Exact fixed-point database value serialized without floating-point conversion.
+             */
+            notional: string;
+            /**
+             * Fee
+             * Format: decimal
+             * @description Exact fixed-point database value serialized without floating-point conversion.
+             */
+            fee: string;
+            /**
+             * Slippage
+             * Format: decimal
+             * @description Exact fixed-point database value serialized without floating-point conversion.
+             */
+            slippage: string;
+            /** Liquidity */
+            liquidity: string;
+            /** Reduce Only */
+            reduce_only: boolean;
+            /** Exit Reason */
+            exit_reason: string | null;
+            /** Gap Filled */
+            gap_filled: boolean;
+            /** Qty Truncated */
+            qty_truncated: boolean;
+        };
+        /** FundingSettlement */
+        FundingSettlement: {
+            /** Settlement Id */
+            settlement_id: number;
+            /** Run Id */
+            run_id: string;
+            /** Trade Id */
+            trade_id: number;
+            /**
+             * Settled At
+             * Format: date-time
+             */
+            settled_at: string;
+            /** Symbol */
+            symbol: string;
+            /** Position Side */
+            position_side: string;
+            /** Funding Rate */
+            funding_rate: number;
+            /** Rate Source */
+            rate_source: string;
+            /**
+             * Settle Price
+             * Format: decimal
+             * @description Exact fixed-point database value serialized without floating-point conversion.
+             */
+            settle_price: string;
+            /** Settle Price Source */
+            settle_price_source: string;
+            /**
+             * Position Notional
+             * Format: decimal
+             * @description Exact fixed-point database value serialized without floating-point conversion.
+             */
+            position_notional: string;
+            /**
+             * Payment Amount
+             * Format: decimal
+             * @description Exact fixed-point database value serialized without floating-point conversion.
+             */
+            payment_amount: string;
+            /**
+             * Theoretical Payment Amount
+             * Format: decimal
+             * @description Exact fixed-point database value serialized without floating-point conversion.
+             */
+            theoretical_payment_amount: string;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -122,7 +669,45 @@ export interface components {
             /** Web Api Version */
             web_api_version: string;
         };
+        /** IntegrityCheck */
+        IntegrityCheck: {
+            /** Check Id */
+            check_id: number;
+            /** Run Id */
+            run_id: string;
+            /** Check Name */
+            check_name: string;
+            /** Passed */
+            passed: boolean;
+            detail_json: components["schemas"]["JsonValue"] | null;
+            /** Sample Ref */
+            sample_ref: string | null;
+            /**
+             * Checked At
+             * Format: date-time
+             */
+            checked_at: string;
+        };
         JsonValue: unknown;
+        /** OutcomeBucket */
+        OutcomeBucket: {
+            /** Bucket Id */
+            bucket_id: number;
+            /** Run Id */
+            run_id: string;
+            /** Subject Kind */
+            subject_kind: string;
+            /** Subject Id */
+            subject_id: number;
+            /** Bucket Name */
+            bucket_name: string;
+            /** Bucket Value */
+            bucket_value: string;
+            /** R Multiple */
+            r_multiple: number | null;
+            /** Note */
+            note: string | null;
+        };
         /**
          * Page
          * @description Offset page metadata.
@@ -136,6 +721,82 @@ export interface components {
             total: number;
             /** Has More */
             has_more: boolean;
+        };
+        /** Position */
+        Position: {
+            /** Position Seq */
+            position_seq: number;
+            /** Run Id */
+            run_id: string;
+            /** Trade Id */
+            trade_id: number | null;
+            /**
+             * Ts
+             * Format: date-time
+             */
+            ts: string;
+            /** Symbol */
+            symbol: string;
+            /** Side */
+            side: string;
+            /**
+             * Quantity
+             * Format: decimal
+             * @description Exact fixed-point database value serialized without floating-point conversion.
+             */
+            quantity: string;
+            /**
+             * Average Price
+             * Format: decimal
+             * @description Exact fixed-point database value serialized without floating-point conversion.
+             */
+            average_price: string;
+            /**
+             * Total Cost
+             * Format: decimal
+             * @description Exact fixed-point database value serialized without floating-point conversion.
+             */
+            total_cost: string;
+            /**
+             * Current Price
+             * Format: decimal
+             * @description Exact fixed-point database value serialized without floating-point conversion.
+             */
+            current_price: string;
+            /**
+             * Mark Price
+             * Format: decimal
+             * @description Exact fixed-point database value serialized without floating-point conversion.
+             */
+            mark_price: string;
+            /** Mark Price Source */
+            mark_price_source: string;
+            /**
+             * Unrealized Pnl
+             * Format: decimal
+             * @description Exact fixed-point database value serialized without floating-point conversion.
+             */
+            unrealized_pnl: string;
+            /** Leverage */
+            leverage: number;
+            /** Margin Type */
+            margin_type: string;
+            /**
+             * Margin
+             * Format: decimal
+             * @description Exact fixed-point database value serialized without floating-point conversion.
+             */
+            margin: string;
+            /** Entry Price */
+            entry_price: string | null;
+            /** Liquidation Price */
+            liquidation_price: string | null;
+            /**
+             * Funding Fee Total
+             * Format: decimal
+             * @description Exact fixed-point database value serialized without floating-point conversion.
+             */
+            funding_fee_total: string;
         };
         /**
          * RunHeader
@@ -192,7 +853,7 @@ export interface components {
             /**
              * Initial Capital
              * Format: decimal
-             * @description Exact PostgreSQL NUMERIC value serialized without floating-point conversion.
+             * @description Exact fixed-point database value serialized without floating-point conversion.
              */
             initial_capital: string;
             /** Sizing Method */
@@ -373,7 +1034,7 @@ export interface components {
             /**
              * Initial Capital
              * Format: decimal
-             * @description Exact PostgreSQL NUMERIC value serialized without floating-point conversion.
+             * @description Exact fixed-point database value serialized without floating-point conversion.
              */
             initial_capital: string;
             /** Final Equity */
@@ -455,6 +1116,121 @@ export interface components {
              */
             summary_status: "available" | "pending" | "failed" | "orphaned" | "missing";
             summary: components["schemas"]["RunSummary"] | null;
+        };
+        /** Trade */
+        Trade: {
+            /** Trade Id */
+            trade_id: number;
+            /** Run Id */
+            run_id: string;
+            /** Backtest Run Id */
+            backtest_run_id: string;
+            /** Source Type */
+            source_type: string;
+            /** Symbol */
+            symbol: string;
+            /** Side */
+            side: string;
+            /** Market Type */
+            market_type: string;
+            /** Entry Execution Id */
+            entry_execution_id: number;
+            /** Exit Execution Id */
+            exit_execution_id: number | null;
+            /**
+             * Entry Price
+             * Format: decimal
+             * @description Exact fixed-point database value serialized without floating-point conversion.
+             */
+            entry_price: string;
+            /**
+             * Entry Quantity
+             * Format: decimal
+             * @description Exact fixed-point database value serialized without floating-point conversion.
+             */
+            entry_quantity: string;
+            /**
+             * Entry Time
+             * Format: date-time
+             */
+            entry_time: string;
+            /** Exit Price */
+            exit_price: string | null;
+            /** Exit Quantity */
+            exit_quantity: string | null;
+            /** Exit Time */
+            exit_time: string | null;
+            /** Exit Reason */
+            exit_reason: string | null;
+            /** Gross Pnl */
+            gross_pnl: string | null;
+            /**
+             * Total Fee
+             * Format: decimal
+             * @description Exact fixed-point database value serialized without floating-point conversion.
+             */
+            total_fee: string;
+            /**
+             * Slippage
+             * Format: decimal
+             * @description Exact fixed-point database value serialized without floating-point conversion.
+             */
+            slippage: string;
+            /**
+             * Liquidation Penalty
+             * Format: decimal
+             * @description Exact fixed-point database value serialized without floating-point conversion.
+             */
+            liquidation_penalty: string;
+            /**
+             * Funding Cost
+             * Format: decimal
+             * @description Exact fixed-point database value serialized without floating-point conversion.
+             */
+            funding_cost: string;
+            /** Net Pnl */
+            net_pnl: string | null;
+            /** Return Pct */
+            return_pct: number | null;
+            /** R0 */
+            r0: string | null;
+            /** R Multiple */
+            r_multiple: number | null;
+            /** Leverage */
+            leverage: number;
+            /** Liquidated */
+            liquidated: boolean;
+            /** Strategy Id */
+            strategy_id: string;
+            /** Strategy Name */
+            strategy_name: string;
+            /** Hold Duration Seconds */
+            hold_duration_seconds: number | null;
+            /** Signal Confidence */
+            signal_confidence: number | null;
+            /** Reason */
+            reason: string | null;
+        };
+        /** TradeFeature */
+        TradeFeature: {
+            /** Tfs Id */
+            tfs_id: number;
+            /** Run Id */
+            run_id: string;
+            /** Trade Id */
+            trade_id: number;
+            /** Phase */
+            phase: string;
+            /**
+             * Ts
+             * Format: date-time
+             */
+            ts: string;
+            features_json: components["schemas"]["JsonValue"];
+            /** Regime Tag */
+            regime_tag: string | null;
+            /** Excursion R */
+            excursion_r: number | null;
         };
         /** ValidationError */
         ValidationError: {
@@ -598,6 +1374,595 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_trades_api_v1_runs__run_id__trades_get: {
+        parameters: {
+            query?: {
+                after_seq?: number;
+                limit?: number;
+                exit_reason?: string | null;
+                side?: string | null;
+                liquidated?: boolean | null;
+                entry_time_from?: string | null;
+                entry_time_to?: string | null;
+            };
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceCollection_Trade_"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_executions_api_v1_runs__run_id__executions_get: {
+        parameters: {
+            query?: {
+                after_seq?: number;
+                limit?: number;
+                trade_id?: number | null;
+            };
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceCollection_Execution_"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_funding_settlements_api_v1_runs__run_id__funding_settlements_get: {
+        parameters: {
+            query?: {
+                after_seq?: number;
+                limit?: number;
+                trade_id?: number | null;
+            };
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceCollection_FundingSettlement_"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_equity_api_v1_runs__run_id__equity_get: {
+        parameters: {
+            query?: {
+                after_seq?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceCollection_EquityPoint_"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_chart_summaries_api_v1_runs__run_id__chart_summaries_get: {
+        parameters: {
+            query?: {
+                after_seq?: number;
+                limit?: number;
+                series_name?: string | null;
+            };
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceCollection_ChartSummary_"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_positions_api_v1_runs__run_id__positions_get: {
+        parameters: {
+            query?: {
+                after_seq?: number;
+                limit?: number;
+                trade_id?: number | null;
+            };
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceCollection_Position_"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_integrity_checks_api_v1_runs__run_id__integrity_checks_get: {
+        parameters: {
+            query?: {
+                after_seq?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceCollection_IntegrityCheck_"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_outcome_buckets_api_v1_runs__run_id__outcome_buckets_get: {
+        parameters: {
+            query?: {
+                after_seq?: number;
+                limit?: number;
+                subject_kind?: string | null;
+                subject_id?: number | null;
+                bucket_name?: string | null;
+            };
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceCollection_OutcomeBucket_"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_drawdown_episodes_api_v1_runs__run_id__drawdown_episodes_get: {
+        parameters: {
+            query?: {
+                after_seq?: number;
+                limit?: number;
+                kind?: string | null;
+            };
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceCollection_DrawdownEpisode_"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_trade_features_api_v1_runs__run_id__trade_features_get: {
+        parameters: {
+            query?: {
+                after_seq?: number;
+                limit?: number;
+                trade_id?: number | null;
+                phase?: string | null;
+            };
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceCollection_TradeFeature_"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_candidate_events_api_v1_runs__run_id__candidate_events_get: {
+        parameters: {
+            query?: {
+                after_seq?: number;
+                limit?: number;
+                linked_trade_id?: number | null;
+                realized?: boolean | null;
+            };
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceCollection_CandidateEvent_"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

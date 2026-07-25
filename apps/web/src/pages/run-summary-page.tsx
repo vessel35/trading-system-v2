@@ -10,11 +10,15 @@ import {
   ShieldCheck,
   XCircle,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useLocation } from "wouter";
 
 import type { RunSummary } from "../api/client";
 import { Badge, type BadgeProps } from "../components/ui/badge";
+import { EquityDrawdownTab } from "../components/evidence/equity-drawdown-tab";
+import { IntegrityCostTab } from "../components/evidence/integrity-cost-tab";
+import { TradeDrawer } from "../components/evidence/trade-drawer";
+import { TradesTab } from "../components/evidence/trades-tab";
 import { Button } from "../components/ui/button";
 import {
   Card,
@@ -27,6 +31,7 @@ import { Skeleton } from "../components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { useComparisonBasket } from "../contexts/comparison-basket";
 import { useRun, useRunSummary } from "../hooks/use-catalog";
+import { useTrades } from "../hooks/use-evidence";
 import {
   cn,
   formatDecimalString,
@@ -315,7 +320,9 @@ export function RunSummaryPage({ runId }: { runId: string }) {
   const [, navigate] = useLocation();
   const runQuery = useRun(runId);
   const summaryQuery = useRunSummary(runId);
+  const tradesQuery = useTrades(runId);
   const basket = useComparisonBasket();
+  const [selectedTradeId, setSelectedTradeId] = useState<number | null>(null);
 
   if (runQuery.isLoading || summaryQuery.isLoading) {
     return (
@@ -450,10 +457,10 @@ export function RunSummaryPage({ runId }: { runId: string }) {
         <div className="overflow-x-auto scrollbar-thin">
           <TabsList className="min-w-max">
             <TabsTrigger value="overview">개요</TabsTrigger>
-            <TabsTrigger value="equity" disabled>
+            <TabsTrigger value="equity">
               자본곡선·DD
             </TabsTrigger>
-            <TabsTrigger value="trades" disabled>
+            <TabsTrigger value="trades">
               거래
             </TabsTrigger>
             <TabsTrigger value="chart" disabled>
@@ -462,7 +469,7 @@ export function RunSummaryPage({ runId }: { runId: string }) {
             <TabsTrigger value="signals" disabled>
               신호·의사결정
             </TabsTrigger>
-            <TabsTrigger value="integrity" disabled>
+            <TabsTrigger value="integrity">
               무결성·비용
             </TabsTrigger>
             <TabsTrigger value="research" disabled>
@@ -496,7 +503,24 @@ export function RunSummaryPage({ runId }: { runId: string }) {
             </Card>
           )}
         </TabsContent>
+        <TabsContent value="equity">
+          <EquityDrawdownTab runId={runId} onSelectTrade={setSelectedTradeId} />
+        </TabsContent>
+        <TabsContent value="trades">
+          <TradesTab runId={runId} onSelectTrade={setSelectedTradeId} />
+        </TabsContent>
+        <TabsContent value="integrity">
+          <IntegrityCostTab runId={runId} summary={summaryEnvelope.summary} />
+        </TabsContent>
       </Tabs>
+
+      <TradeDrawer
+        runId={runId}
+        trades={tradesQuery.data ?? []}
+        selectedTradeId={selectedTradeId}
+        onSelect={setSelectedTradeId}
+        onClose={() => setSelectedTradeId(null)}
+      />
 
       <div className="flex items-center justify-center gap-2 py-2 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
         <ShieldCheck className="h-3.5 w-3.5 text-teal-500" />

@@ -26,6 +26,7 @@ class DatabaseSettings:
     user: str
     password: str
     database: str
+    evidence_root: Path
 
 
 def _repository_env() -> dict[str, str]:
@@ -63,6 +64,12 @@ def get_settings() -> DatabaseSettings:
         user=values["PGUSER"],
         password=values["PGPASSWORD"],
         database=values.get("BACKTEST_DB_NAME", "backtest_db"),
+        evidence_root=Path(
+            values.get(
+                "WEBAPI_EVIDENCE_ROOT",
+                str(Path(__file__).parents[3] / "var" / "evidence"),
+            )
+        ).expanduser(),
     )
 
 
