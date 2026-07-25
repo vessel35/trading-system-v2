@@ -3,7 +3,8 @@
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, JsonValue
+from backtest_service.config import RunConfig
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, SkipValidation
 
 DecimalString = Annotated[
     str,
@@ -582,3 +583,89 @@ class ErrorDetail(BaseModel):
 
 class ErrorResponse(BaseModel):
     error: ErrorDetail
+
+
+PrimaryMetric = Literal[
+    "pf",
+    "profit_factor",
+    "sortino",
+    "calmar",
+    "calmar_or_mar",
+    "mar",
+    "sqn",
+    "mdd",
+    "ror",
+    "sharpe",
+    "win_rate",
+    "payoff",
+    "expectancy_r",
+    "ulcer",
+    "kelly",
+    "trade_count",
+]
+
+
+class PreregistrationInput(BaseModel):
+    """Optional pre-run research claim consumed by the backtest engine."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    hypothesis: str | None = Field(default=None, max_length=2000)
+    primary_metric: PrimaryMetric | None = None
+    success_threshold: float | None = None
+    failure_threshold: float | None = None
+    higher_is_better: bool | None = None
+    declared_by: str | None = Field(default=None, max_length=200)
+
+
+class RunSubmission(BaseModel):
+    """Raw submission envelope; RunConfig is revalidated explicitly by the endpoint."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    config: SkipValidation[RunConfig]
+    prereg: PreregistrationInput | None = None
+
+
+JobStatusValue = Literal["QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "ORPHANED"]
+
+
+class JobError(BaseModel):
+    code: str
+    message: str
+
+
+class JobStatus(BaseModel):
+    job_id: str
+    status: JobStatusValue
+    catalog_status: str | None = None
+    updated_at: datetime
+    run_id: str | None = None
+    evidence_hash: str | None = None
+    integrity_status: str | None = None
+    summary_present: bool | None = None
+    error: JobError | None = None
+
+
+class RunAccepted(BaseModel):
+    job_id: str
+    status: Literal["QUEUED"]
+    events_url: str
+    status_url: str
+
+
+class StrategyOption(BaseModel):
+    strategy_id: str
+    display_name: str
+    strategy_version: str
+    supported_timeframes: list[str]
+    required_indicators: list[dict[str, object]]
+    min_history: int
+    default_params: dict[str, object]
+    is_active: bool
+    is_deprecated: bool
+    source: Literal["strategy_registry", "code_registry"]
+
+
+class StrategyListResponse(BaseModel):
+    data: list[StrategyOption]

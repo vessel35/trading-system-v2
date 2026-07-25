@@ -5,9 +5,10 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "web-api"
 version = "0.1.0"
-description = "Read-only FastAPI backend-for-frontend for the backtest research console."
+description = "Research BFF with read-only queries and one isolated dry-run trigger."
 requires-python = ">=3.12"
 dependencies = [
+    "backtest-service==1.5.0",
     "core-lib==0.2.0",
     "fastapi>=0.115",
     "psycopg[binary]>=3.2",
@@ -31,6 +32,7 @@ include = ["web_api*"]
 web_api = ["py.typed"]
 
 [tool.uv.sources]
+backtest-service = { path = "../backtest-service", editable = true }
 core-lib = { path = "../core-lib", editable = true }
 
 [tool.pytest.ini_options]
@@ -54,7 +56,7 @@ select = ["B", "E", "F", "I", "UP"]
 
 [tool.mypy]
 files = ["web_api", "tests", "scripts"]
-mypy_path = "$MYPY_CONFIG_FILE_DIR/../core-lib"
+mypy_path = "$MYPY_CONFIG_FILE_DIR/../core-lib:$MYPY_CONFIG_FILE_DIR/../backtest-service"
 python_version = "3.12"
 strict = true
 warn_unreachable = true

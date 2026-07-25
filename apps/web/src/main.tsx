@@ -5,6 +5,7 @@ import { createRoot } from "react-dom/client";
 import { App } from "./app";
 import { CatalogFilterProvider } from "./contexts/catalog-filters";
 import { ComparisonBasketProvider } from "./contexts/comparison-basket";
+import { RunJobsProvider } from "./contexts/run-jobs";
 import "./index.css";
 
 const queryClient = new QueryClient({
@@ -27,7 +28,9 @@ createRoot(root).render(
     <QueryClientProvider client={queryClient}>
       <CatalogFilterProvider>
         <ComparisonBasketProvider>
-          <App />
+          <RunJobsProvider>
+            <App />
+          </RunJobsProvider>
         </ComparisonBasketProvider>
       </CatalogFilterProvider>
     </QueryClientProvider>

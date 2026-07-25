@@ -1,31 +1,44 @@
 """FastAPI application for the P0 research catalog."""
 
 import sqlite3
-from collections.abc import Iterator
-from contextlib import contextmanager
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager, contextmanager
 from datetime import UTC, datetime
 from typing import Annotated, Any, NoReturn
 
 import psycopg
+from backtest_service.config import RunConfig
 from core_lib import __version__ as core_lib_version
-from fastapi import Depends, FastAPI, Query, Request
+from fastapi import Body, Depends, FastAPI, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import SkipValidation, ValidationError
 
 from web_api import __version__ as web_api_version
 from web_api.database import (
     CatalogConfigurationError,
     CatalogConnection,
     CryptoConnection,
+    SignalConnection,
     catalog_connection,
     crypto_connection,
+    signal_connection,
 )
 from web_api.evidence import (
     EvidenceRepository,
     EvidenceUnavailableError,
     open_evidence,
+)
+from web_api.jobs import (
+    TERMINAL_JOB_STATES,
+    shutdown_executor,
+    start_executor,
+    submit_job,
+)
+from web_api.jobs import (
+    registry as job_registry,
 )
 from web_api.models import (
     CandidateEvent,
@@ -43,19 +56,28 @@ from web_api.models import (
     HealthResponse,
     IndicatorSnapshot,
     IntegrityCheck,
+    JobStatus,
     MissedOpportunity,
     OutcomeBucket,
     Position,
     PreregistrationResponse,
+    RunAccepted,
     RunComparisonResponse,
     RunHeader,
     RunListResponse,
+    RunSubmission,
     RunSummaryResponse,
     Signal,
+    StrategyListResponse,
     Trade,
     TradeFeature,
 )
-from web_api.repository import CatalogRepository, MarketDataRepository, RunListQuery
+from web_api.repository import (
+    CatalogRepository,
+    MarketDataRepository,
+    RunListQuery,
+    StrategyRepository,
+)
 
 
 class ApiError(Exception):
@@ -74,13 +96,23 @@ class ApiError(Exception):
         super().__init__(message)
 
 
+@asynccontextmanager
+async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
+    start_executor()
+    try:
+        yield
+    finally:
+        shutdown_executor()
+
+
 app = FastAPI(
     title="Backtest Research Web API",
     version=web_api_version,
     description=(
-        "Read-only backend-for-frontend. Stored catalog summaries and immutable "
-        "Evidence are returned without metric or decision recomputation."
+        "Research backend-for-frontend. Reads remain physically read-only; the sole "
+        "write path triggers dry-run backtests that register catalog rows and Evidence."
     ),
+    lifespan=lifespan,
 )
 
 
@@ -97,14 +129,16 @@ def custom_openapi() -> dict[str, Any]:
     )
     paths = schema.get("paths")
     if isinstance(paths, dict):
-        for path_item in paths.values():
+        validation_paths = {"/api/v1/run-config:validate", "/api/v1/runs"}
+        for path, path_item in paths.items():
             if not isinstance(path_item, dict):
                 continue
-            for operation in path_item.values():
+            for method, operation in path_item.items():
                 if not isinstance(operation, dict):
                     continue
                 responses = operation.get("responses")
-                if isinstance(responses, dict):
+                keep_validation = path in validation_paths and method == "post"
+                if isinstance(responses, dict) and not keep_validation:
                     responses.pop("422", None)
     app.openapi_schema = schema
     return schema
@@ -129,16 +163,24 @@ async def api_error_handler(_request: Request, exc: ApiError) -> JSONResponse:
 
 @app.exception_handler(RequestValidationError)
 async def request_validation_error_handler(
-    _request: Request,
+    request: Request,
     exc: RequestValidationError,
 ) -> JSONResponse:
+    run_request = request.method == "POST" and request.url.path in {
+        "/api/v1/run-config:validate",
+        "/api/v1/runs",
+    }
     return JSONResponse(
-        status_code=400,
+        status_code=422 if run_request else 400,
         content={
             "error": {
-                "code": "invalid_query",
-                "message": "The request query is invalid.",
-                "details": jsonable_encoder(exc.errors()),
+                "code": "invalid_run_config" if run_request else "invalid_query",
+                "message": (
+                    "The run request is invalid."
+                    if run_request
+                    else "The request query is invalid."
+                ),
+                "details": _validation_details(exc),
             }
         },
     )
@@ -221,6 +263,48 @@ def market_repository(
     return MarketDataRepository(connection)
 
 
+def strategy_repository(
+    connection: Annotated[SignalConnection, Depends(signal_connection)],
+) -> StrategyRepository:
+    return StrategyRepository(connection)
+
+
+def _validation_details(exc: ValidationError | RequestValidationError) -> list[dict[str, str]]:
+    return [
+        {
+            "field": ".".join(str(part) for part in error["loc"]),
+            "message": str(error["msg"]),
+            "type": str(error["type"]),
+        }
+        for error in exc.errors()
+    ]
+
+
+def _validated_run_config(value: object) -> RunConfig:
+    try:
+        return RunConfig.model_validate(value)
+    except ValidationError as exc:
+        raise ApiError(
+            status_code=422,
+            code="invalid_run_config",
+            message="The run configuration is invalid.",
+            details=_validation_details(exc),
+        ) from exc
+    except NotImplementedError as exc:
+        raise ApiError(
+            status_code=422,
+            code="invalid_run_config",
+            message="The run configuration is invalid.",
+            details=[
+                {
+                    "field": "trigger_feed",
+                    "message": str(exc),
+                    "type": "not_implemented",
+                }
+            ],
+        ) from exc
+
+
 def not_found(run_id: str) -> NoReturn:
     raise ApiError(
         status_code=404,
@@ -255,6 +339,105 @@ def _utc_datetime(value: datetime | None) -> datetime | None:
 def _epoch_ms(value: datetime | None) -> int | None:
     normalized = _utc_datetime(value)
     return int(normalized.timestamp() * 1000) if normalized is not None else None
+
+
+@app.post(
+    "/api/v1/run-config:validate",
+    response_model=RunConfig,
+    responses={422: {"model": ErrorResponse}},
+)
+def validate_run_config(
+    payload: Annotated[SkipValidation[RunConfig], Body()],
+) -> RunConfig:
+    return _validated_run_config(payload)
+
+
+@app.post(
+    "/api/v1/runs",
+    response_model=RunAccepted,
+    status_code=202,
+    responses={422: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+)
+async def trigger_run(payload: RunSubmission) -> RunAccepted:
+    config = _validated_run_config(payload.config)
+    prereg = payload.prereg.model_dump(exclude_none=True) if payload.prereg is not None else {}
+    state = submit_job(config, prereg)
+    base = f"/api/v1/jobs/{state.job_id}"
+    return RunAccepted(
+        job_id=state.job_id,
+        status="QUEUED",
+        events_url=f"{base}/events",
+        status_url=f"{base}/status",
+    )
+
+
+def _job_not_found(job_id: str) -> NoReturn:
+    raise ApiError(
+        status_code=404,
+        code="job_not_found",
+        message=f"Dry-run job '{job_id}' does not exist.",
+        details={"job_id": job_id},
+    )
+
+
+@app.get(
+    "/api/v1/jobs/{job_id}/status",
+    response_model=JobStatus,
+    responses={404: {"model": ErrorResponse}},
+)
+def get_job_status(job_id: str) -> JobStatus:
+    state = job_registry.get(job_id)
+    if state is None:
+        _job_not_found(job_id)
+    return state.public_status()
+
+
+@app.get(
+    "/api/v1/jobs/{job_id}/events",
+    response_class=StreamingResponse,
+    responses={404: {"model": ErrorResponse}},
+)
+async def get_job_events(job_id: str) -> StreamingResponse:
+    if job_registry.get(job_id) is None:
+        _job_not_found(job_id)
+
+    async def stream() -> AsyncIterator[str]:
+        revision = -1
+        while True:
+            state = job_registry.get(job_id)
+            if state is None:
+                return
+            if state.revision != revision:
+                revision = state.revision
+                payload = state.public_status().model_dump_json(exclude_none=True)
+                yield f"event: status\ndata: {payload}\n\n"
+                if state.status in TERMINAL_JOB_STATES:
+                    return
+            try:
+                await job_registry.wait_for_change(job_id, revision, timeout=15.0)
+            except TimeoutError:
+                yield ": keepalive\n\n"
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.get(
+    "/api/v1/strategies",
+    response_model=StrategyListResponse,
+    responses={503: {"model": ErrorResponse}},
+)
+def list_strategies(
+    repo: Annotated[StrategyRepository, Depends(strategy_repository)],
+) -> StrategyListResponse:
+    return repo.list()
 
 
 @app.get(

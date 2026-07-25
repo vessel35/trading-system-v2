@@ -36,6 +36,14 @@ export type PreregistrationResponse =
   components["schemas"]["PreregistrationResponse"];
 export type RunComparisonItem = components["schemas"]["RunComparisonItem"];
 export type RunComparisonResponse = components["schemas"]["RunComparisonResponse"];
+export type RunConfigInput =
+  operations["validate_run_config_api_v1_run_config_validate_post"]["requestBody"]["content"]["application/json"];
+export type RunSubmission = components["schemas"]["RunSubmission"];
+export type RunAccepted = components["schemas"]["RunAccepted"];
+export type JobStatus = components["schemas"]["JobStatus"];
+export type StrategyOption = components["schemas"]["StrategyOption"];
+export type StrategyListResponse = components["schemas"]["StrategyListResponse"];
+export type PreregistrationInput = components["schemas"]["PreregistrationInput"];
 export type RunQuery = NonNullable<
   operations["list_runs_api_v1_runs_get"]["parameters"]["query"]
 >;

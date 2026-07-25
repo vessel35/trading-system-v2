@@ -14,6 +14,7 @@ from psycopg.rows import dict_row
 
 CatalogConnection = Connection[dict[str, Any]]
 CryptoConnection = Connection[dict[str, Any]]
+SignalConnection = Connection[dict[str, Any]]
 
 
 class CatalogConfigurationError(RuntimeError):
@@ -28,6 +29,7 @@ class DatabaseSettings:
     password: str
     database: str
     crypto_database: str
+    signal_database: str
     evidence_root: Path
 
 
@@ -67,6 +69,7 @@ def get_settings() -> DatabaseSettings:
         password=values["PGPASSWORD"],
         database=values.get("BACKTEST_DB_NAME", "backtest_db"),
         crypto_database=values.get("CRYPTO_DB_NAME", "crypto_data"),
+        signal_database=values.get("SIGNAL_DB_NAME", "signal_db"),
         evidence_root=Path(
             values.get(
                 "WEBAPI_EVIDENCE_ROOT",
@@ -121,4 +124,28 @@ def connect_crypto() -> Iterator[CryptoConnection]:
 
 def crypto_connection() -> Generator[CryptoConnection]:
     with connect_crypto() as connection:
+        yield connection
+
+
+@contextmanager
+def connect_signal() -> Iterator[SignalConnection]:
+    """Open a physically read-only strategy-registry transaction."""
+
+    settings = get_settings()
+    with psycopg.connect(
+        host=settings.host,
+        port=settings.port,
+        user=settings.user,
+        password=settings.password,
+        dbname=settings.signal_database,
+        options="-c default_transaction_read_only=on",
+        connect_timeout=5,
+        application_name="web-api-p2-strategy-reader",
+        row_factory=dict_row,
+    ) as connection:
+        yield connection
+
+
+def signal_connection() -> Generator[SignalConnection]:
+    with connect_signal() as connection:
         yield connection

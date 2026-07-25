@@ -4,6 +4,23 @@
  */
 
 export interface paths {
+    "/api/v1/run-config:validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Validate Run Config */
+        post: operations["validate_run_config_api_v1_run_config_validate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs": {
         parameters: {
             query?: never;
@@ -13,6 +30,58 @@ export interface paths {
         };
         /** List Runs */
         get: operations["list_runs_api_v1_runs_get"];
+        put?: never;
+        /** Trigger Run */
+        post: operations["trigger_run_api_v1_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/jobs/{job_id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Job Status */
+        get: operations["get_job_status_api_v1_jobs__job_id__status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/jobs/{job_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Job Events */
+        get: operations["get_job_events_api_v1_jobs__job_id__events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/strategies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Strategies */
+        get: operations["list_strategies_api_v1_strategies_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1093,6 +1162,39 @@ export interface components {
              */
             checked_at: string;
         };
+        /** JobError */
+        JobError: {
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+        };
+        /** JobStatus */
+        JobStatus: {
+            /** Job Id */
+            job_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "ORPHANED";
+            /** Catalog Status */
+            catalog_status?: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Run Id */
+            run_id?: string | null;
+            /** Evidence Hash */
+            evidence_hash?: string | null;
+            /** Integrity Status */
+            integrity_status?: string | null;
+            /** Summary Present */
+            summary_present?: boolean | null;
+            error?: components["schemas"]["JobError"] | null;
+        };
         JsonValue: unknown;
         /** MissedOpportunity */
         MissedOpportunity: {
@@ -1253,11 +1355,43 @@ export interface components {
             /** Locked At */
             locked_at: string | null;
         };
+        /**
+         * PreregistrationInput
+         * @description Optional pre-run research claim consumed by the backtest engine.
+         */
+        PreregistrationInput: {
+            /** Hypothesis */
+            hypothesis?: string | null;
+            /** Primary Metric */
+            primary_metric?: ("pf" | "profit_factor" | "sortino" | "calmar" | "calmar_or_mar" | "mar" | "sqn" | "mdd" | "ror" | "sharpe" | "win_rate" | "payoff" | "expectancy_r" | "ulcer" | "kelly" | "trade_count") | null;
+            /** Success Threshold */
+            success_threshold?: number | null;
+            /** Failure Threshold */
+            failure_threshold?: number | null;
+            /** Higher Is Better */
+            higher_is_better?: boolean | null;
+            /** Declared By */
+            declared_by?: string | null;
+        };
         /** PreregistrationResponse */
         PreregistrationResponse: {
             /** Run Id */
             run_id: string;
             prereg: components["schemas"]["Preregistration"] | null;
+        };
+        /** RunAccepted */
+        RunAccepted: {
+            /** Job Id */
+            job_id: string;
+            /**
+             * Status
+             * @constant
+             */
+            status: "QUEUED";
+            /** Events Url */
+            events_url: string;
+            /** Status Url */
+            status_url: string;
         };
         /** RunComparisonItem */
         RunComparisonItem: {
@@ -1280,6 +1414,92 @@ export interface components {
             compared_by: "run_ids" | "sweep_id";
             /** Sweep Id */
             sweep_id: string | null;
+        };
+        /**
+         * RunConfig
+         * @description A fully validated deterministic backtest-run configuration.
+         */
+        RunConfig: {
+            /** Run Name */
+            run_name: string;
+            /** Strategy Id */
+            strategy_id: string;
+            /** Params */
+            params?: {
+                [key: string]: unknown;
+            };
+            /** Symbol */
+            symbol: string;
+            /** Exchange */
+            exchange: string;
+            /** Timeframe */
+            timeframe: string;
+            /**
+             * Market Type
+             * @enum {string}
+             */
+            market_type: "spot" | "futures";
+            /** Data Source */
+            data_source: string;
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+            /**
+             * End
+             * Format: date-time
+             */
+            end: string;
+            /** Initial Capital */
+            initial_capital: string;
+            /**
+             * Seed
+             * @default 0
+             */
+            seed: number;
+            /**
+             * Sizing Method
+             * @default risk_based
+             * @enum {string}
+             */
+            sizing_method: "risk_based" | "pct";
+            /** Risk Per Trade */
+            risk_per_trade?: number | null;
+            /** Position Size Pct */
+            position_size_pct?: number | null;
+            /** Cost Values */
+            cost_values?: {
+                [key: string]: string;
+            };
+            /**
+             * Indicator Mode
+             * @default auto
+             * @enum {string}
+             */
+            indicator_mode: "auto" | "explicit" | "all";
+            /** Explicit Indicators */
+            explicit_indicators?: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * Trigger Feed
+             * @default tf_candle
+             * @enum {string}
+             */
+            trigger_feed: "tf_candle" | "m1_subcandle";
+            /**
+             * Fill Timing
+             * @default next_bar
+             * @enum {string}
+             */
+            fill_timing: "immediate" | "next_bar";
+            /** Profile Ref */
+            profile_ref: string;
+            /** Sweep */
+            sweep?: {
+                [key: string]: unknown;
+            } | null;
         };
         /**
          * RunHeader
@@ -1472,6 +1692,99 @@ export interface components {
             page: components["schemas"]["Page"];
         };
         /**
+         * RunSubmission
+         * @description Raw submission envelope; RunConfig is revalidated explicitly by the endpoint.
+         */
+        RunSubmission: {
+            /**
+             * RunConfig
+             * @description A fully validated deterministic backtest-run configuration.
+             */
+            config: {
+                /** Run Name */
+                run_name: string;
+                /** Strategy Id */
+                strategy_id: string;
+                /** Params */
+                params?: {
+                    [key: string]: unknown;
+                };
+                /** Symbol */
+                symbol: string;
+                /** Exchange */
+                exchange: string;
+                /** Timeframe */
+                timeframe: string;
+                /**
+                 * Market Type
+                 * @enum {string}
+                 */
+                market_type: "spot" | "futures";
+                /** Data Source */
+                data_source: string;
+                /**
+                 * Start
+                 * Format: date-time
+                 */
+                start: string;
+                /**
+                 * End
+                 * Format: date-time
+                 */
+                end: string;
+                /** Initial Capital */
+                initial_capital: number | string;
+                /**
+                 * Seed
+                 * @default 0
+                 */
+                seed: number;
+                /**
+                 * Sizing Method
+                 * @default risk_based
+                 * @enum {string}
+                 */
+                sizing_method: "risk_based" | "pct";
+                /** Risk Per Trade */
+                risk_per_trade?: number | null;
+                /** Position Size Pct */
+                position_size_pct?: number | null;
+                /** Cost Values */
+                cost_values?: {
+                    [key: string]: number | string;
+                };
+                /**
+                 * Indicator Mode
+                 * @default auto
+                 * @enum {string}
+                 */
+                indicator_mode: "auto" | "explicit" | "all";
+                /** Explicit Indicators */
+                explicit_indicators?: {
+                    [key: string]: unknown;
+                }[];
+                /**
+                 * Trigger Feed
+                 * @default tf_candle
+                 * @enum {string}
+                 */
+                trigger_feed: "tf_candle" | "m1_subcandle";
+                /**
+                 * Fill Timing
+                 * @default next_bar
+                 * @enum {string}
+                 */
+                fill_timing: "immediate" | "next_bar";
+                /** Profile Ref */
+                profile_ref: string;
+                /** Sweep */
+                sweep?: {
+                    [key: string]: unknown;
+                } | null;
+            };
+            prereg?: components["schemas"]["PreregistrationInput"] | null;
+        };
+        /**
          * RunSummary
          * @description Stored backtest_summary row; values are never recomputed here.
          */
@@ -1650,6 +1963,41 @@ export interface components {
             /** Is Warmup */
             is_warmup: boolean;
         };
+        /** StrategyListResponse */
+        StrategyListResponse: {
+            /** Data */
+            data: components["schemas"]["StrategyOption"][];
+        };
+        /** StrategyOption */
+        StrategyOption: {
+            /** Strategy Id */
+            strategy_id: string;
+            /** Display Name */
+            display_name: string;
+            /** Strategy Version */
+            strategy_version: string;
+            /** Supported Timeframes */
+            supported_timeframes: string[];
+            /** Required Indicators */
+            required_indicators: {
+                [key: string]: unknown;
+            }[];
+            /** Min History */
+            min_history: number;
+            /** Default Params */
+            default_params: {
+                [key: string]: unknown;
+            };
+            /** Is Active */
+            is_active: boolean;
+            /** Is Deprecated */
+            is_deprecated: boolean;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "strategy_registry" | "code_registry";
+        };
         /** Trade */
         Trade: {
             /** Trade Id */
@@ -1787,6 +2135,120 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    validate_run_config_api_v1_run_config_validate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Run Name */
+                    run_name: string;
+                    /** Strategy Id */
+                    strategy_id: string;
+                    /** Params */
+                    params?: {
+                        [key: string]: unknown;
+                    };
+                    /** Symbol */
+                    symbol: string;
+                    /** Exchange */
+                    exchange: string;
+                    /** Timeframe */
+                    timeframe: string;
+                    /**
+                     * Market Type
+                     * @enum {string}
+                     */
+                    market_type: "spot" | "futures";
+                    /** Data Source */
+                    data_source: string;
+                    /**
+                     * Start
+                     * Format: date-time
+                     */
+                    start: string;
+                    /**
+                     * End
+                     * Format: date-time
+                     */
+                    end: string;
+                    /** Initial Capital */
+                    initial_capital: number | string;
+                    /**
+                     * Seed
+                     * @default 0
+                     */
+                    seed?: number;
+                    /**
+                     * Sizing Method
+                     * @default risk_based
+                     * @enum {string}
+                     */
+                    sizing_method?: "risk_based" | "pct";
+                    /** Risk Per Trade */
+                    risk_per_trade?: number | null;
+                    /** Position Size Pct */
+                    position_size_pct?: number | null;
+                    /** Cost Values */
+                    cost_values?: {
+                        [key: string]: number | string;
+                    };
+                    /**
+                     * Indicator Mode
+                     * @default auto
+                     * @enum {string}
+                     */
+                    indicator_mode?: "auto" | "explicit" | "all";
+                    /** Explicit Indicators */
+                    explicit_indicators?: {
+                        [key: string]: unknown;
+                    }[];
+                    /**
+                     * Trigger Feed
+                     * @default tf_candle
+                     * @enum {string}
+                     */
+                    trigger_feed?: "tf_candle" | "m1_subcandle";
+                    /**
+                     * Fill Timing
+                     * @default next_bar
+                     * @enum {string}
+                     */
+                    fill_timing?: "immediate" | "next_bar";
+                    /** Profile Ref */
+                    profile_ref: string;
+                    /** Sweep */
+                    sweep?: {
+                        [key: string]: unknown;
+                    } | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunConfig"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     list_runs_api_v1_runs_get: {
         parameters: {
             query?: {
@@ -1832,6 +2294,137 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    trigger_run_api_v1_runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunSubmission"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunAccepted"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_job_status_api_v1_jobs__job_id__status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobStatus"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_job_events_api_v1_jobs__job_id__events_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_strategies_api_v1_strategies_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategyListResponse"];
                 };
             };
             /** @description Service Unavailable */
