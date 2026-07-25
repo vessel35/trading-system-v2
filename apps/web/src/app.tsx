@@ -2,6 +2,7 @@ import { Redirect, Route, Switch } from "wouter";
 
 import { AppShell } from "./components/app-shell";
 import { CatalogPage } from "./pages/catalog-page";
+import { ComparisonPage } from "./pages/comparison-page";
 import { RunSummaryPage } from "./pages/run-summary-page";
 
 export function App() {
@@ -17,6 +18,11 @@ export function App() {
       <Route path="/runs">
         <AppShell>
           <CatalogPage />
+        </AppShell>
+      </Route>
+      <Route path="/compare">
+        <AppShell>
+          <ComparisonPage />
         </AppShell>
       </Route>
       <Route>

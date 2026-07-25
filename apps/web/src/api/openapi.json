@@ -341,6 +341,91 @@
         }
       }
     },
+    "/api/v1/runs:compare": {
+      "get": {
+        "summary": "Compare Runs",
+        "operationId": "compare_runs_api_v1_runs_compare_get",
+        "parameters": [
+          {
+            "name": "run_ids",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Run Ids"
+            }
+          },
+          {
+            "name": "sweep_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sweep Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunComparisonResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
     "/api/v1/runs/{run_id}": {
       "get": {
         "summary": "Get Run",
@@ -425,6 +510,170 @@
               }
             },
             "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/runs/{run_id}/prereg": {
+      "get": {
+        "summary": "Get Run Prereg",
+        "operationId": "get_run_prereg_api_v1_runs__run_id__prereg_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreregistrationResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/runs/{run_id}/candles": {
+      "get": {
+        "summary": "Get Candles",
+        "operationId": "get_candles_api_v1_runs__run_id__candles_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 5000,
+              "minimum": 1,
+              "default": 5000,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CandleCollection"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "503": {
             "content": {
@@ -1575,6 +1824,22 @@
               ],
               "title": "Realized"
             }
+          },
+          {
+            "name": "blocked_by",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Blocked By"
+            }
           }
         ],
         "responses": {
@@ -1584,6 +1849,844 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/EvidenceCollection_CandidateEvent_"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/runs/{run_id}/signals": {
+      "get": {
+        "summary": "Get Signals",
+        "operationId": "get_signals_api_v1_runs__run_id__signals_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "after_seq",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "After Seq"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 200,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "derived_intent",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Derived Intent"
+            }
+          },
+          {
+            "name": "derived_side",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Derived Side"
+            }
+          },
+          {
+            "name": "is_warmup",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Is Warmup"
+            }
+          },
+          {
+            "name": "decision_time_from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Decision Time From"
+            }
+          },
+          {
+            "name": "decision_time_to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Decision Time To"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceCollection_Signal_"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/runs/{run_id}/decisions": {
+      "get": {
+        "summary": "Get Decisions",
+        "operationId": "get_decisions_api_v1_runs__run_id__decisions_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "after_seq",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "After Seq"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 200,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Action"
+            }
+          },
+          {
+            "name": "skip_reason",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Skip Reason"
+            }
+          },
+          {
+            "name": "signal_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Signal Id"
+            }
+          },
+          {
+            "name": "decision_time_from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Decision Time From"
+            }
+          },
+          {
+            "name": "decision_time_to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Decision Time To"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceCollection_Decision_"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/runs/{run_id}/indicator-snapshots": {
+      "get": {
+        "summary": "Get Indicator Snapshots",
+        "operationId": "get_indicator_snapshots_api_v1_runs__run_id__indicator_snapshots_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "after_seq",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "After Seq"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 200,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "indicator_key",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Indicator Key"
+            }
+          },
+          {
+            "name": "is_warmup",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Is Warmup"
+            }
+          },
+          {
+            "name": "feature_time_from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Feature Time From"
+            }
+          },
+          {
+            "name": "feature_time_to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Feature Time To"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceCollection_IndicatorSnapshot_"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/runs/{run_id}/missed-opportunities": {
+      "get": {
+        "summary": "Get Missed Opportunities",
+        "operationId": "get_missed_opportunities_api_v1_runs__run_id__missed_opportunities_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "after_seq",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "After Seq"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 200,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "missing_reason",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Missing Reason"
+            }
+          },
+          {
+            "name": "time_from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Time From"
+            }
+          },
+          {
+            "name": "time_to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Time To"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceCollection_MissedOpportunity_"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/runs/{run_id}/conditional-expectancy": {
+      "get": {
+        "summary": "Get Conditional Expectancy",
+        "operationId": "get_conditional_expectancy_api_v1_runs__run_id__conditional_expectancy_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "after_seq",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "After Seq"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 200,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "subject_kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Subject Kind"
+            }
+          },
+          {
+            "name": "is_significant",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Is Significant"
+            }
+          },
+          {
+            "name": "min_sample_count",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Sample Count"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceCollection_ConditionalExpectancy_"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/runs/{run_id}/findings": {
+      "get": {
+        "summary": "Get Findings",
+        "operationId": "get_findings_api_v1_runs__run_id__findings_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "after_seq",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "After Seq"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 200,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "confidence",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Confidence"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FindingsCollection"
                 }
               }
             }
@@ -1745,6 +2848,141 @@
         ],
         "title": "CandidateEvent"
       },
+      "Candle": {
+        "properties": {
+          "open_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Open Time"
+          },
+          "close_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Close Time"
+          },
+          "open": {
+            "type": "number",
+            "title": "Open"
+          },
+          "high": {
+            "type": "number",
+            "title": "High"
+          },
+          "low": {
+            "type": "number",
+            "title": "Low"
+          },
+          "close": {
+            "type": "number",
+            "title": "Close"
+          },
+          "volume": {
+            "type": "number",
+            "title": "Volume"
+          },
+          "quote_volume": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quote Volume"
+          },
+          "trade_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trade Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "open_time",
+          "close_time",
+          "open",
+          "high",
+          "low",
+          "close",
+          "volume",
+          "quote_volume",
+          "trade_count"
+        ],
+        "title": "Candle"
+      },
+      "CandleCollection": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Candle"
+            },
+            "type": "array",
+            "title": "Data"
+          },
+          "page": {
+            "$ref": "#/components/schemas/CandlePage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data",
+          "page"
+        ],
+        "title": "CandleCollection"
+      },
+      "CandlePage": {
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          },
+          "from_ts": {
+            "type": "string",
+            "format": "date-time",
+            "title": "From Ts"
+          },
+          "to_ts": {
+            "type": "string",
+            "format": "date-time",
+            "title": "To Ts"
+          },
+          "timeframe": {
+            "type": "string",
+            "title": "Timeframe"
+          },
+          "source_timeframe": {
+            "type": "string",
+            "const": "1m",
+            "title": "Source Timeframe",
+            "default": "1m"
+          }
+        },
+        "type": "object",
+        "required": [
+          "limit",
+          "total",
+          "has_more",
+          "from_ts",
+          "to_ts",
+          "timeframe"
+        ],
+        "title": "CandlePage"
+      },
       "CatalogHealth": {
         "properties": {
           "status": {
@@ -1838,6 +3076,130 @@
         ],
         "title": "ChartSummary"
       },
+      "ConditionalExpectancy": {
+        "properties": {
+          "ce_id": {
+            "type": "integer",
+            "title": "Ce Id"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "signature_key": {
+            "type": "string",
+            "title": "Signature Key"
+          },
+          "taxonomy_version": {
+            "type": "string",
+            "title": "Taxonomy Version"
+          },
+          "definition_json": {
+            "$ref": "#/components/schemas/JsonValue"
+          },
+          "subject_kind": {
+            "type": "string",
+            "title": "Subject Kind"
+          },
+          "signature_sample_count": {
+            "type": "integer",
+            "title": "Signature Sample Count"
+          },
+          "sample_count": {
+            "type": "integer",
+            "title": "Sample Count"
+          },
+          "win_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Win Rate"
+          },
+          "payoff": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payoff"
+          },
+          "expectancy_r": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expectancy R"
+          },
+          "pf": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pf"
+          },
+          "ci_low": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci Low"
+          },
+          "ci_high": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci High"
+          },
+          "is_significant": {
+            "type": "boolean",
+            "title": "Is Significant"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ce_id",
+          "run_id",
+          "signature_key",
+          "taxonomy_version",
+          "definition_json",
+          "subject_kind",
+          "signature_sample_count",
+          "sample_count",
+          "win_rate",
+          "payoff",
+          "expectancy_r",
+          "pf",
+          "ci_low",
+          "ci_high",
+          "is_significant"
+        ],
+        "title": "ConditionalExpectancy"
+      },
       "CursorPage": {
         "properties": {
           "limit": {
@@ -1878,6 +3240,161 @@
         ],
         "title": "CursorPage",
         "description": "Evidence cursor metadata."
+      },
+      "Decision": {
+        "properties": {
+          "decision_id": {
+            "type": "integer",
+            "title": "Decision Id"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "signal_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signal Id"
+          },
+          "decision_ts": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Decision Ts"
+          },
+          "action": {
+            "type": "string",
+            "title": "Action"
+          },
+          "skip_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skip Reason"
+          },
+          "intended_side": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intended Side"
+          },
+          "intended_qty": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intended Qty"
+          },
+          "stop_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stop Price"
+          },
+          "take_profit_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Take Profit Price"
+          },
+          "risk_amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risk Amount"
+          },
+          "stop_distance": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stop Distance"
+          },
+          "sizing_method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sizing Method"
+          },
+          "framework_compliant": {
+            "type": "boolean",
+            "title": "Framework Compliant"
+          },
+          "planned_execution_ts": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Planned Execution Ts"
+          }
+        },
+        "type": "object",
+        "required": [
+          "decision_id",
+          "run_id",
+          "signal_id",
+          "decision_ts",
+          "action",
+          "skip_reason",
+          "intended_side",
+          "intended_qty",
+          "stop_price",
+          "take_profit_price",
+          "risk_amount",
+          "stop_distance",
+          "sizing_method",
+          "framework_compliant",
+          "planned_execution_ts"
+        ],
+        "title": "Decision"
       },
       "DrawdownEpisode": {
         "properties": {
@@ -2158,6 +3675,46 @@
         ],
         "title": "EvidenceCollection[ChartSummary]"
       },
+      "EvidenceCollection_ConditionalExpectancy_": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ConditionalExpectancy"
+            },
+            "type": "array",
+            "title": "Data"
+          },
+          "page": {
+            "$ref": "#/components/schemas/CursorPage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data",
+          "page"
+        ],
+        "title": "EvidenceCollection[ConditionalExpectancy]"
+      },
+      "EvidenceCollection_Decision_": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Decision"
+            },
+            "type": "array",
+            "title": "Data"
+          },
+          "page": {
+            "$ref": "#/components/schemas/CursorPage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data",
+          "page"
+        ],
+        "title": "EvidenceCollection[Decision]"
+      },
       "EvidenceCollection_DrawdownEpisode_": {
         "properties": {
           "data": {
@@ -2238,6 +3795,26 @@
         ],
         "title": "EvidenceCollection[FundingSettlement]"
       },
+      "EvidenceCollection_IndicatorSnapshot_": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/IndicatorSnapshot"
+            },
+            "type": "array",
+            "title": "Data"
+          },
+          "page": {
+            "$ref": "#/components/schemas/CursorPage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data",
+          "page"
+        ],
+        "title": "EvidenceCollection[IndicatorSnapshot]"
+      },
       "EvidenceCollection_IntegrityCheck_": {
         "properties": {
           "data": {
@@ -2257,6 +3834,26 @@
           "page"
         ],
         "title": "EvidenceCollection[IntegrityCheck]"
+      },
+      "EvidenceCollection_MissedOpportunity_": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/MissedOpportunity"
+            },
+            "type": "array",
+            "title": "Data"
+          },
+          "page": {
+            "$ref": "#/components/schemas/CursorPage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data",
+          "page"
+        ],
+        "title": "EvidenceCollection[MissedOpportunity]"
       },
       "EvidenceCollection_OutcomeBucket_": {
         "properties": {
@@ -2297,6 +3894,26 @@
           "page"
         ],
         "title": "EvidenceCollection[Position]"
+      },
+      "EvidenceCollection_Signal_": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Signal"
+            },
+            "type": "array",
+            "title": "Data"
+          },
+          "page": {
+            "$ref": "#/components/schemas/CursorPage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data",
+          "page"
+        ],
+        "title": "EvidenceCollection[Signal]"
       },
       "EvidenceCollection_TradeFeature_": {
         "properties": {
@@ -2498,6 +4115,115 @@
         ],
         "title": "Execution"
       },
+      "Finding": {
+        "properties": {
+          "finding_id": {
+            "type": "integer",
+            "title": "Finding Id"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "claim": {
+            "type": "string",
+            "title": "Claim"
+          },
+          "evidence_ref_json": {
+            "$ref": "#/components/schemas/JsonValue"
+          },
+          "confidence": {
+            "type": "string",
+            "title": "Confidence"
+          },
+          "proposed_change": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposed Change"
+          },
+          "next_prereg_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Prereg Ref"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "finding_id",
+          "run_id",
+          "claim",
+          "evidence_ref_json",
+          "confidence",
+          "proposed_change",
+          "next_prereg_ref",
+          "created_at"
+        ],
+        "title": "Finding"
+      },
+      "FindingsCollection": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Finding"
+            },
+            "type": "array",
+            "title": "Data"
+          },
+          "page": {
+            "$ref": "#/components/schemas/CursorPage"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/FindingsMeta"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data",
+          "page",
+          "meta"
+        ],
+        "title": "FindingsCollection"
+      },
+      "FindingsMeta": {
+        "properties": {
+          "deterministic": {
+            "type": "boolean",
+            "const": false,
+            "title": "Deterministic",
+            "default": false
+          },
+          "hash_excluded": {
+            "type": "boolean",
+            "const": true,
+            "title": "Hash Excluded",
+            "default": true
+          },
+          "note": {
+            "type": "string",
+            "title": "Note",
+            "default": "FINDING_CLAIM is a post-hoc annotation layer excluded from Evidence hash."
+          }
+        },
+        "type": "object",
+        "title": "FindingsMeta"
+      },
       "FundingSettlement": {
         "properties": {
           "settlement_id": {
@@ -2621,6 +4347,109 @@
         ],
         "title": "HealthResponse"
       },
+      "IndicatorSnapshot": {
+        "properties": {
+          "snapshot_seq": {
+            "type": "integer",
+            "title": "Snapshot Seq"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "indicator_key": {
+            "type": "string",
+            "title": "Indicator Key"
+          },
+          "indicator_name": {
+            "type": "string",
+            "title": "Indicator Name"
+          },
+          "params_json": {
+            "$ref": "#/components/schemas/JsonValue"
+          },
+          "impl_version": {
+            "type": "string",
+            "title": "Impl Version"
+          },
+          "pinned_impl": {
+            "type": "boolean",
+            "title": "Pinned Impl"
+          },
+          "min_history": {
+            "type": "integer",
+            "title": "Min History"
+          },
+          "computation_mode": {
+            "type": "string",
+            "title": "Computation Mode"
+          },
+          "enabled_reason": {
+            "type": "string",
+            "title": "Enabled Reason"
+          },
+          "feature_ts": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Feature Ts"
+          },
+          "candle_open_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Candle Open Time"
+          },
+          "candle_close_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Candle Close Time"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "value_json": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JsonValue"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "is_warmup": {
+            "type": "boolean",
+            "title": "Is Warmup"
+          }
+        },
+        "type": "object",
+        "required": [
+          "snapshot_seq",
+          "run_id",
+          "indicator_key",
+          "indicator_name",
+          "params_json",
+          "impl_version",
+          "pinned_impl",
+          "min_history",
+          "computation_mode",
+          "enabled_reason",
+          "feature_ts",
+          "candle_open_time",
+          "candle_close_time",
+          "value",
+          "value_json",
+          "is_warmup"
+        ],
+        "title": "IndicatorSnapshot"
+      },
       "IntegrityCheck": {
         "properties": {
           "check_id": {
@@ -2679,6 +4508,81 @@
         "title": "IntegrityCheck"
       },
       "JsonValue": {},
+      "MissedOpportunity": {
+        "properties": {
+          "miss_id": {
+            "type": "integer",
+            "title": "Miss Id"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "ts": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Ts"
+          },
+          "symbol": {
+            "type": "string",
+            "title": "Symbol"
+          },
+          "source_rule": {
+            "type": "string",
+            "title": "Source Rule"
+          },
+          "missing_reason": {
+            "type": "string",
+            "title": "Missing Reason"
+          },
+          "potential_r": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Potential R"
+          },
+          "potential_move_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Potential Move Pct"
+          },
+          "nearest_candidate_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nearest Candidate Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "miss_id",
+          "run_id",
+          "ts",
+          "symbol",
+          "source_rule",
+          "missing_reason",
+          "potential_r",
+          "potential_move_pct",
+          "nearest_candidate_id"
+        ],
+        "title": "MissedOpportunity"
+      },
       "OutcomeBucket": {
         "properties": {
           "bucket_id": {
@@ -2914,6 +4818,193 @@
           "funding_fee_total"
         ],
         "title": "Position"
+      },
+      "Preregistration": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "hypothesis": {
+            "type": "string",
+            "title": "Hypothesis"
+          },
+          "weakness_addressed": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weakness Addressed"
+          },
+          "primary_metric": {
+            "type": "string",
+            "title": "Primary Metric"
+          },
+          "success_criteria_json": {
+            "$ref": "#/components/schemas/JsonValue"
+          },
+          "failure_criteria_json": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JsonValue"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "profile_update_declared": {
+            "type": "boolean",
+            "title": "Profile Update Declared"
+          },
+          "related_finding_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Related Finding Ref"
+          },
+          "declared_by": {
+            "type": "string",
+            "title": "Declared By"
+          },
+          "declared_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Declared At"
+          },
+          "locked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Locked At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "hypothesis",
+          "weakness_addressed",
+          "primary_metric",
+          "success_criteria_json",
+          "failure_criteria_json",
+          "profile_update_declared",
+          "related_finding_ref",
+          "declared_by",
+          "declared_at",
+          "locked_at"
+        ],
+        "title": "Preregistration"
+      },
+      "PreregistrationResponse": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "prereg": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Preregistration"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "prereg"
+        ],
+        "title": "PreregistrationResponse"
+      },
+      "RunComparisonItem": {
+        "properties": {
+          "run": {
+            "$ref": "#/components/schemas/RunHeader"
+          },
+          "summary_status": {
+            "type": "string",
+            "enum": [
+              "available",
+              "pending",
+              "failed",
+              "orphaned",
+              "missing"
+            ],
+            "title": "Summary Status"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "run",
+          "summary_status",
+          "summary"
+        ],
+        "title": "RunComparisonItem"
+      },
+      "RunComparisonResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/RunComparisonItem"
+            },
+            "type": "array",
+            "title": "Data"
+          },
+          "compared_by": {
+            "type": "string",
+            "enum": [
+              "run_ids",
+              "sweep_id"
+            ],
+            "title": "Compared By"
+          },
+          "sweep_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sweep Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data",
+          "compared_by",
+          "sweep_id"
+        ],
+        "title": "RunComparisonResponse"
       },
       "RunHeader": {
         "properties": {
@@ -4081,6 +6172,142 @@
         ],
         "title": "RunSummaryResponse",
         "description": "0..1 stored summary with a status-derived absence explanation."
+      },
+      "Signal": {
+        "properties": {
+          "signal_id": {
+            "type": "integer",
+            "title": "Signal Id"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "decision_ts": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Decision Ts"
+          },
+          "feature_ts": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Feature Ts"
+          },
+          "candle_open_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Candle Open Time"
+          },
+          "candle_close_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Candle Close Time"
+          },
+          "symbol": {
+            "type": "string",
+            "title": "Symbol"
+          },
+          "price": {
+            "type": "number",
+            "title": "Price"
+          },
+          "confidence": {
+            "type": "number",
+            "title": "Confidence"
+          },
+          "stop_loss": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stop Loss"
+          },
+          "take_profit": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Take Profit"
+          },
+          "market_type": {
+            "type": "string",
+            "title": "Market Type"
+          },
+          "leverage": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Leverage"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "metadata_json": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JsonValue"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "derived_intent": {
+            "type": "string",
+            "title": "Derived Intent"
+          },
+          "derived_side": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Derived Side"
+          },
+          "is_warmup": {
+            "type": "boolean",
+            "title": "Is Warmup"
+          }
+        },
+        "type": "object",
+        "required": [
+          "signal_id",
+          "run_id",
+          "decision_ts",
+          "feature_ts",
+          "candle_open_time",
+          "candle_close_time",
+          "symbol",
+          "price",
+          "confidence",
+          "stop_loss",
+          "take_profit",
+          "market_type",
+          "leverage",
+          "reason",
+          "metadata_json",
+          "derived_intent",
+          "derived_side",
+          "is_warmup"
+        ],
+        "title": "Signal"
       },
       "Trade": {
         "properties": {

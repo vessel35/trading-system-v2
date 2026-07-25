@@ -17,15 +17,23 @@ from web_api.database import get_settings
 from web_api.models import (
     CandidateEvent,
     ChartSummary,
+    ConditionalExpectancy,
     CursorPage,
+    Decision,
     DrawdownEpisode,
     EquityPoint,
     EvidenceCollection,
     Execution,
+    Finding,
+    FindingsCollection,
+    FindingsMeta,
     FundingSettlement,
+    IndicatorSnapshot,
     IntegrityCheck,
+    MissedOpportunity,
     OutcomeBucket,
     Position,
+    Signal,
     Trade,
     TradeFeature,
 )
@@ -492,6 +500,7 @@ class EvidenceRepository:
         limit: int,
         linked_trade_id: int | None,
         realized: bool | None,
+        blocked_by: str | None = None,
     ) -> EvidenceCollection[CandidateEvent]:
         def decode(row: dict[str, Any]) -> dict[str, Any]:
             row["ts"] = _iso8601(row["ts"])
@@ -511,5 +520,233 @@ class EvidenceRepository:
             filters=(
                 ("linked_trade_id = ?", linked_trade_id),
                 ("realized = ?", int(realized) if realized is not None else None),
+                ("blocked_by = ?", blocked_by),
             ),
+        )
+
+    def source_range(self, timeframe: str) -> tuple[datetime, datetime]:
+        """Return the immutable OHLCV snapshot range for the requested run timeframe."""
+
+        row = self._connection.execute(
+            """
+            SELECT range_start, range_end
+            FROM SOURCE_DATA_SNAPSHOT
+            WHERE source_kind = 'ohlcv' AND timeframe = ?
+            ORDER BY snapshot_id
+            LIMIT 1
+            """,
+            (timeframe,),
+        ).fetchone()
+        if row is None:
+            row = self._connection.execute(
+                "SELECT period_start, period_end FROM BACKTEST_RUN_LOCAL LIMIT 1"
+            ).fetchone()
+        if row is None:
+            raise EvidenceUnavailableError("evidence_source_range_missing")
+        return _iso8601(int(row[0])), _iso8601(int(row[1]))
+
+    def signals(
+        self,
+        *,
+        after_seq: int,
+        limit: int,
+        derived_intent: str | None,
+        derived_side: str | None,
+        is_warmup: bool | None,
+        decision_time_from: int | None,
+        decision_time_to: int | None,
+    ) -> EvidenceCollection[Signal]:
+        def decode(row: dict[str, Any]) -> dict[str, Any]:
+            for column in (
+                "decision_ts",
+                "feature_ts",
+                "candle_open_time",
+                "candle_close_time",
+            ):
+                row[column] = _iso8601(row[column])
+            row["metadata_json"] = _json_value(row["metadata_json"])
+            row["is_warmup"] = _boolean(row["is_warmup"])
+            return row
+
+        return self._collection(
+            table="SIGNAL",
+            cursor_column="signal_id",
+            model=Signal,
+            decoder=decode,
+            after_seq=after_seq,
+            limit=limit,
+            filters=(
+                ("derived_intent = ?", derived_intent),
+                ("derived_side = ?", derived_side),
+                ("is_warmup = ?", int(is_warmup) if is_warmup is not None else None),
+                ("decision_ts >= ?", decision_time_from),
+                ("decision_ts <= ?", decision_time_to),
+            ),
+        )
+
+    def decisions(
+        self,
+        *,
+        after_seq: int,
+        limit: int,
+        action: str | None,
+        skip_reason: str | None,
+        signal_id: int | None,
+        decision_time_from: int | None,
+        decision_time_to: int | None,
+    ) -> EvidenceCollection[Decision]:
+        def decode(row: dict[str, Any]) -> dict[str, Any]:
+            row["decision_ts"] = _iso8601(row["decision_ts"])
+            if row["planned_execution_ts"] is not None:
+                row["planned_execution_ts"] = _iso8601(row["planned_execution_ts"])
+            row["framework_compliant"] = _boolean(row["framework_compliant"])
+            return row
+
+        return self._collection(
+            table="DECISION",
+            cursor_column="decision_id",
+            model=Decision,
+            decoder=decode,
+            after_seq=after_seq,
+            limit=limit,
+            filters=(
+                ("action = ?", action),
+                ("skip_reason = ?", skip_reason),
+                ("signal_id = ?", signal_id),
+                ("decision_ts >= ?", decision_time_from),
+                ("decision_ts <= ?", decision_time_to),
+            ),
+        )
+
+    def indicator_snapshots(
+        self,
+        *,
+        after_seq: int,
+        limit: int,
+        indicator_key: str | None,
+        is_warmup: bool | None,
+        feature_time_from: int | None,
+        feature_time_to: int | None,
+    ) -> EvidenceCollection[IndicatorSnapshot]:
+        def decode(row: dict[str, Any]) -> dict[str, Any]:
+            for column in (
+                "feature_ts",
+                "candle_open_time",
+                "candle_close_time",
+            ):
+                row[column] = _iso8601(row[column])
+            row["params_json"] = _json_value(row["params_json"])
+            row["value_json"] = _json_value(row["value_json"])
+            row["pinned_impl"] = _boolean(row["pinned_impl"])
+            row["is_warmup"] = _boolean(row["is_warmup"])
+            return row
+
+        return self._collection(
+            table="INDICATOR_SNAPSHOT AS s",
+            cursor_column="s.snapshot_seq",
+            model=IndicatorSnapshot,
+            decoder=decode,
+            after_seq=after_seq,
+            limit=limit,
+            filters=(
+                ("s.indicator_key = ?", indicator_key),
+                ("s.is_warmup = ?", int(is_warmup) if is_warmup is not None else None),
+                ("s.feature_ts >= ?", feature_time_from),
+                ("s.feature_ts <= ?", feature_time_to),
+            ),
+            select="""
+                s.*, d.indicator_name, d.params_json, d.impl_version,
+                d.pinned_impl, d.min_history, d.computation_mode, d.enabled_reason
+            """,
+            joins="JOIN INDICATOR_DEFINITION AS d ON d.indicator_key = s.indicator_key",
+        )
+
+    def missed_opportunities(
+        self,
+        *,
+        after_seq: int,
+        limit: int,
+        missing_reason: str | None,
+        time_from: int | None,
+        time_to: int | None,
+    ) -> EvidenceCollection[MissedOpportunity]:
+        def decode(row: dict[str, Any]) -> dict[str, Any]:
+            row["ts"] = _iso8601(row["ts"])
+            return row
+
+        return self._collection(
+            table="MISSED_OPPORTUNITY",
+            cursor_column="miss_id",
+            model=MissedOpportunity,
+            decoder=decode,
+            after_seq=after_seq,
+            limit=limit,
+            filters=(
+                ("missing_reason = ?", missing_reason),
+                ("ts >= ?", time_from),
+                ("ts <= ?", time_to),
+            ),
+        )
+
+    def conditional_expectancy(
+        self,
+        *,
+        after_seq: int,
+        limit: int,
+        subject_kind: str | None,
+        is_significant: bool | None,
+        min_sample_count: int | None,
+    ) -> EvidenceCollection[ConditionalExpectancy]:
+        def decode(row: dict[str, Any]) -> dict[str, Any]:
+            row["definition_json"] = _json_value(row["definition_json"])
+            row["is_significant"] = _boolean(row["is_significant"])
+            return row
+
+        return self._collection(
+            table="CONDITIONAL_EXPECTANCY AS ce",
+            cursor_column="ce.ce_id",
+            model=ConditionalExpectancy,
+            decoder=decode,
+            after_seq=after_seq,
+            limit=limit,
+            filters=(
+                ("cs.subject_kind = ?", subject_kind),
+                (
+                    "ce.is_significant = ?",
+                    int(is_significant) if is_significant is not None else None,
+                ),
+                ("ce.sample_count >= ?", min_sample_count),
+            ),
+            select="""
+                ce.*, cs.taxonomy_version, cs.definition_json, cs.subject_kind,
+                cs.sample_count AS signature_sample_count
+            """,
+            joins="JOIN CONDITION_SIGNATURE AS cs ON cs.signature_key = ce.signature_key",
+        )
+
+    def findings(
+        self,
+        *,
+        after_seq: int,
+        limit: int,
+        confidence: str | None,
+    ) -> FindingsCollection:
+        def decode(row: dict[str, Any]) -> dict[str, Any]:
+            row["evidence_ref_json"] = _json_value(row["evidence_ref_json"])
+            row["created_at"] = _iso8601(row["created_at"])
+            return row
+
+        collection = self._collection(
+            table="FINDING_CLAIM",
+            cursor_column="finding_id",
+            model=Finding,
+            decoder=decode,
+            after_seq=after_seq,
+            limit=limit,
+            filters=(("confidence = ?", confidence),),
+        )
+        return FindingsCollection(
+            data=collection.data,
+            page=collection.page,
+            meta=FindingsMeta(),
         )

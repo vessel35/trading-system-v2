@@ -25,7 +25,7 @@ import { Button } from "./ui/button";
 
 const researchNav = [
   { label: "카탈로그", icon: LayoutList, path: "/runs", enabled: true },
-  { label: "분석", icon: BarChart3, path: "/analysis", enabled: false },
+  { label: "분석", icon: BarChart3, path: "/compare", enabled: true },
   { label: "실행 관리", icon: FlaskConical, path: "/manage", enabled: false },
   { label: "전략", icon: BookOpenCheck, path: "/strategies", enabled: false },
 ] as const;
@@ -190,7 +190,7 @@ export function AppShell({ children }: PropsWithChildren) {
             읽기 전용
           </div>
           <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
-            P0는 backtest 카탈로그만 조회하며 주문·지갑 경로가 없습니다.
+            P1은 카탈로그·Evidence·시장 원천을 조회하며 주문·지갑 경로가 없습니다.
           </p>
         </div>
       </aside>
@@ -204,7 +204,9 @@ export function AppShell({ children }: PropsWithChildren) {
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-sm font-semibold">비교 바스켓</h2>
-              <p className="text-xs text-muted-foreground">비교 화면은 P1에서 연결됩니다.</p>
+              <p className="text-xs text-muted-foreground">
+                두 실행 이상이면 저장 지표와 설정을 비교합니다.
+              </p>
             </div>
             <Button variant="ghost" size="icon" onClick={() => setBasketOpen(false)}>
               <X className="h-4 w-4" />
@@ -235,9 +237,21 @@ export function AppShell({ children }: PropsWithChildren) {
             )}
           </div>
           {items.length > 0 && (
-            <Button variant="ghost" size="sm" className="mt-3 w-full" onClick={clear}>
-              바스켓 비우기
-            </Button>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <Button variant="ghost" size="sm" onClick={clear}>
+                바스켓 비우기
+              </Button>
+              <Button
+                size="sm"
+                disabled={items.length < 2}
+                onClick={() => {
+                  setBasketOpen(false);
+                  navigate("/compare");
+                }}
+              >
+                비교 열기
+              </Button>
+            </div>
           )}
         </div>
       )}

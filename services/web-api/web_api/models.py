@@ -228,6 +228,163 @@ class CandidateEvent(BaseModel):
     linked_trade_id: int | None
 
 
+class Signal(BaseModel):
+    signal_id: int
+    run_id: str
+    decision_ts: datetime
+    feature_ts: datetime
+    candle_open_time: datetime
+    candle_close_time: datetime
+    symbol: str
+    price: float
+    confidence: float
+    stop_loss: float | None
+    take_profit: float | None
+    market_type: str
+    leverage: int | None
+    reason: str
+    metadata_json: JsonValue | None
+    derived_intent: str
+    derived_side: str | None
+    is_warmup: bool
+
+
+class Decision(BaseModel):
+    decision_id: int
+    run_id: str
+    signal_id: int | None
+    decision_ts: datetime
+    action: str
+    skip_reason: str | None
+    intended_side: str | None
+    intended_qty: float | None
+    stop_price: float | None
+    take_profit_price: float | None
+    risk_amount: float | None
+    stop_distance: float | None
+    sizing_method: str | None
+    framework_compliant: bool
+    planned_execution_ts: datetime | None
+
+
+class IndicatorSnapshot(BaseModel):
+    snapshot_seq: int
+    run_id: str
+    indicator_key: str
+    indicator_name: str
+    params_json: JsonValue
+    impl_version: str
+    pinned_impl: bool
+    min_history: int
+    computation_mode: str
+    enabled_reason: str
+    feature_ts: datetime
+    candle_open_time: datetime
+    candle_close_time: datetime
+    value: float | None
+    value_json: JsonValue | None
+    is_warmup: bool
+
+
+class MissedOpportunity(BaseModel):
+    miss_id: int
+    run_id: str
+    ts: datetime
+    symbol: str
+    source_rule: str
+    missing_reason: str
+    potential_r: float | None
+    potential_move_pct: float | None
+    nearest_candidate_id: int | None
+
+
+class ConditionalExpectancy(BaseModel):
+    ce_id: int
+    run_id: str
+    signature_key: str
+    taxonomy_version: str
+    definition_json: JsonValue
+    subject_kind: str
+    signature_sample_count: int
+    sample_count: int
+    win_rate: float | None
+    payoff: float | None
+    expectancy_r: float | None
+    pf: float | None
+    ci_low: float | None
+    ci_high: float | None
+    is_significant: bool
+
+
+class Finding(BaseModel):
+    finding_id: int
+    run_id: str
+    claim: str
+    evidence_ref_json: JsonValue
+    confidence: str
+    proposed_change: str | None
+    next_prereg_ref: str | None
+    created_at: datetime
+
+
+class FindingsMeta(BaseModel):
+    deterministic: Literal[False] = False
+    hash_excluded: Literal[True] = True
+    note: str = "FINDING_CLAIM is a post-hoc annotation layer excluded from Evidence hash."
+
+
+class FindingsCollection(BaseModel):
+    data: list[Finding]
+    page: CursorPage
+    meta: FindingsMeta
+
+
+class Candle(BaseModel):
+    open_time: datetime
+    close_time: datetime
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
+    quote_volume: float | None
+    trade_count: int | None
+
+
+class CandlePage(BaseModel):
+    limit: int
+    total: int
+    has_more: bool
+    from_ts: datetime
+    to_ts: datetime
+    timeframe: str
+    source_timeframe: Literal["1m"] = "1m"
+
+
+class CandleCollection(BaseModel):
+    data: list[Candle]
+    page: CandlePage
+
+
+class Preregistration(BaseModel):
+    run_id: str
+    hypothesis: str
+    weakness_addressed: str | None
+    primary_metric: str
+    success_criteria_json: JsonValue
+    failure_criteria_json: JsonValue | None
+    profile_update_declared: bool
+    related_finding_ref: str | None
+    declared_by: str
+    declared_at: datetime
+    locked_at: datetime | None
+
+
+class PreregistrationResponse(BaseModel):
+    run_id: str
+    prereg: Preregistration | None
+
+
 class RunListItem(BaseModel):
     """Thin catalog row with an optional stored summary."""
 
@@ -386,6 +543,18 @@ class RunSummaryResponse(BaseModel):
     run_status: str
     summary_status: SummaryStatus
     summary: RunSummary | None
+
+
+class RunComparisonItem(BaseModel):
+    run: RunHeader
+    summary_status: SummaryStatus
+    summary: RunSummary | None
+
+
+class RunComparisonResponse(BaseModel):
+    data: list[RunComparisonItem]
+    compared_by: Literal["run_ids", "sweep_id"]
+    sweep_id: str | None
 
 
 class CatalogHealth(BaseModel):

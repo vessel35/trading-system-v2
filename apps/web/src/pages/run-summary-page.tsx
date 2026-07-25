@@ -16,7 +16,10 @@ import { useLocation } from "wouter";
 import type { RunSummary } from "../api/client";
 import { Badge, type BadgeProps } from "../components/ui/badge";
 import { EquityDrawdownTab } from "../components/evidence/equity-drawdown-tab";
+import { ChartTab } from "../components/evidence/chart-tab";
 import { IntegrityCostTab } from "../components/evidence/integrity-cost-tab";
+import { ResearchNotesTab } from "../components/evidence/research-notes-tab";
+import { SignalsDecisionsTab } from "../components/evidence/signals-decisions-tab";
 import { TradeDrawer } from "../components/evidence/trade-drawer";
 import { TradesTab } from "../components/evidence/trades-tab";
 import { Button } from "../components/ui/button";
@@ -463,16 +466,16 @@ export function RunSummaryPage({ runId }: { runId: string }) {
             <TabsTrigger value="trades">
               거래
             </TabsTrigger>
-            <TabsTrigger value="chart" disabled>
+            <TabsTrigger value="chart">
               차트
             </TabsTrigger>
-            <TabsTrigger value="signals" disabled>
+            <TabsTrigger value="signals">
               신호·의사결정
             </TabsTrigger>
             <TabsTrigger value="integrity">
               무결성·비용
             </TabsTrigger>
-            <TabsTrigger value="research" disabled>
+            <TabsTrigger value="research">
               조건부·노트
             </TabsTrigger>
           </TabsList>
@@ -509,8 +512,20 @@ export function RunSummaryPage({ runId }: { runId: string }) {
         <TabsContent value="trades">
           <TradesTab runId={runId} onSelectTrade={setSelectedTradeId} />
         </TabsContent>
+        <TabsContent value="chart">
+          <ChartTab runId={runId} onSelectTrade={setSelectedTradeId} />
+        </TabsContent>
+        <TabsContent value="signals">
+          <SignalsDecisionsTab
+            runId={runId}
+            onSelectTrade={setSelectedTradeId}
+          />
+        </TabsContent>
         <TabsContent value="integrity">
           <IntegrityCostTab runId={runId} summary={summaryEnvelope.summary} />
+        </TabsContent>
+        <TabsContent value="research">
+          <ResearchNotesTab runId={runId} summary={summaryEnvelope.summary} />
         </TabsContent>
       </Tabs>
 

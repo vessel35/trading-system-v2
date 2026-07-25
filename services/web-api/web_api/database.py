@@ -13,6 +13,7 @@ from psycopg import Connection
 from psycopg.rows import dict_row
 
 CatalogConnection = Connection[dict[str, Any]]
+CryptoConnection = Connection[dict[str, Any]]
 
 
 class CatalogConfigurationError(RuntimeError):
@@ -26,6 +27,7 @@ class DatabaseSettings:
     user: str
     password: str
     database: str
+    crypto_database: str
     evidence_root: Path
 
 
@@ -64,6 +66,7 @@ def get_settings() -> DatabaseSettings:
         user=values["PGUSER"],
         password=values["PGPASSWORD"],
         database=values.get("BACKTEST_DB_NAME", "backtest_db"),
+        crypto_database=values.get("CRYPTO_DB_NAME", "crypto_data"),
         evidence_root=Path(
             values.get(
                 "WEBAPI_EVIDENCE_ROOT",
@@ -94,4 +97,28 @@ def connect_catalog() -> Iterator[CatalogConnection]:
 
 def catalog_connection() -> Generator[CatalogConnection]:
     with connect_catalog() as connection:
+        yield connection
+
+
+@contextmanager
+def connect_crypto() -> Iterator[CryptoConnection]:
+    """Open a physically read-only market-data transaction."""
+
+    settings = get_settings()
+    with psycopg.connect(
+        host=settings.host,
+        port=settings.port,
+        user=settings.user,
+        password=settings.password,
+        dbname=settings.crypto_database,
+        options="-c default_transaction_read_only=on",
+        connect_timeout=5,
+        application_name="web-api-p1-crypto-reader",
+        row_factory=dict_row,
+    ) as connection:
+        yield connection
+
+
+def crypto_connection() -> Generator[CryptoConnection]:
+    with connect_crypto() as connection:
         yield connection

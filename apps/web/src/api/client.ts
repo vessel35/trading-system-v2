@@ -23,6 +23,19 @@ export type OutcomeBucket = components["schemas"]["OutcomeBucket"];
 export type DrawdownEpisode = components["schemas"]["DrawdownEpisode"];
 export type TradeFeature = components["schemas"]["TradeFeature"];
 export type CandidateEvent = components["schemas"]["CandidateEvent"];
+export type Candle = components["schemas"]["Candle"];
+export type CandleCollection = components["schemas"]["CandleCollection"];
+export type Signal = components["schemas"]["Signal"];
+export type Decision = components["schemas"]["Decision"];
+export type IndicatorSnapshot = components["schemas"]["IndicatorSnapshot"];
+export type MissedOpportunity = components["schemas"]["MissedOpportunity"];
+export type ConditionalExpectancy = components["schemas"]["ConditionalExpectancy"];
+export type Finding = components["schemas"]["Finding"];
+export type Preregistration = components["schemas"]["Preregistration"];
+export type PreregistrationResponse =
+  components["schemas"]["PreregistrationResponse"];
+export type RunComparisonItem = components["schemas"]["RunComparisonItem"];
+export type RunComparisonResponse = components["schemas"]["RunComparisonResponse"];
 export type RunQuery = NonNullable<
   operations["list_runs_api_v1_runs_get"]["parameters"]["query"]
 >;
