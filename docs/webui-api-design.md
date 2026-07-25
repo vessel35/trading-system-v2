@@ -191,8 +191,11 @@ REAL은 숫자로, epoch를 ISO-8601로 낸다. 파일 부재·미완결은 `evi
   포함 여부는 열린 결정.
 - **POST `/api/v1/runs`** — dry-run 트리거. 검증된 `RunConfig`와 `prereg`(hypothesis·primary_metric·
   success/failure_criteria·higher_is_better·declared_by)를 받아 백그라운드 작업으로 넘기고 202와
-  발급 `run_id`·상태 스트림 URL 반환. 워커가 `runner.run_backtest` 호출. 결과는 저장 요약으로 조회.
-- **GET `/api/v1/runs/{id}/events`**(SSE)·**`/status`** — 상태 전이 스트림·경량 폴링.
+  추적용 `job_id`·상태 스트림 URL을 반환한다. 워커가 `runner.run_backtest`를 호출하며 카탈로그
+  `run_id`는 완료 시점에 성공 이벤트로 전달된다. 결과는 저장 요약으로 조회.
+- **GET `/api/v1/jobs/{job_id}/events`**(SSE)·**GET `/api/v1/jobs/{job_id}/status`** — 카탈로그
+  `run_id`가 생기기 전부터 `job_id`로 상태 전이 스트림·경량 폴링을 제공한다. 성공 상태는 `run_id`와
+  Evidence 해시를 포함한다.
 - **GET·POST `/api/v1/runs/{id}/prereg`** — 사전등록 조회·기록. 잠긴 행(`locked_at`)은 409.
 - **GET·POST·DELETE `/api/v1/runs/{id}/tags`** — 분류 라벨. `(run_id, tag_type, tag_value)` 유일 제약 반영.
 - **POST `/api/v1/sweeps`**·**GET `/api/v1/sweeps/{id}`** — 스윕·워크포워드·표본내외 묶음을

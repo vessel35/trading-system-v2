@@ -17,6 +17,7 @@ from .evidence_schema import _plain_decimal, _plain_shortest_float, canonical_js
 from .evidence_sink import epoch_milliseconds
 
 _RUN_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+_RUN_NAME_MAX_LENGTH = 24
 _CONFIG_HASH_FIELDS = (
     "strategy_id",
     "strategy_version",
@@ -246,6 +247,18 @@ def _database_value(name: str, value: object) -> object:
     raise TypeError(f"unsupported catalog value for {name}: {type(value).__name__}")
 
 
+def validate_catalog_run_name(run_name: object) -> str:
+    """Return a catalog-safe run name or raise the canonical contract error."""
+
+    if (
+        not isinstance(run_name, str)
+        or len(run_name) > _RUN_NAME_MAX_LENGTH
+        or _RUN_NAME.fullmatch(run_name) is None
+    ):
+        raise ValueError("run_name must be at most 24 lowercase kebab-case characters")
+    return run_name
+
+
 class BacktestCatalogStore(CatalogStore):
     """Write only the four backtest_db catalog entities behind the CatalogStore port."""
 
@@ -258,13 +271,7 @@ class BacktestCatalogStore(CatalogStore):
         missing = set(_RUN_INSERT_FIELDS) - set(meta)
         if missing:
             raise ValueError(f"run metadata missing fields: {sorted(missing)}")
-        run_name = meta["run_name"]
-        if (
-            not isinstance(run_name, str)
-            or len(run_name) > 24
-            or _RUN_NAME.fullmatch(run_name) is None
-        ):
-            raise ValueError("run_name must be at most 24 lowercase kebab-case characters")
+        run_name = validate_catalog_run_name(meta["run_name"])
         expected_hash = normalized_config_hash(meta)
         supplied_hash = meta["config_hash"]
         if supplied_hash != expected_hash:

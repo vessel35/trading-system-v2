@@ -26,7 +26,7 @@ import { Button } from "./ui/button";
 const researchNav = [
   { label: "카탈로그", icon: LayoutList, path: "/runs", enabled: true },
   { label: "분석", icon: BarChart3, path: "/compare", enabled: true },
-  { label: "실행 관리", icon: FlaskConical, path: "/manage", enabled: false },
+  { label: "실행 관리", icon: FlaskConical, path: "/manage", enabled: true },
   { label: "전략", icon: BookOpenCheck, path: "/strategies", enabled: false },
 ] as const;
 
@@ -187,10 +187,10 @@ export function AppShell({ children }: PropsWithChildren) {
         <div className="absolute bottom-5 left-3 right-3 rounded-lg border border-teal-500/10 bg-teal-500/5 p-3">
           <div className="flex items-center gap-2 text-xs font-medium text-teal-200">
             <LockKeyhole className="h-3.5 w-3.5" />
-            읽기 전용
+            dry-run 격리
           </div>
           <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
-            P1은 카탈로그·Evidence·시장 원천을 조회하며 주문·지갑 경로가 없습니다.
+            조회는 읽기 전용이며 트리거는 카탈로그·Evidence만 생성합니다. 주문·지갑 경로는 없습니다.
           </p>
         </div>
       </aside>

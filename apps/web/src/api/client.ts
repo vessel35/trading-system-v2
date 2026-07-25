@@ -36,6 +36,14 @@ export type PreregistrationResponse =
   components["schemas"]["PreregistrationResponse"];
 export type RunComparisonItem = components["schemas"]["RunComparisonItem"];
 export type RunComparisonResponse = components["schemas"]["RunComparisonResponse"];
+export type RunConfigInput =
+  operations["validate_run_config_api_v1_run_config_validate_post"]["requestBody"]["content"]["application/json"];
+export type RunSubmission = components["schemas"]["RunSubmission"];
+export type RunAccepted = components["schemas"]["RunAccepted"];
+export type JobStatus = components["schemas"]["JobStatus"];
+export type StrategyOption = components["schemas"]["StrategyOption"];
+export type StrategyListResponse = components["schemas"]["StrategyListResponse"];
+export type PreregistrationInput = components["schemas"]["PreregistrationInput"];
 export type RunQuery = NonNullable<
   operations["list_runs_api_v1_runs_get"]["parameters"]["query"]
 >;
@@ -44,13 +52,35 @@ export class ApiRequestError extends Error {
   constructor(
     message: string,
     readonly code: string | null,
+    readonly violations: string[] = [],
   ) {
     super(message);
     this.name = "ApiRequestError";
   }
 }
 
-function errorDetails(error: unknown): { message: string; code: string | null } {
+interface RequestErrorDetails {
+  message: string;
+  code: string | null;
+  violations: string[];
+}
+
+function validationViolations(details: unknown): string[] {
+  if (!Array.isArray(details)) return [];
+  return details.flatMap((detail) => {
+    if (typeof detail !== "object" || detail === null) return [];
+    const field =
+      "field" in detail && typeof detail.field === "string" ? detail.field : null;
+    const message =
+      "message" in detail && typeof detail.message === "string"
+        ? detail.message
+        : null;
+    if (!message) return [];
+    return [`${field ? `${field}: ` : ""}${message}`];
+  });
+}
+
+function errorDetails(error: unknown): RequestErrorDetails {
   if (
     typeof error === "object" &&
     error !== null &&
@@ -66,18 +96,28 @@ function errorDetails(error: unknown): { message: string; code: string | null } 
       "code" in error.error && typeof error.error.code === "string"
         ? error.error.code
         : null;
-    return { message, code };
+    const violations =
+      "details" in error.error ? validationViolations(error.error.details) : [];
+    return { message, code, violations };
   }
-  return { message: "카탈로그 요청을 완료하지 못했습니다.", code: null };
+  return {
+    message: "카탈로그 요청을 완료하지 못했습니다.",
+    code: null,
+    violations: [],
+  };
 }
 
 export function requestErrorMessage(error: unknown): string {
-  return errorDetails(error).message;
+  const details = errorDetails(error);
+  return [
+    details.message,
+    ...details.violations.map((violation) => `• ${violation}`),
+  ].join("\n");
 }
 
 export function apiRequestError(error: unknown): ApiRequestError {
   const details = errorDetails(error);
-  return new ApiRequestError(details.message, details.code);
+  return new ApiRequestError(details.message, details.code, details.violations);
 }
 
 export function isEvidenceUnavailable(error: unknown): boolean {

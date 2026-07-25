@@ -4,9 +4,11 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, Literal
 
+from core_lib.strategy import StrategyConfig
+from core_lib.strategy.adaptees import STRATEGY_ID, VesselReference
 from pydantic import BaseModel
 
-from web_api.database import CatalogConnection, CryptoConnection, get_settings
+from web_api.database import CatalogConnection, CryptoConnection, SignalConnection, get_settings
 from web_api.models import (
     Candle,
     CandleCollection,
@@ -23,6 +25,8 @@ from web_api.models import (
     RunListResponse,
     RunSummary,
     RunSummaryResponse,
+    StrategyListResponse,
+    StrategyOption,
     SummaryStatus,
 )
 
@@ -355,6 +359,71 @@ class CatalogRepository:
             ),
             core_lib_version=core_lib_version,
             web_api_version=web_api_version,
+        )
+
+
+class StrategyRepository:
+    """Read the signal-service registry, falling back to the in-process Adaptee."""
+
+    def __init__(self, connection: SignalConnection) -> None:
+        self._connection = connection
+
+    def list(self) -> StrategyListResponse:
+        table = self._connection.execute(
+            "SELECT to_regclass('public.strategy_registry') AS relation"
+        ).fetchone()
+        if table is not None and table["relation"] is not None:
+            rows = self._connection.execute(
+                """
+                SELECT strategy_id, display_name, strategy_version,
+                       supported_timeframes, required_indicators_json,
+                       min_history, default_params_json, is_active, is_deprecated
+                FROM public.strategy_registry
+                ORDER BY strategy_id
+                """
+            ).fetchall()
+            if rows:
+                return StrategyListResponse(
+                    data=[
+                        StrategyOption(
+                            strategy_id=str(row["strategy_id"]),
+                            display_name=str(row["display_name"]),
+                            strategy_version=str(row["strategy_version"]),
+                            supported_timeframes=list(row["supported_timeframes"]),
+                            required_indicators=list(row["required_indicators_json"]),
+                            min_history=int(row["min_history"]),
+                            default_params=dict(row["default_params_json"]),
+                            is_active=bool(row["is_active"]),
+                            is_deprecated=bool(row["is_deprecated"]),
+                            source="strategy_registry",
+                        )
+                        for row in rows
+                    ]
+                )
+        return self._code_registry()
+
+    @staticmethod
+    def _code_registry() -> StrategyListResponse:
+        metadata = VesselReference.get_metadata()
+        resolved = StrategyConfig.resolve(
+            VesselReference.get_parameter_schema(),
+            {"strategy_id": STRATEGY_ID, "params": {}},
+        )
+        return StrategyListResponse(
+            data=[
+                StrategyOption(
+                    strategy_id=STRATEGY_ID,
+                    display_name="Vessel Reference",
+                    strategy_version=VesselReference.VERSION,
+                    supported_timeframes=metadata.supported_timeframes,
+                    required_indicators=metadata.required_indicators,
+                    min_history=metadata.min_history,
+                    default_params=dict(resolved.params),
+                    is_active=True,
+                    is_deprecated=False,
+                    source="code_registry",
+                )
+            ]
         )
 
 
