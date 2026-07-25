@@ -43,6 +43,22 @@ RUN_LIST_COLUMNS = """
     (s.run_id IS NOT NULL) AS summary_present
 """
 
+RUN_SUMMARY_COLUMNS = """
+    run_id, trade_count, win_count, loss_count, r_excluded_count, pf,
+    sortino, calmar_or_mar, calmar_basis, sqn, mdd, ror, sharpe, win_rate,
+    payoff, expectancy_r, ulcer, kelly, annualization, initial_capital,
+    final_equity, net_pnl_total, gross_pnl_total, total_fee, total_slippage,
+    total_funding, total_liquidation_penalty, integrity_passed,
+    integrity_status, integrity_failed_json, gate_passed, gate_stage,
+    gate_verdict, gate_failed_json, envelope_result, envelope_deviated_json,
+    decision_route, decision_rationale, oos_degradation, psr, harness_json,
+    computed_at, expected_candle_count, observed_candle_count,
+    source_absent_gap_count, partial_bucket_count, data_coverage_ratio,
+    max_consecutive_gap_bars, max_consecutive_gap_seconds,
+    data_coverage_passed, unobservable_funding_boundary_count,
+    data_gap_exit_count
+"""
+
 SORT_COLUMNS = {
     "created_at": "r.created_at",
     "pf": "s.pf",
@@ -91,7 +107,7 @@ def _decimal_strings(row: dict[str, Any]) -> dict[str, Any]:
     for column in DECIMAL_COLUMNS:
         value = clean.get(column)
         if isinstance(value, Decimal):
-            clean[column] = str(value)
+            clean[column] = format(value, "f")
     return clean
 
 
@@ -199,10 +215,10 @@ class CatalogRepository:
         ).fetchone()
         if run_row is None:
             return None
-        summary_row = self._connection.execute(
-            "SELECT * FROM public.backtest_summary WHERE run_id = %s",
-            (run_id,),
-        ).fetchone()
+        summary_query = (
+            f"SELECT {RUN_SUMMARY_COLUMNS} FROM public.backtest_summary WHERE run_id = %s"
+        )
+        summary_row = self._connection.execute(summary_query, (run_id,)).fetchone()
         status = str(run_row["status"])
         summary = (
             RunSummary.model_validate(_decimal_strings(summary_row))

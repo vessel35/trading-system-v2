@@ -12,7 +12,11 @@ from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 
 from web_api import __version__ as web_api_version
-from web_api.database import CatalogConnection, catalog_connection
+from web_api.database import (
+    CatalogConfigurationError,
+    CatalogConnection,
+    catalog_connection,
+)
 from web_api.models import (
     ErrorResponse,
     HealthResponse,
@@ -123,10 +127,10 @@ async def database_error_handler(_request: Request, _exc: psycopg.Error) -> JSON
     )
 
 
-@app.exception_handler(RuntimeError)
+@app.exception_handler(CatalogConfigurationError)
 async def runtime_configuration_error_handler(
     _request: Request,
-    _exc: RuntimeError,
+    _exc: CatalogConfigurationError,
 ) -> JSONResponse:
     return JSONResponse(
         status_code=503,

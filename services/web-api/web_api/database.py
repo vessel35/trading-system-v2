@@ -15,6 +15,10 @@ from psycopg.rows import dict_row
 CatalogConnection = Connection[dict[str, Any]]
 
 
+class CatalogConfigurationError(RuntimeError):
+    """The catalog reader preset is missing or malformed."""
+
+
 @dataclass(frozen=True)
 class DatabaseSettings:
     host: str
@@ -48,10 +52,14 @@ def get_settings() -> DatabaseSettings:
     missing = [key for key in ("PGHOST", "PGPORT", "PGUSER", "PGPASSWORD") if not values.get(key)]
     if missing:
         names = ", ".join(missing)
-        raise RuntimeError(f"PostgreSQL connection settings are incomplete: {names}")
+        raise CatalogConfigurationError(f"PostgreSQL connection settings are incomplete: {names}")
+    try:
+        port = int(values["PGPORT"])
+    except ValueError as exc:
+        raise CatalogConfigurationError("PGPORT must be an integer") from exc
     return DatabaseSettings(
         host=values["PGHOST"],
-        port=int(values["PGPORT"]),
+        port=port,
         user=values["PGUSER"],
         password=values["PGPASSWORD"],
         database=values.get("BACKTEST_DB_NAME", "backtest_db"),

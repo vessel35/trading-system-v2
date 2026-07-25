@@ -8,8 +8,20 @@ import pytest
 from fastapi.testclient import TestClient
 from web_api.database import connect_catalog
 from web_api.main import app
+from web_api.repository import _decimal_strings
 
 pytestmark = pytest.mark.integration
+
+
+def test_decimal_serialization_uses_fixed_point_notation() -> None:
+    converted = _decimal_strings(
+        {
+            "net_pnl_total": Decimal("0E-8"),
+            "total_fee": Decimal("-1.23000000"),
+        }
+    )
+    assert converted["net_pnl_total"] == "0.00000000"
+    assert converted["total_fee"] == "-1.23000000"
 
 
 @pytest.fixture(scope="module")
@@ -48,11 +60,26 @@ def catalog_rows() -> dict[str, object]:
                 LIMIT 1
                 """
             ).fetchone()
+            with_zero_decimal = connection.execute(
+                """
+                SELECT run_id
+                FROM public.backtest_summary
+                WHERE net_pnl_total = 0
+                   OR gross_pnl_total = 0
+                   OR total_fee = 0
+                   OR total_slippage = 0
+                   OR total_funding = 0
+                   OR total_liquidation_penalty = 0
+                ORDER BY computed_at DESC
+                LIMIT 1
+                """
+            ).fetchone()
     except (OSError, RuntimeError, psycopg.Error) as exc:
         pytest.skip(f"development backtest_db is unavailable: {type(exc).__name__}")
     assert read_only is not None
     assert counts is not None
     assert with_summary is not None
+    assert with_zero_decimal is not None
     return {
         "read_only": read_only["value"],
         "run_count": int(counts["run_count"]),
@@ -60,6 +87,7 @@ def catalog_rows() -> dict[str, object]:
         "summary_absent_count": int(counts["summary_absent_count"]),
         "with_summary": with_summary["run_id"],
         "without_summary": without_summary["run_id"] if without_summary else None,
+        "with_zero_decimal": with_zero_decimal["run_id"],
     }
 
 
@@ -159,6 +187,7 @@ def test_run_summary_supports_one_and_zero_rows_with_decimal_strings(
         assert value is None or isinstance(value, str)
         if value is not None:
             Decimal(value)
+            assert "E" not in value.upper()
 
     without_summary = catalog_rows["without_summary"]
     if without_summary is not None:
@@ -167,6 +196,30 @@ def test_run_summary_supports_one_and_zero_rows_with_decimal_strings(
         absent_body = absent.json()
         assert absent_body["summary"] is None
         assert absent_body["summary_status"] != "available"
+
+
+def test_decimal_zeroes_use_fixed_point_notation(
+    client: TestClient,
+    catalog_rows: dict[str, object],
+) -> None:
+    run_id = str(catalog_rows["with_zero_decimal"])
+    response = client.get(f"/api/v1/runs/{run_id}/summary")
+    assert response.status_code == 200
+    summary = response.json()["summary"]
+    assert summary is not None
+    money_fields = (
+        "initial_capital",
+        "final_equity",
+        "net_pnl_total",
+        "gross_pnl_total",
+        "total_fee",
+        "total_slippage",
+        "total_funding",
+        "total_liquidation_penalty",
+    )
+    values = [summary[field] for field in money_fields if summary[field] is not None]
+    assert any(Decimal(value).is_zero() for value in values)
+    assert all("E" not in value.upper() for value in values)
 
 
 def test_health_proves_read_only_real_catalog_connection(

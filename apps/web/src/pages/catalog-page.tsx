@@ -37,6 +37,7 @@ import { useCatalogFilters } from "../contexts/catalog-filters";
 import { useComparisonBasket } from "../contexts/comparison-basket";
 import { useRuns } from "../hooks/use-catalog";
 import {
+  catalogDecisionPresentation,
   cn,
   formatDecimalString,
   formatMetric,
@@ -60,6 +61,25 @@ function verdictVariant(verdict: string | null): BadgeProps["variant"] {
   return verdict.includes("fail") || verdict.includes("not_")
     ? "destructive"
     : "warning";
+}
+
+function DecisionCell({ run }: { run: RunListItem }) {
+  const decision = catalogDecisionPresentation(
+    run.summary_present,
+    run.gate_verdict,
+    run.decision_route,
+  );
+
+  return (
+    <div className="flex min-w-24 flex-col items-start gap-1">
+      <Badge variant={run.summary_present ? verdictVariant(run.gate_verdict) : "secondary"}>
+        {decision.label}
+      </Badge>
+      {decision.showRoute && (
+        <span className="text-[10px] text-muted-foreground">{run.decision_route}</span>
+      )}
+    </div>
+  );
 }
 
 export function CatalogPage() {
@@ -231,18 +251,7 @@ export function CatalogPage() {
       {
         id: "decision",
         header: "판정",
-        cell: ({ row }) => (
-          <div className="flex min-w-24 flex-col items-start gap-1">
-            <Badge variant={verdictVariant(row.original.gate_verdict)}>
-              {row.original.gate_verdict ?? "no summary"}
-            </Badge>
-            {row.original.decision_route && (
-              <span className="text-[10px] text-muted-foreground">
-                {row.original.decision_route}
-              </span>
-            )}
-          </div>
-        ),
+        cell: ({ row }) => <DecisionCell run={row.original} />,
         enableSorting: false,
       },
       {

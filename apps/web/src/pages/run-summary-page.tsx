@@ -32,6 +32,7 @@ import {
   formatDecimalString,
   formatMetric,
   formatPeriod,
+  formatRatioPercent,
   formatTimestamp,
   shortHash,
 } from "../lib/utils";
@@ -417,9 +418,9 @@ export function RunSummaryPage({ runId }: { runId: string }) {
             <Definition label="Initial capital" value={formatDecimalString(run.initial_capital)} />
             <Definition
               label="Sizing"
-              value={`${run.sizing_method} · ${
-                run.risk_per_trade ?? run.position_size_pct ?? "—"
-              }`}
+              value={`${run.sizing_method} ${formatRatioPercent(
+                run.risk_per_trade ?? run.position_size_pct,
+              )}`}
             />
             <Definition label="Seed" value={run.seed.toLocaleString()} />
             <Definition label="Engine" value={run.engine_version} />
