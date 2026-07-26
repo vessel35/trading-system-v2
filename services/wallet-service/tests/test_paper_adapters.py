@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Callable, Sequence
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import cast
@@ -14,7 +15,7 @@ import wallet_service.infrastructure.paper_broker as broker_module
 from core_lib.ports import Broker, CostModel
 from wallet_service.application import WalletService
 from wallet_service.core import RiskPolicy
-from wallet_service.domain import WalletExecution
+from wallet_service.domain import SignalConsumptionStatus, WalletExecution
 from wallet_service.infrastructure import (
     PaperBroker,
     PaperCostModel,
@@ -116,14 +117,53 @@ def test_repository_commits_fill_position_accounting_and_balance_together() -> N
     assert inserted is True
     assert connection.commit_calls == 1
     assert connection.rollback_calls == 0
-    assert len(connection.calls) == 5
+    assert len(connection.calls) == 6
     statements = [query.lstrip().split(maxsplit=1)[0] for query, _ in connection.calls]
-    assert statements == ["INSERT", "DELETE", "INSERT", "INSERT", "INSERT"]
+    assert statements == ["INSERT", "INSERT", "DELETE", "INSERT", "INSERT", "INSERT"]
     relations = "\n".join(query for query, _ in connection.calls)
+    assert '"public".wallet_signal_consumption' in relations
     assert '"public".fills' in relations
     assert '"public".positions' in relations
     assert '"public".accounting_snapshots' in relations
     assert '"public".wallet_accounts' in relations
+    assert connection.calls[0][1][2] == SignalConsumptionStatus.FILLED.value
+
+
+def test_repository_records_rejection_without_any_ledger_statement() -> None:
+    connection = _Connection(
+        lambda query, params: _Result((params[1],)) if "RETURNING" in query else _Result()
+    )
+    repository = PostgresWalletRepository(connection)
+    consumed_at = datetime(2026, 1, 1, tzinfo=UTC)
+
+    inserted = repository.record_consumption(
+        "wallet-1",
+        "signal-rejected",
+        SignalConsumptionStatus.REJECTED,
+        consumed_at,
+    )
+
+    assert inserted is True
+    assert connection.commit_calls == 1
+    assert connection.rollback_calls == 0
+    assert len(connection.calls) == 1
+    query, params = connection.calls[0]
+    assert '"public".wallet_signal_consumption' in query
+    assert params == (
+        "wallet-1",
+        "signal-rejected",
+        SignalConsumptionStatus.REJECTED.value,
+        consumed_at,
+    )
+    assert all(
+        table not in query
+        for table in (
+            '"public".fills',
+            '"public".positions',
+            '"public".accounting_snapshots',
+            '"public".wallet_accounts',
+        )
+    )
 
 
 def test_repository_rolls_back_every_statement_on_failure() -> None:
@@ -182,13 +222,21 @@ def test_service_contains_no_remote_trading_dependency_or_runner() -> None:
 
 def test_wallet_schema_is_paper_only_and_contains_the_atomic_ledger_tables() -> None:
     root = Path(__file__).resolve().parents[3]
-    migration = (
+    migration_directory = (
         root / "init-scripts" / "wallet-service" / "20260726" / "01-create-paper-wallet-ledger.sql"
-    ).read_text()
-    assert migration.count("CREATE TABLE IF NOT EXISTS") == 4
-    for table in ("wallet_accounts", "fills", "positions", "accounting_snapshots"):
+    ).parent
+    migration = "\n".join(path.read_text() for path in sorted(migration_directory.glob("*.sql")))
+    assert migration.count("CREATE TABLE IF NOT EXISTS") == 5
+    for table in (
+        "wallet_accounts",
+        "fills",
+        "positions",
+        "accounting_snapshots",
+        "wallet_signal_consumption",
+    ):
         assert f"public.{table}" in migration
-    assert migration.count("CHECK (mode = 'paper')") == 4
+    assert migration.count("CHECK (mode = 'paper')") == 5
+    assert "CHECK (status IN ('filled', 'rejected', 'skipped'))" in migration
     assert "BEGIN;" in migration
     assert "COMMIT;" in migration
     assert "api_key" not in migration

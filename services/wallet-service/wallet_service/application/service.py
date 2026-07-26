@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from decimal import Decimal
+from types import TracebackType
 
 import core_lib.execution as execution
 from core_lib.costs import liquidation_price
@@ -26,6 +27,7 @@ from wallet_service.domain import (
     PaperIntent,
     PaperSignal,
     RiskRejected,
+    SignalConsumptionStatus,
     WalletExecution,
 )
 
@@ -83,11 +85,46 @@ class WalletService:
         self._risk_guard.engage_kill_switch()
 
     def run_once(self) -> WalletExecution | None:
-        """Consume at most one queued signal."""
+        """Consume one ready signal and terminally receipt every permanent outcome."""
         message = self._queue.receive()
         if message is None:
             return None
-        return self.process(message)
+        try:
+            execution = self.process(message)
+        except RiskRejected:
+            self._repository.record_consumption(
+                self._wallet_id,
+                message.signal_id,
+                SignalConsumptionStatus.REJECTED,
+                message.execution_candle.close_time,
+            )
+            return None
+        if execution is None:
+            self._repository.record_consumption(
+                self._wallet_id,
+                message.signal_id,
+                SignalConsumptionStatus.SKIPPED,
+                message.execution_candle.close_time,
+            )
+        return execution
+
+    def close(self) -> None:
+        """Release queue-owned read connections."""
+        self._queue.close()
+
+    def __enter__(self) -> WalletService:
+        """Support bounded ownership of source read connections."""
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Close source reads even when processing raises unexpectedly."""
+        del exc_type, exc_value, traceback
+        self.close()
 
     def process(self, message: PaperSignal) -> WalletExecution | None:
         """Simulate, account, and atomically persist one paper signal."""

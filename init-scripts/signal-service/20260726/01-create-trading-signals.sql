@@ -84,8 +84,9 @@ COMMENT ON COLUMN public.trading_signals.params_json IS
 CREATE INDEX IF NOT EXISTS ix_trading_signals_created
     ON public.trading_signals (created_at DESC);
 
-GRANT USAGE ON SCHEMA public TO signal_writer;
+GRANT USAGE ON SCHEMA public TO signal_writer, signal_reader;
 GRANT SELECT, INSERT ON TABLE public.trading_signals TO signal_writer;
+GRANT SELECT ON TABLE public.trading_signals TO signal_reader;
 GRANT USAGE, SELECT
     ON SEQUENCE public.trading_signals_signal_id_seq
     TO signal_writer;

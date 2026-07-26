@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import cast
@@ -13,7 +14,7 @@ import pytest
 from psycopg.conninfo import conninfo_to_dict
 from wallet_service.application import WalletRepository, WalletService
 from wallet_service.core import RiskPolicy
-from wallet_service.domain import WalletExecution
+from wallet_service.domain import SignalConsumptionStatus, WalletExecution
 from wallet_service.infrastructure import (
     PaperBroker,
     PaperCostModel,
@@ -26,13 +27,7 @@ from tests.conftest import QueueDouble, paper_signal
 pytestmark = pytest.mark.integration
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
-WALLET_MIGRATION = (
-    REPOSITORY_ROOT
-    / "init-scripts"
-    / "wallet-service"
-    / "20260726"
-    / "01-create-paper-wallet-ledger.sql"
-)
+WALLET_MIGRATION_DIRECTORY = REPOSITORY_ROOT / "init-scripts" / "wallet-service" / "20260726"
 
 
 def _dsn() -> str:
@@ -55,7 +50,9 @@ def _dsn() -> str:
 
 def _migration_sql(schema: str) -> str:
     """Relocate the real psql migration into one disposable test schema."""
-    source = WALLET_MIGRATION.read_text()
+    source = "\n".join(
+        path.read_text() for path in sorted(WALLET_MIGRATION_DIRECTORY.glob("*.sql"))
+    )
     sql = "\n".join(line for line in source.splitlines() if not line.lstrip().startswith("\\"))
     return sql.replace("public.", f'"{schema}".').replace(
         "SCHEMA public",
@@ -69,6 +66,16 @@ class _Capture(WalletRepository):
 
     def store(self, execution: WalletExecution) -> bool:
         self.value = execution
+        return True
+
+    def record_consumption(
+        self,
+        wallet_id: str,
+        signal_id: str,
+        status: SignalConsumptionStatus,
+        consumed_at: datetime,
+    ) -> bool:
+        del wallet_id, signal_id, status, consumed_at
         return True
 
 
@@ -110,10 +117,11 @@ def test_repository_commits_to_disposable_wallet_schema_and_rejects_replay() -> 
                 (SELECT count(*) FROM "{schema}".fills),
                 (SELECT count(*) FROM "{schema}".positions),
                 (SELECT count(*) FROM "{schema}".accounting_snapshots),
-                (SELECT count(*) FROM "{schema}".wallet_accounts)
+                (SELECT count(*) FROM "{schema}".wallet_accounts),
+                (SELECT count(*) FROM "{schema}".wallet_signal_consumption)
             """
         ).fetchone()
-        assert counts == (1, 1, 1, 1)
+        assert counts == (1, 1, 1, 1, 1)
         constraints = {
             row[0]
             for row in connection.execute(
@@ -132,6 +140,8 @@ def test_repository_commits_to_disposable_wallet_schema_and_rejects_replay() -> 
             "ck_positions_paper_only",
             "ck_accounting_paper_only",
             "ck_accounting_identity",
+            "ck_wallet_signal_consumption_paper_only",
+            "ck_wallet_signal_consumption_status",
         } <= constraints
         with pytest.raises(psycopg.errors.CheckViolation):
             connection.execute(

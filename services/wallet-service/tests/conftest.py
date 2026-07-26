@@ -9,7 +9,12 @@ import pytest
 from core_lib.types import Candle, MarketType, PositionSide, TradingSignal
 from wallet_service.application import SignalQueue, WalletRepository, WalletService
 from wallet_service.core import RiskPolicy
-from wallet_service.domain import PaperIntent, PaperSignal, WalletExecution
+from wallet_service.domain import (
+    PaperIntent,
+    PaperSignal,
+    SignalConsumptionStatus,
+    WalletExecution,
+)
 from wallet_service.infrastructure import PaperBroker, PaperCostModel
 
 
@@ -18,9 +23,13 @@ class QueueDouble(SignalQueue):
 
     def __init__(self, messages: list[PaperSignal] | None = None) -> None:
         self.messages = [] if messages is None else list(messages)
+        self.close_calls = 0
 
     def receive(self) -> PaperSignal | None:
         return None if not self.messages else self.messages.pop(0)
+
+    def close(self) -> None:
+        self.close_calls += 1
 
 
 class RepositoryDouble(WalletRepository):
@@ -29,11 +38,30 @@ class RepositoryDouble(WalletRepository):
     def __init__(self, *, accept: bool = True) -> None:
         self.accept = accept
         self.executions: list[WalletExecution] = []
+        self.consumptions: list[tuple[str, str, SignalConsumptionStatus, datetime]] = []
 
     def store(self, execution: WalletExecution) -> bool:
         if not self.accept:
             return False
         self.executions.append(execution)
+        self.consumptions.append(
+            (
+                execution.wallet_id,
+                execution.signal_id,
+                SignalConsumptionStatus.FILLED,
+                execution.accounting.occurred_at,
+            )
+        )
+        return True
+
+    def record_consumption(
+        self,
+        wallet_id: str,
+        signal_id: str,
+        status: SignalConsumptionStatus,
+        consumed_at: datetime,
+    ) -> bool:
+        self.consumptions.append((wallet_id, signal_id, status, consumed_at))
         return True
 
 

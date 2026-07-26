@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from datetime import datetime
 from decimal import Decimal
 from typing import Protocol
 
 from core_lib.ports import CostModel
 from core_lib.types import Candle, Fill, Order, OrderRequest
 
-from wallet_service.domain import PaperSignal, WalletExecution
+from wallet_service.domain import PaperSignal, SignalConsumptionStatus, WalletExecution
 
 
 class SignalQueue(ABC):
@@ -19,6 +20,10 @@ class SignalQueue(ABC):
     def receive(self) -> PaperSignal | None:
         """Return the next paper signal, or no work."""
 
+    def close(self) -> None:
+        """Release queue-owned source connections, if any."""
+        return None
+
 
 class WalletRepository(ABC):
     """Commit or roll back wallet-owned execution facts atomically."""
@@ -26,6 +31,16 @@ class WalletRepository(ABC):
     @abstractmethod
     def store(self, execution: WalletExecution) -> bool:
         """Persist one signal transaction, returning false for an idempotent replay."""
+
+    @abstractmethod
+    def record_consumption(
+        self,
+        wallet_id: str,
+        signal_id: str,
+        status: SignalConsumptionStatus,
+        consumed_at: datetime,
+    ) -> bool:
+        """Persist a terminal non-fill receipt without creating ledger facts."""
 
 
 class PaperExecutionBroker(Protocol):
