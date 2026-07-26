@@ -91,8 +91,13 @@
 > 배포는 버전 고정 산출물을 설치한다"로 지킨다.
 
 기존 백테스트·replay 서비스는 전면 폐기 대상이라 서비스가 아니며 이 뷰에 등장하지 않는다. 그 필요 기능은 새
-`backtest-service`가 새로 구현한다. 외부 collector는 리포 내부 `OHLCV 수집기`로 이관해 OHLCV 적재만 맡기고, 지표
-사전계산 역할은 폐지한다.
+`backtest-service`가 새로 구현한다. 외부 collector의 OHLCV 적재 부분은 리포 내부 독립 서비스 `OHLCV 수집기`
+(`services/collector/`, backtest에 종속되지 않음)로 이관해 OHLCV 적재만 맡기고, 지표 사전계산 역할은 폐지한다.
+이 수집기가 채운 `crypto_data`를 **백테스트·페이퍼·라이브 세 모드가 공통 OHLCV 원천으로 쓴다**(백테스트는 과거
+구간을 읽고, 페이퍼·라이브는 실시간 적재분을 쓴다). 라이브·페이퍼 운영 서비스는 `signal-service`이므로,
+signal-service가 채택되면 이 수집기의 운영 홈이 된다(그 전까지는 독립 `services/collector/`로 둔다). 한편 외부
+데이터 파이프라인 `crypto-data-hub`는 **OHLCV를 더는 수집하지 않고** 거시·뉴스 등 거래소 외부 데이터 수집만
+맡는다(`crypto_data` DB 자체의 생성·소유는 유지).
 
 ## 확정된 범위 조정
 
@@ -224,13 +229,13 @@ core-lib은 특정 DB에 묶이지 않는다. 이 방식은 현행 signal-servic
 | `backtest-service` | 신규 서비스         | 도메인 로직을 `core_lib`에서만 가져오는(다른 서비스 import 안 함) 결정적 실행 드라이버·입출력 오케스트레이터(사전등록·run_id 발급·워밍업 preload·캔들 루프·데이터 피드 push·체결·2계층 저장·상위 검증) | 전략 판단·지표·사이징·비용·실행 규칙 자체 미보유(전부 `core_lib` 호출); 라이브 인프라(큐·폴링·HTTP·상태 복구) 없음; 전략 파라미터 스키마·검증 미소유(run 설정만 소유)      | `core-lib`(import); `crypto_data`·Evidence SQLite·`backtest_db`·`signal_db`(전부 포트 경유) | monorepo `services/backtest-service/`; core-lib editable 의존; 독립 배포; 포트의 backtest 구현(어댑터) 소유                                                 |
 | `signal-service`   | 기존 서비스 (유지·채택) | 확정 캔들마다 지표 증분(O(1)) 직접 계산 + Adapter Manager로 Adaptee 생성·판단 호출 → `wallet-service` 큐로 신호 전달                                    | 이 설계 단계 미변경(채택 단계에서만 내부 구현→`core_lib` 치환, 동작 불변); 판정 루프 안 돎(라이브 Evidence는 연구 피드백만)                               | 채택 후 `core-lib`(import); `crypto_data`(읽기·지표 계산); `signal_db`                         | monorepo `services/signal-service/`(채택 시 이관); 독립 배포; 실거래는 core-lib 버전 고정; 채택 전 기존 리포가 프로덕션·이식 원천; 채택은 무중단 re-export shim                    |
 | `wallet-service`   | 기존 서비스 (유지·채택) | 신호 큐 소비 → 사이징·실행·비용 호출로 체결·리스크·킬스위치; 체결·포지션·회계를 자기 운영 DB에 기록                                                                 | 이 설계 단계 미변경(채택 단계에서 체결 시점 즉시→다음 캔들 시가 전환, 회귀 ~1279건 필요); 라이브 인프라 백테스트로 미이관                                       | 채택 후 `core-lib`(import); `wallet_db`                                                  | monorepo `services/wallet-service/`(채택 시 이관); 독립 배포; 실거래는 core-lib 버전 고정; 채택 전 기존 리포가 프로덕션·이식 원천; 채택은 re-export shim                        |
-| `OHLCV 수집기`        | 내부 컴포넌트        | 거래소 확정 캔들 OHLCV를 `crypto_data`에 적재(확정 캔들마다 1행·무조건)                                                                           | 지표 미생성(계산은 signal·backtest가 `core_lib`로); 진행 중 캔들 미적재(look-ahead 방지의 데이터 층 근거); 단일 심볼 Binance 선물만(Upbit 현물 범위 밖) | 거래소 REST·WebSocket(입력); `crypto_data`(쓰기); `config_db`(활성 심볼 읽기)                      | 외부 collector의 리포 내부 이관분; 과거 구간은 기존 backfill 재사용 + `crypto_data` 보존 연장(예: 2000일)                                                             |
+| `OHLCV 수집기`        | 내부 컴포넌트        | 거래소 확정 캔들 OHLCV를 `crypto_data`에 적재(확정 캔들마다 1행·무조건)                                                                           | 지표 미생성(계산은 signal·backtest가 `core_lib`로); 진행 중 캔들 미적재(look-ahead 방지의 데이터 층 근거); 단일 심볼 Binance 선물만(Upbit 현물 범위 밖) | 거래소 REST·WebSocket(입력); `crypto_data`(쓰기); `config_db`(활성 심볼 읽기)                      | 독립 서비스 `services/collector/`(backtest 비종속; 백테스트·페이퍼·라이브 세 모드 공통 OHLCV 원천; 라이브·페이퍼 운영 서비스인 signal-service가 채택되면 그 운영 홈이 됨); 외부 데이터 수집(거시·뉴스)은 crypto-data-hub가 계속 맡음; 과거 구간은 기존 backfill 재사용 + `crypto_data` 보존 연장(retention 400→2000일 확정)                                                             |
 
 **저장소 정의**
 
 | 저장소 | 유형 | 책임 | 접근 (쓰기/읽기) | 경계 |
 |---|---|---|---|---|
-| `crypto_data` | 공유·읽기 | 확정 캔들 OHLCV(1분 적재, 상위 TF는 연속 집계 뷰) + funding rate 시계열 | `OHLCV 수집기` 쓰기; `backtest-service`(DataFeed 포트)·`signal-service` 읽기; 백테스트 미기록 | crypto-data-hub가 생성·소유하는 공유 DB; 백테스트 결과 미저장; 전략 TF와 별도로 1분 트리거 캔들 보유(1분 집행 피드 사용은 §4.4 확정) |
+| `crypto_data` | 공유·읽기 | 확정 캔들 OHLCV(1분 적재, 상위 TF는 연속 집계 뷰) + funding rate 시계열 | `OHLCV 수집기` 쓰기; `backtest-service`(DataFeed 포트)·`signal-service` 읽기; 백테스트 미기록 | crypto-data-hub가 생성·소유하는 공유 DB(스키마·프로비저닝 유지); **OHLCV 적재는 `OHLCV 수집기`가 맡고 crypto-data-hub는 거시·뉴스 등 거래소 외부 데이터만 적재**; `ohlcv_futures` retention 2000일 확정; 백테스트 결과 미저장; 전략 TF와 별도로 1분 트리거 캔들 보유(1분 집행 피드 사용은 §4.4 확정) |
 | `backtest_db` | 신규·전용 메타 | run 요약·카탈로그·사전등록·태그 등 run 메타(검색·비교·집계 근거) | `backtest-service`(CatalogStore 포트) 쓰기, Harness 읽기; 조회용 읽기 전용 역할을 writer와 분리 | 운영 DB와 분리(연구 데이터 오염 방지); 상세 Evidence 미보유; 이름·writer 계승·스키마 신규·읽기 전용 역할 신설(필드는 §5.2) |
 | `signal_db` | 기존 + 레지스트리 | `signal-service` 운영 DB + 실행할 전략(Adaptee) 목록 레지스트리 — 현행 코드 상주(부팅 하드코딩) 목록을 DB로 승격해 전략 목록의 단일 출처로 삼음 | `signal-service` 쓰기; Adapter Manager가 주입 포트로 등록·조회(`backtest-service`도 주입 포트로 조회) | `core_lib` 직접 의존 없음(주입 포트 경유); 레지스트리는 현행 `trading_strategies`(클래스명·파라미터 JSONB·심볼·타임프레임·활성·버전) 구조 차용, ERD·필드는 §5.1 |
 | Evidence SQLite | run별 상세 | run별 캔들 신호·주문·체결·포지션·손익·지표 스냅샷(forensics·재현 원천) | `backtest-service`(EvidenceSink 포트) 쓰기; 대시보드·연구 읽기; 라이브는 연구 피드백용만 | run 자기완결(원천 스냅샷 로컬 사본); 운영 DB 미저장; 결정성 해시=정렬 행 정규화 직렬화(파일 바이트 아님)(필드는 §5.3) |
