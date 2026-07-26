@@ -97,6 +97,7 @@ def test_pip_bootstrap_resolves_workspace_projects_together() -> None:
         "-e ./services/core-lib[dev]",
         "-e ./services/backtest-service[dev]",
         "-e ./services/signal-service[dev]",
+        "-e ./services/wallet-service[dev]",
         "-e ./services/web-api[dev]",
     }
     backtest_project = tomllib.loads(
@@ -107,3 +108,7 @@ def test_pip_bootstrap_resolves_workspace_projects_together() -> None:
         (repository_root / "services" / "signal-service" / "pyproject.toml").read_text()
     )["project"]
     assert "core-lib==0.2.0" in signal_project["dependencies"]
+    wallet_project = tomllib.loads(
+        (repository_root / "services" / "wallet-service" / "pyproject.toml").read_text()
+    )["project"]
+    assert "core-lib==0.2.0" in wallet_project["dependencies"]

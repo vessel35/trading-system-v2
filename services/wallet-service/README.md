@@ -1,15 +1,18 @@
 # wallet-service
 
 `wallet-service` is the v2 paper-execution driver. It consumes an injected
-in-process signal queue, calls `core_lib` for risk-money sizing, exposure
+queue, calls `core_lib` for risk-money sizing, exposure
 limits, deterministic matching, costs, position-book updates, and accounting,
 then commits fills, the current position, and an accounting snapshot to its
 own `wallet_db`.
 
 `PaperSignal` is the wallet-side queue delivery envelope. A process-local queue
-adapter carries the signal-service decision plus routing identity and the next
-finalized paper candle; the services remain sibling packages and do not import
-one another.
+adapter remains available for unit assembly. `PostgresSignalQueue` reads
+paper-only decisions from `signal_db`, anti-joins their IDs against the
+wallet-owned consumption receipts, and reads only finalized 1m rows from
+`crypto_data`. Both decision and next execution candles use the shared
+`core_lib.candles` resampler; an incomplete next candle yields no work until a
+later poll.
 
 ## Safety boundary
 
@@ -19,10 +22,12 @@ order API, credential model, withdrawal path, or live runner. The only
 float-to-`Decimal` transition is inside `PaperBroker.submit()` through
 `core_lib.execution.normalizer`.
 
-The application constructor accepts an already-created connection/repository
-and queue. It never reads `.env`, discovers a database, or starts a process by
-itself. PostgreSQL integration tests are opt-in and reject any DSN that is not
-local and whose database name does not end in `_test`.
+The application constructor accepts already-created read connections,
+connection/repository, and queue. It never reads `.env`, discovers a database,
+or starts a process by itself. Signal and candle connections issue SELECT only;
+the atomic ledger transaction writes only `wallet_db`, including
+`wallet_signal_consumption`. PostgreSQL integration tests are opt-in and reject
+any DSN that is not local and whose database name does not end in `_test`.
 
 ## Checks
 

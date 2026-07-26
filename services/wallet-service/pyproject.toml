@@ -52,7 +52,7 @@ select = ["B", "E", "F", "I", "UP"]
 
 [tool.mypy]
 files = ["wallet_service", "tests"]
-mypy_path = "$MYPY_CONFIG_FILE_DIR/../core-lib"
+mypy_path = "$MYPY_CONFIG_FILE_DIR/../core-lib:$MYPY_CONFIG_FILE_DIR/../signal-service"
 python_version = "3.12"
 strict = true
 warn_unreachable = true

@@ -11,6 +11,15 @@ from wallet_service.domain import WalletExecution
 
 _IDENTIFIER = re.compile(r"^[a-z_][a-z0-9_]*$")
 
+_INSERT_CONSUMPTION = """
+INSERT INTO {consumption} (
+    wallet_id, signal_id, mode, consumed_at
+)
+VALUES (%s, %s, 'paper', %s)
+ON CONFLICT (wallet_id, signal_id) DO NOTHING
+RETURNING signal_id
+"""
+
 _INSERT_FILL = """
 INSERT INTO {fills} (
     wallet_id, signal_id, mode, order_id, symbol, side, position_side,
@@ -101,6 +110,9 @@ class PostgresWalletRepository(WalletRepository):
 
     def __init__(self, connection: WriteConnection, *, schema: str = "public") -> None:
         self._connection = connection
+        self._insert_consumption = _INSERT_CONSUMPTION.format(
+            consumption=_relation(schema, "wallet_signal_consumption"),
+        )
         self._insert_fill = _INSERT_FILL.format(
             fills=_relation(schema, "fills"),
         )
@@ -120,6 +132,18 @@ class PostgresWalletRepository(WalletRepository):
     def store(self, execution: WalletExecution) -> bool:
         """Commit fills, final position, and accounting or roll back all of them."""
         try:
+            inserted_consumption = self._connection.execute(
+                self._insert_consumption,
+                (
+                    execution.wallet_id,
+                    execution.signal_id,
+                    execution.accounting.occurred_at,
+                ),
+            ).fetchone()
+            if inserted_consumption is None:
+                self._connection.rollback()
+                return False
+
             for fill in execution.fills:
                 inserted = self._connection.execute(
                     self._insert_fill,

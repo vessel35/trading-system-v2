@@ -45,6 +45,7 @@ EXPECTED_WALLET_TABLES = {
     "fills",
     "positions",
     "wallet_accounts",
+    "wallet_signal_consumption",
 }
 EXPECTED_SIGNAL_REGISTRY_COLUMNS = {
     "strategy_id",
@@ -283,7 +284,9 @@ def test_application_roles_have_expected_least_privilege_access() -> None:
         SELECT
             pg_has_role('backtest_writer', 'data_reader', 'member'),
             pg_has_role('backtest_writer', 'signal_reader', 'member'),
-            pg_has_role('signal_writer', 'config_reader', 'member');
+            pg_has_role('signal_writer', 'config_reader', 'member'),
+            pg_has_role('wallet_writer', 'data_reader', 'member'),
+            pg_has_role('wallet_writer', 'signal_reader', 'member');
         """,
     )
     crypto_access = _query(
@@ -339,6 +342,11 @@ def test_application_roles_have_expected_least_privilege_access() -> None:
                 'public.trading_signals',
                 'UPDATE,DELETE'
             ),
+            has_table_privilege(
+                'signal_reader',
+                'public.trading_signals',
+                'SELECT'
+            ),
             NOT has_table_privilege(
                 'signal_reader',
                 'public.trading_signals',
@@ -374,14 +382,24 @@ def test_application_roles_have_expected_least_privilege_access() -> None:
                 'wallet_writer',
                 'public.accounting_snapshots',
                 'SELECT,INSERT'
+            ),
+            has_table_privilege(
+                'wallet_writer',
+                'public.wallet_signal_consumption',
+                'SELECT,INSERT'
+            ),
+            NOT has_table_privilege(
+                'wallet_writer',
+                'public.wallet_signal_consumption',
+                'UPDATE,DELETE'
             );
         """,
     )
-    assert memberships == ["t|t|t"]
+    assert memberships == ["t|t|t|t|t"]
     assert crypto_access == ["t|t|t"]
     assert config_access == ["t|t"]
-    assert signal_access == ["t|t|t|t|t"]
-    assert wallet_access == ["t|t|t|t|t"]
+    assert signal_access == ["t|t|t|t|t|t"]
+    assert wallet_access == ["t|t|t|t|t|t|t"]
 
 
 def test_crypto_columns_precision_nullability_and_primary_keys_match_design() -> None:

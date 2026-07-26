@@ -7,16 +7,14 @@ import re
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import Protocol, cast
+from typing import Protocol
 
+from core_lib.candles import resample_confirmed_ohlcv
 from core_lib.types import Candle
 
 from signal_service.application import SignalDataFeed
 
 _LOGGER = logging.getLogger(__name__)
-_TIMEFRAME_PATTERN = re.compile(r"^(?P<count>[1-9]\d*)(?P<unit>[mhd])$")
-_TIMEFRAME_SECONDS = {"m": 60, "h": 3600, "d": 86400}
-_MINUTE = timedelta(minutes=1)
 _FUNDING_COLLECTION_WINDOW = timedelta(seconds=1)
 _DERIVATIVE_SYMBOL = re.compile(r"^(?P<base>[A-Z0-9]+)/(?P<quote>[A-Z0-9]+)(?::[A-Z0-9]+)?$")
 
@@ -88,22 +86,6 @@ def _utc(value: datetime, *, name: str) -> datetime:
     return value.astimezone(UTC)
 
 
-def _timeframe_duration(timeframe: str) -> timedelta:
-    match = _TIMEFRAME_PATTERN.fullmatch(timeframe)
-    if match is None:
-        raise ValueError(f"unsupported timeframe: {timeframe!r}")
-    seconds = _TIMEFRAME_SECONDS[match.group("unit")] * int(match.group("count"))
-    if seconds % 60 != 0:
-        raise ValueError("signal candles must be a whole number of minutes")
-    return timedelta(seconds=seconds)
-
-
-def _bucket_start(value: datetime, duration: timedelta) -> datetime:
-    seconds = int(duration.total_seconds())
-    epoch_seconds = int(_utc(value, name="candle time").timestamp())
-    return datetime.fromtimestamp(epoch_seconds - epoch_seconds % seconds, tz=UTC)
-
-
 def _decimal(value: object, *, name: str) -> Decimal:
     if not isinstance(value, Decimal):
         raise TypeError(f"{name} must be returned as Decimal")
@@ -173,105 +155,23 @@ class CryptoDataFeed(SignalDataFeed):
         boundary: datetime,
         rows: list[Sequence[object]],
     ) -> list[Candle]:
-        duration = _timeframe_duration(tf)
-        if not rows:
-            return []
-
-        grouped: dict[datetime, dict[datetime, Sequence[object]]] = {}
-        for row in rows:
-            if len(row) != 8:
-                raise ValueError("ohlcv_futures SELECT returned an unexpected row shape")
-            open_time = row[0]
-            if not isinstance(open_time, datetime):
-                raise TypeError("ohlcv_futures.time must be datetime")
-            for index, name in (
-                (1, "open"),
-                (2, "high"),
-                (3, "low"),
-                (4, "close"),
-                (5, "volume"),
-            ):
-                _decimal(row[index], name=name)
-            normalized_time = _utc(open_time, name="ohlcv_futures.time")
-            group = grouped.setdefault(_bucket_start(normalized_time, duration), {})
-            if normalized_time in group:
-                raise ValueError("duplicate 1m source candle")
-            group[normalized_time] = row
-
-        first_bucket = min(grouped)
-        latest_complete_bucket = _bucket_start(boundary - duration, duration)
-        if latest_complete_bucket < first_bucket:
-            return []
-
-        result: list[Candle] = []
-        dropped = 0
-        expected_count = int(duration / _MINUTE)
-        current = first_bucket
-        while current <= latest_complete_bucket:
-            bucket = grouped.get(current, {})
-            expected_times = {current + index * _MINUTE for index in range(expected_count)}
-            if set(bucket) != expected_times:
-                dropped += 1
-                current += duration
-                continue
-            ordered = [bucket[at] for at in sorted(bucket)]
-            result.append(self._build_candle(symbol, tf, current, duration, ordered))
-            current += duration
-
-        if dropped:
-            self._dropped_bucket_count += dropped
+        result = resample_confirmed_ohlcv(
+            rows,
+            symbol=symbol,
+            exchange=self._exchange,
+            timeframe=tf,
+            boundary=boundary,
+        )
+        if result.dropped_bucket_count:
+            self._dropped_bucket_count += result.dropped_bucket_count
             _LOGGER.warning(
                 "discarded %d incomplete OHLCV bucket(s) for %s %s through %s",
-                dropped,
+                result.dropped_bucket_count,
                 symbol,
                 tf,
                 boundary.isoformat(),
             )
-        return result
-
-    def _build_candle(
-        self,
-        symbol: str,
-        timeframe: str,
-        open_time: datetime,
-        duration: timedelta,
-        rows: list[Sequence[object]],
-    ) -> Candle:
-        opens = [cast(Decimal, row[1]) for row in rows]
-        highs = [cast(Decimal, row[2]) for row in rows]
-        lows = [cast(Decimal, row[3]) for row in rows]
-        closes = [cast(Decimal, row[4]) for row in rows]
-        volumes = [cast(Decimal, row[5]) for row in rows]
-        quote_volume = (
-            None
-            if any(row[6] is None for row in rows)
-            else float(sum((_decimal(row[6], name="quote_volume") for row in rows), Decimal(0)))
-        )
-        trade_count = (
-            None
-            if any(row[7] is None for row in rows)
-            else sum(self._trade_count(row[7]) for row in rows)
-        )
-        return Candle(
-            symbol=symbol,
-            exchange=self._exchange,
-            timeframe=timeframe,
-            open_time=open_time,
-            close_time=open_time + duration,
-            open=float(opens[0]),
-            high=float(max(highs)),
-            low=float(min(lows)),
-            close=float(closes[-1]),
-            volume=float(sum(volumes, Decimal(0))),
-            quote_volume=quote_volume,
-            trade_count=trade_count,
-        )
-
-    @staticmethod
-    def _trade_count(value: object) -> int:
-        if isinstance(value, bool) or not isinstance(value, int):
-            raise TypeError("trade_count must be int")
-        return value
+        return list(result.candles)
 
     def funding(self, symbol: str, at: datetime) -> Decimal:
         """Return the observed boundary rate through a SELECT-only query."""

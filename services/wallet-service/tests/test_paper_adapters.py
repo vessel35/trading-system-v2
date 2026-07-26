@@ -116,10 +116,11 @@ def test_repository_commits_fill_position_accounting_and_balance_together() -> N
     assert inserted is True
     assert connection.commit_calls == 1
     assert connection.rollback_calls == 0
-    assert len(connection.calls) == 5
+    assert len(connection.calls) == 6
     statements = [query.lstrip().split(maxsplit=1)[0] for query, _ in connection.calls]
-    assert statements == ["INSERT", "DELETE", "INSERT", "INSERT", "INSERT"]
+    assert statements == ["INSERT", "INSERT", "DELETE", "INSERT", "INSERT", "INSERT"]
     relations = "\n".join(query for query, _ in connection.calls)
+    assert '"public".wallet_signal_consumption' in relations
     assert '"public".fills' in relations
     assert '"public".positions' in relations
     assert '"public".accounting_snapshots' in relations
@@ -182,13 +183,20 @@ def test_service_contains_no_remote_trading_dependency_or_runner() -> None:
 
 def test_wallet_schema_is_paper_only_and_contains_the_atomic_ledger_tables() -> None:
     root = Path(__file__).resolve().parents[3]
-    migration = (
+    migration_directory = (
         root / "init-scripts" / "wallet-service" / "20260726" / "01-create-paper-wallet-ledger.sql"
-    ).read_text()
-    assert migration.count("CREATE TABLE IF NOT EXISTS") == 4
-    for table in ("wallet_accounts", "fills", "positions", "accounting_snapshots"):
+    ).parent
+    migration = "\n".join(path.read_text() for path in sorted(migration_directory.glob("*.sql")))
+    assert migration.count("CREATE TABLE IF NOT EXISTS") == 5
+    for table in (
+        "wallet_accounts",
+        "fills",
+        "positions",
+        "accounting_snapshots",
+        "wallet_signal_consumption",
+    ):
         assert f"public.{table}" in migration
-    assert migration.count("CHECK (mode = 'paper')") == 4
+    assert migration.count("CHECK (mode = 'paper')") == 5
     assert "BEGIN;" in migration
     assert "COMMIT;" in migration
     assert "api_key" not in migration
