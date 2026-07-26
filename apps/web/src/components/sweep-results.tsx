@@ -105,9 +105,11 @@ export function SweepResults({ sweep }: { sweep: TrackedSweep | undefined }) {
   const [selected, setSelected] = useState<string[]>([]);
 
   const axes = useMemo(
-    () => variedParameters(result.data?.runs ?? []).slice(0, 2),
+    () => variedParameters(result.data?.runs ?? []),
     [result.data?.runs],
   );
+  const listRequired = axes.length > 2;
+  const activeView = listRequired ? "list" : view;
   const xAxis = axes[0] ?? "run";
   const yAxis = axes[1] ?? null;
   const xValues = useMemo(
@@ -191,10 +193,14 @@ export function SweepResults({ sweep }: { sweep: TrackedSweep | undefined }) {
   }
 
   const aggregateRisk =
-    result.data.oos_degradation !== null && result.data.oos_degradation >= 0.5
-      ? "OOS 성능 저하가 저장 임계 50% 이상입니다."
-      : result.data.psr !== null && result.data.psr < 0.95
-        ? "PSR이 저장 임계 0.95 미만입니다."
+    result.data.oos_degradation !== null
+    && result.data.oos_degradation >= result.data.oos_degradation_limit
+      ? `OOS 성능 저하가 저장 임계 ${formatMetric(
+          result.data.oos_degradation_limit,
+          { style: "percent", maximumFractionDigits: 1 },
+        )} 이상입니다.`
+      : result.data.psr !== null && result.data.psr < result.data.psr_minimum
+        ? `PSR이 저장 임계 ${formatMetric(result.data.psr_minimum)} 미만입니다.`
         : result.data.harness_json === null
           ? "grid 결과에는 집합 검증 증거가 없습니다. OOS 재검증을 권장합니다."
           : null;
@@ -225,15 +231,21 @@ export function SweepResults({ sweep }: { sweep: TrackedSweep | undefined }) {
             </select>
             <Button
               size="sm"
-              variant={view === "heatmap" ? "secondary" : "ghost"}
+              variant={activeView === "heatmap" ? "secondary" : "ghost"}
               onClick={() => setView("heatmap")}
+              disabled={listRequired}
+              title={
+                listRequired
+                  ? "히트맵은 최대 두 개의 변화 축만 표현합니다."
+                  : undefined
+              }
             >
               <Grid3X3 className="mr-1 h-3.5 w-3.5" />
               히트맵
             </Button>
             <Button
               size="sm"
-              variant={view === "list" ? "secondary" : "ghost"}
+              variant={activeView === "list" ? "secondary" : "ghost"}
               onClick={() => setView("list")}
             >
               <List className="mr-1 h-3.5 w-3.5" />
@@ -247,9 +259,16 @@ export function SweepResults({ sweep }: { sweep: TrackedSweep | undefined }) {
             과적합 경고 · {aggregateRisk}
           </div>
         )}
+        {listRequired && (
+          <div className="mt-3 flex items-center gap-2 rounded-md border border-blue-500/25 bg-blue-500/10 p-2 text-xs text-blue-200">
+            <List className="h-4 w-4 shrink-0" />
+            변화 축이 {axes.length}개여서 목록 보기로 고정했습니다.{" "}
+            {result.data.runs.length}개 run을 모두 표시합니다.
+          </div>
+        )}
       </CardHeader>
       <CardContent>
-        {view === "heatmap" ? (
+        {activeView === "heatmap" ? (
           <div className="overflow-x-auto">
             <div
               className="grid min-w-[560px] gap-2"

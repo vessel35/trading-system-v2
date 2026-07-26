@@ -2162,6 +2162,10 @@ export interface components {
             oos_degradation: number | null;
             /** Psr */
             psr: number | null;
+            /** Oos Degradation Limit */
+            oos_degradation_limit: number;
+            /** Psr Minimum */
+            psr_minimum: number;
             harness_json: components["schemas"]["JsonValue"] | null;
         };
         /**

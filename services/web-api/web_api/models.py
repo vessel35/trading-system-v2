@@ -568,6 +568,8 @@ class SweepResponse(BaseModel):
     runs: list[RunComparisonItem]
     oos_degradation: float | None
     psr: float | None
+    oos_degradation_limit: float
+    psr_minimum: float
     harness_json: JsonValue | None
 
 

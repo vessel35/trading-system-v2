@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, Literal, cast
 
+from core_lib.eval import thresholds
 from core_lib.strategy import StrategyConfig
 from core_lib.strategy.adaptees import STRATEGY_ID, VesselReference
 from pydantic import BaseModel
@@ -354,12 +355,15 @@ class CatalogRepository:
             comparison.data[0],
         )
         summary = representative.summary
+        overfit_limits = thresholds.overfit()
         return SweepResponse(
             sweep_id=sweep_id,
             representative_run_id=representative.run.run_id,
             runs=comparison.data,
             oos_degradation=summary.oos_degradation if summary is not None else None,
             psr=summary.psr if summary is not None else None,
+            oos_degradation_limit=overfit_limits["oos_degradation_limit"],
+            psr_minimum=overfit_limits["psr_minimum"],
             harness_json=summary.harness_json if summary is not None else None,
         )
 

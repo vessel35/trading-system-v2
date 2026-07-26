@@ -178,6 +178,32 @@ function localDateTime(value: string): string {
   return local.toISOString().slice(0, 16);
 }
 
+function timeframeMilliseconds(timeframe: string): number | null {
+  const match = /^([1-9]\d*)([mhd])$/.exec(timeframe);
+  if (!match) return null;
+  const units = { m: 60_000, h: 3_600_000, d: 86_400_000 } as const;
+  return Number(match[1]) * units[match[2] as keyof typeof units];
+}
+
+function alignedDefaultSplit(
+  startValue: string,
+  endValue: string,
+  timeframe: string,
+): string {
+  const start = new Date(startValue).getTime();
+  const end = new Date(endValue).getTime();
+  const interval = timeframeMilliseconds(timeframe);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || !interval || start >= end) {
+    return "0.5";
+  }
+  const earliest = Math.ceil((start + 1) / interval) * interval;
+  const latest = Math.floor((end - 1) / interval) * interval;
+  if (earliest > latest) return "0.5";
+  const midpoint = Math.round(((start + end) / 2) / interval) * interval;
+  const boundary = Math.min(latest, Math.max(earliest, midpoint));
+  return ((boundary - start) / (end - start)).toString();
+}
+
 function optionalNumber(value: string): number | undefined {
   if (!value.trim()) return undefined;
   const parsed = Number(value);
@@ -371,10 +397,13 @@ export function RunManagementPage() {
   const [axisOneParameter, setAxisOneParameter] = useState("reward_risk");
   const [axisOneValues, setAxisOneValues] = useState("[1.5, 2.0, 2.5]");
   const [axisTwoEnabled, setAxisTwoEnabled] = useState(true);
-  const [axisTwoParameter, setAxisTwoParameter] = useState("atr_stop");
+  const [axisTwoParameter, setAxisTwoParameter] = useState("atr_stop_multiple");
   const [axisTwoValues, setAxisTwoValues] = useState("[1.5, 2.0]");
   const [folds, setFolds] = useState("3");
-  const [split, setSplit] = useState("0.7");
+  const [split, setSplit] = useState(() =>
+    alignedDefaultSplit(initialForm.start, initialForm.end, initialForm.timeframe),
+  );
+  const [splitCustomized, setSplitCustomized] = useState(false);
   const [notice, setNotice] = useState<{
     kind: "success" | "error";
     message: string;
@@ -392,6 +421,10 @@ export function RunManagementPage() {
   const selectedStrategy = useMemo(
     () => strategies.data?.find((item) => item.strategy_id === form.strategyId),
     [form.strategyId, strategies.data],
+  );
+  const axisCandidates = useMemo(
+    () => Object.keys(selectedStrategy?.default_params ?? {}),
+    [selectedStrategy],
   );
   const coverage = useCoverage(form.dataSource, form.symbol, form.exchange);
   const coverageWarning = useMemo(() => {
@@ -417,6 +450,25 @@ export function RunManagementPage() {
       timeframe: selectedStrategy.supported_timeframes[0] ?? current.timeframe,
     }));
   }, [form.params, selectedStrategy]);
+
+  useEffect(() => {
+    if (axisCandidates.length === 0) return;
+    const nextOne = axisCandidates.includes(axisOneParameter)
+      ? axisOneParameter
+      : axisCandidates[0];
+    const nextTwo = axisCandidates.includes(axisTwoParameter)
+      && axisTwoParameter !== nextOne
+      ? axisTwoParameter
+      : axisCandidates.find((candidate) => candidate !== nextOne);
+    if (axisOneParameter !== nextOne) setAxisOneParameter(nextOne);
+    if (nextTwo && axisTwoParameter !== nextTwo) setAxisTwoParameter(nextTwo);
+    if (!nextTwo) setAxisTwoEnabled(false);
+  }, [axisCandidates, axisOneParameter, axisTwoParameter]);
+
+  useEffect(() => {
+    if (splitCustomized) return;
+    setSplit(alignedDefaultSplit(form.start, form.end, form.timeframe));
+  }, [form.end, form.start, form.timeframe, splitCustomized]);
 
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((current) => ({ ...current, [key]: value }));
@@ -1048,11 +1100,32 @@ export function RunManagementPage() {
                   )}
                   {sweepType === "is_oos" && (
                     <Label>
-                      split (0–1)
+                      <span className="flex items-center justify-between gap-2">
+                        split (0–1)
+                        <button
+                          type="button"
+                          className="font-normal text-teal-300 hover:underline"
+                          onClick={() => {
+                            setSplitCustomized(false);
+                            setSplit(
+                              alignedDefaultSplit(
+                                form.start,
+                                form.end,
+                                form.timeframe,
+                              ),
+                            );
+                          }}
+                        >
+                          timeframe 자동정렬
+                        </button>
+                      </span>
                       <Input
                         inputMode="decimal"
                         value={split}
-                        onChange={(event) => setSplit(event.target.value)}
+                        onChange={(event) => {
+                          setSplitCustomized(true);
+                          setSplit(event.target.value);
+                        }}
                       />
                     </Label>
                   )}
@@ -1061,13 +1134,29 @@ export function RunManagementPage() {
                       <div className="grid gap-3 rounded-md border p-3 sm:col-span-2 sm:grid-cols-2">
                         <Label>
                           축 1 파라미터
-                          <Input
-                            value={axisOneParameter}
-                            onChange={(event) =>
-                              setAxisOneParameter(event.target.value)
-                            }
-                            placeholder="reward_risk"
-                          />
+                          {axisCandidates.length > 0 ? (
+                            <select
+                              className={selectClass}
+                              value={axisOneParameter}
+                              onChange={(event) =>
+                                setAxisOneParameter(event.target.value)
+                              }
+                            >
+                              {axisCandidates.map((candidate) => (
+                                <option key={candidate} value={candidate}>
+                                  {candidate}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <Input
+                              value={axisOneParameter}
+                              onChange={(event) =>
+                                setAxisOneParameter(event.target.value)
+                              }
+                              placeholder="reward_risk"
+                            />
+                          )}
                         </Label>
                         <Label>
                           축 1 값 JSON 배열
@@ -1091,13 +1180,34 @@ export function RunManagementPage() {
                         <div className="grid gap-3 rounded-md border p-3 sm:col-span-2 sm:grid-cols-2">
                           <Label>
                             축 2 파라미터
-                            <Input
-                              value={axisTwoParameter}
-                              onChange={(event) =>
-                                setAxisTwoParameter(event.target.value)
-                              }
-                              placeholder="atr_stop"
-                            />
+                            {axisCandidates.length > 0 ? (
+                              <select
+                                className={selectClass}
+                                value={axisTwoParameter}
+                                onChange={(event) =>
+                                  setAxisTwoParameter(event.target.value)
+                                }
+                              >
+                                {axisCandidates
+                                  .filter(
+                                    (candidate) =>
+                                      candidate !== axisOneParameter,
+                                  )
+                                  .map((candidate) => (
+                                    <option key={candidate} value={candidate}>
+                                      {candidate}
+                                    </option>
+                                  ))}
+                              </select>
+                            ) : (
+                              <Input
+                                value={axisTwoParameter}
+                                onChange={(event) =>
+                                  setAxisTwoParameter(event.target.value)
+                                }
+                                placeholder="atr_stop_multiple"
+                              />
+                            )}
                           </Label>
                           <Label>
                             축 2 값 JSON 배열

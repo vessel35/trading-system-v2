@@ -117,7 +117,7 @@ def test_grid_sweep_expands_validated_configs_and_reports_completion(
     ("sweep_type", "extra", "method", "run_count"),
     [
         ("walk_forward", {"folds": 3}, "walk_forward", 3),
-        ("is_oos", {"split": 0.6}, "is_oos", 2),
+        ("is_oos", {"split": 0.5}, "is_oos", 2),
     ],
 )
 def test_validation_sweep_modes_use_harness_aggregate_methods(
@@ -157,6 +157,31 @@ def test_validation_sweep_modes_use_harness_aggregate_methods(
     assert calls == [(method, extra[next(iter(extra))])]
 
 
+@pytest.mark.parametrize(
+    ("sweep_type", "extra", "field"),
+    [
+        ("is_oos", {"split": 0.7}, "split"),
+        ("walk_forward", {"folds": 5}, "folds"),
+    ],
+)
+def test_validation_sweep_rejects_misaligned_timeframe_boundaries_before_job(
+    client: TestClient,
+    run_config_payload: dict[str, object],
+    sweep_type: str,
+    extra: dict[str, object],
+    field: str,
+) -> None:
+    response = client.post(
+        "/api/v1/sweeps",
+        json={"type": sweep_type, "config": run_config_payload, **extra},
+    )
+    assert response.status_code == 422
+    error = response.json()["error"]
+    assert error["code"] == "invalid_run_config"
+    assert error["details"][0]["field"] == field
+    assert "timeframe grid" in error["details"][0]["message"]
+
+
 def test_grid_sweep_rejects_duplicate_or_oversized_axes(
     client: TestClient,
     run_config_payload: dict[str, object],
@@ -182,7 +207,7 @@ def test_grid_sweep_rejects_duplicate_or_oversized_axes(
             "config": run_config_payload,
             "axes": [
                 {"parameter": "reward_risk", "values": list(range(11))},
-                {"parameter": "atr_stop", "values": list(range(10))},
+                {"parameter": "atr_stop_multiple", "values": list(range(10))},
             ],
         },
     )

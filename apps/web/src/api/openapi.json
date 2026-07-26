@@ -8047,6 +8047,14 @@
             ],
             "title": "Psr"
           },
+          "oos_degradation_limit": {
+            "type": "number",
+            "title": "Oos Degradation Limit"
+          },
+          "psr_minimum": {
+            "type": "number",
+            "title": "Psr Minimum"
+          },
           "harness_json": {
             "anyOf": [
               {
@@ -8065,6 +8073,8 @@
           "runs",
           "oos_degradation",
           "psr",
+          "oos_degradation_limit",
+          "psr_minimum",
           "harness_json"
         ],
         "title": "SweepResponse",

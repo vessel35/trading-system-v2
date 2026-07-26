@@ -111,6 +111,8 @@ def test_grid_sweep_tag_crud_facets_and_coverage_round_trip(tmp_path: Path) -> N
             sweep_body = sweep.json()
             assert sweep_body["representative_run_id"] == representative_run_id
             assert len(sweep_body["runs"]) == 2
+            assert sweep_body["oos_degradation_limit"] == 0.5
+            assert sweep_body["psr_minimum"] == 0.95
             assert {item["run"]["params_json"]["reward_risk"] for item in sweep_body["runs"]} == {
                 1.5,
                 2.5,

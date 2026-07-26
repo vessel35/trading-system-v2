@@ -4,7 +4,7 @@ import sqlite3
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from copy import deepcopy
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from itertools import product
 from math import prod
 from typing import Annotated, Any, NoReturn, cast
@@ -380,8 +380,42 @@ def _assign_axis(params: dict[str, object], parameter: str, value: object) -> No
     current[path[-1]] = value
 
 
+def _validate_sweep_boundaries(config: RunConfig, payload: SweepSubmission) -> None:
+    if payload.type == "grid":
+        return
+    duration = config.end - config.start
+    if payload.type == "is_oos":
+        if payload.split is None:
+            raise RuntimeError("validated is_oos sweep is missing split")
+        boundaries = [config.start + duration * payload.split]
+        field = "split"
+    else:
+        if payload.folds is None:
+            raise RuntimeError("validated walk_forward sweep is missing folds")
+        boundaries = [
+            config.start + duration * (index / payload.folds) for index in range(1, payload.folds)
+        ]
+        field = "folds"
+    timeframe = MarketDataRepository._timeframe_duration(config.timeframe)
+    epoch = datetime(1970, 1, 1, tzinfo=UTC)
+    misaligned = [
+        boundary.isoformat()
+        for boundary in boundaries
+        if (boundary - epoch) % timeframe != timedelta(0)
+    ]
+    if misaligned:
+        _sweep_error(
+            (
+                f"{payload.type} boundaries must align to the {config.timeframe} "
+                f"timeframe grid: {misaligned}"
+            ),
+            field=field,
+        )
+
+
 def _prepare_sweep(payload: SweepSubmission) -> SweepPlan:
     base = _validated_run_config(payload.config)
+    _validate_sweep_boundaries(base, payload)
     sweep_id = f"S-{uuid4().hex}"
     sweep_meta = {
         **({} if base.sweep is None else base.sweep),
