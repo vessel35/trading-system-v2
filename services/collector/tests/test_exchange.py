@@ -185,6 +185,33 @@ def test_funding_page_preserves_raw_rate_precision_and_optional_mark_price() -> 
     assert fake.funding_calls == [("ETH/USDT:USDT", since_ms, 1_000)]
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("fundingTime", "not-a-timestamp"),
+        ("fundingRate", "not-a-rate"),
+    ],
+)
+def test_invalid_required_funding_fields_still_fail(field: str, value: str) -> None:
+    since = datetime(2025, 7, 21, 0, 0, tzinfo=UTC)
+    info = {
+        "fundingTime": str(int(since.timestamp() * 1_000)),
+        "fundingRate": "0.0000875001",
+        "markPrice": "",
+    }
+    info[field] = value
+    client = BinanceUsdMClient(FakeCcxt([], funding_rows=[{"info": info}]))
+
+    with pytest.raises(ValueError, match="invalid numeric value"):
+        asyncio.run(
+            client.fetch_funding_rate_page(
+                Symbol("ETH/USDT:USDT", "binance"),
+                since=since,
+                limit=1_000,
+            )
+        )
+
+
 def test_exchange_adapter_rejects_non_1m_or_large_fetches() -> None:
     client = BinanceUsdMClient(FakeCcxt([]))
     symbol = Symbol("ETH/USDT:USDT", "binance")

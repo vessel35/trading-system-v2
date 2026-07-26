@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+import pytest
 from collector_service.application import FundingBackfill, HistoricalBackfill
 from collector_service.domain import Candle, FundingRate, Symbol
+from collector_service.infrastructure.exchange import BinanceUsdMClient
 
 BASE = datetime(2026, 1, 1, 0, 0, tzinfo=UTC)
 TARGET = Symbol("ETH/USDT:USDT", "binance")
@@ -112,6 +115,51 @@ class MockFundingExchange:
         return []
 
 
+class InvalidMarkCcxt:
+    def __init__(self) -> None:
+        self.rows = [
+            {
+                "timestamp": int(BASE.timestamp() * 1_000),
+                "info": {
+                    "fundingTime": str(int(BASE.timestamp() * 1_000)),
+                    "fundingRate": "0.0000875001",
+                    "markPrice": "",
+                },
+            },
+            {
+                "timestamp": int((BASE + timedelta(hours=8)).timestamp() * 1_000),
+                "info": {
+                    "fundingTime": str(int((BASE + timedelta(hours=8)).timestamp() * 1_000)),
+                    "fundingRate": "-0.0000000001",
+                    "markPrice": "0",
+                },
+            },
+        ]
+
+    def fetch_ohlcv(
+        self,
+        symbol: str,
+        timeframe: str,
+        since: int | None,
+        limit: int,
+    ) -> list[list[object]]:
+        return []
+
+    def fetch_funding_rate_history(
+        self,
+        symbol: str,
+        since: int | None,
+        limit: int | None,
+    ) -> list[dict[str, object]]:
+        assert symbol == TARGET.value
+        assert since is not None
+        assert limit == 1_000
+        return [row for row in self.rows if int(str(row["timestamp"])) >= since]
+
+    def close(self) -> object:
+        return None
+
+
 class MemoryFunding:
     def __init__(self) -> None:
         self.rows: dict[tuple[datetime, str, str], FundingRate] = {}
@@ -190,3 +238,38 @@ def test_funding_range_keeps_precision_and_does_not_fill_missing_boundaries() ->
         "3500.12345678"
     )
     assert exchange.calls == [(BASE, 1_000)]
+
+
+def test_invalid_marks_become_null_without_blocking_funding_backfill(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    repository = MemoryFunding()
+    service = FundingBackfill(
+        symbols=MemorySymbols(),
+        exchange=BinanceUsdMClient(InvalidMarkCcxt()),
+        funding=repository,
+    )
+
+    with caplog.at_level(logging.WARNING):
+        result = asyncio.run(
+            service.run(
+                start=BASE,
+                end=BASE + timedelta(hours=9),
+            )
+        )
+
+    assert result.persisted_count == 2
+    persisted = sorted(repository.rows.values(), key=lambda item: item.time)
+    assert [item.funding_rate for item in persisted] == [
+        Decimal("0.0000875001"),
+        Decimal("-0.0000000001"),
+    ]
+    assert [item.mark_price for item in persisted] == [None, None]
+    assert caplog.text.count("funding_mark_price_dropped") == 2
+    assert "reason=parse_error" in caplog.text
+    assert "reason=non_positive_or_non_finite" in caplog.text
+
+
+def test_funding_domain_lowers_nonpositive_decimal_mark_to_none() -> None:
+    assert funding(0, "0.0001", "0").mark_price is None
+    assert funding(0, "0.0001", "-1").mark_price is None

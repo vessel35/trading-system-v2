@@ -98,7 +98,7 @@ class FundingRate:
             if not isinstance(self.mark_price, Decimal):
                 raise TypeError("mark_price must be Decimal or None")
             if not self.mark_price.is_finite() or self.mark_price <= 0:
-                raise ValueError("mark_price must be finite and positive")
+                object.__setattr__(self, "mark_price", None)
 
 
 @dataclass(frozen=True, slots=True)

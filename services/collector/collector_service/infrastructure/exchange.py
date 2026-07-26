@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
@@ -14,6 +15,7 @@ from collector_service.domain.models import ONE_MINUTE, Candle, FundingRate, Sym
 
 _PAGE_LIMIT = 1_000
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+logger = logging.getLogger(__name__)
 
 
 class _SyncCcxtClient(Protocol):
@@ -190,9 +192,13 @@ class BinanceUsdMClient:
         try:
             timestamp_ms = int(str(timestamp_value))
             funding_rate = Decimal(str(rate_value))
-            mark_price = None if mark_value is None else Decimal(str(mark_value))
         except (InvalidOperation, TypeError, ValueError) as exc:
             raise ValueError("CCXT funding row contains an invalid numeric value") from exc
+        mark_price = BinanceUsdMClient._optional_mark_price(
+            symbol=symbol,
+            timestamp_ms=timestamp_ms,
+            value=mark_value,
+        )
         return FundingRate(
             symbol=symbol.value,
             exchange=symbol.exchange,
@@ -200,6 +206,37 @@ class BinanceUsdMClient:
             funding_rate=funding_rate,
             mark_price=mark_price,
         )
+
+    @staticmethod
+    def _optional_mark_price(
+        *,
+        symbol: Symbol,
+        timestamp_ms: int,
+        value: object,
+    ) -> Decimal | None:
+        if value is None:
+            return None
+        try:
+            mark_price = Decimal(str(value))
+        except (InvalidOperation, TypeError, ValueError):
+            logger.warning(
+                "funding_mark_price_dropped symbol=%s exchange=%s funding_time_ms=%d "
+                "reason=parse_error",
+                symbol.value,
+                symbol.exchange,
+                timestamp_ms,
+            )
+            return None
+        if not mark_price.is_finite() or mark_price <= 0:
+            logger.warning(
+                "funding_mark_price_dropped symbol=%s exchange=%s funding_time_ms=%d "
+                "reason=non_positive_or_non_finite",
+                symbol.value,
+                symbol.exchange,
+                timestamp_ms,
+            )
+            return None
+        return mark_price
 
     @staticmethod
     def _timestamp_ms(value: datetime, *, name: str) -> int:
