@@ -5,6 +5,13 @@
 > backtest 데이터 확보 방향을 정한다. 인벤토리다 — 데이터 피드 포트 설계나 `crypto_data` ERD는 여기서 하지
 > 않는다. 모든 코드 사실은 `파일:줄`로 인용한다.
 
+> **확정 정정(2026-07-26, 사용자 확정).** `crypto-data-hub`는 v2가 **사용하지 않는 참조·이식 원천**일 뿐이다.
+> 이 노트가 crypto-data-hub를 분석하는 것은 v2가 참조할 사실을 모으기 위해서이며, v2가 crypto-data-hub의
+> 실행 서비스·데이터베이스를 프로덕션으로 쓴다는 뜻이 아니다. 따라서 3.3의 "기존 backfill 재사용"과
+> "crypto-data-hub가 `crypto_data` 생성·소유" 서술은 **"v1/crypto-data-hub 코드를 참조해 v2가 backfill·funding
+> 원천과 `crypto_data` 프로비저닝을 신규 구현·소유한다"**로 읽는다. OHLCV 적재 수집기는 `services/collector/`로
+> 이미 신규 구현했다(별도 PR).
+
 원천 리포(읽기 전용): `crypto-data-hub` (git HEAD `f6ca9cf`). 수집기는 `services/collector/`(Clean
 Architecture: `domain/`·`application/`·`infrastructure/`·`core/`·`main.py`).
 
