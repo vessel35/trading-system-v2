@@ -13,10 +13,11 @@ from typing import Protocol, cast
 import psycopg
 from psycopg import sql
 
-from collector_service.domain.models import Candle, Symbol
+from collector_service.domain.models import Candle, FundingRate, Symbol
 
 _IDENTIFIER = re.compile(r"^[a-z_][a-z0-9_]*$")
 _OHLCV_COLUMNS = 11
+_FUNDING_COLUMNS = 5
 
 
 class QueryResult(Protocol):
@@ -60,6 +61,7 @@ class TableName:
 
 _CONFIG_SYMBOLS_TABLE = TableName("public", "symbols")
 _OHLCV_FUTURES_TABLE = TableName("public", "ohlcv_futures")
+_FUNDING_RATES_TABLE = TableName("public", "funding_rates")
 
 
 def connection_provider(
@@ -208,6 +210,54 @@ class PostgresOhlcvRepository:
                 candle.trade_count,
             )
             for candle in candles
+        )
+        params = tuple(chain.from_iterable(rows))
+        with self._connections() as connection:
+            connection.execute(query, params)
+
+
+class PostgresFundingRepository:
+    """Upsert observed settlements into the funding source table."""
+
+    def __init__(
+        self,
+        connections: ConnectionProvider,
+        *,
+        table: TableName = _FUNDING_RATES_TABLE,
+    ) -> None:
+        self._connections = connections
+        self._table = table
+
+    def upsert_batch(self, rates: list[FundingRate]) -> None:
+        if not rates:
+            return
+
+        row_placeholder = (
+            sql.SQL("(") + sql.SQL(", ").join([sql.Placeholder()] * _FUNDING_COLUMNS) + sql.SQL(")")
+        )
+        values_clause = sql.SQL(", ").join([row_placeholder] * len(rates))
+        query = sql.SQL(
+            """
+            INSERT INTO {} (
+                time, symbol, exchange, funding_rate, mark_price
+            )
+            VALUES {}
+            ON CONFLICT (time, symbol, exchange)
+            DO UPDATE SET
+                funding_rate = EXCLUDED.funding_rate,
+                mark_price = EXCLUDED.mark_price,
+                created_at = NOW()
+            """
+        ).format(self._table.identifier(), values_clause)
+        rows = (
+            (
+                rate.time,
+                rate.symbol,
+                rate.exchange,
+                rate.funding_rate,
+                rate.mark_price,
+            )
+            for rate in rates
         )
         params = tuple(chain.from_iterable(rows))
         with self._connections() as connection:

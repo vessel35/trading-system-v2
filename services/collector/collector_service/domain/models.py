@@ -76,6 +76,32 @@ class Candle:
 
 
 @dataclass(frozen=True, slots=True)
+class FundingRate:
+    """One observed funding settlement without application-level rounding."""
+
+    symbol: str
+    exchange: str
+    time: datetime
+    funding_rate: Decimal
+    mark_price: Decimal | None
+
+    def __post_init__(self) -> None:
+        if not self.symbol or not self.exchange:
+            raise ValueError("symbol and exchange are required")
+        if self.time.tzinfo is None:
+            raise ValueError("funding time must be timezone-aware")
+        if not isinstance(self.funding_rate, Decimal):
+            raise TypeError("funding_rate must be Decimal")
+        if not self.funding_rate.is_finite():
+            raise ValueError("funding_rate must be finite")
+        if self.mark_price is not None:
+            if not isinstance(self.mark_price, Decimal):
+                raise TypeError("mark_price must be Decimal or None")
+            if not self.mark_price.is_finite() or self.mark_price <= 0:
+                raise ValueError("mark_price must be finite and positive")
+
+
+@dataclass(frozen=True, slots=True)
 class CandleGap:
     """A missing 1m range that is reported but never synthesized."""
 

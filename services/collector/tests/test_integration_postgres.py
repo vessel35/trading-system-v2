@@ -10,9 +10,10 @@ from uuid import uuid4
 
 import psycopg
 import pytest
-from collector_service.domain import Candle, Symbol
+from collector_service.domain import Candle, FundingRate, Symbol
 from collector_service.infrastructure.postgres import (
     ConfigSymbolRepository,
+    PostgresFundingRepository,
     PostgresOhlcvRepository,
     TableName,
     connection_provider,
@@ -38,15 +39,16 @@ def local_test_dsn() -> str:
         pytest.skip("COLLECTOR_TEST_DATABASE_URL is not set")
     info = conninfo_to_dict(dsn)
     host = info.get("host", "")
-    database = info.get("dbname", "")
+    database_value = info.get("dbname", "")
+    database = database_value if isinstance(database_value, str) else ""
     if host not in _LOCAL_HOSTS:
         pytest.skip("collector integration database must be local")
-    if not database or database in _FORBIDDEN_DATABASES:
-        pytest.skip("collector integration database must be a dedicated non-production database")
+    if not database or database in _FORBIDDEN_DATABASES or not database.endswith("_test"):
+        pytest.skip("collector integration database name must end in _test")
     return dsn
 
 
-def test_config_read_and_ohlcv_upsert_are_isolated_and_idempotent() -> None:
+def test_source_upserts_are_isolated_idempotent_and_decimal_exact() -> None:
     dsn = local_test_dsn()
     schema = f"collector_test_{uuid4().hex}"
     schema_identifier = sql.Identifier(schema)
@@ -59,6 +61,21 @@ def test_config_read_and_ohlcv_upsert_are_isolated_and_idempotent() -> None:
                     symbol TEXT NOT NULL,
                     exchange TEXT NOT NULL,
                     is_active BOOLEAN NOT NULL
+                )
+                """
+            ).format(schema_identifier)
+        )
+        setup.execute(
+            sql.SQL(
+                """
+                CREATE TABLE {}.funding_rates (
+                    time TIMESTAMPTZ NOT NULL,
+                    symbol VARCHAR(30) NOT NULL,
+                    exchange VARCHAR(20) NOT NULL DEFAULT 'binance',
+                    funding_rate NUMERIC(20, 10) NOT NULL,
+                    mark_price NUMERIC(20, 8),
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    PRIMARY KEY (time, symbol, exchange)
                 )
                 """
             ).format(schema_identifier)
@@ -126,12 +143,37 @@ def test_config_read_and_ohlcv_upsert_are_isolated_and_idempotent() -> None:
         repository.upsert_batch([original])
         repository.upsert_batch([replace(original, close=Decimal("102"), trade_count=11)])
 
+        funding_repository = PostgresFundingRepository(
+            connection_provider(
+                dsn,
+                read_only=False,
+                application_name="collector-disposable-funding-test",
+            ),
+            table=TableName(schema, "funding_rates"),
+        )
+        observed = FundingRate(
+            symbol="ETH/USDT:USDT",
+            exchange="binance",
+            time=datetime(2026, 7, 26, tzinfo=UTC),
+            funding_rate=Decimal("0.0000875001"),
+            mark_price=Decimal("3750.12345678"),
+        )
+        funding_repository.upsert_batch([observed])
+        funding_repository.upsert_batch(
+            [replace(observed, funding_rate=Decimal("-0.0000000001"), mark_price=None)]
+        )
+
         with psycopg.connect(dsn) as verification:
             verification_query = sql.SQL(
                 "SELECT COUNT(*), MAX(close), MAX(trade_count) FROM {}.ohlcv_futures"
             ).format(schema_identifier)
-            row = verification.execute(verification_query).fetchone()
-        assert row == (1, Decimal("102.00000000"), 11)
+            ohlcv_row = verification.execute(verification_query).fetchone()
+            funding_query = sql.SQL(
+                "SELECT COUNT(*), MAX(funding_rate), MAX(mark_price) FROM {}.funding_rates"
+            ).format(schema_identifier)
+            funding_row = verification.execute(funding_query).fetchone()
+        assert ohlcv_row == (1, Decimal("102.00000000"), 11)
+        assert funding_row == (1, Decimal("-0.0000000001"), None)
     finally:
         with psycopg.connect(dsn, autocommit=True) as cleanup:
             cleanup.execute(sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(schema_identifier))

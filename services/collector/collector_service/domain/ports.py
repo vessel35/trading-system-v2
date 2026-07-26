@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Protocol
 
-from .models import Candle, Symbol
+from .models import Candle, FundingRate, Symbol
 
 
 class ExchangeClient(Protocol):
@@ -24,6 +24,33 @@ class ExchangeClient(Protocol):
         """Release the underlying exchange client."""
 
 
+class HistoricalExchangeClient(Protocol):
+    """Fetch bounded pages of confirmed historical futures candles."""
+
+    async def fetch_ohlcv_page(
+        self,
+        symbol: Symbol,
+        *,
+        timeframe: str,
+        since: datetime,
+        limit: int,
+    ) -> list[Candle]:
+        """Return one ascending page from ``since``, excluding open candles."""
+
+
+class FundingExchangeClient(Protocol):
+    """Fetch observed funding settlements without numeric normalization."""
+
+    async def fetch_funding_rate_page(
+        self,
+        symbol: Symbol,
+        *,
+        since: datetime,
+        limit: int,
+    ) -> list[FundingRate]:
+        """Return one ascending funding-history page from ``since``."""
+
+
 class CandleRepository(Protocol):
     """Persist futures candles with a database-enforced idempotent key."""
 
@@ -37,6 +64,13 @@ class CandleRepository(Protocol):
 
     def upsert_batch(self, candles: list[Candle]) -> None:
         """Insert or update every supplied confirmed candle."""
+
+
+class FundingRepository(Protocol):
+    """Persist observed funding rates with their source precision."""
+
+    def upsert_batch(self, rates: list[FundingRate]) -> None:
+        """Insert or update every supplied settlement."""
 
 
 class SymbolRepository(Protocol):

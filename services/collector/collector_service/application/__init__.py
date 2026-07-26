@@ -1,5 +1,11 @@
 """Confirmed-candle collection use case."""
 
+from .backfill import (
+    BackfillResult,
+    FundingBackfill,
+    FundingBackfillResult,
+    HistoricalBackfill,
+)
 from .service import (
     CollectorConfigurationError,
     IngestionResult,
@@ -8,7 +14,11 @@ from .service import (
 )
 
 __all__ = [
+    "BackfillResult",
     "CollectorConfigurationError",
+    "FundingBackfill",
+    "FundingBackfillResult",
+    "HistoricalBackfill",
     "IngestionResult",
     "LiveCollector",
     "seconds_until_next_poll",

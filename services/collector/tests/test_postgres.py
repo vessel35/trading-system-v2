@@ -8,11 +8,12 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import cast
 
-from collector_service.domain import Candle, Symbol
+from collector_service.domain import Candle, FundingRate, Symbol
 from collector_service.infrastructure.postgres import (
     ConfigSymbolRepository,
     ConnectionProvider,
     DatabaseConnection,
+    PostgresFundingRepository,
     PostgresOhlcvRepository,
     QueryResult,
     TableName,
@@ -73,6 +74,16 @@ def one_candle(*, close: str = "100") -> Candle:
     )
 
 
+def one_funding(*, rate: str = "0.0000875001") -> FundingRate:
+    return FundingRate(
+        symbol="ETH/USDT:USDT",
+        exchange="binance",
+        time=datetime(2026, 7, 26, tzinfo=UTC),
+        funding_rate=Decimal(rate),
+        mark_price=Decimal("3750.12345678"),
+    )
+
+
 def test_batch_sql_has_exact_idempotency_key_and_updates_all_payload_fields() -> None:
     connection = FakeConnection()
     repository = PostgresOhlcvRepository(
@@ -125,8 +136,28 @@ def test_config_query_reads_only_active_exchange_rows_and_optional_selector() ->
     assert params == ["binance", "ETH/USDT:USDT"]
 
 
+def test_funding_sql_uses_exact_key_and_decimal_parameters_without_quantizing() -> None:
+    connection = FakeConnection()
+    repository = PostgresFundingRepository(
+        provider(connection),
+        table=TableName("collector_test", "funding_rates"),
+    )
+
+    repository.upsert_batch([one_funding()])
+
+    query, params = connection.executed[0]
+    statement = " ".join(render(query).split())
+    assert 'INSERT INTO "collector_test"."funding_rates"' in statement
+    assert "ON CONFLICT (time, symbol, exchange)" in statement
+    assert "funding_rate = EXCLUDED.funding_rate" in statement
+    assert "mark_price = EXCLUDED.mark_price" in statement
+    assert params[3] == Decimal("0.0000875001")
+    assert params[4] == Decimal("3750.12345678")
+    assert all(not isinstance(value, float) for value in params)
+
+
 def test_empty_batch_executes_no_sql() -> None:
     connection = FakeConnection()
-    repository = PostgresOhlcvRepository(provider(connection))
-    repository.upsert_batch([])
+    PostgresOhlcvRepository(provider(connection)).upsert_batch([])
+    PostgresFundingRepository(provider(connection)).upsert_batch([])
     assert connection.executed == []

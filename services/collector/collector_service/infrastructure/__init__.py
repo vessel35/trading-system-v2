@@ -3,6 +3,7 @@
 from .exchange import BinanceUsdMClient
 from .postgres import (
     ConfigSymbolRepository,
+    PostgresFundingRepository,
     PostgresOhlcvRepository,
     TableName,
     connection_provider,
@@ -11,6 +12,7 @@ from .postgres import (
 __all__ = [
     "BinanceUsdMClient",
     "ConfigSymbolRepository",
+    "PostgresFundingRepository",
     "PostgresOhlcvRepository",
     "TableName",
     "connection_provider",
