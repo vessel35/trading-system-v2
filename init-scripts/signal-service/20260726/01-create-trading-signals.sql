@@ -5,6 +5,7 @@ BEGIN;
 CREATE TABLE IF NOT EXISTS public.trading_signals (
     signal_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     strategy_id VARCHAR(80) NOT NULL,
+    params_json JSONB NOT NULL,
     source_mode VARCHAR(10) NOT NULL,
     symbol VARCHAR(30) NOT NULL,
     exchange VARCHAR(20) NOT NULL,
@@ -26,8 +27,10 @@ CREATE TABLE IF NOT EXISTS public.trading_signals (
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uq_trading_signals_decision UNIQUE (
         strategy_id,
+        params_json,
         source_mode,
         symbol,
+        exchange,
         timeframe,
         candle_close_time
     ),
@@ -63,6 +66,9 @@ CREATE TABLE IF NOT EXISTS public.trading_signals (
     ),
     CONSTRAINT ck_trading_signals_metadata CHECK (
         jsonb_typeof(metadata_json) = 'object'
+    ),
+    CONSTRAINT ck_trading_signals_params CHECK (
+        jsonb_typeof(params_json) = 'object'
     )
 );
 
@@ -72,6 +78,8 @@ COMMENT ON COLUMN public.trading_signals.signal_type IS
     'Persistence-only direction derived by the signal-service driver.';
 COMMENT ON COLUMN public.trading_signals.derived_intent IS
     'Driver-derived enter, reverse, or exit action; not strategy judgment logic.';
+COMMENT ON COLUMN public.trading_signals.params_json IS
+    'Core-resolved Adaptee parameters included in the idempotency identity.';
 
 CREATE INDEX IF NOT EXISTS ix_trading_signals_created
     ON public.trading_signals (created_at DESC);

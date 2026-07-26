@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import cast
 
@@ -67,6 +68,7 @@ def _record() -> PersistedSignal:
     )
     return PersistedSignal(
         strategy_id="probe",
+        params={"threshold": 1},
         mode=SignalMode.PAPER,
         timeframe="1h",
         candle=candle,
@@ -79,7 +81,9 @@ def _record() -> PersistedSignal:
 
 def test_postgres_sink_in_a_disposable_schema() -> None:
     schema = f"signal_service_test_{uuid.uuid4().hex}"
-    connection = psycopg.connect(_dsn(), autocommit=True)
+    dsn = _dsn()
+    connection = psycopg.connect(dsn)
+    observer: psycopg.Connection[tuple[object, ...]] | None = None
     try:
         connection.execute(f'CREATE SCHEMA "{schema}"')
         connection.execute(
@@ -87,6 +91,7 @@ def test_postgres_sink_in_a_disposable_schema() -> None:
             CREATE TABLE "{schema}".trading_signals (
                 signal_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
                 strategy_id TEXT NOT NULL,
+                params_json JSONB NOT NULL,
                 source_mode TEXT NOT NULL,
                 symbol TEXT NOT NULL,
                 exchange TEXT NOT NULL,
@@ -106,11 +111,13 @@ def test_postgres_sink_in_a_disposable_schema() -> None:
                 reason TEXT NOT NULL,
                 metadata_json JSONB NOT NULL,
                 UNIQUE (
-                    strategy_id, source_mode, symbol, timeframe, candle_close_time
+                    strategy_id, params_json, source_mode, symbol, exchange,
+                    timeframe, candle_close_time
                 )
             )
             """
         )
+        connection.commit()
         sink = PostgresSignalSink(
             cast(WriteConnection, connection),
             schema=schema,
@@ -118,8 +125,20 @@ def test_postgres_sink_in_a_disposable_schema() -> None:
         record = _record()
         assert sink.store(record) is True
         assert sink.store(record) is False
-        count = connection.execute(f'SELECT count(*) FROM "{schema}".trading_signals').fetchone()
-        assert count == (1,)
+        assert sink.store(replace(record, params={"threshold": 2})) is True
+        alternate_exchange = replace(
+            record,
+            candle=replace(record.candle, exchange="alternate"),
+        )
+        assert sink.store(alternate_exchange) is True
+
+        observer = psycopg.connect(dsn)
+        count = observer.execute(f'SELECT count(*) FROM "{schema}".trading_signals').fetchone()
+        assert count == (3,)
     finally:
+        if observer is not None:
+            observer.close()
+        connection.rollback()
         connection.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+        connection.commit()
         connection.close()

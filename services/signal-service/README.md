@@ -2,8 +2,11 @@
 
 `signal-service` is the paper/live driver sibling of `backtest-service`. It
 accepts already-opened connections, reads confirmed 1m candles from
-`crypto_data`, resamples only complete buckets, resolves an Adaptee through the
-read-only `signal_db.strategy_registry`, and runs the same shared call path:
+`crypto_data`, resamples only complete buckets, then polls with a cursor-bounded
+incremental query. Missing candles are never filled; every detected gap is
+returned in `SignalCycleResult.gaps` and logged. The service resolves an Adaptee
+through the read-only `signal_db.strategy_registry` and runs the same shared
+call path:
 
 ```text
 finalized Candle
@@ -12,6 +15,11 @@ finalized Candle
   -> core_lib TradingSignal
   -> signal_db.trading_signals
 ```
+
+The sink commits every insert (including an idempotent duplicate outcome) and
+rolls back on failure. Its idempotency identity includes the core-resolved
+strategy parameters and exchange, so distinct deployments cannot silently
+discard each other's signals.
 
 The package intentionally has no executable CLI and does not load `.env`.
 Opening production connections, streaming/recovery, and running the service are

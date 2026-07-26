@@ -38,10 +38,18 @@ class _Connection:
     ) -> None:
         self._handler = handler
         self.calls: list[tuple[str, tuple[object, ...]]] = []
+        self.commit_calls = 0
+        self.rollback_calls = 0
 
     def execute(self, query: str, params: tuple[object, ...]) -> _Result:
         self.calls.append((query, params))
         return _Result(self._handler(query, params))
+
+    def commit(self) -> None:
+        self.commit_calls += 1
+
+    def rollback(self) -> None:
+        self.rollback_calls += 1
 
 
 def _minute_row(at: datetime, price: int) -> tuple[object, ...]:
@@ -130,6 +138,7 @@ def _persisted() -> PersistedSignal:
     )
     return PersistedSignal(
         strategy_id="probe",
+        params={"threshold": 2},
         mode=SignalMode.PAPER,
         timeframe="1h",
         candle=candle,
@@ -176,6 +185,25 @@ def test_crypto_data_feed_drops_an_incomplete_bucket() -> None:
     assert feed.dropped_bucket_count == 1
 
 
+def test_crypto_data_feed_incremental_read_starts_at_processed_cursor() -> None:
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    cursor = base + timedelta(minutes=5)
+    boundary = base + timedelta(minutes=10)
+    rows: list[Sequence[object]] = [
+        _minute_row(base + timedelta(minutes=index), 100 + index) for index in range(5, 10)
+    ]
+    connection = _Connection(lambda query, params: rows)
+    feed = CryptoDataFeed(connection)
+
+    candles = feed.candles_after("BTCUSDT", "5m", cursor, boundary)
+
+    assert len(candles) == 1
+    assert candles[0].open_time == cursor
+    query, params = connection.calls[0]
+    assert "time >= %s" in query
+    assert params == ("BTCUSDT", "binance", cursor, boundary)
+
+
 def test_signal_strategy_registry_reads_only_catalog_and_rejects_writes() -> None:
     rows: list[Sequence[object]] = [_registry_row("alpha"), _registry_row("beta")]
 
@@ -214,12 +242,31 @@ def test_signal_sink_writes_only_owned_table_and_is_idempotent() -> None:
     assert "strategy_registry" not in query
     assert "wallet" not in query.casefold()
     assert params[0] == "probe"
-    assert params[1] == "paper"
-    assert params[8:11] == ("BUY", "enter", "long")
+    assert params[1] == '{"threshold":2}'
+    assert params[2] == "paper"
+    assert params[9:12] == ("BUY", "enter", "long")
     assert params[-1] == '{"source":"unit"}'
+    assert connection.commit_calls == 1
+    assert connection.rollback_calls == 0
 
     duplicate_connection = _Connection(lambda query, params: [])
     assert PostgresSignalSink(duplicate_connection).store(persisted) is False
+    assert duplicate_connection.commit_calls == 1
+    assert duplicate_connection.rollback_calls == 0
+
+
+def test_signal_sink_rolls_back_when_insert_fails() -> None:
+    def fail(query: str, params: tuple[object, ...]) -> list[Sequence[object]]:
+        del query, params
+        raise RuntimeError("insert failed")
+
+    connection = _Connection(fail)
+
+    with pytest.raises(RuntimeError, match="insert failed"):
+        PostgresSignalSink(connection).store(_persisted())
+
+    assert connection.commit_calls == 0
+    assert connection.rollback_calls == 1
 
 
 def test_signal_sink_rejects_an_untrusted_schema_identifier() -> None:
@@ -241,7 +288,7 @@ def test_main_wires_confirmed_crypto_rows_through_core_vessel_to_signal_db() -> 
         signal_writer=writer,
     )
 
-    persisted = service.start(
+    cycle = service.start(
         SignalGenerationConfig(
             strategy_id="vessel-reference",
             symbol="BTCUSDT",
@@ -251,11 +298,18 @@ def test_main_wires_confirmed_crypto_rows_through_core_vessel_to_signal_db() -> 
         ),
         base + timedelta(hours=22),
     )
+    persisted = cycle.signal
 
     assert persisted is not None
+    assert dict(persisted.params) == {
+        "atr_stop_multiple": 2.0,
+        "leverage": 1,
+        "reward_risk": 2.0,
+    }
     assert persisted.signal.metadata["adaptee"] == "vessel-reference"
     assert persisted.signal_type is SignalType.BUY
     assert crypto.calls[0][0].lstrip().startswith("SELECT")
     assert registry.calls[0][0].lstrip().startswith("SELECT")
     assert writer.calls[0][0].lstrip().startswith("INSERT")
     assert '"public".trading_signals' in writer.calls[0][0]
+    assert writer.commit_calls == 1

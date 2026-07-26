@@ -59,6 +59,7 @@ EXPECTED_SIGNAL_REGISTRY_COLUMNS = {
 EXPECTED_TRADING_SIGNAL_COLUMNS = {
     "signal_id",
     "strategy_id",
+    "params_json",
     "source_mode",
     "symbol",
     "exchange",
@@ -520,6 +521,17 @@ def test_service_catalogs_exist_without_legacy_or_wallet_data() -> None:
             """,
         )
     )
+    trading_signal_unique_columns = _query(
+        "signal_db",
+        """
+        SELECT column_name
+        FROM information_schema.key_column_usage
+        WHERE table_schema = 'public'
+          AND table_name = 'trading_signals'
+          AND constraint_name = 'uq_trading_signals_decision'
+        ORDER BY ordinal_position;
+        """,
+    )
     wallet_table_count = _query(
         "wallet_db",
         """
@@ -534,4 +546,13 @@ def test_service_catalogs_exist_without_legacy_or_wallet_data() -> None:
     assert signal_state == ["t|1|t|t|vessel-reference"]
     assert signal_registry_columns == EXPECTED_SIGNAL_REGISTRY_COLUMNS
     assert trading_signal_columns == EXPECTED_TRADING_SIGNAL_COLUMNS
+    assert trading_signal_unique_columns == [
+        "strategy_id",
+        "params_json",
+        "source_mode",
+        "symbol",
+        "exchange",
+        "timeframe",
+        "candle_close_time",
+    ]
     assert wallet_table_count == ["0"]

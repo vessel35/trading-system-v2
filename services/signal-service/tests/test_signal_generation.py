@@ -11,7 +11,7 @@ from typing import ClassVar
 
 import pytest
 from core_lib.indicators import DEFAULT_REGISTRY
-from core_lib.ports import DataFeed, StrategyRegistry
+from core_lib.ports import StrategyRegistry
 from core_lib.strategy import (
     AdapterManager,
     InProcessStrategyRegistry,
@@ -21,7 +21,12 @@ from core_lib.strategy import (
     StrategyProfile,
 )
 from core_lib.types import Candle, MarketType, Position, TradingSignal
-from signal_service.application import SignalGenerationService, SignalQueue, SignalSink
+from signal_service.application import (
+    SignalDataFeed,
+    SignalGenerationService,
+    SignalQueue,
+    SignalSink,
+)
 from signal_service.core import SignalGenerationConfig
 from signal_service.domain import PersistedSignal, SignalIntent, SignalMode
 
@@ -52,11 +57,12 @@ def _candles(count: int) -> list[Candle]:
     return result
 
 
-class _Feed(DataFeed):
+class _Feed(SignalDataFeed):
     def __init__(self, candles: list[Candle], *, enforce_boundary: bool = True) -> None:
         self.values = list(candles)
         self.enforce_boundary = enforce_boundary
         self.calls: list[datetime] = []
+        self.incremental_calls: list[tuple[datetime, datetime]] = []
 
     def candles(self, symbol: str, tf: str, up_to: datetime) -> list[Candle]:
         assert symbol == "BTCUSDT"
@@ -65,6 +71,24 @@ class _Feed(DataFeed):
         if not self.enforce_boundary:
             return list(self.values)
         return [candle for candle in self.values if candle.close_time <= up_to]
+
+    def candles_after(
+        self,
+        symbol: str,
+        tf: str,
+        after: datetime,
+        up_to: datetime,
+    ) -> list[Candle]:
+        assert symbol == "BTCUSDT"
+        assert tf == "1h"
+        self.incremental_calls.append((after, up_to))
+        if not self.enforce_boundary:
+            return list(self.values)
+        return [
+            candle
+            for candle in self.values
+            if candle.open_time >= after and candle.close_time <= up_to
+        ]
 
     def funding(self, symbol: str, at: datetime) -> Decimal:
         del symbol, at
@@ -194,9 +218,12 @@ def test_finalized_candle_uses_core_incremental_state_and_adaptee_contract() -> 
     _ProbeStrategy.calls.clear()
     service = SignalGenerationService(feed, _manager(), sink, queue=queue)
 
-    persisted = service.start(_config(), values[-1].close_time)
+    cycle = service.start(_config(), values[-1].close_time)
+    persisted = cycle.signal
 
     assert persisted is not None
+    assert cycle.gaps == ()
+    assert dict(persisted.params) == {}
     assert persisted.intent is SignalIntent.ENTER
     assert persisted.signal_type.value == "BUY"
     assert persisted.side is not None and persisted.side.value == "long"
@@ -221,8 +248,11 @@ def test_finalized_candle_uses_core_incremental_state_and_adaptee_contract() -> 
     assert observed_indicators == {"ema:period=9": expected}
 
     feed.values.extend(_candles(11)[10:])
-    next_persisted = service.poll(feed.values[-1].close_time)
+    next_cycle = service.poll(feed.values[-1].close_time)
+    next_persisted = next_cycle.signal
     assert next_persisted is not None
+    assert next_cycle.gaps == ()
+    assert feed.incremental_calls == [(values[-1].close_time, feed.values[-1].close_time)]
     assert len(_ProbeStrategy.calls) == 2
     next_market_data, _ = _ProbeStrategy.calls[-1]
     assert isinstance(next_market_data["candles"], list)
@@ -255,11 +285,47 @@ def test_duplicate_sink_result_does_not_publish_to_queue() -> None:
     queue = _Queue()
     service = SignalGenerationService(_Feed(values), _manager(), sink, queue=queue)
 
-    persisted = service.start(_config(), values[-1].close_time)
+    persisted = service.start(_config(), values[-1].close_time).signal
 
     assert persisted is not None
     assert sink.values == [persisted]
     assert queue.values == []
+
+
+def test_missing_candle_is_reported_in_result_and_log(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    values = _candles(11)
+    del values[9]
+    service = SignalGenerationService(_Feed(values), _manager(), _Sink())
+
+    with caplog.at_level("WARNING"):
+        cycle = service.start(_config(), values[-1].close_time)
+
+    assert cycle.signal is not None
+    assert len(cycle.gaps) == 1
+    assert cycle.gaps[0].missing_candles == 1
+    assert service.gap_reports == cycle.gaps
+    assert "detected 1 missing finalized candle" in caplog.text
+
+
+def test_poll_reports_missing_expected_candle_without_filling_it(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    values = _candles(10)
+    feed = _Feed(values)
+    service = SignalGenerationService(feed, _manager(), _Sink())
+    service.start(_config(), values[-1].close_time)
+
+    with caplog.at_level("WARNING"):
+        cycle = service.poll(values[-1].close_time + timedelta(hours=1))
+
+    assert cycle.signal is None
+    assert len(cycle.gaps) == 1
+    assert cycle.gaps[0].next_open is None
+    assert cycle.gaps[0].missing_candles == 1
+    assert feed.values == values
+    assert "missing finalized candle" in caplog.text
 
 
 def test_slice_has_no_order_exchange_or_wallet_database_surface() -> None:

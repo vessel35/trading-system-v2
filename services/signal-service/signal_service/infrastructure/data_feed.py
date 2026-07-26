@@ -9,8 +9,9 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Protocol, cast
 
-from core_lib.ports import DataFeed
 from core_lib.types import Candle
+
+from signal_service.application import SignalDataFeed
 
 _LOGGER = logging.getLogger(__name__)
 _TIMEFRAME_PATTERN = re.compile(r"^(?P<count>[1-9]\d*)(?P<unit>[mhd])$")
@@ -25,6 +26,16 @@ FROM public.ohlcv_futures
 WHERE symbol = %s
   AND exchange = %s
   AND timeframe = '1m'
+  AND time < %s
+ORDER BY time
+"""
+_CANDLES_AFTER_SQL = """
+SELECT time, open, high, low, close, volume, quote_volume, trade_count
+FROM public.ohlcv_futures
+WHERE symbol = %s
+  AND exchange = %s
+  AND timeframe = '1m'
+  AND time >= %s
   AND time < %s
 ORDER BY time
 """
@@ -109,7 +120,7 @@ def _funding_symbol(symbol: str) -> str:
     raise ValueError(f"unsupported crypto_data symbol format: {symbol!r}")
 
 
-class CryptoDataFeed(DataFeed):
+class CryptoDataFeed(SignalDataFeed):
     """Resample confirmed 1m source rows without writing to crypto_data."""
 
     def __init__(self, connection: ReadConnection, *, exchange: str = "binance") -> None:
@@ -127,11 +138,42 @@ class CryptoDataFeed(DataFeed):
     def candles(self, symbol: str, tf: str, up_to: datetime) -> list[Candle]:
         """Return only complete buckets whose close time is at most the boundary."""
         boundary = _utc(up_to, name="up_to")
-        duration = _timeframe_duration(tf)
         rows = self._connection.execute(
             _CANDLES_SQL,
             (symbol, self._exchange, boundary),
         ).fetchall()
+        return self._resample(symbol, tf, boundary, rows)
+
+    def candles_after(
+        self,
+        symbol: str,
+        tf: str,
+        after: datetime,
+        up_to: datetime,
+    ) -> list[Candle]:
+        """Read only source rows at or after the last processed close time."""
+        cursor = _utc(after, name="after")
+        boundary = _utc(up_to, name="up_to")
+        if cursor >= boundary:
+            return []
+        rows = self._connection.execute(
+            _CANDLES_AFTER_SQL,
+            (symbol, self._exchange, cursor, boundary),
+        ).fetchall()
+        return [
+            candle
+            for candle in self._resample(symbol, tf, boundary, rows)
+            if candle.open_time >= cursor
+        ]
+
+    def _resample(
+        self,
+        symbol: str,
+        tf: str,
+        boundary: datetime,
+        rows: list[Sequence[object]],
+    ) -> list[Candle]:
+        duration = _timeframe_duration(tf)
         if not rows:
             return []
 

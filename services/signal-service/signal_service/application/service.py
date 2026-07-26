@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import re
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
 from core_lib.indicators import (
     DEFAULT_REGISTRY,
@@ -14,14 +16,23 @@ from core_lib.indicators import (
     IndicatorState,
     assert_finalized,
 )
-from core_lib.ports import DataFeed
-from core_lib.strategy import AdapterManager, StrategyAdapter
+from core_lib.strategy import AdapterManager, StrategyAdapter, StrategyConfig
 from core_lib.types import Candle, Position, PositionSide, SignalType, TradingSignal
 
 from signal_service.core import SignalGenerationConfig
-from signal_service.domain import PersistedSignal, SignalIntent
+from signal_service.domain import DataGap, PersistedSignal, SignalIntent
 
-from .ports import SignalQueue, SignalSink
+from .ports import SignalDataFeed, SignalQueue, SignalSink
+
+_LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class SignalCycleResult:
+    """Return one cycle's optional signal and explicit missing-candle reports."""
+
+    signal: PersistedSignal | None
+    gaps: tuple[DataGap, ...] = ()
 
 
 class SignalGenerationService:
@@ -29,7 +40,7 @@ class SignalGenerationService:
 
     def __init__(
         self,
-        feed: DataFeed,
+        feed: SignalDataFeed,
         manager: AdapterManager,
         sink: SignalSink,
         *,
@@ -47,6 +58,14 @@ class SignalGenerationService:
         self._states: dict[str, IndicatorState] = {}
         self._confirmed: list[Candle] = []
         self._last_close: datetime | None = None
+        self._resolved_params: dict[str, object] = {}
+        self._gap_reports: list[DataGap] = []
+        self._reported_missing_until: datetime | None = None
+
+    @property
+    def gap_reports(self) -> tuple[DataGap, ...]:
+        """Return every gap reported by this in-memory session."""
+        return tuple(self._gap_reports)
 
     def start(
         self,
@@ -54,7 +73,7 @@ class SignalGenerationService:
         decision_time: datetime,
         *,
         current_position: Position | None = None,
-    ) -> PersistedSignal | None:
+    ) -> SignalCycleResult:
         """Warm from prior candles and judge only the latest finalized candle."""
         if self._config is not None:
             raise RuntimeError("signal generation session is already started")
@@ -76,6 +95,13 @@ class SignalGenerationService:
             metadata.min_history,
             max(spec.min_history for spec in specs),
         )
+        resolved = StrategyConfig.resolve(
+            strategy.get_parameter_schema(),
+            {"strategy_id": config.strategy_id, "params": dict(config.params)},
+        )
+        serialized_params = StrategyConfig.serialize(resolved)["params"]
+        if not isinstance(serialized_params, dict):
+            raise TypeError("core_lib resolved strategy params must serialize to a dict")
         history = self._confirmed_history(config, boundary)
         if len(history) < required_warmup + 1:
             raise ValueError(
@@ -87,34 +113,39 @@ class SignalGenerationService:
         self._strategy = strategy
         self._specs = specs
         self._states = {spec.identifier: spec.make_state() for spec in specs}
-        self._confirmed = history[-(required_warmup + 1) : -1]
+        self._resolved_params = dict(serialized_params)
+        decision_window = history[-(required_warmup + 1) :]
+        gaps = self._report_series_gaps(decision_window, boundary)
+        self._confirmed = decision_window[:-1]
         for state in self._states.values():
             state.seed(self._confirmed)
             if not state.warmed_up:
                 raise ValueError("indicator state did not warm up after required preload")
-        return self._process(history[-1], boundary, current_position)
+        persisted = self._process(decision_window[-1], boundary, current_position)
+        return SignalCycleResult(persisted, gaps)
 
     def poll(
         self,
         decision_time: datetime,
         *,
         current_position: Position | None = None,
-    ) -> PersistedSignal | None:
+    ) -> SignalCycleResult:
         """Judge the next finalized candle, rejecting deferred state recovery."""
         config = self._require_config()
         boundary = self._utc(decision_time, name="decision_time")
         last_close = self._last_close
         if last_close is None:
             raise RuntimeError("signal generation session has no processed candle")
-        history = self._confirmed_history(config, boundary)
-        fresh = [candle for candle in history if candle.close_time > last_close]
+        fresh = self._confirmed_increment(config, last_close, boundary)
+        gaps = self._report_poll_gaps(config, last_close, fresh, boundary)
         if not fresh:
-            return None
+            return SignalCycleResult(None, gaps)
         if len(fresh) > 1:
             raise RuntimeError(
                 "multiple unprocessed candles require state recovery, which is outside this slice"
             )
-        return self._process(fresh[0], boundary, current_position)
+        persisted = self._process(fresh[0], boundary, current_position)
+        return SignalCycleResult(persisted, gaps)
 
     def _confirmed_history(
         self,
@@ -125,16 +156,49 @@ class SignalGenerationService:
             self._feed.candles(config.symbol, config.timeframe, boundary),
             key=lambda candle: candle.open_time,
         )
+        self._validate_sequence(history, boundary, config)
+        return history
+
+    def _confirmed_increment(
+        self,
+        config: SignalGenerationConfig,
+        after: datetime,
+        boundary: datetime,
+    ) -> list[Candle]:
+        fresh = sorted(
+            self._feed.candles_after(
+                config.symbol,
+                config.timeframe,
+                after,
+                boundary,
+            ),
+            key=lambda candle: candle.open_time,
+        )
+        self._validate_sequence(fresh, boundary, config)
+        if any(candle.open_time < after for candle in fresh):
+            raise ValueError("incremental DataFeed returned a candle before the cursor")
+        return fresh
+
+    @staticmethod
+    def _validate_sequence(
+        candles: list[Candle],
+        boundary: datetime,
+        config: SignalGenerationConfig,
+    ) -> None:
         if any(
             right.open_time <= left.open_time
-            for left, right in zip(history, history[1:], strict=False)
+            for left, right in zip(candles, candles[1:], strict=False)
         ):
             raise ValueError("DataFeed candles must have strictly increasing open_time")
-        for candle in history:
+        if any(
+            right.open_time < left.close_time
+            for left, right in zip(candles, candles[1:], strict=False)
+        ):
+            raise ValueError("DataFeed candles must not overlap")
+        for candle in candles:
             assert_finalized(candle, boundary)
             if candle.symbol != config.symbol or candle.timeframe != config.timeframe:
                 raise ValueError("DataFeed returned a candle outside the configured series")
-        return history
 
     def _process(
         self,
@@ -163,6 +227,10 @@ class SignalGenerationService:
             current_position,
         )
         self._last_close = candle.close_time
+        self._reported_missing_until = max(
+            candle.close_time,
+            self._reported_missing_until or candle.close_time,
+        )
         if signal is None:
             return None
         if signal.timestamp > candle.close_time:
@@ -183,6 +251,7 @@ class SignalGenerationService:
         config = self._require_config()
         return PersistedSignal(
             strategy_id=config.strategy_id,
+            params=self._resolved_params,
             mode=config.mode,
             timeframe=config.timeframe,
             candle=candle,
@@ -191,6 +260,115 @@ class SignalGenerationService:
             intent=intent,
             side=side,
         )
+
+    def _report_series_gaps(
+        self,
+        candles: list[Candle],
+        detected_at: datetime,
+    ) -> tuple[DataGap, ...]:
+        reports: list[DataGap] = []
+        for left, right in zip(candles, candles[1:], strict=False):
+            if right.open_time > left.close_time:
+                reports.append(
+                    self._record_gap(
+                        symbol=left.symbol,
+                        timeframe=left.timeframe,
+                        previous_close=left.close_time,
+                        next_open=right.open_time,
+                        detected_at=detected_at,
+                        duration=left.close_time - left.open_time,
+                    )
+                )
+        return tuple(reports)
+
+    def _report_poll_gaps(
+        self,
+        config: SignalGenerationConfig,
+        last_close: datetime,
+        fresh: list[Candle],
+        detected_at: datetime,
+    ) -> tuple[DataGap, ...]:
+        reports: list[DataGap] = []
+        duration = self._timeframe_duration(config.timeframe)
+        if fresh:
+            if fresh[0].open_time > last_close:
+                reports.append(
+                    self._record_gap(
+                        symbol=config.symbol,
+                        timeframe=config.timeframe,
+                        previous_close=last_close,
+                        next_open=fresh[0].open_time,
+                        detected_at=detected_at,
+                        duration=duration,
+                    )
+                )
+            reports.extend(self._report_series_gaps(fresh, detected_at))
+            return tuple(reports)
+
+        missing_start = max(
+            last_close,
+            self._reported_missing_until or last_close,
+        )
+        complete_missing, _ = divmod(detected_at - missing_start, duration)
+        if complete_missing > 0:
+            report = self._record_gap(
+                symbol=config.symbol,
+                timeframe=config.timeframe,
+                previous_close=missing_start,
+                next_open=None,
+                detected_at=detected_at,
+                duration=duration,
+                missing_candles=complete_missing,
+            )
+            self._reported_missing_until = missing_start + complete_missing * duration
+            reports.append(report)
+        return tuple(reports)
+
+    def _record_gap(
+        self,
+        *,
+        symbol: str,
+        timeframe: str,
+        previous_close: datetime,
+        next_open: datetime | None,
+        detected_at: datetime,
+        duration: timedelta,
+        missing_candles: int | None = None,
+    ) -> DataGap:
+        if missing_candles is None:
+            assert next_open is not None
+            quotient, remainder = divmod(next_open - previous_close, duration)
+            missing_candles = quotient + int(remainder > timedelta(0))
+        report = DataGap(
+            symbol=symbol,
+            timeframe=timeframe,
+            previous_close=previous_close,
+            next_open=next_open,
+            detected_at=detected_at,
+            missing_candles=missing_candles,
+        )
+        self._gap_reports.append(report)
+        _LOGGER.warning(
+            "detected %d missing finalized candle(s) for %s %s after %s through %s",
+            report.missing_candles,
+            symbol,
+            timeframe,
+            previous_close.isoformat(),
+            (next_open or detected_at).isoformat(),
+        )
+        return report
+
+    @staticmethod
+    def _timeframe_duration(timeframe: str) -> timedelta:
+        match = re.fullmatch(r"(?P<count>[1-9]\d*)(?P<unit>[mhd])", timeframe)
+        if match is None:
+            raise ValueError(f"unsupported timeframe: {timeframe!r}")
+        units = {
+            "m": timedelta(minutes=1),
+            "h": timedelta(hours=1),
+            "d": timedelta(days=1),
+        }
+        return int(match.group("count")) * units[match.group("unit")]
 
     @staticmethod
     def _derive_intent(

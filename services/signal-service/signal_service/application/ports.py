@@ -1,8 +1,26 @@
 """Define short-lived signal output boundaries."""
 
 from abc import ABC, abstractmethod
+from datetime import datetime
+
+from core_lib.ports import DataFeed
+from core_lib.types import Candle
 
 from signal_service.domain import PersistedSignal
+
+
+class SignalDataFeed(DataFeed):
+    """Extend the shared feed with cursor-bounded reads needed by polling."""
+
+    @abstractmethod
+    def candles_after(
+        self,
+        symbol: str,
+        tf: str,
+        after: datetime,
+        up_to: datetime,
+    ) -> list[Candle]:
+        """Return confirmed candles opening at or after the processed cursor."""
 
 
 class SignalSink(ABC):
