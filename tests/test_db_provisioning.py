@@ -345,7 +345,7 @@ def test_crypto_columns_precision_nullability_and_primary_keys_match_design() ->
     }
 
 
-def test_crypto_contract_has_two_hypertables_and_2000_day_retention() -> None:
+def test_crypto_contract_has_compression_before_2000_day_retention() -> None:
     hypertables = set(
         _query(
             "crypto_data",
@@ -354,6 +354,21 @@ def test_crypto_contract_has_two_hypertables_and_2000_day_retention() -> None:
             FROM timescaledb_information.hypertables
             WHERE hypertable_schema = 'public'
               AND hypertable_name IN ('ohlcv_futures', 'funding_rates')
+              AND compression_enabled
+            ORDER BY hypertable_name;
+            """,
+        )
+    )
+    compression_tables = set(
+        _query(
+            "crypto_data",
+            """
+            SELECT hypertable_name
+            FROM timescaledb_information.jobs
+            WHERE proc_name = 'policy_compression'
+              AND hypertable_schema = 'public'
+              AND hypertable_name IN ('ohlcv_futures', 'funding_rates')
+              AND (config ->> 'compress_after')::interval = INTERVAL '7 days'
             ORDER BY hypertable_name;
             """,
         )
@@ -373,6 +388,7 @@ def test_crypto_contract_has_two_hypertables_and_2000_day_retention() -> None:
         )
     )
     assert hypertables == {"funding_rates", "ohlcv_futures"}
+    assert compression_tables == hypertables
     assert retention_tables == hypertables
 
 

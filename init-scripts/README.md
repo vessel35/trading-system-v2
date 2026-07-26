@@ -3,8 +3,9 @@
 루트 `docker-compose.yml`은 v2가 소유하는 PostgreSQL 16 + TimescaleDB
 인스턴스만 시작한다. 초기화 스크립트는 새 볼륨에서 데이터베이스 5개,
 애플리케이션 역할 8개, `crypto_data` 하이퍼테이블 2개와 2000일
-retention 정책 2개, 연속 집계 5개, 그리고 v2 서비스 카탈로그를 만든다.
-v1 또는 crypto-data-hub의 데이터 행은 읽거나 복사하지 않는다.
+retention 정책 2개, 7일 후 압축 정책 2개, 연속 집계 5개, 그리고 v2
+서비스 카탈로그를 만든다. v1 또는 crypto-data-hub의 데이터 행은 읽거나
+복사하지 않는다.
 
 ## 최초 기동
 

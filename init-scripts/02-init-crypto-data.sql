@@ -213,6 +213,28 @@ SELECT add_continuous_aggregate_policy(
     if_not_exists => TRUE
 );
 
+ALTER TABLE public.ohlcv_futures SET (
+    timescaledb.compress,
+    timescaledb.compress_segmentby = 'symbol,exchange,timeframe',
+    timescaledb.compress_orderby = 'time DESC'
+);
+ALTER TABLE public.funding_rates SET (
+    timescaledb.compress,
+    timescaledb.compress_segmentby = 'symbol,exchange',
+    timescaledb.compress_orderby = 'time DESC'
+);
+
+SELECT add_compression_policy(
+    'public.ohlcv_futures',
+    compress_after => INTERVAL '7 days',
+    if_not_exists => TRUE
+);
+SELECT add_compression_policy(
+    'public.funding_rates',
+    compress_after => INTERVAL '7 days',
+    if_not_exists => TRUE
+);
+
 SELECT add_retention_policy(
     'public.ohlcv_futures',
     drop_after => INTERVAL '2000 days',

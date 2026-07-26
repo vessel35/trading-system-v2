@@ -1,3 +1,5 @@
+name: trading-system-v2-db
+
 services:
   timescaledb:
     image: timescale/timescaledb:2.25.1-pg16
