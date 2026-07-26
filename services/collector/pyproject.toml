@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "collector-service"
+version = "0.1.0"
+description = "Confirmed Binance USD-M futures 1m OHLCV ingestion service."
+requires-python = ">=3.12"
+dependencies = [
+    "ccxt>=4.5,<5",
+    "psycopg[binary]>=3.2",
+    "pydantic-settings>=2.10",
+]
+
+[project.optional-dependencies]
+dev = [
+    "mypy>=1.14",
+    "pytest>=8.3",
+    "ruff>=0.9",
+]
+
+[project.scripts]
+collector-service = "collector_service.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["collector_service*"]
+
+[tool.setuptools.package-data]
+collector_service = ["py.typed"]
+
+[tool.pytest.ini_options]
+addopts = [
+    "--import-mode=importlib",
+    "--strict-config",
+    "--strict-markers",
+    "-m",
+    "not integration",
+]
+markers = [
+    "integration: uses a disposable schema in an explicitly configured local PostgreSQL database",
+]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+src = ["collector_service", "tests"]
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["B", "E", "F", "I", "UP"]
+
+[tool.mypy]
+files = ["collector_service", "tests"]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
