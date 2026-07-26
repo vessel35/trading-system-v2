@@ -1,5 +1,6 @@
 # 비밀·로컬 환경
 .env
+.env.provisioning
 
 # Python
 .venv/
