@@ -17,7 +17,7 @@ from core_lib.sizing import size as core_risk_size
 from core_lib.types import PositionSide
 from wallet_service.application import WalletService
 from wallet_service.core import RiskPolicy
-from wallet_service.domain import PaperIntent, RiskRejected
+from wallet_service.domain import PaperIntent, RiskRejected, SignalConsumptionStatus
 from wallet_service.infrastructure import PaperBroker, PaperCostModel
 
 from tests.conftest import QueueDouble, RepositoryDouble, paper_signal
@@ -96,6 +96,92 @@ def test_mock_queue_runs_core_sizing_matcher_book_costs_and_accounting(
     assert calls["position_value"] >= 2
     assert calls["recompute"] >= 2
     assert calls["assert_identity"] >= 2
+
+
+def test_run_once_receipts_a_permanent_risk_rejection_without_a_fill() -> None:
+    message = paper_signal()
+    queue = QueueDouble([message])
+    repository = RepositoryDouble()
+    service = WalletService(
+        "wallet-1",
+        queue,
+        PaperBroker(PaperCostModel()),
+        repository,
+        RiskPolicy(frozenset({"ETHUSDT"})),
+        initial_cash=Decimal("1000"),
+    )
+
+    assert service.run_once() is None
+
+    assert repository.executions == []
+    assert repository.consumptions == [
+        (
+            "wallet-1",
+            "signal-1",
+            SignalConsumptionStatus.REJECTED,
+            message.execution_candle.close_time,
+        )
+    ]
+    assert service.current_position is None
+    assert service.cash_balance == Decimal("1000.00000000")
+
+
+def test_run_once_receipts_a_nonpersisted_execution_as_skipped() -> None:
+    message = paper_signal()
+    repository = RepositoryDouble(accept=False)
+    service = WalletService(
+        "wallet-1",
+        QueueDouble([message]),
+        PaperBroker(PaperCostModel()),
+        repository,
+        RiskPolicy(frozenset({"BTCUSDT"})),
+        initial_cash=Decimal("1000"),
+    )
+
+    assert service.run_once() is None
+
+    assert repository.executions == []
+    assert repository.consumptions == [
+        (
+            "wallet-1",
+            "signal-1",
+            SignalConsumptionStatus.SKIPPED,
+            message.execution_candle.close_time,
+        )
+    ]
+
+
+def test_no_ready_message_leaves_no_consumption_receipt() -> None:
+    repository = RepositoryDouble()
+    service = WalletService(
+        "wallet-1",
+        QueueDouble(),
+        PaperBroker(PaperCostModel()),
+        repository,
+        RiskPolicy(frozenset({"BTCUSDT"})),
+        initial_cash=Decimal("1000"),
+    )
+
+    assert service.run_once() is None
+    assert repository.consumptions == []
+
+
+def test_wallet_context_closes_queue_owned_source_reads(
+    queue: QueueDouble,
+    repository: RepositoryDouble,
+) -> None:
+    with WalletService(
+        "wallet-1",
+        queue,
+        PaperBroker(PaperCostModel()),
+        repository,
+        RiskPolicy(frozenset({"BTCUSDT"})),
+        initial_cash=Decimal("1000"),
+    ) as service:
+        assert service.run_once() is None
+        assert queue.close_calls == 0
+
+    assert queue.close_calls == 1
 
 
 def test_exit_is_matched_and_flattened_through_the_same_accounting_path(

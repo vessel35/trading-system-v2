@@ -6,6 +6,7 @@ from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+import pytest
 from core_lib.types import MarketType, PositionSide
 from wallet_service.domain import PaperIntent
 from wallet_service.infrastructure import PostgresSignalQueue
@@ -26,10 +27,14 @@ class _Connection:
     ) -> None:
         self._handler = handler
         self.calls: list[tuple[str, tuple[object, ...]]] = []
+        self.closed = False
 
     def execute(self, query: str, params: tuple[object, ...]) -> _Result:
         self.calls.append((query, params))
         return _Result(self._handler(query, params))
+
+    def close(self) -> None:
+        self.closed = True
 
 
 def _minute_row(at: datetime, price: int) -> tuple[object, ...]:
@@ -155,6 +160,19 @@ def test_queue_skips_until_the_next_execution_candle_is_confirmed() -> None:
     assert len(crypto.calls) == 1
     assert len(wallet.calls) == 1
     assert all(not query.lstrip().startswith("INSERT") for query, _ in wallet.calls)
+
+
+def test_queue_close_releases_only_source_connections() -> None:
+    queue, signal, crypto, wallet = _queue()
+
+    queue.close()
+    queue.close()
+
+    assert signal.closed is True
+    assert crypto.closed is True
+    assert wallet.closed is False
+    with pytest.raises(RuntimeError, match="closed"):
+        queue.receive()
 
 
 def test_queue_does_not_read_candles_for_an_already_consumed_signal() -> None:

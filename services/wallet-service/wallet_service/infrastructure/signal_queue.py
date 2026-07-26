@@ -71,6 +71,9 @@ class ReadConnection(Protocol):
     ) -> QueryResult:
         """Execute one read query."""
 
+    def close(self) -> None:
+        """Close the source session and roll back any open read transaction."""
+
 
 @dataclass(frozen=True, slots=True)
 class _SignalRow:
@@ -115,6 +118,7 @@ class PostgresSignalQueue(SignalQueue):
         self._signal_reader = signal_reader
         self._crypto_reader = crypto_reader
         self._wallet_reader = wallet_reader
+        self._closed = False
         self._wallet_id = wallet_id
         self._batch_size = batch_size
         self._signals_sql = _SIGNALS_SQL.format(signals=_relation(signal_schema, "trading_signals"))
@@ -123,6 +127,8 @@ class PostgresSignalQueue(SignalQueue):
 
     def receive(self) -> PaperSignal | None:
         """Return the first ready, unconsumed signal without claiming it early."""
+        if self._closed:
+            raise RuntimeError("signal queue is closed")
         after_signal_id = 0
         while True:
             raw_rows = self._signal_reader.execute(
@@ -140,6 +146,15 @@ class PostgresSignalQueue(SignalQueue):
                 message = self._assemble(row)
                 if message is not None:
                     return message
+
+    def close(self) -> None:
+        """Close only source readers; the wallet connection belongs to its repository."""
+        if self._closed:
+            return
+        self._closed = True
+        self._signal_reader.close()
+        if self._crypto_reader is not self._signal_reader:
+            self._crypto_reader.close()
 
     def _unconsumed_signal_ids(self, signal_ids: tuple[int, ...]) -> frozenset[int]:
         values = ", ".join("(%s::varchar)" for _ in signal_ids)

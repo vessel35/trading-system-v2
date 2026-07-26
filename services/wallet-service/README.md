@@ -12,7 +12,10 @@ paper-only decisions from `signal_db`, anti-joins their IDs against the
 wallet-owned consumption receipts, and reads only finalized 1m rows from
 `crypto_data`. Both decision and next execution candles use the shared
 `core_lib.candles` resampler; an incomplete next candle yields no work until a
-later poll.
+later poll and creates no receipt. Terminal risk rejections and non-persisted
+executions are receipted as `rejected` and `skipped`, while atomic paper ledger
+commits use `filled`; all three statuses advance the anti-join without turning
+a rejection into a fill.
 
 ## Safety boundary
 
@@ -28,6 +31,9 @@ or starts a process by itself. Signal and candle connections issue SELECT only;
 the atomic ledger transaction writes only `wallet_db`, including
 `wallet_signal_consumption`. PostgreSQL integration tests are opt-in and reject
 any DSN that is not local and whose database name does not end in `_test`.
+Use the assembled `WalletService` as a context manager (or call `close()`) so
+queue-owned `signal_db` and `crypto_data` read sessions cannot remain idle in a
+transaction; the wallet connection remains repository-owned.
 
 ## Checks
 

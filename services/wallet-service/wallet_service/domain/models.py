@@ -18,6 +18,14 @@ class PaperIntent(StrEnum):
     EXIT = "exit"
 
 
+class SignalConsumptionStatus(StrEnum):
+    """Distinguish paper fills from terminal non-fill dispositions."""
+
+    FILLED = "filled"
+    REJECTED = "rejected"
+    SKIPPED = "skipped"
+
+
 class RiskRejected(RuntimeError):
     """Report a deliberate safety rejection before any fill or persistence."""
 

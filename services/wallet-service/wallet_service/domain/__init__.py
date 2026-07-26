@@ -5,6 +5,7 @@ from .models import (
     PaperIntent,
     PaperSignal,
     RiskRejected,
+    SignalConsumptionStatus,
     WalletExecution,
 )
 
@@ -13,5 +14,6 @@ __all__ = [
     "PaperIntent",
     "PaperSignal",
     "RiskRejected",
+    "SignalConsumptionStatus",
     "WalletExecution",
 ]

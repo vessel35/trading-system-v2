@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import cast
@@ -13,7 +14,7 @@ import pytest
 from psycopg.conninfo import conninfo_to_dict
 from wallet_service.application import WalletRepository, WalletService
 from wallet_service.core import RiskPolicy
-from wallet_service.domain import WalletExecution
+from wallet_service.domain import SignalConsumptionStatus, WalletExecution
 from wallet_service.infrastructure import (
     PaperBroker,
     PaperCostModel,
@@ -65,6 +66,16 @@ class _Capture(WalletRepository):
 
     def store(self, execution: WalletExecution) -> bool:
         self.value = execution
+        return True
+
+    def record_consumption(
+        self,
+        wallet_id: str,
+        signal_id: str,
+        status: SignalConsumptionStatus,
+        consumed_at: datetime,
+    ) -> bool:
+        del wallet_id, signal_id, status, consumed_at
         return True
 
 
@@ -130,6 +141,7 @@ def test_repository_commits_to_disposable_wallet_schema_and_rejects_replay() -> 
             "ck_accounting_paper_only",
             "ck_accounting_identity",
             "ck_wallet_signal_consumption_paper_only",
+            "ck_wallet_signal_consumption_status",
         } <= constraints
         with pytest.raises(psycopg.errors.CheckViolation):
             connection.execute(

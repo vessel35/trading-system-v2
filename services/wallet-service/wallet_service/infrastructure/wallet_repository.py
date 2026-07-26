@@ -4,18 +4,19 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
+from datetime import datetime
 from typing import Protocol
 
 from wallet_service.application import WalletRepository
-from wallet_service.domain import WalletExecution
+from wallet_service.domain import SignalConsumptionStatus, WalletExecution
 
 _IDENTIFIER = re.compile(r"^[a-z_][a-z0-9_]*$")
 
 _INSERT_CONSUMPTION = """
 INSERT INTO {consumption} (
-    wallet_id, signal_id, mode, consumed_at
+    wallet_id, signal_id, mode, status, consumed_at
 )
-VALUES (%s, %s, 'paper', %s)
+VALUES (%s, %s, 'paper', %s, %s)
 ON CONFLICT (wallet_id, signal_id) DO NOTHING
 RETURNING signal_id
 """
@@ -137,6 +138,7 @@ class PostgresWalletRepository(WalletRepository):
                 (
                     execution.wallet_id,
                     execution.signal_id,
+                    SignalConsumptionStatus.FILLED.value,
                     execution.accounting.occurred_at,
                 ),
             ).fetchone()
@@ -228,6 +230,33 @@ class PostgresWalletRepository(WalletRepository):
             )
             self._connection.commit()
             return True
+        except Exception:
+            self._connection.rollback()
+            raise
+
+    def record_consumption(
+        self,
+        wallet_id: str,
+        signal_id: str,
+        status: SignalConsumptionStatus,
+        consumed_at: datetime,
+    ) -> bool:
+        """Commit a rejected/skipped receipt without any fill or accounting row."""
+        normalized_status = SignalConsumptionStatus(status)
+        if normalized_status is SignalConsumptionStatus.FILLED:
+            raise ValueError("filled consumption must be committed with its ledger")
+        try:
+            inserted = self._connection.execute(
+                self._insert_consumption,
+                (
+                    wallet_id,
+                    signal_id,
+                    normalized_status.value,
+                    consumed_at,
+                ),
+            ).fetchone()
+            self._connection.commit()
+            return inserted is not None
         except Exception:
             self._connection.rollback()
             raise
