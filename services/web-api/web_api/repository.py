@@ -2,18 +2,21 @@
 
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
+from core_lib.eval import thresholds
 from core_lib.strategy import StrategyConfig
 from core_lib.strategy.adaptees import STRATEGY_ID, VesselReference
 from pydantic import BaseModel
 
 from web_api.database import CatalogConnection, CryptoConnection, SignalConnection, get_settings
 from web_api.models import (
+    BacktestTag,
     Candle,
     CandleCollection,
     CandlePage,
     CatalogHealth,
+    DataSourceCoverage,
     HealthResponse,
     Page,
     Preregistration,
@@ -25,9 +28,15 @@ from web_api.models import (
     RunListResponse,
     RunSummary,
     RunSummaryResponse,
+    RunTagsResponse,
     StrategyListResponse,
     StrategyOption,
     SummaryStatus,
+    SweepResponse,
+    TagFacet,
+    TagFacetsResponse,
+    TagFacetValue,
+    TagType,
 )
 
 RUN_HEADER_COLUMNS = """
@@ -102,6 +111,8 @@ class RunListQuery(BaseModel):
     gate_passed: bool | None = None
     sweep_id: str | None = None
     config_hash: str | None = None
+    tag_type: TagType | None = None
+    tag_value: str | None = None
     created_at_from: datetime | None = None
     created_at_to: datetime | None = None
     period_start_from: datetime | None = None
@@ -161,6 +172,18 @@ class CatalogRepository:
             if value is not None:
                 filters.append(f"{column} = %s")
                 params.append(value)
+
+        if query.tag_type is not None or query.tag_value is not None:
+            tag_filters = ["t.run_id = r.run_id"]
+            if query.tag_type is not None:
+                tag_filters.append("t.tag_type = %s")
+                params.append(query.tag_type)
+            if query.tag_value is not None:
+                tag_filters.append("t.tag_value = %s")
+                params.append(query.tag_value)
+            filters.append(
+                f"EXISTS (SELECT 1 FROM public.backtest_tag t WHERE {' AND '.join(tag_filters)})"
+            )
 
         range_filters = (
             ("created_at_from", "r.created_at", ">="),
@@ -317,6 +340,96 @@ class CatalogRepository:
             data=items,
             compared_by=compared_by,
             sweep_id=sweep_id,
+        )
+
+    def get_sweep(self, sweep_id: str) -> SweepResponse | None:
+        comparison = self.compare_runs(run_ids=None, sweep_id=sweep_id)
+        if not comparison.data:
+            return None
+        representative = next(
+            (
+                item
+                for item in comparison.data
+                if item.summary is not None and item.summary.harness_json is not None
+            ),
+            comparison.data[0],
+        )
+        summary = representative.summary
+        overfit_limits = thresholds.overfit()
+        return SweepResponse(
+            sweep_id=sweep_id,
+            representative_run_id=representative.run.run_id,
+            runs=comparison.data,
+            oos_degradation=summary.oos_degradation if summary is not None else None,
+            psr=summary.psr if summary is not None else None,
+            oos_degradation_limit=overfit_limits["oos_degradation_limit"],
+            psr_minimum=overfit_limits["psr_minimum"],
+            harness_json=summary.harness_json if summary is not None else None,
+        )
+
+    def get_tags(self, run_id: str) -> RunTagsResponse | None:
+        exists = self._connection.execute(
+            "SELECT 1 FROM public.backtest_run WHERE run_id = %s",
+            (run_id,),
+        ).fetchone()
+        if exists is None:
+            return None
+        rows = self._connection.execute(
+            """
+            SELECT tag_id, run_id, tag_type, tag_value, created_at
+            FROM public.backtest_tag
+            WHERE run_id = %s
+            ORDER BY tag_type, tag_value, tag_id
+            """,
+            (run_id,),
+        ).fetchall()
+        return RunTagsResponse(
+            run_id=run_id,
+            data=[BacktestTag.model_validate(row) for row in rows],
+        )
+
+    def get_tag(self, run_id: str, tag_type: TagType, tag_value: str) -> BacktestTag | None:
+        row = self._connection.execute(
+            """
+            SELECT tag_id, run_id, tag_type, tag_value, created_at
+            FROM public.backtest_tag
+            WHERE run_id = %s AND tag_type = %s AND tag_value = %s
+            """,
+            (run_id, tag_type, tag_value),
+        ).fetchone()
+        return BacktestTag.model_validate(row) if row is not None else None
+
+    def tag_facets(self) -> TagFacetsResponse:
+        rows = self._connection.execute(
+            """
+            SELECT tag_type, tag_value, count(*) AS count
+            FROM public.backtest_tag
+            GROUP BY tag_type, tag_value
+            ORDER BY tag_type, count(*) DESC, tag_value
+            """
+        ).fetchall()
+        grouped: dict[TagType, list[TagFacetValue]] = {}
+        for row in rows:
+            tag_type = str(row["tag_type"])
+            if tag_type not in {
+                "classification",
+                "purpose",
+                "weakness",
+                "improvement",
+                "usability",
+            }:
+                continue
+            typed_tag = cast(TagType, tag_type)
+            grouped.setdefault(typed_tag, []).append(
+                TagFacetValue(
+                    tag_value=str(row["tag_value"]),
+                    count=int(row["count"]),
+                )
+            )
+        return TagFacetsResponse(
+            data=[
+                TagFacet(tag_type=tag_type, values=values) for tag_type, values in grouped.items()
+            ]
         )
 
     def health(self, *, core_lib_version: str, web_api_version: str) -> HealthResponse:
@@ -540,6 +653,46 @@ class MarketDataRepository:
                 to_ts=to_ts,
                 timeframe=timeframe,
             ),
+        )
+
+    def coverage(
+        self,
+        *,
+        data_source: str,
+        symbol: str,
+        exchange: str,
+    ) -> DataSourceCoverage:
+        table = self._source_table(data_source)
+        row = self._connection.execute(
+            f"""
+            SELECT
+                min(time) AS available_from,
+                max(time) AS available_to,
+                count(DISTINCT time) AS row_count,
+                CASE
+                    WHEN min(time) IS NULL THEN 0
+                    ELSE floor(extract(epoch FROM (max(time) - min(time))) / 60)::bigint + 1
+                END AS expected_1m_rows
+            FROM public.{table}
+            WHERE symbol = %s
+              AND exchange = %s
+              AND timeframe = '1m'
+            """,
+            (symbol, exchange),
+        ).fetchone()
+        if row is None:
+            raise RuntimeError("coverage query returned no row")
+        row_count = int(row["row_count"])
+        expected = int(row["expected_1m_rows"])
+        return DataSourceCoverage(
+            data_source=data_source,
+            symbol=symbol,
+            exchange=exchange,
+            available_from=row["available_from"],
+            available_to=row["available_to"],
+            row_count=row_count,
+            expected_1m_rows=expected,
+            missing_1m_rows=max(0, expected - row_count),
         )
 
     @staticmethod

@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Backtest Research Web API",
-    "description": "Research backend-for-frontend. Reads remain physically read-only; the sole write path triggers dry-run backtests that register catalog rows and Evidence.",
+    "description": "Research backend-for-frontend. Reads remain physically read-only; writes are limited to dry-run catalog/Evidence execution and short-lived tag mutations.",
     "version": "0.1.0"
   },
   "paths": {
@@ -449,6 +449,45 @@
             }
           },
           {
+            "name": "tag_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "classification",
+                    "purpose",
+                    "weakness",
+                    "improvement",
+                    "usability"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tag Type"
+            }
+          },
+          {
+            "name": "tag_value",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tag Value"
+            }
+          },
+          {
             "name": "created_at_from",
             "in": "query",
             "required": false,
@@ -618,6 +657,54 @@
         }
       }
     },
+    "/api/v1/sweeps": {
+      "post": {
+        "summary": "Trigger Sweep",
+        "operationId": "trigger_sweep_api_v1_sweeps_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SweepSubmission"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunAccepted"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/jobs/{job_id}/status": {
       "get": {
         "summary": "Get Job Status",
@@ -713,6 +800,154 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/v1/sweeps/{sweep_id}": {
+      "get": {
+        "summary": "Get Sweep",
+        "operationId": "get_sweep_api_v1_sweeps__sweep_id__get",
+        "parameters": [
+          {
+            "name": "sweep_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Sweep Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SweepResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/tags/facets": {
+      "get": {
+        "summary": "Get Tag Facets",
+        "operationId": "get_tag_facets_api_v1_tags_facets_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TagFacetsResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/data-sources/{data_source}/coverage": {
+      "get": {
+        "summary": "Get Data Source Coverage",
+        "operationId": "get_data_source_coverage_api_v1_data_sources__data_source__coverage_get",
+        "parameters": [
+          {
+            "name": "data_source",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Data Source"
+            }
+          },
+          {
+            "name": "symbol",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 30,
+              "title": "Symbol"
+            }
+          },
+          {
+            "name": "exchange",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 20,
+              "title": "Exchange"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataSourceCoverage"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         }
       }
@@ -922,6 +1157,169 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PreregistrationResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/runs/{run_id}/tags": {
+      "get": {
+        "summary": "Get Run Tags",
+        "operationId": "get_run_tags_api_v1_runs__run_id__tags_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunTagsResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      "post": {
+        "summary": "Add Run Tag",
+        "operationId": "add_run_tag_api_v1_runs__run_id__tags_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TagMutationResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Remove Run Tag",
+        "operationId": "remove_run_tag_api_v1_runs__run_id__tags_delete",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TagDeleteResponse"
                 }
               }
             }
@@ -3131,6 +3529,47 @@
   },
   "components": {
     "schemas": {
+      "BacktestTag": {
+        "properties": {
+          "tag_id": {
+            "type": "integer",
+            "title": "Tag Id"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "tag_type": {
+            "type": "string",
+            "enum": [
+              "classification",
+              "purpose",
+              "weakness",
+              "improvement",
+              "usability"
+            ],
+            "title": "Tag Type"
+          },
+          "tag_value": {
+            "type": "string",
+            "title": "Tag Value"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tag_id",
+          "run_id",
+          "tag_type",
+          "tag_value",
+          "created_at"
+        ],
+        "title": "BacktestTag"
+      },
       "CandidateEvent": {
         "properties": {
           "candidate_id": {
@@ -3626,6 +4065,76 @@
         ],
         "title": "CursorPage",
         "description": "Evidence cursor metadata."
+      },
+      "DataSourceCoverage": {
+        "properties": {
+          "data_source": {
+            "type": "string",
+            "title": "Data Source"
+          },
+          "symbol": {
+            "type": "string",
+            "title": "Symbol"
+          },
+          "exchange": {
+            "type": "string",
+            "title": "Exchange"
+          },
+          "source_timeframe": {
+            "type": "string",
+            "const": "1m",
+            "title": "Source Timeframe",
+            "default": "1m"
+          },
+          "available_from": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Available From"
+          },
+          "available_to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Available To"
+          },
+          "row_count": {
+            "type": "integer",
+            "title": "Row Count"
+          },
+          "expected_1m_rows": {
+            "type": "integer",
+            "title": "Expected 1M Rows"
+          },
+          "missing_1m_rows": {
+            "type": "integer",
+            "title": "Missing 1M Rows"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data_source",
+          "symbol",
+          "exchange",
+          "available_from",
+          "available_to",
+          "row_count",
+          "expected_1m_rows",
+          "missing_1m_rows"
+        ],
+        "title": "DataSourceCoverage"
       },
       "Decision": {
         "properties": {
@@ -4954,6 +5463,28 @@
               }
             ],
             "title": "Run Id"
+          },
+          "sweep_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sweep Id"
+          },
+          "run_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Count"
           },
           "evidence_hash": {
             "anyOf": [
@@ -7194,6 +7725,27 @@
         "title": "RunSummaryResponse",
         "description": "0..1 stored summary with a status-derived absence explanation."
       },
+      "RunTagsResponse": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/BacktestTag"
+            },
+            "type": "array",
+            "title": "Data"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "data"
+        ],
+        "title": "RunTagsResponse"
+      },
       "Signal": {
         "properties": {
           "signal_id": {
@@ -7415,6 +7967,521 @@
           "source"
         ],
         "title": "StrategyOption"
+      },
+      "SweepAxis": {
+        "properties": {
+          "parameter": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "pattern": "^(?:params\\.)?[A-Za-z_][A-Za-z0-9_.-]*$",
+            "title": "Parameter"
+          },
+          "values": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "type": "array",
+            "maxItems": 20,
+            "minItems": 2,
+            "title": "Values"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "parameter",
+          "values"
+        ],
+        "title": "SweepAxis"
+      },
+      "SweepResponse": {
+        "properties": {
+          "sweep_id": {
+            "type": "string",
+            "title": "Sweep Id"
+          },
+          "representative_run_id": {
+            "type": "string",
+            "title": "Representative Run Id"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/RunComparisonItem"
+            },
+            "type": "array",
+            "title": "Runs"
+          },
+          "oos_degradation": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oos Degradation"
+          },
+          "psr": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Psr"
+          },
+          "oos_degradation_limit": {
+            "type": "number",
+            "title": "Oos Degradation Limit"
+          },
+          "psr_minimum": {
+            "type": "number",
+            "title": "Psr Minimum"
+          },
+          "harness_json": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JsonValue"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "sweep_id",
+          "representative_run_id",
+          "runs",
+          "oos_degradation",
+          "psr",
+          "oos_degradation_limit",
+          "psr_minimum",
+          "harness_json"
+        ],
+        "title": "SweepResponse",
+        "description": "Stored runs and the one stored representative aggregate for a sweep."
+      },
+      "SweepSubmission": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "grid",
+              "walk_forward",
+              "is_oos"
+            ],
+            "title": "Type"
+          },
+          "config": {
+            "properties": {
+              "run_name": {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1,
+                "title": "Run Name"
+              },
+              "strategy_id": {
+                "type": "string",
+                "maxLength": 80,
+                "minLength": 1,
+                "title": "Strategy Id"
+              },
+              "params": {
+                "additionalProperties": true,
+                "type": "object",
+                "title": "Params"
+              },
+              "symbol": {
+                "type": "string",
+                "maxLength": 30,
+                "minLength": 1,
+                "title": "Symbol"
+              },
+              "exchange": {
+                "type": "string",
+                "maxLength": 20,
+                "minLength": 1,
+                "title": "Exchange"
+              },
+              "timeframe": {
+                "type": "string",
+                "maxLength": 10,
+                "minLength": 2,
+                "title": "Timeframe"
+              },
+              "market_type": {
+                "type": "string",
+                "enum": [
+                  "spot",
+                  "futures"
+                ],
+                "title": "Market Type"
+              },
+              "data_source": {
+                "type": "string",
+                "minLength": 1,
+                "title": "Data Source"
+              },
+              "start": {
+                "type": "string",
+                "format": "date-time",
+                "title": "Start"
+              },
+              "end": {
+                "type": "string",
+                "format": "date-time",
+                "title": "End"
+              },
+              "initial_capital": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "exclusiveMinimum": 0.0
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                  }
+                ],
+                "title": "Initial Capital"
+              },
+              "seed": {
+                "type": "integer",
+                "title": "Seed",
+                "default": 0
+              },
+              "sizing_method": {
+                "type": "string",
+                "enum": [
+                  "risk_based",
+                  "pct"
+                ],
+                "title": "Sizing Method",
+                "default": "risk_based"
+              },
+              "risk_per_trade": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Risk Per Trade"
+              },
+              "position_size_pct": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Position Size Pct"
+              },
+              "cost_values": {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "string",
+                      "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                    }
+                  ]
+                },
+                "type": "object",
+                "title": "Cost Values"
+              },
+              "indicator_mode": {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "explicit",
+                  "all"
+                ],
+                "title": "Indicator Mode",
+                "default": "auto"
+              },
+              "explicit_indicators": {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array",
+                "title": "Explicit Indicators"
+              },
+              "trigger_feed": {
+                "type": "string",
+                "enum": [
+                  "tf_candle",
+                  "m1_subcandle"
+                ],
+                "title": "Trigger Feed",
+                "default": "tf_candle"
+              },
+              "fill_timing": {
+                "type": "string",
+                "enum": [
+                  "immediate",
+                  "next_bar"
+                ],
+                "title": "Fill Timing",
+                "default": "next_bar"
+              },
+              "profile_ref": {
+                "type": "string",
+                "minLength": 1,
+                "title": "Profile Ref"
+              },
+              "sweep": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Sweep"
+              }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "required": [
+              "run_name",
+              "strategy_id",
+              "symbol",
+              "exchange",
+              "timeframe",
+              "market_type",
+              "data_source",
+              "start",
+              "end",
+              "initial_capital",
+              "profile_ref"
+            ],
+            "title": "RunConfig",
+            "description": "A fully validated deterministic backtest-run configuration."
+          },
+          "axes": {
+            "items": {
+              "$ref": "#/components/schemas/SweepAxis"
+            },
+            "type": "array",
+            "maxItems": 3,
+            "title": "Axes"
+          },
+          "folds": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 20.0,
+                "minimum": 2.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Folds"
+          },
+          "split": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMaximum": 1.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Split"
+          },
+          "prereg": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PreregistrationInput"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "config"
+        ],
+        "title": "SweepSubmission",
+        "description": "Validated multi-run dry-run request; no independent preregistration write."
+      },
+      "TagDeleteResponse": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "tag_type": {
+            "type": "string",
+            "enum": [
+              "classification",
+              "purpose",
+              "weakness",
+              "improvement",
+              "usability"
+            ],
+            "title": "Tag Type"
+          },
+          "tag_value": {
+            "type": "string",
+            "title": "Tag Value"
+          },
+          "removed": {
+            "type": "boolean",
+            "title": "Removed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "tag_type",
+          "tag_value",
+          "removed"
+        ],
+        "title": "TagDeleteResponse"
+      },
+      "TagFacet": {
+        "properties": {
+          "tag_type": {
+            "type": "string",
+            "enum": [
+              "classification",
+              "purpose",
+              "weakness",
+              "improvement",
+              "usability"
+            ],
+            "title": "Tag Type"
+          },
+          "values": {
+            "items": {
+              "$ref": "#/components/schemas/TagFacetValue"
+            },
+            "type": "array",
+            "title": "Values"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tag_type",
+          "values"
+        ],
+        "title": "TagFacet"
+      },
+      "TagFacetValue": {
+        "properties": {
+          "tag_value": {
+            "type": "string",
+            "title": "Tag Value"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tag_value",
+          "count"
+        ],
+        "title": "TagFacetValue"
+      },
+      "TagFacetsResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/TagFacet"
+            },
+            "type": "array",
+            "title": "Data"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "TagFacetsResponse"
+      },
+      "TagInput": {
+        "properties": {
+          "tag_type": {
+            "type": "string",
+            "enum": [
+              "classification",
+              "purpose",
+              "weakness",
+              "improvement",
+              "usability"
+            ],
+            "title": "Tag Type"
+          },
+          "tag_value": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Tag Value"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "tag_type",
+          "tag_value"
+        ],
+        "title": "TagInput"
+      },
+      "TagMutationResponse": {
+        "properties": {
+          "tag": {
+            "$ref": "#/components/schemas/BacktestTag"
+          },
+          "created": {
+            "type": "boolean",
+            "title": "Created"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tag",
+          "created"
+        ],
+        "title": "TagMutationResponse"
       },
       "Trade": {
         "properties": {

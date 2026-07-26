@@ -1,6 +1,7 @@
 import { RotateCcw, SlidersHorizontal } from "lucide-react";
 
 import { useCatalogFilters } from "../contexts/catalog-filters";
+import { useTagFacets } from "../hooks/use-p2b";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -11,6 +12,10 @@ function dateValue(value: string | null | undefined): string {
 
 export function CatalogFilterBar() {
   const { filters, updateFilters, resetFilters, activeCount } = useCatalogFilters();
+  const facets = useTagFacets();
+  const selectedFacet = facets.data?.data.find(
+    (facet) => facet.tag_type === filters.tag_type,
+  );
 
   return (
     <div className="rounded-xl border bg-card/65 p-3 shadow-sm">
@@ -29,7 +34,7 @@ export function CatalogFilterBar() {
           초기화
         </Button>
       </div>
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-7">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-9">
         <Input
           value={filters.strategy_id ?? ""}
           onChange={(event) =>
@@ -99,6 +104,41 @@ export function CatalogFilterBar() {
           <option value="">모든 gate</option>
           <option value="true">통과</option>
           <option value="false">미통과</option>
+        </select>
+        <select
+          value={filters.tag_type ?? ""}
+          onChange={(event) =>
+            updateFilters({
+              tag_type:
+                (event.target.value as typeof filters.tag_type) || undefined,
+              tag_value: undefined,
+            })
+          }
+          className="h-9 rounded-md border border-input bg-background/70 px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+          aria-label="태그 종류 필터"
+        >
+          <option value="">모든 태그 종류</option>
+          {(facets.data?.data ?? []).map((facet) => (
+            <option key={facet.tag_type} value={facet.tag_type}>
+              {facet.tag_type}
+            </option>
+          ))}
+        </select>
+        <select
+          value={filters.tag_value ?? ""}
+          onChange={(event) =>
+            updateFilters({ tag_value: event.target.value || undefined })
+          }
+          disabled={!selectedFacet}
+          className="h-9 rounded-md border border-input bg-background/70 px-3 text-sm outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+          aria-label="태그 값 필터"
+        >
+          <option value="">모든 태그 값</option>
+          {(selectedFacet?.values ?? []).map((value) => (
+            <option key={value.tag_value} value={value.tag_value}>
+              {value.tag_value} ({value.count})
+            </option>
+          ))}
         </select>
         <div className="grid grid-cols-2 gap-1">
           <Input

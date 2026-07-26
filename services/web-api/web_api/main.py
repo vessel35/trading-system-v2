@@ -3,11 +3,19 @@
 import sqlite3
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
-from datetime import UTC, datetime
-from typing import Annotated, Any, NoReturn
+from copy import deepcopy
+from datetime import UTC, datetime, timedelta
+from itertools import product
+from math import prod
+from typing import Annotated, Any, NoReturn, cast
+from uuid import uuid4
 
 import psycopg
-from backtest_service.adapters.catalog_store import validate_catalog_run_name
+from backtest_service.adapters.catalog_store import (
+    BacktestCatalogStore,
+    WriteConnection,
+    validate_catalog_run_name,
+)
 from backtest_service.config import RunConfig
 from core_lib import __version__ as core_lib_version
 from fastapi import Body, Depends, FastAPI, Query, Request
@@ -24,6 +32,7 @@ from web_api.database import (
     CryptoConnection,
     SignalConnection,
     catalog_connection,
+    connect_catalog_writer,
     crypto_connection,
     signal_connection,
 )
@@ -34,9 +43,11 @@ from web_api.evidence import (
 )
 from web_api.jobs import (
     TERMINAL_JOB_STATES,
+    SweepPlan,
     shutdown_executor,
     start_executor,
     submit_job,
+    submit_sweep_job,
 )
 from web_api.jobs import (
     registry as job_registry,
@@ -46,6 +57,7 @@ from web_api.models import (
     CandleCollection,
     ChartSummary,
     ConditionalExpectancy,
+    DataSourceCoverage,
     Decision,
     DrawdownEpisode,
     EquityPoint,
@@ -68,8 +80,16 @@ from web_api.models import (
     RunListResponse,
     RunSubmission,
     RunSummaryResponse,
+    RunTagsResponse,
     Signal,
     StrategyListResponse,
+    SweepResponse,
+    SweepSubmission,
+    TagDeleteResponse,
+    TagFacetsResponse,
+    TagInput,
+    TagMutationResponse,
+    TagType,
     Trade,
     TradeFeature,
 )
@@ -110,8 +130,8 @@ app = FastAPI(
     title="Backtest Research Web API",
     version=web_api_version,
     description=(
-        "Research backend-for-frontend. Reads remain physically read-only; the sole "
-        "write path triggers dry-run backtests that register catalog rows and Evidence."
+        "Research backend-for-frontend. Reads remain physically read-only; writes are "
+        "limited to dry-run catalog/Evidence execution and short-lived tag mutations."
     ),
     lifespan=lifespan,
 )
@@ -130,7 +150,11 @@ def custom_openapi() -> dict[str, Any]:
     )
     paths = schema.get("paths")
     if isinstance(paths, dict):
-        validation_paths = {"/api/v1/run-config:validate", "/api/v1/runs"}
+        validation_paths = {
+            "/api/v1/run-config:validate",
+            "/api/v1/runs",
+            "/api/v1/sweeps",
+        }
         for path, path_item in paths.items():
             if not isinstance(path_item, dict):
                 continue
@@ -170,6 +194,7 @@ async def request_validation_error_handler(
     run_request = request.method == "POST" and request.url.path in {
         "/api/v1/run-config:validate",
         "/api/v1/runs",
+        "/api/v1/sweeps",
     }
     return JSONResponse(
         status_code=422 if run_request else 400,
@@ -321,6 +346,121 @@ def _validated_run_config(value: object) -> RunConfig:
         ) from exc
 
 
+def _sweep_error(message: str, *, field: str = "axes") -> NoReturn:
+    raise ApiError(
+        status_code=422,
+        code="invalid_run_config",
+        message="The sweep configuration is invalid.",
+        details=[{"field": field, "message": message, "type": "sweep_contract"}],
+    )
+
+
+def _sweep_run_name(base_name: str, index: int) -> str:
+    suffix = f"g{index + 1}"
+    prefix = base_name[: 24 - len(suffix) - 1].rstrip("-")
+    return f"{prefix}-{suffix}"
+
+
+def _assign_axis(params: dict[str, object], parameter: str, value: object) -> None:
+    path = parameter.removeprefix("params.").split(".")
+    current = params
+    for part in path[:-1]:
+        nested = current.get(part)
+        if nested is None:
+            replacement: dict[str, object] = {}
+            current[part] = replacement
+            current = replacement
+        elif isinstance(nested, dict):
+            current = cast(dict[str, object], nested)
+        else:
+            _sweep_error(
+                f"axis '{parameter}' crosses a non-object parameter",
+                field=f"axes.{parameter}",
+            )
+    current[path[-1]] = value
+
+
+def _validate_sweep_boundaries(config: RunConfig, payload: SweepSubmission) -> None:
+    if payload.type == "grid":
+        return
+    duration = config.end - config.start
+    if payload.type == "is_oos":
+        if payload.split is None:
+            raise RuntimeError("validated is_oos sweep is missing split")
+        boundaries = [config.start + duration * payload.split]
+        field = "split"
+    else:
+        if payload.folds is None:
+            raise RuntimeError("validated walk_forward sweep is missing folds")
+        boundaries = [
+            config.start + duration * (index / payload.folds) for index in range(1, payload.folds)
+        ]
+        field = "folds"
+    timeframe = MarketDataRepository._timeframe_duration(config.timeframe)
+    epoch = datetime(1970, 1, 1, tzinfo=UTC)
+    misaligned = [
+        boundary.isoformat()
+        for boundary in boundaries
+        if (boundary - epoch) % timeframe != timedelta(0)
+    ]
+    if misaligned:
+        _sweep_error(
+            (
+                f"{payload.type} boundaries must align to the {config.timeframe} "
+                f"timeframe grid: {misaligned}"
+            ),
+            field=field,
+        )
+
+
+def _prepare_sweep(payload: SweepSubmission) -> SweepPlan:
+    base = _validated_run_config(payload.config)
+    _validate_sweep_boundaries(base, payload)
+    sweep_id = f"S-{uuid4().hex}"
+    sweep_meta = {
+        **({} if base.sweep is None else base.sweep),
+        "sweep_id": sweep_id,
+    }
+    base_payload = base.model_dump()
+    base_payload["sweep"] = sweep_meta
+
+    if payload.type != "grid":
+        config = _validated_run_config(base_payload)
+        return SweepPlan(
+            sweep_id=sweep_id,
+            type=payload.type,
+            config=config,
+            folds=payload.folds,
+            split=payload.split,
+        )
+
+    names = [axis.parameter.removeprefix("params.") for axis in payload.axes]
+    if len(names) != len(set(names)):
+        _sweep_error("grid axis parameters must be unique")
+    cell_count = prod(len(axis.values) for axis in payload.axes)
+    if cell_count > 100:
+        _sweep_error("grid sweeps are limited to 100 cells")
+    configs: list[RunConfig] = []
+    value_sets = [axis.values for axis in payload.axes]
+    for index, combination in enumerate(product(*value_sets)):
+        cell = deepcopy(base_payload)
+        params = cast(dict[str, object], cell["params"])
+        for axis, value in zip(payload.axes, combination, strict=True):
+            _assign_axis(params, axis.parameter, value)
+        cell["run_name"] = _sweep_run_name(base.run_name, index)
+        cell["sweep"] = {
+            **sweep_meta,
+            "fold_label": f"grid-{index + 1}",
+        }
+        configs.append(_validated_run_config(cell))
+    return SweepPlan(
+        sweep_id=sweep_id,
+        type="grid",
+        config=configs[0],
+        configs=tuple(configs),
+    )
+
+
 def not_found(run_id: str) -> NoReturn:
     raise ApiError(
         status_code=404,
@@ -378,6 +518,25 @@ async def trigger_run(payload: RunSubmission) -> RunAccepted:
     config = _validated_run_config(payload.config)
     prereg = payload.prereg.model_dump(exclude_none=True) if payload.prereg is not None else {}
     state = submit_job(config, prereg)
+    base = f"/api/v1/jobs/{state.job_id}"
+    return RunAccepted(
+        job_id=state.job_id,
+        status="QUEUED",
+        events_url=f"{base}/events",
+        status_url=f"{base}/status",
+    )
+
+
+@app.post(
+    "/api/v1/sweeps",
+    response_model=RunAccepted,
+    status_code=202,
+    responses={422: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+)
+async def trigger_sweep(payload: SweepSubmission) -> RunAccepted:
+    plan = _prepare_sweep(payload)
+    prereg = payload.prereg.model_dump(exclude_none=True) if payload.prereg is not None else {}
+    state = submit_sweep_job(plan, prereg)
     base = f"/api/v1/jobs/{state.job_id}"
     return RunAccepted(
         job_id=state.job_id,
@@ -457,6 +616,63 @@ def list_strategies(
 
 
 @app.get(
+    "/api/v1/sweeps/{sweep_id}",
+    response_model=SweepResponse,
+    responses={404: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+)
+def get_sweep(
+    sweep_id: str,
+    repo: Annotated[CatalogRepository, Depends(repository)],
+) -> SweepResponse:
+    sweep = repo.get_sweep(sweep_id)
+    if sweep is None:
+        raise ApiError(
+            status_code=404,
+            code="sweep_not_found",
+            message=f"Backtest sweep '{sweep_id}' does not exist.",
+            details={"sweep_id": sweep_id},
+        )
+    return sweep
+
+
+@app.get(
+    "/api/v1/tags/facets",
+    response_model=TagFacetsResponse,
+    responses={503: {"model": ErrorResponse}},
+)
+def get_tag_facets(
+    repo: Annotated[CatalogRepository, Depends(repository)],
+) -> TagFacetsResponse:
+    return repo.tag_facets()
+
+
+@app.get(
+    "/api/v1/data-sources/{data_source}/coverage",
+    response_model=DataSourceCoverage,
+    responses={400: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+)
+def get_data_source_coverage(
+    data_source: str,
+    market: Annotated[MarketDataRepository, Depends(market_repository)],
+    symbol: Annotated[str, Query(min_length=1, max_length=30)],
+    exchange: Annotated[str, Query(min_length=1, max_length=20)],
+) -> DataSourceCoverage:
+    try:
+        return market.coverage(
+            data_source=data_source,
+            symbol=symbol,
+            exchange=exchange,
+        )
+    except ValueError as exc:
+        raise ApiError(
+            status_code=400,
+            code="unsupported_data_source",
+            message=str(exc),
+            details={"data_source": data_source},
+        ) from exc
+
+
+@app.get(
     "/api/v1/runs",
     response_model=RunListResponse,
     responses={400: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
@@ -473,6 +689,8 @@ def list_runs(
     gate_passed: bool | None = None,
     sweep_id: str | None = None,
     config_hash: str | None = None,
+    tag_type: TagType | None = None,
+    tag_value: str | None = None,
     created_at_from: datetime | None = None,
     created_at_to: datetime | None = None,
     period_start_from: datetime | None = None,
@@ -494,6 +712,8 @@ def list_runs(
         gate_passed=gate_passed,
         sweep_id=sweep_id,
         config_hash=config_hash,
+        tag_type=tag_type,
+        tag_value=tag_value,
         created_at_from=_utc_datetime(created_at_from),
         created_at_to=_utc_datetime(created_at_to),
         period_start_from=_utc_datetime(period_start_from),
@@ -613,6 +833,65 @@ def get_run_prereg(
     if prereg is None:
         not_found(run_id)
     return prereg
+
+
+@app.get(
+    "/api/v1/runs/{run_id}/tags",
+    response_model=RunTagsResponse,
+    responses={404: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+)
+def get_run_tags(
+    run_id: str,
+    repo: Annotated[CatalogRepository, Depends(repository)],
+) -> RunTagsResponse:
+    tags = repo.get_tags(run_id)
+    if tags is None:
+        not_found(run_id)
+    return tags
+
+
+@app.post(
+    "/api/v1/runs/{run_id}/tags",
+    response_model=TagMutationResponse,
+    responses={404: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+)
+def add_run_tag(
+    run_id: str,
+    payload: TagInput,
+    repo: Annotated[CatalogRepository, Depends(repository)],
+) -> TagMutationResponse:
+    if repo.get_run(run_id) is None:
+        not_found(run_id)
+    with connect_catalog_writer() as connection:
+        store = BacktestCatalogStore(cast(WriteConnection, connection))
+        created = store.add_tag(run_id, payload.tag_type, payload.tag_value)
+    tag = repo.get_tag(run_id, payload.tag_type, payload.tag_value)
+    if tag is None:
+        raise RuntimeError("tag mutation committed without a readable tag row")
+    return TagMutationResponse(tag=tag, created=created)
+
+
+@app.delete(
+    "/api/v1/runs/{run_id}/tags",
+    response_model=TagDeleteResponse,
+    responses={404: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+)
+def remove_run_tag(
+    run_id: str,
+    payload: Annotated[TagInput, Body()],
+    repo: Annotated[CatalogRepository, Depends(repository)],
+) -> TagDeleteResponse:
+    if repo.get_run(run_id) is None:
+        not_found(run_id)
+    with connect_catalog_writer() as connection:
+        store = BacktestCatalogStore(cast(WriteConnection, connection))
+        removed = store.remove_tag(run_id, payload.tag_type, payload.tag_value)
+    return TagDeleteResponse(
+        run_id=run_id,
+        tag_type=payload.tag_type,
+        tag_value=payload.tag_value,
+        removed=removed,
+    )
 
 
 @app.get(

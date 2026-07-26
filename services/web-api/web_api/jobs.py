@@ -12,10 +12,10 @@ from typing import Literal
 from uuid import uuid4
 
 from backtest_service.config import RunConfig
-from backtest_service.runner import run_backtest
+from backtest_service.runner import build_harness, run_backtest
 
 from web_api.database import _repository_env
-from web_api.models import JobError, JobStatus
+from web_api.models import JobError, JobStatus, SweepType
 
 JobStateValue = Literal["QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "ORPHANED"]
 TERMINAL_JOB_STATES = frozenset({"SUCCEEDED", "FAILED", "ORPHANED"})
@@ -34,6 +34,8 @@ class JobState:
     updated_at: datetime
     revision: int = 0
     run_id: str | None = None
+    sweep_id: str | None = None
+    run_count: int | None = None
     evidence_hash: str | None = None
     integrity_status: str | None = None
     summary_present: bool | None = None
@@ -51,6 +53,8 @@ class JobState:
             catalog_status=catalog_status,
             updated_at=self.updated_at,
             run_id=self.run_id,
+            sweep_id=self.sweep_id,
+            run_count=self.run_count,
             evidence_hash=self.evidence_hash,
             integrity_status=self.integrity_status,
             summary_present=self.summary_present,
@@ -93,6 +97,8 @@ class JobRegistry:
         status: JobStateValue,
         *,
         run_id: str | None = None,
+        sweep_id: str | None = None,
+        run_count: int | None = None,
         evidence_hash: str | None = None,
         integrity_status: str | None = None,
         summary_present: bool | None = None,
@@ -106,6 +112,8 @@ class JobRegistry:
                 updated_at=_now(),
                 revision=current.revision + 1,
                 run_id=run_id,
+                sweep_id=sweep_id,
+                run_count=run_count,
                 evidence_hash=evidence_hash,
                 integrity_status=integrity_status,
                 summary_present=summary_present,
@@ -139,6 +147,16 @@ class JobRegistry:
 
 registry = JobRegistry()
 _executor: ThreadPoolExecutor | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SweepPlan:
+    sweep_id: str
+    type: SweepType
+    config: RunConfig
+    configs: tuple[RunConfig, ...] = ()
+    folds: int | None = None
+    split: float | None = None
 
 
 def start_executor() -> None:
@@ -203,6 +221,57 @@ def _run_job(job_id: str, config: RunConfig, prereg: dict[str, object]) -> None:
         )
 
 
+def _run_sweep_job(job_id: str, plan: SweepPlan, prereg: dict[str, object]) -> None:
+    env: dict[str, str] = {}
+    try:
+        registry.update(job_id, "RUNNING", sweep_id=plan.sweep_id)
+        env = _repository_env()
+        evidence_root = Path(
+            env.get("WEBAPI_EVIDENCE_ROOT", str(REPOSITORY_ROOT / "var" / "evidence"))
+        ).expanduser()
+        with build_harness(
+            plan.config,
+            prereg,
+            evidence_root=evidence_root,
+            env=env,
+            seed=plan.config.seed,
+        ) as harness:
+            if plan.type == "grid":
+                results = harness.sweep(list(plan.configs))
+                representative_run_id = results[0].run_id
+                run_count = len(results)
+            elif plan.type == "walk_forward":
+                if plan.folds is None:
+                    raise RuntimeError("walk-forward sweep is missing folds")
+                evidence = harness.walk_forward(plan.config, plan.folds)
+                representative_run_id = str(evidence["representative_run_id"])
+                run_count = plan.folds
+            else:
+                if plan.split is None:
+                    raise RuntimeError("in/out-of-sample sweep is missing split")
+                evidence = harness.is_oos(plan.config, plan.split)
+                representative_run_id = str(evidence["representative_run_id"])
+                run_count = 2
+        registry.update(
+            job_id,
+            "SUCCEEDED",
+            run_id=representative_run_id,
+            sweep_id=plan.sweep_id,
+            run_count=run_count,
+            summary_present=True,
+        )
+    except Exception as error:
+        registry.update(
+            job_id,
+            "FAILED",
+            sweep_id=plan.sweep_id,
+            error=JobError(
+                code="sweep_failed",
+                message=_safe_error_message(error, env),
+            ),
+        )
+
+
 def _job_done(job_id: str, future: asyncio.Future[None]) -> None:
     """Retrieve executor failures and make an unexpected escape terminal."""
 
@@ -217,6 +286,8 @@ def _job_done(job_id: str, future: asyncio.Future[None]) -> None:
     registry.update(
         job_id,
         "FAILED",
+        sweep_id=state.sweep_id,
+        run_count=state.run_count,
         error=JobError(
             code="backtest_failed",
             message="The dry-run worker terminated unexpectedly.",
@@ -237,12 +308,27 @@ def submit_job(config: RunConfig, prereg: dict[str, object]) -> JobState:
     return state
 
 
+def submit_sweep_job(plan: SweepPlan, prereg: dict[str, object]) -> JobState:
+    """Register a QUEUED multi-run job on the same serial dry-run executor."""
+
+    if _executor is None:
+        raise RuntimeError("dry-run executor is not started")
+    job_id = str(uuid4())
+    state = registry.register(job_id)
+    loop = asyncio.get_running_loop()
+    future = loop.run_in_executor(_executor, _run_sweep_job, job_id, plan, prereg)
+    future.add_done_callback(lambda completed: _job_done(job_id, completed))
+    return state
+
+
 __all__ = [
     "JobRegistry",
     "JobState",
+    "SweepPlan",
     "TERMINAL_JOB_STATES",
     "registry",
     "shutdown_executor",
     "start_executor",
     "submit_job",
+    "submit_sweep_job",
 ]

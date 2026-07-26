@@ -14,6 +14,7 @@ import {
   type JobStatus,
   type RunAccepted,
   type RunSubmission,
+  type SweepSubmission,
 } from "../api/client";
 
 export interface TrackedJob {
@@ -23,9 +24,18 @@ export interface TrackedJob {
   submittedAt: string;
 }
 
+export interface TrackedSweep {
+  accepted: RunAccepted;
+  status: JobStatus;
+  submission: SweepSubmission;
+  submittedAt: string;
+}
+
 interface RunJobsValue {
   jobs: TrackedJob[];
+  sweeps: TrackedSweep[];
   track: (accepted: RunAccepted, submission: RunSubmission) => void;
+  trackSweep: (accepted: RunAccepted, submission: SweepSubmission) => void;
 }
 
 const RunJobsContext = createContext<RunJobsValue | null>(null);
@@ -43,6 +53,7 @@ function eventUrl(path: string): string {
 
 export function RunJobsProvider({ children }: PropsWithChildren) {
   const [jobs, setJobs] = useState<TrackedJob[]>([]);
+  const [sweeps, setSweeps] = useState<TrackedSweep[]>([]);
   const sources = useRef(new Map<string, EventSource>());
   const reconnectTimers = useRef(new Map<string, number>());
 
@@ -50,6 +61,11 @@ export function RunJobsProvider({ children }: PropsWithChildren) {
     setJobs((current) =>
       current.map((job) =>
         job.accepted.job_id === jobId ? { ...job, status } : job,
+      ),
+    );
+    setSweeps((current) =>
+      current.map((sweep) =>
+        sweep.accepted.job_id === jobId ? { ...sweep, status } : sweep,
       ),
     );
   }, []);
@@ -111,6 +127,28 @@ export function RunJobsProvider({ children }: PropsWithChildren) {
     [subscribe],
   );
 
+  const trackSweep = useCallback(
+    (accepted: RunAccepted, submission: SweepSubmission) => {
+      const now = new Date().toISOString();
+      const status: JobStatus = {
+        job_id: accepted.job_id,
+        status: accepted.status,
+        updated_at: now,
+      };
+      setSweeps((current) => [
+        {
+          accepted,
+          status,
+          submission,
+          submittedAt: now,
+        },
+        ...current.filter((sweep) => sweep.accepted.job_id !== accepted.job_id),
+      ]);
+      subscribe(accepted);
+    },
+    [subscribe],
+  );
+
   useEffect(
     () => () => {
       sources.current.forEach((source) => source.close());
@@ -119,7 +157,10 @@ export function RunJobsProvider({ children }: PropsWithChildren) {
     [],
   );
 
-  const value = useMemo(() => ({ jobs, track }), [jobs, track]);
+  const value = useMemo(
+    () => ({ jobs, sweeps, track, trackSweep }),
+    [jobs, sweeps, track, trackSweep],
+  );
   return <RunJobsContext.Provider value={value}>{children}</RunJobsContext.Provider>;
 }
 

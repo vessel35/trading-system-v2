@@ -22,6 +22,7 @@ import { ResearchNotesTab } from "../components/evidence/research-notes-tab";
 import { SignalsDecisionsTab } from "../components/evidence/signals-decisions-tab";
 import { TradeDrawer } from "../components/evidence/trade-drawer";
 import { TradesTab } from "../components/evidence/trades-tab";
+import { RunTags } from "../components/run-tags";
 import { Button } from "../components/ui/button";
 import {
   Card,
@@ -384,7 +385,8 @@ export function RunSummaryPage({ runId }: { runId: string }) {
                 >
                   {run.status}
                 </Badge>
-                <Badge variant="outline">READ ONLY</Badge>
+              <Badge variant="outline">READ ONLY</Badge>
+              <Badge variant="outline">TAG EDITABLE</Badge>
                 <span className="text-xs text-muted-foreground">
                   {formatTimestamp(run.created_at)}
                 </span>
@@ -453,6 +455,7 @@ export function RunSummaryPage({ runId }: { runId: string }) {
               <p className="mt-1 text-xs">{run.error_message}</p>
             </div>
           )}
+          <RunTags runId={run.run_id} />
         </CardContent>
       </Card>
 
