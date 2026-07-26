@@ -48,9 +48,12 @@ WHERE NOT EXISTS (
 )
 \gexec
 
+REVOKE CONNECT ON DATABASE backtest_db FROM PUBLIC;
 GRANT CONNECT ON DATABASE signal_db TO signal_reader;
 GRANT ALL PRIVILEGES ON DATABASE backtest_db TO backtest_writer;
 GRANT CONNECT ON DATABASE backtest_db TO backtest_reader;
+GRANT data_reader, signal_reader TO backtest_writer;
+GRANT data_reader, signal_reader TO backtest_reader;
 
 \connect backtest_db
 
