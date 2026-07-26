@@ -26,11 +26,12 @@ test-path arguments produces the same result. Integration tests are excluded unl
 explicitly selected.
 
 ```bash
-.venv/bin/pytest services/core-lib/tests services/backtest-service/tests
-.venv/bin/ruff check services/core-lib services/backtest-service
-.venv/bin/ruff format --check services/core-lib services/backtest-service
+.venv/bin/pytest services/core-lib/tests services/backtest-service/tests services/signal-service/tests
+.venv/bin/ruff check services/core-lib services/backtest-service services/signal-service
+.venv/bin/ruff format --check services/core-lib services/backtest-service services/signal-service
 (cd services/core-lib && ../../.venv/bin/mypy)
 (cd services/backtest-service && ../../.venv/bin/mypy)
+(cd services/signal-service && ../../.venv/bin/mypy)
 ```
 
 PostgreSQL integration tests are opt-in and use the repository `.env`. The

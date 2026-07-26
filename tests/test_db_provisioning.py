@@ -40,7 +40,7 @@ EXPECTED_BACKTEST_TABLES = {
     "backtest_summary",
     "backtest_tag",
 }
-EXPECTED_SIGNAL_COLUMNS = {
+EXPECTED_SIGNAL_REGISTRY_COLUMNS = {
     "strategy_id",
     "class_name",
     "module_path",
@@ -55,6 +55,30 @@ EXPECTED_SIGNAL_COLUMNS = {
     "is_deprecated",
     "registered_at",
     "updated_at",
+}
+EXPECTED_TRADING_SIGNAL_COLUMNS = {
+    "signal_id",
+    "strategy_id",
+    "params_json",
+    "source_mode",
+    "symbol",
+    "exchange",
+    "timeframe",
+    "candle_open_time",
+    "candle_close_time",
+    "signal_time",
+    "signal_type",
+    "derived_intent",
+    "derived_side",
+    "price",
+    "confidence",
+    "stop_loss",
+    "take_profit",
+    "market_type",
+    "leverage",
+    "reason",
+    "metadata_json",
+    "created_at",
 }
 EXPECTED_CRYPTO_COLUMNS = {
     "ohlcv_futures": {
@@ -298,13 +322,28 @@ def test_application_roles_have_expected_least_privilege_access() -> None:
                 'signal_reader',
                 'public.strategy_registry',
                 'INSERT'
+            ),
+            has_table_privilege(
+                'signal_writer',
+                'public.trading_signals',
+                'SELECT,INSERT'
+            ),
+            NOT has_table_privilege(
+                'signal_writer',
+                'public.trading_signals',
+                'UPDATE,DELETE'
+            ),
+            NOT has_table_privilege(
+                'signal_reader',
+                'public.trading_signals',
+                'SELECT,INSERT'
             );
         """,
     )
     assert memberships == ["t|t|t"]
     assert crypto_access == ["t|t|t"]
     assert config_access == ["t|t"]
-    assert signal_access == ["t|t"]
+    assert signal_access == ["t|t|t|t|t"]
 
 
 def test_crypto_columns_precision_nullability_and_primary_keys_match_design() -> None:
@@ -454,10 +493,11 @@ def test_service_catalogs_exist_without_legacy_or_wallet_data() -> None:
             to_regclass('public.strategy_registry') IS NOT NULL,
             (SELECT count(*) FROM public.strategy_registry),
             to_regclass('public.trading_strategies') IS NULL,
+            to_regclass('public.trading_signals') IS NOT NULL,
             (SELECT strategy_id FROM public.strategy_registry);
         """,
     )
-    signal_columns = set(
+    signal_registry_columns = set(
         _query(
             "signal_db",
             """
@@ -468,6 +508,29 @@ def test_service_catalogs_exist_without_legacy_or_wallet_data() -> None:
             ORDER BY ordinal_position;
             """,
         )
+    )
+    trading_signal_columns = set(
+        _query(
+            "signal_db",
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'trading_signals'
+            ORDER BY ordinal_position;
+            """,
+        )
+    )
+    trading_signal_unique_columns = _query(
+        "signal_db",
+        """
+        SELECT column_name
+        FROM information_schema.key_column_usage
+        WHERE table_schema = 'public'
+          AND table_name = 'trading_signals'
+          AND constraint_name = 'uq_trading_signals_decision'
+        ORDER BY ordinal_position;
+        """,
     )
     wallet_table_count = _query(
         "wallet_db",
@@ -480,6 +543,16 @@ def test_service_catalogs_exist_without_legacy_or_wallet_data() -> None:
     assert crypto_table_count == ["2"]
     assert config_state == ["t|0"]
     assert backtest_tables == EXPECTED_BACKTEST_TABLES
-    assert signal_state == ["t|1|t|vessel-reference"]
-    assert signal_columns == EXPECTED_SIGNAL_COLUMNS
+    assert signal_state == ["t|1|t|t|vessel-reference"]
+    assert signal_registry_columns == EXPECTED_SIGNAL_REGISTRY_COLUMNS
+    assert trading_signal_columns == EXPECTED_TRADING_SIGNAL_COLUMNS
+    assert trading_signal_unique_columns == [
+        "strategy_id",
+        "params_json",
+        "source_mode",
+        "symbol",
+        "exchange",
+        "timeframe",
+        "candle_close_time",
+    ]
     assert wallet_table_count == ["0"]

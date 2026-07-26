@@ -86,7 +86,7 @@ def test_core_lib_dependencies_follow_the_one_way_component_graph() -> None:
     assert violations == []
 
 
-def test_pip_bootstrap_resolves_both_workspace_projects_together() -> None:
+def test_pip_bootstrap_resolves_workspace_projects_together() -> None:
     """Keep pip from resolving the sibling core-lib name through an index."""
     repository_root = Path(__file__).resolve().parents[3]
     requirements = (repository_root / "services" / "requirements-dev.txt").read_text().splitlines()
@@ -96,9 +96,14 @@ def test_pip_bootstrap_resolves_both_workspace_projects_together() -> None:
     assert editable == {
         "-e ./services/core-lib[dev]",
         "-e ./services/backtest-service[dev]",
+        "-e ./services/signal-service[dev]",
         "-e ./services/web-api[dev]",
     }
     backtest_project = tomllib.loads(
         (repository_root / "services" / "backtest-service" / "pyproject.toml").read_text()
     )["project"]
     assert "core-lib==0.2.0" in backtest_project["dependencies"]
+    signal_project = tomllib.loads(
+        (repository_root / "services" / "signal-service" / "pyproject.toml").read_text()
+    )["project"]
+    assert "core-lib==0.2.0" in signal_project["dependencies"]
