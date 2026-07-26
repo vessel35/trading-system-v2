@@ -56,6 +56,8 @@ POSTGRES_PASSWORD='<non-production placeholder>' \
 ```
 
 `signal_db`에는 읽기 전용 Adaptee 레지스트리와 signal-service가 쓰는
-`trading_signals` 운영 테이블만 만든다. `wallet_db`는 빈 데이터베이스와
-`wallet_writer` 역할만 준비한다. wallet 테이블, 현물 OHLCV, backfill,
-지표, macro, news 스키마는 이 프로비저닝 범위에 포함하지 않는다.
+`trading_signals` 운영 테이블을 만든다. `wallet_db`에는 wallet-service의
+paper 전용 `wallet_accounts`·`fills`·`positions`·`accounting_snapshots`
+네 테이블만 만들며 거래소 자격 증명·원격 주문·출금 상태는 두지 않는다.
+현물 OHLCV, backfill, 지표, macro, news 스키마는 이 프로비저닝 범위에
+포함하지 않는다.

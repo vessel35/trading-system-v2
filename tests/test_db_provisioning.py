@@ -40,6 +40,12 @@ EXPECTED_BACKTEST_TABLES = {
     "backtest_summary",
     "backtest_tag",
 }
+EXPECTED_WALLET_TABLES = {
+    "accounting_snapshots",
+    "fills",
+    "positions",
+    "wallet_accounts",
+}
 EXPECTED_SIGNAL_REGISTRY_COLUMNS = {
     "strategy_id",
     "class_name",
@@ -340,10 +346,42 @@ def test_application_roles_have_expected_least_privilege_access() -> None:
             );
         """,
     )
+    wallet_access = _query(
+        "wallet_db",
+        """
+        SELECT
+            has_table_privilege(
+                'wallet_writer',
+                'public.wallet_accounts',
+                'SELECT,INSERT,UPDATE'
+            ),
+            has_table_privilege(
+                'wallet_writer',
+                'public.fills',
+                'SELECT,INSERT'
+            ),
+            NOT has_table_privilege(
+                'wallet_writer',
+                'public.fills',
+                'UPDATE,DELETE'
+            ),
+            has_table_privilege(
+                'wallet_writer',
+                'public.positions',
+                'SELECT,INSERT,UPDATE,DELETE'
+            ),
+            has_table_privilege(
+                'wallet_writer',
+                'public.accounting_snapshots',
+                'SELECT,INSERT'
+            );
+        """,
+    )
     assert memberships == ["t|t|t"]
     assert crypto_access == ["t|t|t"]
     assert config_access == ["t|t"]
     assert signal_access == ["t|t|t|t|t"]
+    assert wallet_access == ["t|t|t|t|t"]
 
 
 def test_crypto_columns_precision_nullability_and_primary_keys_match_design() -> None:
@@ -456,7 +494,7 @@ def test_crypto_contract_has_five_continuous_aggregates_and_refresh_jobs() -> No
     assert refresh_job_count == ["5"]
 
 
-def test_service_catalogs_exist_without_legacy_or_wallet_data() -> None:
+def test_service_catalogs_and_paper_wallet_schema_exist_without_legacy_data() -> None:
     crypto_table_count = _query(
         "crypto_data",
         """
@@ -532,13 +570,17 @@ def test_service_catalogs_exist_without_legacy_or_wallet_data() -> None:
         ORDER BY ordinal_position;
         """,
     )
-    wallet_table_count = _query(
-        "wallet_db",
-        """
-        SELECT count(*)
+    wallet_tables = set(
+        _query(
+            "wallet_db",
+            """
+        SELECT table_name
         FROM information_schema.tables
-        WHERE table_schema = 'public';
+        WHERE table_schema = 'public'
+          AND table_type = 'BASE TABLE'
+        ORDER BY table_name;
         """,
+        )
     )
     assert crypto_table_count == ["2"]
     assert config_state == ["t|0"]
@@ -555,4 +597,4 @@ def test_service_catalogs_exist_without_legacy_or_wallet_data() -> None:
         "timeframe",
         "candle_close_time",
     ]
-    assert wallet_table_count == ["0"]
+    assert wallet_tables == EXPECTED_WALLET_TABLES
