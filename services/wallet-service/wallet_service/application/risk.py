@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable
 
-from core_lib.sizing import exposure_limit
+from core_lib.sizing import MAX_RISK_PER_TRADE, exposure_limit
 from core_lib.sizing import one_r as calculate_one_r
 from core_lib.types import Fill, MarketType, PositionSide
 
 from wallet_service.core import RiskPolicy
 from wallet_service.domain import PaperSignal, RiskRejected
+
+_ONE_R_REL_TOLERANCE = 1e-12
 
 
 class RiskGuard:
@@ -57,7 +60,13 @@ class RiskGuard:
         if stop is None:
             raise RiskRejected("protective_stop_required")
         one_r = calculate_one_r(message.signal.price, stop, quantity)
-        if one_r > equity * 0.01:
+        risk_budget = equity * MAX_RISK_PER_TRADE
+        if one_r > risk_budget and not math.isclose(
+            one_r,
+            risk_budget,
+            rel_tol=_ONE_R_REL_TOLERANCE,
+            abs_tol=0.0,
+        ):
             raise RiskRejected("one_r_limit")
 
         normalized_symbol = message.signal.symbol.upper()

@@ -8,8 +8,11 @@ from decimal import Decimal
 
 import core_lib.execution as core_execution
 import pytest
+import wallet_service.application.risk as risk_module
 import wallet_service.application.service as service_module
+from core_lib.sizing import MAX_RISK_PER_TRADE
 from core_lib.sizing import exposure_limit as core_exposure_limit
+from core_lib.sizing import one_r as core_one_r
 from core_lib.sizing import size as core_risk_size
 from core_lib.types import PositionSide
 from wallet_service.application import WalletService
@@ -227,6 +230,60 @@ def test_actual_simulated_notional_is_rechecked_before_book_or_write() -> None:
     assert repository.executions == []
     assert service.current_position is None
     assert service.cash_balance == Decimal("1000.00000000")
+
+
+def test_one_r_float_roundoff_does_not_reject_core_sized_entry() -> None:
+    equity = 89104.93
+    price = 98049.54
+    stop = 92359.77
+    sized_quantity = core_risk_size(
+        MAX_RISK_PER_TRADE,
+        equity,
+        abs(price - stop),
+    )
+    assert core_one_r(price, stop, sized_quantity) > equity * MAX_RISK_PER_TRADE
+
+    repository = RepositoryDouble()
+    service = WalletService(
+        "wallet-1",
+        QueueDouble(),
+        PaperBroker(PaperCostModel()),
+        repository,
+        RiskPolicy(frozenset({"BTCUSDT"})),
+        initial_cash=Decimal("89104.93"),
+    )
+
+    result = service.process(
+        paper_signal(
+            decision_price=price,
+            execution_open=price,
+            stop_loss=stop,
+            take_profit=109429.08,
+        )
+    )
+
+    assert result is not None
+    assert result.position is not None
+    assert result.position.quantity == Decimal("0.15660550")
+    assert repository.executions == [result]
+
+
+def test_one_r_tolerance_remains_fail_closed_for_material_overshoot(
+    monkeypatch: pytest.MonkeyPatch,
+    service: WalletService,
+    repository: RepositoryDouble,
+) -> None:
+    monkeypatch.setattr(
+        risk_module,
+        "calculate_one_r",
+        lambda entry, stop, quantity: 10.0000001,
+    )
+
+    with pytest.raises(RiskRejected, match="one_r_limit"):
+        service.process(paper_signal())
+
+    assert repository.executions == []
+    assert service.current_position is None
 
 
 def test_repository_replay_does_not_commit_candidate_memory_state() -> None:

@@ -62,13 +62,18 @@ def paper_signal(
     decision_index: int = 0,
     intent: PaperIntent = PaperIntent.ENTER,
     side: PositionSide | None = PositionSide.LONG,
+    decision_price: float = 100.0,
     execution_open: float = 102.0,
     stop_loss: float | None = 95.0,
     take_profit: float | None = 110.0,
     mode: str = "paper",
 ) -> PaperSignal:
     """Build a signal-service-compatible paper envelope."""
-    decision = candle(decision_index, opening=100.0, closing=100.0)
+    decision = candle(
+        decision_index,
+        opening=decision_price,
+        closing=decision_price,
+    )
     execution_candle = candle(
         decision_index + 1,
         opening=execution_open,

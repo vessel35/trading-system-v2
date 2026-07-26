@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import uuid
 from decimal import Decimal
+from pathlib import Path
 from typing import cast
 
 import psycopg
@@ -23,6 +24,15 @@ from wallet_service.infrastructure import (
 from tests.conftest import QueueDouble, paper_signal
 
 pytestmark = pytest.mark.integration
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
+WALLET_MIGRATION = (
+    REPOSITORY_ROOT
+    / "init-scripts"
+    / "wallet-service"
+    / "20260726"
+    / "01-create-paper-wallet-ledger.sql"
+)
 
 
 def _dsn() -> str:
@@ -43,72 +53,14 @@ def _dsn() -> str:
     return dsn
 
 
-_TABLES = """
-CREATE TABLE "{schema}".wallet_accounts (
-    wallet_id TEXT PRIMARY KEY,
-    mode TEXT NOT NULL,
-    cash_balance NUMERIC NOT NULL,
-    total_equity NUMERIC NOT NULL,
-    updated_at TIMESTAMPTZ NOT NULL
-);
-CREATE TABLE "{schema}".fills (
-    fill_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    wallet_id TEXT NOT NULL,
-    signal_id TEXT NOT NULL,
-    mode TEXT NOT NULL,
-    order_id TEXT NOT NULL,
-    symbol TEXT NOT NULL,
-    side TEXT NOT NULL,
-    position_side TEXT NOT NULL,
-    reference_price NUMERIC NOT NULL,
-    price NUMERIC NOT NULL,
-    quantity NUMERIC NOT NULL,
-    fee NUMERIC NOT NULL,
-    slippage NUMERIC NOT NULL,
-    liquidity TEXT NOT NULL,
-    executed_at TIMESTAMPTZ NOT NULL,
-    reduce_only BOOLEAN NOT NULL,
-    exit_reason TEXT,
-    gap_filled BOOLEAN NOT NULL,
-    qty_truncated BOOLEAN NOT NULL,
-    UNIQUE (wallet_id, order_id),
-    UNIQUE (wallet_id, signal_id, reduce_only)
-);
-CREATE TABLE "{schema}".positions (
-    wallet_id TEXT NOT NULL,
-    mode TEXT NOT NULL,
-    symbol TEXT NOT NULL,
-    side TEXT NOT NULL,
-    quantity NUMERIC NOT NULL,
-    average_price NUMERIC NOT NULL,
-    total_cost NUMERIC NOT NULL,
-    current_price NUMERIC NOT NULL,
-    unrealized_pnl NUMERIC NOT NULL,
-    market_type TEXT NOT NULL,
-    leverage INTEGER NOT NULL,
-    margin_type TEXT NOT NULL,
-    margin NUMERIC NOT NULL,
-    entry_price NUMERIC NOT NULL,
-    mark_price NUMERIC NOT NULL,
-    liquidation_price NUMERIC NOT NULL,
-    funding_fee_total NUMERIC NOT NULL,
-    updated_at TIMESTAMPTZ NOT NULL,
-    PRIMARY KEY (wallet_id, symbol, side)
-);
-CREATE TABLE "{schema}".accounting_snapshots (
-    snapshot_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    wallet_id TEXT NOT NULL,
-    signal_id TEXT NOT NULL,
-    mode TEXT NOT NULL,
-    occurred_at TIMESTAMPTZ NOT NULL,
-    cash_balance NUMERIC NOT NULL,
-    position_value NUMERIC NOT NULL,
-    total_equity NUMERIC NOT NULL,
-    fee_total NUMERIC NOT NULL,
-    slippage_total NUMERIC NOT NULL,
-    UNIQUE (wallet_id, signal_id)
-);
-"""
+def _migration_sql(schema: str) -> str:
+    """Relocate the real psql migration into one disposable test schema."""
+    source = WALLET_MIGRATION.read_text()
+    sql = "\n".join(line for line in source.splitlines() if not line.lstrip().startswith("\\"))
+    return sql.replace("public.", f'"{schema}".').replace(
+        "SCHEMA public",
+        f'SCHEMA "{schema}"',
+    )
 
 
 class _Capture(WalletRepository):
@@ -124,9 +76,14 @@ def test_repository_commits_to_disposable_wallet_schema_and_rejects_replay() -> 
     schema = f"wallet_service_test_{uuid.uuid4().hex}"
     connection = psycopg.connect(_dsn())
     try:
+        if (
+            connection.execute("SELECT 1 FROM pg_roles WHERE rolname = 'wallet_writer'").fetchone()
+            is None
+        ):
+            pytest.skip("disposable v2 database must provision wallet_writer")
         connection.execute(f'CREATE SCHEMA "{schema}"')
-        connection.execute(_TABLES.format(schema=schema))
         connection.commit()
+        connection.execute(_migration_sql(schema))
 
         capture = _Capture()
         service = WalletService(
@@ -157,6 +114,31 @@ def test_repository_commits_to_disposable_wallet_schema_and_rejects_replay() -> 
             """
         ).fetchone()
         assert counts == (1, 1, 1, 1)
+        constraints = {
+            row[0]
+            for row in connection.execute(
+                """
+                SELECT constraint_name
+                FROM information_schema.table_constraints
+                WHERE table_schema = %s
+                  AND constraint_type = 'CHECK'
+                """,
+                (schema,),
+            ).fetchall()
+        }
+        assert {
+            "ck_wallet_accounts_paper_only",
+            "ck_fills_paper_only",
+            "ck_positions_paper_only",
+            "ck_accounting_paper_only",
+            "ck_accounting_identity",
+        } <= constraints
+        with pytest.raises(psycopg.errors.CheckViolation):
+            connection.execute(
+                f'UPDATE "{schema}".wallet_accounts SET mode = %s',
+                ("not-paper",),
+            )
+        connection.rollback()
     finally:
         connection.rollback()
         connection.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
