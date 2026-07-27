@@ -353,9 +353,7 @@ def test_facets_coverage_and_inventory_are_read_only_dependency_queries(
         assert coverage.json()["missing_1m_rows"] == 1
         assert coverage.json()["source_timeframe"] == "1m"
 
-        inventory = client.get(
-            "/api/v1/data-sources/crypto_data.ohlcv_futures/inventory"
-        )
+        inventory = client.get("/api/v1/data-sources/crypto_data.ohlcv_futures/inventory")
         assert inventory.status_code == 200
         assert inventory.json()["items"][0]["timeframe"] == "1m"
         assert inventory.json()["items"][0]["missing_1m_rows"] == 1

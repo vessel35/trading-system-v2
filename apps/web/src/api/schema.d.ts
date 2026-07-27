@@ -90,6 +90,61 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/data-jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Data Jobs */
+        get: operations["list_data_jobs_api_v1_data_jobs_get"];
+        put?: never;
+        /**
+         * Queue a collector data job
+         * @description Launches a collector subprocess with external Binance network access and crypto_data write capability after validation.
+         */
+        post: operations["trigger_data_job_api_v1_data_jobs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/data-jobs/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Data Job */
+        get: operations["get_data_job_api_v1_data_jobs__job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/data-jobs/{job_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Data Job Events */
+        get: operations["get_data_job_events_api_v1_data_jobs__job_id__events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/strategies": {
         parameters: {
             query?: never;
@@ -779,6 +834,89 @@ export interface components {
             total: number;
             /** Has More */
             has_more: boolean;
+        };
+        /**
+         * DataJobRequest
+         * @description A deliberate request for collector network access and crypto_data writes.
+         */
+        DataJobRequest: {
+            /**
+             * Operation
+             * @description Collector operation. Execution can access Binance and write crypto_data.
+             * @enum {string}
+             */
+            operation: "backfill" | "funding_backfill" | "refresh_aggregates";
+            /**
+             * Symbol
+             * @description CCXT futures symbol, for example ETH/USDT:USDT.
+             */
+            symbol: string;
+            /** Exchange */
+            exchange: string;
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+            /**
+             * End
+             * Format: date-time
+             */
+            end: string;
+            /** Timeframes */
+            timeframes?: ("5m" | "15m" | "1h" | "4h" | "1d")[] | null;
+        };
+        /**
+         * DataJobStatus
+         * @description Public snapshot of one collector subprocess job.
+         */
+        DataJobStatus: {
+            /** Job Id */
+            job_id: string;
+            /**
+             * Operation
+             * @enum {string}
+             */
+            operation: "backfill" | "funding_backfill" | "refresh_aggregates";
+            /** Symbol */
+            symbol: string;
+            /**
+             * Exchange
+             * @constant
+             */
+            exchange: "binance";
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+            /**
+             * End
+             * Format: date-time
+             */
+            end: string;
+            /** Timeframes */
+            timeframes?: ("5m" | "15m" | "1h" | "4h" | "1d")[] | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED";
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Started At */
+            started_at?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+            error?: components["schemas"]["JobError"] | null;
         };
         /** DataSourceCoverage */
         DataSourceCoverage: {
@@ -2800,6 +2938,119 @@ export interface operations {
         };
     };
     get_job_events_api_v1_jobs__job_id__events_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_data_jobs_api_v1_data_jobs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataJobStatus"][];
+                };
+            };
+        };
+    };
+    trigger_data_job_api_v1_data_jobs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DataJobRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataJobStatus"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_data_job_api_v1_data_jobs__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataJobStatus"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_data_job_events_api_v1_data_jobs__job_id__events_get: {
         parameters: {
             query?: never;
             header?: never;

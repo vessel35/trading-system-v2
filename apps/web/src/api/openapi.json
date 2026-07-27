@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Backtest Research Web API",
-    "description": "Research backend-for-frontend. Reads remain physically read-only; writes are limited to dry-run catalog/Evidence execution and short-lived tag mutations.",
+    "description": "Research backend-for-frontend. Read endpoints remain physically read-only. Data-job endpoints deliberately launch collector subprocesses with Binance network access and crypto_data write capability.",
     "version": "0.1.0"
   },
   "paths": {
@@ -748,6 +748,136 @@
       "get": {
         "summary": "Get Job Events",
         "operationId": "get_job_events_api_v1_jobs__job_id__events_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        }
+      }
+    },
+    "/api/v1/data-jobs": {
+      "get": {
+        "summary": "List Data Jobs",
+        "operationId": "list_data_jobs_api_v1_data_jobs_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DataJobStatus"
+                  },
+                  "type": "array",
+                  "title": "Response List Data Jobs Api V1 Data Jobs Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Queue a collector data job",
+        "description": "Launches a collector subprocess with external Binance network access and crypto_data write capability after validation.",
+        "operationId": "trigger_data_job_api_v1_data_jobs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DataJobRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataJobStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/data-jobs/{job_id}": {
+      "get": {
+        "summary": "Get Data Job",
+        "operationId": "get_data_job_api_v1_data_jobs__job_id__get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataJobStatus"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        }
+      }
+    },
+    "/api/v1/data-jobs/{job_id}/events": {
+      "get": {
+        "summary": "Get Data Job Events",
+        "operationId": "get_data_job_events_api_v1_data_jobs__job_id__events_get",
         "parameters": [
           {
             "name": "job_id",
@@ -4114,6 +4244,202 @@
         ],
         "title": "CursorPage",
         "description": "Evidence cursor metadata."
+      },
+      "DataJobRequest": {
+        "properties": {
+          "operation": {
+            "type": "string",
+            "enum": [
+              "backfill",
+              "funding_backfill",
+              "refresh_aggregates"
+            ],
+            "title": "Operation",
+            "description": "Collector operation. Execution can access Binance and write crypto_data."
+          },
+          "symbol": {
+            "type": "string",
+            "maxLength": 60,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*:[A-Za-z0-9][A-Za-z0-9._-]*$",
+            "title": "Symbol",
+            "description": "CCXT futures symbol, for example ETH/USDT:USDT."
+          },
+          "exchange": {
+            "type": "string",
+            "maxLength": 20,
+            "minLength": 1,
+            "title": "Exchange"
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Start"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time",
+            "title": "End"
+          },
+          "timeframes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "5m",
+                    "15m",
+                    "1h",
+                    "4h",
+                    "1d"
+                  ]
+                },
+                "type": "array",
+                "minItems": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeframes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "operation",
+          "symbol",
+          "exchange",
+          "start",
+          "end"
+        ],
+        "title": "DataJobRequest",
+        "description": "A deliberate request for collector network access and crypto_data writes."
+      },
+      "DataJobStatus": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "title": "Job Id"
+          },
+          "operation": {
+            "type": "string",
+            "enum": [
+              "backfill",
+              "funding_backfill",
+              "refresh_aggregates"
+            ],
+            "title": "Operation"
+          },
+          "symbol": {
+            "type": "string",
+            "title": "Symbol"
+          },
+          "exchange": {
+            "type": "string",
+            "const": "binance",
+            "title": "Exchange"
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Start"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time",
+            "title": "End"
+          },
+          "timeframes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "5m",
+                    "15m",
+                    "1h",
+                    "4h",
+                    "1d"
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeframes"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "QUEUED",
+              "RUNNING",
+              "SUCCEEDED",
+              "FAILED"
+            ],
+            "title": "Status"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobError"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "operation",
+          "symbol",
+          "exchange",
+          "start",
+          "end",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "DataJobStatus",
+        "description": "Public snapshot of one collector subprocess job."
       },
       "DataSourceCoverage": {
         "properties": {
