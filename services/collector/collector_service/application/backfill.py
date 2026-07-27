@@ -275,11 +275,11 @@ class FundingBackfill(_SingleSymbolUseCase):
 
 def _validated_range(start: datetime, end: datetime) -> tuple[datetime, datetime]:
     if start.tzinfo is None or end.tzinfo is None:
-        raise ValueError("backfill range must be timezone-aware")
+        raise ValueError("range must be timezone-aware")
     normalized_start = start.astimezone(UTC)
     normalized_end = end.astimezone(UTC)
     if normalized_start >= normalized_end:
-        raise ValueError("backfill start must precede end")
+        raise ValueError("start must precede end")
     return normalized_start, normalized_end
 
 

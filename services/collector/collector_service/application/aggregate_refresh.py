@@ -8,19 +8,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
+from collector_service.domain.aggregates import AGGREGATE_VIEWS
 from collector_service.domain.ports import AggregateRefreshRepository
 
 from .backfill import _validated_range
 
 logger = logging.getLogger(__name__)
-
-_AGGREGATE_VIEWS = {
-    "5m": "public.ohlcv_futures_5m",
-    "15m": "public.ohlcv_futures_15m",
-    "1h": "public.ohlcv_futures_1h",
-    "4h": "public.ohlcv_futures_4h",
-    "1d": "public.ohlcv_futures_1d",
-}
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,7 +42,7 @@ class AggregateRefresh:
         selected_timeframes = self._selected_timeframes(timeframes)
 
         for timeframe in selected_timeframes:
-            view_name = _AGGREGATE_VIEWS[timeframe]
+            view_name = AGGREGATE_VIEWS[timeframe]
             await asyncio.to_thread(
                 self._repository.refresh_range,
                 view_name,
@@ -88,8 +81,8 @@ class AggregateRefresh:
     @staticmethod
     def _selected_timeframes(timeframes: Sequence[str] | None) -> tuple[str, ...]:
         if timeframes is None:
-            return tuple(_AGGREGATE_VIEWS)
-        invalid = sorted(set(timeframes) - _AGGREGATE_VIEWS.keys())
+            return tuple(AGGREGATE_VIEWS)
+        invalid = sorted(set(timeframes) - AGGREGATE_VIEWS.keys())
         if invalid:
             raise ValueError(f"unsupported aggregate timeframes: {', '.join(invalid)}")
         if not timeframes:

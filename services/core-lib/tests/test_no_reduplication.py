@@ -96,6 +96,7 @@ def test_pip_bootstrap_resolves_workspace_projects_together() -> None:
     assert editable == {
         "-e ./services/core-lib[dev]",
         "-e ./services/service-commons[dev]",
+        "-e ./services/collector[dev]",
         "-e ./services/backtest-service[dev]",
         "-e ./services/signal-service[dev]",
         "-e ./services/wallet-service[dev]",

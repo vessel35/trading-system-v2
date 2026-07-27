@@ -203,7 +203,7 @@ def test_aggregate_refresh_calls_allowlisted_view_with_bound_range() -> None:
 
     assert connection.executed == [
         (
-            "CALL refresh_continuous_aggregate(%s, %s, %s)",
+            "CALL refresh_continuous_aggregate(%s::regclass, %s, %s)",
             ("public.ohlcv_futures_1h", start, end),
         )
     ]
@@ -223,13 +223,18 @@ def test_aggregate_refresh_rejects_non_allowlisted_view() -> None:
 
 
 @pytest.mark.parametrize(
-    ("autocommit", "assignments"),
-    [(False, []), (True, [True])],
+    "autocommit",
+    [False, True],
 )
-def test_connection_provider_enables_autocommit_only_when_requested(
+@pytest.mark.parametrize(
+    ("read_only", "options"),
+    [(False, {}), (True, {"options": "-c default_transaction_read_only=on"})],
+)
+def test_connection_provider_passes_autocommit_to_connect(
     monkeypatch: pytest.MonkeyPatch,
     autocommit: bool,
-    assignments: list[bool],
+    read_only: bool,
+    options: dict[str, object],
 ) -> None:
     connection = ConnectableFakeConnection()
     connect_calls: list[tuple[str, dict[str, object]]] = []
@@ -241,7 +246,7 @@ def test_connection_provider_enables_autocommit_only_when_requested(
     monkeypatch.setattr(psycopg, "connect", fake_connect)
     connections = connection_provider(
         "postgresql://data",
-        read_only=False,
+        read_only=read_only,
         application_name="collector-aggregate-refresher",
         autocommit=autocommit,
     )
@@ -249,13 +254,15 @@ def test_connection_provider_enables_autocommit_only_when_requested(
     with connections() as provided:
         assert provided is connection
 
-    assert connection.autocommit_assignments == assignments
+    assert connection.autocommit_assignments == []
     assert connect_calls == [
         (
             "postgresql://data",
             {
                 "connect_timeout": 5,
                 "application_name": "collector-aggregate-refresher",
+                "autocommit": autocommit,
+                **options,
             },
         )
     ]
