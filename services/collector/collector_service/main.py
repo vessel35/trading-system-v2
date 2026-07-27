@@ -13,7 +13,7 @@ from service_commons.observability import configure_logging
 
 from collector_service.core import Settings, build_runtime
 
-Mode = Literal["collect", "backfill", "funding-backfill"]
+Mode = Literal["collect", "backfill", "funding-backfill", "refresh-aggregates"]
 
 
 async def _run(
@@ -22,6 +22,7 @@ async def _run(
     mode: Mode = "collect",
     start: datetime | None = None,
     end: datetime | None = None,
+    timeframes: Sequence[str] | None = None,
 ) -> None:
     runtime = build_runtime(settings)
     try:
@@ -31,16 +32,24 @@ async def _run(
             if start is None or end is None:
                 raise ValueError("backfill mode requires start and end")
             await runtime.backfill.run(start=start, end=end)
-        else:
+        elif mode == "funding-backfill":
             if start is None or end is None:
                 raise ValueError("funding-backfill mode requires start and end")
             await runtime.funding_backfill.run(start=start, end=end)
+        else:
+            if start is None or end is None:
+                raise ValueError("refresh-aggregates mode requires start and end")
+            await runtime.aggregate_refresh.run(
+                start=start,
+                end=end,
+                timeframes=timeframes,
+            )
     finally:
         await runtime.close()
 
 
 def main(argv: Sequence[str] | None = None) -> None:
-    """Select collect/backfill/funding-backfill and run the configured target."""
+    """Select one collection or maintenance mode and run the configured target."""
 
     parser = _argument_parser()
     arguments = parser.parse_args(argv)
@@ -48,6 +57,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         parser.error(f"{arguments.mode} requires --start and --end")
     if arguments.mode == "collect" and (arguments.start is not None or arguments.end is not None):
         parser.error("collect does not accept --start or --end")
+    if arguments.mode != "refresh-aggregates" and arguments.timeframes is not None:
+        parser.error("--timeframes is accepted only by refresh-aggregates")
 
     settings_arguments = {}
     if arguments.symbol is not None:
@@ -61,6 +72,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                 mode=arguments.mode,
                 start=arguments.start,
                 end=arguments.end,
+                timeframes=arguments.timeframes,
             )
         )
     except KeyboardInterrupt:
@@ -71,7 +83,7 @@ def _argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Binance USD-M source collector")
     parser.add_argument(
         "mode",
-        choices=("collect", "backfill", "funding-backfill"),
+        choices=("collect", "backfill", "funding-backfill", "refresh-aggregates"),
         nargs="?",
         default="collect",
     )
@@ -89,6 +101,11 @@ def _argument_parser() -> argparse.ArgumentParser:
         "--symbol",
         help="optional CCXT symbol selector, for example ETH/USDT:USDT",
     )
+    parser.add_argument(
+        "--timeframes",
+        type=_comma_separated_timeframes,
+        help="comma-separated aggregate timeframes (default: 5m,15m,1h,4h,1d)",
+    )
     return parser
 
 
@@ -100,6 +117,13 @@ def _utc_datetime(value: str) -> datetime:
     if parsed.tzinfo is None:
         raise argparse.ArgumentTypeError("must include an explicit UTC offset")
     return parsed
+
+
+def _comma_separated_timeframes(value: str) -> tuple[str, ...]:
+    timeframes = tuple(part.strip() for part in value.split(","))
+    if not timeframes or any(not timeframe for timeframe in timeframes):
+        raise argparse.ArgumentTypeError("must be a comma-separated list of timeframes")
+    return timeframes
 
 
 if __name__ == "__main__":

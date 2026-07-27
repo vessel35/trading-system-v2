@@ -73,6 +73,18 @@ class FundingRepository(Protocol):
         """Insert or update every supplied settlement."""
 
 
+class AggregateRefreshRepository(Protocol):
+    """Refresh bounded continuous-aggregate materialization ranges."""
+
+    def refresh_range(
+        self,
+        view_name: str,
+        start: datetime,
+        end: datetime,
+    ) -> None:
+        """Materialize one aggregate view over the supplied range."""
+
+
 class SymbolRepository(Protocol):
     """Read the collection target from config_db."""
 

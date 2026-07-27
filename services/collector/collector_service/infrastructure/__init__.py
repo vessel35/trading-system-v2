@@ -3,6 +3,7 @@
 from .exchange import BinanceUsdMClient
 from .postgres import (
     ConfigSymbolRepository,
+    PostgresAggregateRefresher,
     PostgresFundingRepository,
     PostgresOhlcvRepository,
     TableName,
@@ -12,6 +13,7 @@ from .postgres import (
 __all__ = [
     "BinanceUsdMClient",
     "ConfigSymbolRepository",
+    "PostgresAggregateRefresher",
     "PostgresFundingRepository",
     "PostgresOhlcvRepository",
     "TableName",
