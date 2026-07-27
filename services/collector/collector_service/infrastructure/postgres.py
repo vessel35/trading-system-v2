@@ -13,21 +13,14 @@ from typing import Protocol, cast
 import psycopg
 from psycopg import sql
 
+from collector_service.domain.aggregates import AGGREGATE_VIEWS
 from collector_service.domain.models import Candle, FundingRate, Symbol
 from collector_service.domain.ports import AggregateRefreshRepository
 
 _IDENTIFIER = re.compile(r"^[a-z_][a-z0-9_]*$")
 _OHLCV_COLUMNS = 11
 _FUNDING_COLUMNS = 5
-_AGGREGATE_VIEW_NAMES = frozenset(
-    {
-        "public.ohlcv_futures_5m",
-        "public.ohlcv_futures_15m",
-        "public.ohlcv_futures_1h",
-        "public.ohlcv_futures_4h",
-        "public.ohlcv_futures_1d",
-    }
-)
+_AGGREGATE_VIEW_NAMES = frozenset(AGGREGATE_VIEWS.values())
 
 
 class QueryResult(Protocol):
@@ -91,15 +84,15 @@ def connection_provider(
                 connect_timeout=5,
                 application_name=application_name,
                 options="-c default_transaction_read_only=on",
+                autocommit=autocommit,
             )
         else:
             connection_context = psycopg.connect(
                 dsn,
                 connect_timeout=5,
                 application_name=application_name,
+                autocommit=autocommit,
             )
-        if autocommit:
-            connection_context.autocommit = True
         with connection_context as connection:
             yield cast(DatabaseConnection, connection)
 
@@ -293,6 +286,6 @@ class PostgresAggregateRefresher(AggregateRefreshRepository):
             raise ValueError(f"unsupported aggregate view: {view_name}")
         with self._connections() as connection:
             connection.execute(
-                "CALL refresh_continuous_aggregate(%s, %s, %s)",
+                "CALL refresh_continuous_aggregate(%s::regclass, %s, %s)",
                 (view_name, start, end),
             )
