@@ -11,7 +11,13 @@ from typing import Protocol
 
 from signal_service.core import SignalGenerationConfig
 
-from .service import SignalStateRecoveryRequired
+from .observability import (
+    RunnerHealthSnapshot,
+    RunnerMetricsSnapshot,
+    RunnerObservability,
+    safe_exception_info,
+)
+from .service import SignalCycleResult, SignalStateRecoveryRequired
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -64,6 +70,8 @@ class SignalPollingRunner:
         wall_clock: Callable[[], float] = time.time,
         sleep: Callable[[float], object] | None = None,
         stop_event: Event | None = None,
+        stale_after_seconds: float | None = None,
+        failure_streak_threshold: int = 3,
     ) -> None:
         seconds_until_next_poll(
             0.0,
@@ -77,6 +85,21 @@ class SignalPollingRunner:
         self._wall_clock = wall_clock
         self._stop_event = Event() if stop_event is None else stop_event
         self._sleep = self._stop_event.wait if sleep is None else sleep
+        self._observability = RunnerObservability(
+            "signal",
+            counter_names=(
+                "warmups",
+                "poll_cycles",
+                "poll_errors",
+                "signals_generated",
+                "gap_rewarmups",
+            ),
+            stale_after_seconds=(
+                poll_interval_seconds * 3.0 if stale_after_seconds is None else stale_after_seconds
+            ),
+            failure_streak_threshold=failure_streak_threshold,
+            clock=self._decision_time,
+        )
 
     @property
     def stopped(self) -> bool:
@@ -89,61 +112,142 @@ class SignalPollingRunner:
 
         self._stop_event.set()
 
+    def metrics_snapshot(self) -> RunnerMetricsSnapshot:
+        """Return the current in-process signal-runner counters."""
+
+        return self._observability.metrics_snapshot()
+
+    def health_snapshot(self) -> RunnerHealthSnapshot:
+        """Return liveness and signal-generation progress for health checks."""
+
+        return self._observability.health_snapshot()
+
     def run(self) -> None:
         """Warm once and poll until the injected stop event is set."""
 
         if self._stop_event.is_set():
             return
-        self._generator.start(self._config, self._decision_time())
-        _LOGGER.info(
-            "signal_runner_started strategy_id=%s symbol=%s timeframe=%s",
-            self._config.strategy_id,
-            self._config.symbol,
-            self._config.timeframe,
-        )
-        while not self._stop_event.is_set():
-            delay = seconds_until_next_poll(
-                self._wall_clock(),
-                poll_interval_seconds=self._poll_interval_seconds,
-                poll_buffer_seconds=self._poll_buffer_seconds,
+        self._observability.mark_running()
+        try:
+            warmup_result = self._generator.start(self._config, self._decision_time())
+            self._observability.record_warmup()
+            _LOGGER.info(
+                "signal_runner_started",
+                extra=self._event_fields(
+                    "runner_warmup",
+                    count=1,
+                    poll_interval_seconds=self._poll_interval_seconds,
+                ),
             )
-            self._sleep(delay)
-            if self._stop_event.is_set():
-                break
-            decision_time = self._decision_time()
-            try:
-                self._generator.poll(decision_time)
-            except SignalStateRecoveryRequired as exc:
+            self._record_generated(warmup_result)
+            while not self._stop_event.is_set():
+                delay = seconds_until_next_poll(
+                    self._wall_clock(),
+                    poll_interval_seconds=self._poll_interval_seconds,
+                    poll_buffer_seconds=self._poll_buffer_seconds,
+                )
+                self._sleep(delay)
+                if self._stop_event.is_set():
+                    break
+                decision_time = self._decision_time()
+                self._observability.record_poll()
+                _LOGGER.info(
+                    "signal_poll_started",
+                    extra=self._event_fields("runner_poll_started", count=0),
+                )
                 try:
-                    self._generator.rewarm(decision_time)
-                except Exception:
-                    _LOGGER.exception(
-                        "signal_rewarm_failed strategy_id=%s symbol=%s timeframe=%s",
-                        self._config.strategy_id,
-                        self._config.symbol,
-                        self._config.timeframe,
+                    result = self._generator.poll(decision_time)
+                except SignalStateRecoveryRequired:
+                    self._observability.record_gap_rewarmup()
+                    try:
+                        result = self._generator.rewarm(decision_time)
+                    except Exception as exc:
+                        self._observability.record_poll_error()
+                        _LOGGER.error(
+                            "signal_rewarm_failed",
+                            extra=self._event_fields(
+                                "runner_poll_error",
+                                count=1,
+                                outcome="error",
+                                reason="gap_rewarmup_failed",
+                                error_type=type(exc).__name__,
+                            ),
+                            exc_info=safe_exception_info(exc),
+                        )
+                    else:
+                        self._observability.record_warmup()
+                        generated = self._record_generated(result)
+                        _LOGGER.warning(
+                            "signal_poll_rewarmed",
+                            extra=self._event_fields(
+                                "runner_gap_rewarmup",
+                                count=1,
+                                outcome="completed",
+                                reason="state_recovery_required",
+                            ),
+                        )
+                        self._log_poll_completed(generated, gap_rewarmed=True)
+                except Exception as exc:
+                    self._observability.record_poll_error()
+                    _LOGGER.error(
+                        "signal_poll_failed",
+                        extra=self._event_fields(
+                            "runner_poll_error",
+                            count=1,
+                            outcome="error",
+                            reason="poll_failed",
+                            error_type=type(exc).__name__,
+                        ),
+                        exc_info=safe_exception_info(exc),
                     )
                 else:
-                    _LOGGER.warning(
-                        "signal_poll_rewarmed strategy_id=%s symbol=%s timeframe=%s reason=%s",
-                        self._config.strategy_id,
-                        self._config.symbol,
-                        self._config.timeframe,
-                        exc,
-                    )
-            except Exception:
-                _LOGGER.exception(
-                    "signal_poll_failed strategy_id=%s symbol=%s timeframe=%s",
-                    self._config.strategy_id,
-                    self._config.symbol,
-                    self._config.timeframe,
-                )
-        _LOGGER.info(
-            "signal_runner_stopped strategy_id=%s symbol=%s timeframe=%s",
-            self._config.strategy_id,
-            self._config.symbol,
-            self._config.timeframe,
-        )
+                    self._log_poll_completed(self._record_generated(result))
+        finally:
+            self._observability.mark_stopped()
+            _LOGGER.info(
+                "signal_runner_stopped",
+                extra=self._event_fields(
+                    "runner_shutdown",
+                    count=0,
+                    outcome="stopped",
+                    reason="stop_requested",
+                ),
+            )
 
     def _decision_time(self) -> datetime:
         return datetime.fromtimestamp(self._wall_clock(), tz=UTC)
+
+    def _record_generated(self, result: object) -> int:
+        if not isinstance(result, SignalCycleResult) or result.signal is None:
+            return 0
+        self._observability.record_signal_generated()
+        _LOGGER.info(
+            "signal_generated",
+            extra=self._event_fields(
+                "signal_generated",
+                count=1,
+                outcome="generated",
+            ),
+        )
+        return 1
+
+    def _log_poll_completed(self, generated: int, *, gap_rewarmed: bool = False) -> None:
+        self._observability.record_poll_success(gap_rewarmed=gap_rewarmed)
+        _LOGGER.info(
+            "signal_poll_completed",
+            extra=self._event_fields(
+                "runner_poll_completed",
+                count=generated,
+                outcome="completed",
+            ),
+        )
+
+    def _event_fields(self, event: str, **fields: object) -> dict[str, object]:
+        return {
+            "event": event,
+            "service": "signal",
+            "strategy_id": self._config.strategy_id,
+            "symbol": self._config.symbol,
+            "timeframe": self._config.timeframe,
+            **fields,
+        }

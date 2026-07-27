@@ -12,11 +12,14 @@ import pytest
 from collector_service.application import (
     CollectorConfigurationError,
     LiveCollector,
+    RunnerHealthSnapshot,
     seconds_until_next_poll,
 )
+from collector_service.application.observability import RunnerLogFormatter
 from collector_service.domain import Candle, Symbol
 
 BASE = datetime(2026, 7, 26, 0, 0, tzinfo=UTC)
+SENSITIVE_ERROR = "postgresql://operator:fake-password@db.example/collector"
 
 
 def candle(minute: int, *, close: str = "100") -> Candle:
@@ -50,6 +53,18 @@ class MockExchange:
 
     async def close(self) -> None:
         return None
+
+
+class SecretFailingExchange(MockExchange):
+    async def fetch_completed_candles(
+        self,
+        symbol: Symbol,
+        *,
+        timeframe: str,
+        limit: int,
+    ) -> list[Candle]:
+        del symbol, timeframe, limit
+        raise ValueError(SENSITIVE_ERROR)
 
 
 class MemoryCandleRepository:
@@ -188,6 +203,131 @@ def test_symbol_is_read_from_config_and_must_be_singular() -> None:
         broken, _ = make_collector([], MemoryCandleRepository(), symbols=invalid)
         with pytest.raises(CollectorConfigurationError, match="exactly one"):
             asyncio.run(broken.load_symbol())
+
+
+def test_runner_observability_counts_persistence_gap_and_structured_events(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    repository = MemoryCandleRepository(latest=BASE)
+    now = 15.0
+    sleep_calls = 0
+
+    def wall_clock() -> float:
+        return now
+
+    async def cancel_after_one_poll(delay: float) -> None:
+        nonlocal now, sleep_calls
+        now += delay
+        sleep_calls += 1
+        if sleep_calls == 2:
+            raise asyncio.CancelledError
+
+    service = LiveCollector(
+        symbols=MemorySymbolRepository([Symbol("ETH/USDT:USDT", "binance")]),
+        exchange=MockExchange([candle(1), candle(3)]),
+        candles=repository,
+        wall_clock=wall_clock,
+        sleep=cancel_after_one_poll,
+    )
+
+    with caplog.at_level(logging.INFO), pytest.raises(asyncio.CancelledError):
+        asyncio.run(service.run())
+
+    metrics = service.metrics_snapshot()
+    assert metrics.counters == {
+        "warmups": 1,
+        "poll_cycles": 1,
+        "poll_errors": 0,
+        "records_processed": 2,
+        "gaps_detected": 1,
+    }
+    assert metrics.last_poll_at == datetime(1970, 1, 1, 0, 1, 2, tzinfo=UTC)
+    assert metrics.last_progress_at == datetime(1970, 1, 1, 0, 1, 2, tzinfo=UTC)
+    events = {getattr(record, "event", None) for record in caplog.records}
+    assert {
+        "runner_warmup",
+        "runner_poll_started",
+        "records_persisted",
+        "data_gap",
+        "runner_poll_completed",
+        "runner_shutdown",
+    } <= events
+    completed = next(
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) == "runner_poll_completed"
+    )
+    assert getattr(completed, "service", None) == "collector"
+    assert getattr(completed, "symbol", None) == "ETH/USDT:USDT"
+    assert getattr(completed, "count", None) == 2
+    formatted = RunnerLogFormatter().format(completed)
+    assert 'event="runner_poll_completed"' in formatted
+    assert 'service="collector"' in formatted
+    assert "count=2" in formatted
+    assert service.health_snapshot().running is False
+
+
+def test_transient_collector_poll_error_keeps_health_and_stack_is_secret_safe(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    now = 15.0
+    sleep_calls = 0
+    snapshots: list[RunnerHealthSnapshot] = []
+    service: LiveCollector
+
+    def wall_clock() -> float:
+        return now
+
+    async def inspect_then_cancel(delay: float) -> None:
+        nonlocal now, sleep_calls
+        now += delay
+        sleep_calls += 1
+        if sleep_calls == 2:
+            snapshots.append(service.health_snapshot())
+            raise asyncio.CancelledError
+
+    service = LiveCollector(
+        symbols=MemorySymbolRepository([Symbol("ETH/USDT:USDT", "binance")]),
+        exchange=SecretFailingExchange([]),
+        candles=MemoryCandleRepository(),
+        wall_clock=wall_clock,
+        sleep=inspect_then_cancel,
+        stale_after_seconds=600,
+    )
+
+    with caplog.at_level(logging.ERROR), pytest.raises(asyncio.CancelledError):
+        asyncio.run(service.run())
+
+    metrics = service.metrics_snapshot()
+    assert metrics.counters == {
+        "warmups": 1,
+        "poll_cycles": 1,
+        "poll_errors": 1,
+        "records_processed": 0,
+        "gaps_detected": 0,
+    }
+    assert metrics.last_progress_at is None
+    assert len(snapshots) == 1
+    assert snapshots[0].running is True
+    assert snapshots[0].stale is False
+    assert snapshots[0].stale_reason is None
+    assert snapshots[0].healthy is True
+    assert snapshots[0].metrics.failure_streaks == {"poll_errors": 1}
+    error_record = next(
+        record for record in caplog.records if getattr(record, "event", None) == "runner_poll_error"
+    )
+    assert getattr(error_record, "service", None) == "collector"
+    assert getattr(error_record, "error_type", None) == "ValueError"
+    assert getattr(error_record, "reason", None) == "poll_failed"
+    assert error_record.exc_info is not None
+    formatted = RunnerLogFormatter().format(error_record)
+    assert "Traceback (most recent call last)" in formatted
+    assert 'event="runner_poll_error"' in formatted
+    assert 'service="collector"' in formatted
+    assert "fake-password" not in formatted
+    assert "fake-password" not in caplog.text
+    assert "fake-password" not in repr(metrics)
+    assert "fake-password" not in repr(service.health_snapshot())
 
 
 @pytest.mark.parametrize(

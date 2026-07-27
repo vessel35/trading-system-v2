@@ -1,5 +1,6 @@
 """Assemble and run the paper wallet from explicitly injected adapters."""
 
+import logging
 import signal
 import threading
 import time
@@ -11,6 +12,7 @@ from types import FrameType
 from core_lib.ports import CostModel
 
 from wallet_service.application import SignalQueue, WalletPollingRunner, WalletService
+from wallet_service.application.observability import configure_logging
 from wallet_service.core import RiskPolicy
 from wallet_service.infrastructure import (
     PaperBroker,
@@ -90,6 +92,7 @@ def run_paper_wallet(
 ) -> None:
     """Run and close an injected paper wallet on cooperative process shutdown."""
 
+    configure_logging(logging.INFO)
     runner = WalletPollingRunner(
         service,
         poll_interval_seconds=poll_interval_seconds,

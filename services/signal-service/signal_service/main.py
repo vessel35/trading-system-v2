@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import signal
 import threading
 import time
@@ -19,6 +20,7 @@ from signal_service.application import (
     SignalPollingRunner,
     SignalQueue,
 )
+from signal_service.application.observability import configure_logging
 from signal_service.core import SignalGenerationConfig
 from signal_service.infrastructure import (
     CryptoDataFeed,
@@ -63,6 +65,7 @@ def run_signal_generator(
 ) -> None:
     """Run the injected generator until SIGINT, SIGTERM, or an explicit stop."""
 
+    configure_logging(logging.INFO)
     runner = SignalPollingRunner(
         generator,
         config,

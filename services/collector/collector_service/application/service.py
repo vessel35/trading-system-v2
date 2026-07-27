@@ -7,6 +7,7 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from collector_service.domain.models import (
     Candle,
@@ -19,6 +20,13 @@ from collector_service.domain.ports import (
     CandleRepository,
     ExchangeClient,
     SymbolRepository,
+)
+
+from .observability import (
+    RunnerHealthSnapshot,
+    RunnerMetricsSnapshot,
+    RunnerObservability,
+    safe_exception_info,
 )
 
 logger = logging.getLogger(__name__)
@@ -73,6 +81,8 @@ class LiveCollector:
         poll_buffer_seconds: int = 2,
         wall_clock: Callable[[], float] = time.time,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        stale_after_seconds: float | None = None,
+        failure_streak_threshold: int = 3,
     ) -> None:
         if timeframe != "1m":
             raise ValueError("live collector supports only 1m ingestion")
@@ -90,6 +100,31 @@ class LiveCollector:
         self._wall_clock = wall_clock
         self._sleep = sleep
         self._ingestion_lock = asyncio.Lock()
+        self._observability = RunnerObservability(
+            "collector",
+            counter_names=(
+                "warmups",
+                "poll_cycles",
+                "poll_errors",
+                "records_processed",
+                "gaps_detected",
+            ),
+            stale_after_seconds=(
+                poll_interval_seconds * 3.0 if stale_after_seconds is None else stale_after_seconds
+            ),
+            failure_streak_threshold=failure_streak_threshold,
+            clock=self._decision_time,
+        )
+
+    def metrics_snapshot(self) -> RunnerMetricsSnapshot:
+        """Return the current in-process collector counters."""
+
+        return self._observability.metrics_snapshot()
+
+    def health_snapshot(self) -> RunnerHealthSnapshot:
+        """Return liveness and persistence progress for health checks."""
+
+        return self._observability.health_snapshot()
 
     async def load_symbol(self) -> Symbol:
         """Read, rather than seed, the single active Binance target."""
@@ -136,6 +171,13 @@ class LiveCollector:
                     gap.expected_open_time.isoformat(),
                     gap.observed_open_time.isoformat(),
                     gap.missing_candles,
+                    extra=self._event_fields(
+                        "data_gap",
+                        symbol=symbol.value,
+                        count=gap.missing_candles,
+                        outcome="detected",
+                        reason="missing_confirmed_candles",
+                    ),
                 )
 
             if new_candles:
@@ -145,6 +187,12 @@ class LiveCollector:
                     symbol.value,
                     symbol.exchange,
                     len(new_candles),
+                    extra=self._event_fields(
+                        "records_persisted",
+                        symbol=symbol.value,
+                        count=len(new_candles),
+                        outcome="persisted",
+                    ),
                 )
             return IngestionResult(
                 fetched_completed_count=len(completed),
@@ -156,29 +204,81 @@ class LiveCollector:
     async def run(self) -> None:
         """Poll forever at minute boundary +2s; cancellation remains cooperative."""
 
-        symbol = await self.load_symbol()
-        logger.info(
-            "collector_started symbol=%s exchange=%s timeframe=1m",
-            symbol.value,
-            symbol.exchange,
-        )
-        while True:
-            delay = seconds_until_next_poll(
-                self._wall_clock(),
-                poll_interval_seconds=self._poll_interval_seconds,
-                poll_buffer_seconds=self._poll_buffer_seconds,
+        symbol: Symbol | None = None
+        self._observability.mark_running()
+        try:
+            symbol = await self.load_symbol()
+            self._observability.record_warmup()
+            logger.info(
+                "collector_started",
+                extra=self._event_fields(
+                    "runner_warmup",
+                    symbol=symbol.value,
+                    count=1,
+                    poll_interval_seconds=self._poll_interval_seconds,
+                ),
             )
-            await self._sleep(delay)
-            try:
-                await self.collect_once(symbol)
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                logger.exception(
-                    "collector_poll_failed symbol=%s exchange=%s",
-                    symbol.value,
-                    symbol.exchange,
+            while True:
+                delay = seconds_until_next_poll(
+                    self._wall_clock(),
+                    poll_interval_seconds=self._poll_interval_seconds,
+                    poll_buffer_seconds=self._poll_buffer_seconds,
                 )
+                await self._sleep(delay)
+                self._observability.record_poll()
+                logger.info(
+                    "collector_poll_started",
+                    extra=self._event_fields(
+                        "runner_poll_started",
+                        symbol=symbol.value,
+                        count=0,
+                    ),
+                )
+                try:
+                    result = await self.collect_once(symbol)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    self._observability.record_poll_error()
+                    logger.error(
+                        "collector_poll_failed",
+                        extra=self._event_fields(
+                            "runner_poll_error",
+                            symbol=symbol.value,
+                            count=1,
+                            outcome="error",
+                            reason="poll_failed",
+                            error_type=type(exc).__name__,
+                        ),
+                        exc_info=safe_exception_info(exc),
+                    )
+                else:
+                    self._observability.record_processed(
+                        result.persisted_count,
+                        gaps_detected=len(result.gaps),
+                    )
+                    self._observability.record_poll_success()
+                    logger.info(
+                        "collector_poll_completed",
+                        extra=self._event_fields(
+                            "runner_poll_completed",
+                            symbol=symbol.value,
+                            count=result.persisted_count,
+                            outcome="completed",
+                        ),
+                    )
+        finally:
+            self._observability.mark_stopped()
+            logger.info(
+                "collector_stopped",
+                extra=self._event_fields(
+                    "runner_shutdown",
+                    symbol="unknown" if symbol is None else symbol.value,
+                    count=0,
+                    outcome="stopped",
+                    reason="shutdown",
+                ),
+            )
 
     def _validate_series_identity(
         self,
@@ -192,3 +292,22 @@ class LiveCollector:
                 or candle.timeframe != self._timeframe
             ):
                 raise ValueError("exchange response crossed the configured candle series")
+
+    def _decision_time(self) -> datetime:
+        return datetime.fromtimestamp(self._wall_clock(), tz=UTC)
+
+    def _event_fields(
+        self,
+        event: str,
+        *,
+        symbol: str,
+        **fields: object,
+    ) -> dict[str, object]:
+        return {
+            "event": event,
+            "service": "collector",
+            "symbol": symbol,
+            "exchange": self._exchange_name,
+            "timeframe": self._timeframe,
+            **fields,
+        }
