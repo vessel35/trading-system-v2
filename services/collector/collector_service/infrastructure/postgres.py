@@ -1,4 +1,4 @@
-"""Psycopg 3 adapters for config reads and idempotent futures writes."""
+"""Psycopg 3 adapters for collector reads, writes, and aggregate maintenance."""
 
 from __future__ import annotations
 
@@ -14,10 +14,20 @@ import psycopg
 from psycopg import sql
 
 from collector_service.domain.models import Candle, FundingRate, Symbol
+from collector_service.domain.ports import AggregateRefreshRepository
 
 _IDENTIFIER = re.compile(r"^[a-z_][a-z0-9_]*$")
 _OHLCV_COLUMNS = 11
 _FUNDING_COLUMNS = 5
+_AGGREGATE_VIEW_NAMES = frozenset(
+    {
+        "public.ohlcv_futures_5m",
+        "public.ohlcv_futures_15m",
+        "public.ohlcv_futures_1h",
+        "public.ohlcv_futures_4h",
+        "public.ohlcv_futures_1d",
+    }
+)
 
 
 class QueryResult(Protocol):
@@ -69,8 +79,9 @@ def connection_provider(
     *,
     read_only: bool,
     application_name: str,
+    autocommit: bool = False,
 ) -> ConnectionProvider:
-    """Create short-lived sessions, physically read-only for config_db access."""
+    """Create short-lived sessions with optional read-only or autocommit semantics."""
 
     @contextmanager
     def connect() -> Iterator[DatabaseConnection]:
@@ -87,6 +98,8 @@ def connection_provider(
                 connect_timeout=5,
                 application_name=application_name,
             )
+        if autocommit:
+            connection_context.autocommit = True
         with connection_context as connection:
             yield cast(DatabaseConnection, connection)
 
@@ -262,3 +275,24 @@ class PostgresFundingRepository:
         params = tuple(chain.from_iterable(rows))
         with self._connections() as connection:
             connection.execute(query, params)
+
+
+class PostgresAggregateRefresher(AggregateRefreshRepository):
+    """Refresh only the collector-owned continuous aggregate views."""
+
+    def __init__(self, connections: ConnectionProvider) -> None:
+        self._connections = connections
+
+    def refresh_range(
+        self,
+        view_name: str,
+        start: datetime,
+        end: datetime,
+    ) -> None:
+        if view_name not in _AGGREGATE_VIEW_NAMES:
+            raise ValueError(f"unsupported aggregate view: {view_name}")
+        with self._connections() as connection:
+            connection.execute(
+                "CALL refresh_continuous_aggregate(%s, %s, %s)",
+                (view_name, start, end),
+            )

@@ -6,17 +6,22 @@ from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import cast
+from types import TracebackType
+from typing import Self, cast
 
+import psycopg
+import pytest
 from collector_service.domain import Candle, FundingRate, Symbol
 from collector_service.infrastructure.postgres import (
     ConfigSymbolRepository,
     ConnectionProvider,
     DatabaseConnection,
+    PostgresAggregateRefresher,
     PostgresFundingRepository,
     PostgresOhlcvRepository,
     QueryResult,
     TableName,
+    connection_provider,
 )
 from psycopg import sql
 
@@ -44,6 +49,31 @@ class FakeConnection:
     ) -> QueryResult:
         self.executed.append((query, params))
         return FakeResult(self.rows)
+
+
+class ConnectableFakeConnection(FakeConnection):
+    def __init__(self) -> None:
+        super().__init__()
+        self.autocommit_assignments: list[bool] = []
+
+    @property
+    def autocommit(self) -> bool:
+        return self.autocommit_assignments[-1] if self.autocommit_assignments else False
+
+    @autocommit.setter
+    def autocommit(self, value: bool) -> None:
+        self.autocommit_assignments.append(value)
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        return None
 
 
 def provider(connection: FakeConnection) -> ConnectionProvider:
@@ -161,3 +191,71 @@ def test_empty_batch_executes_no_sql() -> None:
     PostgresOhlcvRepository(provider(connection)).upsert_batch([])
     PostgresFundingRepository(provider(connection)).upsert_batch([])
     assert connection.executed == []
+
+
+def test_aggregate_refresh_calls_allowlisted_view_with_bound_range() -> None:
+    connection = FakeConnection()
+    repository = PostgresAggregateRefresher(provider(connection))
+    start = datetime(2021, 1, 1, tzinfo=UTC)
+    end = datetime(2022, 1, 1, tzinfo=UTC)
+
+    repository.refresh_range("public.ohlcv_futures_1h", start, end)
+
+    assert connection.executed == [
+        (
+            "CALL refresh_continuous_aggregate(%s, %s, %s)",
+            ("public.ohlcv_futures_1h", start, end),
+        )
+    ]
+
+
+def test_aggregate_refresh_rejects_non_allowlisted_view() -> None:
+    connection = FakeConnection()
+
+    with pytest.raises(ValueError, match="unsupported aggregate view"):
+        PostgresAggregateRefresher(provider(connection)).refresh_range(
+            "public.not_collector_owned",
+            datetime(2021, 1, 1, tzinfo=UTC),
+            datetime(2022, 1, 1, tzinfo=UTC),
+        )
+
+    assert connection.executed == []
+
+
+@pytest.mark.parametrize(
+    ("autocommit", "assignments"),
+    [(False, []), (True, [True])],
+)
+def test_connection_provider_enables_autocommit_only_when_requested(
+    monkeypatch: pytest.MonkeyPatch,
+    autocommit: bool,
+    assignments: list[bool],
+) -> None:
+    connection = ConnectableFakeConnection()
+    connect_calls: list[tuple[str, dict[str, object]]] = []
+
+    def fake_connect(dsn: str, **kwargs: object) -> ConnectableFakeConnection:
+        connect_calls.append((dsn, kwargs))
+        return connection
+
+    monkeypatch.setattr(psycopg, "connect", fake_connect)
+    connections = connection_provider(
+        "postgresql://data",
+        read_only=False,
+        application_name="collector-aggregate-refresher",
+        autocommit=autocommit,
+    )
+
+    with connections() as provided:
+        assert provided is connection
+
+    assert connection.autocommit_assignments == assignments
+    assert connect_calls == [
+        (
+            "postgresql://data",
+            {
+                "connect_timeout": 5,
+                "application_name": "collector-aggregate-refresher",
+            },
+        )
+    ]

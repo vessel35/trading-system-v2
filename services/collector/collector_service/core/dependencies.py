@@ -4,10 +4,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from collector_service.application import FundingBackfill, HistoricalBackfill, LiveCollector
+from collector_service.application import (
+    AggregateRefresh,
+    FundingBackfill,
+    HistoricalBackfill,
+    LiveCollector,
+)
 from collector_service.infrastructure import (
     BinanceUsdMClient,
     ConfigSymbolRepository,
+    PostgresAggregateRefresher,
     PostgresFundingRepository,
     PostgresOhlcvRepository,
     connection_provider,
@@ -23,6 +29,7 @@ class Runtime:
     collector: LiveCollector
     backfill: HistoricalBackfill
     funding_backfill: FundingBackfill
+    aggregate_refresh: AggregateRefresh
     exchange: BinanceUsdMClient
 
     async def close(self) -> None:
@@ -59,6 +66,14 @@ def build_runtime(settings: Settings) -> Runtime:
             application_name="collector-funding-writer",
         )
     )
+    aggregate_refresher = PostgresAggregateRefresher(
+        connection_provider(
+            settings.data_db_url.get_secret_value(),
+            read_only=False,
+            application_name="collector-aggregate-refresher",
+            autocommit=True,
+        )
+    )
     collector = LiveCollector(
         symbols=symbols,
         exchange=exchange,
@@ -85,9 +100,11 @@ def build_runtime(settings: Settings) -> Runtime:
         exchange_name=settings.exchange,
         symbol_selector=settings.symbol,
     )
+    aggregate_refresh = AggregateRefresh(aggregate_refresher)
     return Runtime(
         collector=collector,
         backfill=backfill,
         funding_backfill=funding_backfill,
+        aggregate_refresh=aggregate_refresh,
         exchange=exchange,
     )
