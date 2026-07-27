@@ -11,6 +11,7 @@ dependencies = [
     "ccxt>=4.5,<5",
     "psycopg[binary]>=3.2",
     "pydantic-settings>=2.10",
+    "service-commons==0.1.0",
 ]
 
 [project.optional-dependencies]
@@ -29,6 +30,9 @@ include = ["collector_service*"]
 
 [tool.setuptools.package-data]
 collector_service = ["py.typed"]
+
+[tool.uv.sources]
+service-commons = { path = "../service-commons", editable = true }
 
 [tool.pytest.ini_options]
 addopts = [
@@ -53,6 +57,7 @@ select = ["B", "E", "F", "I", "UP"]
 
 [tool.mypy]
 files = ["collector_service", "tests"]
+mypy_path = "$MYPY_CONFIG_FILE_DIR/../service-commons"
 python_version = "3.12"
 strict = true
 warn_unreachable = true

@@ -10,9 +10,9 @@ from threading import Event
 from types import FrameType
 
 from core_lib.ports import CostModel
+from service_commons.observability import configure_logging
 
 from wallet_service.application import SignalQueue, WalletPollingRunner, WalletService
-from wallet_service.application.observability import configure_logging
 from wallet_service.core import RiskPolicy
 from wallet_service.infrastructure import (
     PaperBroker,

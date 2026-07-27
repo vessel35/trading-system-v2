@@ -9,7 +9,8 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Literal
 
-from collector_service.application.observability import configure_logging
+from service_commons.observability import configure_logging
+
 from collector_service.core import Settings, build_runtime
 
 Mode = Literal["collect", "backfill", "funding-backfill"]

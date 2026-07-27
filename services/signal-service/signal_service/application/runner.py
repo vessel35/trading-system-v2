@@ -9,14 +9,16 @@ from datetime import UTC, datetime
 from threading import Event
 from typing import Protocol
 
-from signal_service.core import SignalGenerationConfig
-
-from .observability import (
+from service_commons.observability import (
     RunnerHealthSnapshot,
     RunnerMetricsSnapshot,
     RunnerObservability,
     safe_exception_info,
 )
+from service_commons.polling import seconds_until_next_poll
+
+from signal_service.core import SignalGenerationConfig
+
 from .service import SignalCycleResult, SignalStateRecoveryRequired
 
 _LOGGER = logging.getLogger(__name__)
@@ -37,24 +39,6 @@ class SignalGenerator(Protocol):
 
     def rewarm(self, decision_time: datetime) -> object:
         """Re-seed indicator state at the latest finalized candle."""
-
-
-def seconds_until_next_poll(
-    now: float,
-    *,
-    poll_interval_seconds: int = 60,
-    poll_buffer_seconds: int = 2,
-) -> float:
-    """Align polling to a wall-clock period boundary plus a close buffer."""
-
-    if poll_interval_seconds <= 0:
-        raise ValueError("poll interval must be positive")
-    if not 0 <= poll_buffer_seconds < poll_interval_seconds:
-        raise ValueError("poll buffer must be within the polling interval")
-    seconds_into_period = now % poll_interval_seconds
-    if seconds_into_period < poll_buffer_seconds:
-        return poll_buffer_seconds - seconds_into_period
-    return poll_interval_seconds - seconds_into_period + poll_buffer_seconds
 
 
 class SignalPollingRunner:

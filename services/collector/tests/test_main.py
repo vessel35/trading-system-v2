@@ -8,8 +8,8 @@ from datetime import UTC, datetime
 
 import collector_service.main as collector_main
 import pytest
-from collector_service.application.observability import RunnerLogFormatter
 from collector_service.core import Settings
+from service_commons.observability import RunnerLogFormatter
 
 
 class StubAction:
