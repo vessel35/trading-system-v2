@@ -21,19 +21,20 @@ a rejection into a fill.
 
 This package has one execution adapter: `PaperBroker`. It simulates a
 next-candle fill from supplied candle data and has no exchange client, remote
-order API, credential model, withdrawal path, or live runner. The only
-float-to-`Decimal` transition is inside `PaperBroker.submit()` through
-`core_lib.execution.normalizer`.
+order API, credential model, or withdrawal path. Its polling runner only drains
+the injected paper `WalletService`; it does not add a live broker or order
+transport. The only float-to-`Decimal` transition is inside
+`PaperBroker.submit()` through `core_lib.execution.normalizer`.
 
 The application constructor accepts already-created read connections,
-connection/repository, and queue. It never reads `.env`, discovers a database,
-or starts a process by itself. Signal and candle connections issue SELECT only;
-the atomic ledger transaction writes only `wallet_db`, including
-`wallet_signal_consumption`. PostgreSQL integration tests are opt-in and reject
-any DSN that is not local and whose database name does not end in `_test`.
-Use the assembled `WalletService` as a context manager (or call `close()`) so
-queue-owned `signal_db` and `crypto_data` read sessions cannot remain idle in a
-transaction; the wallet connection remains repository-owned.
+connection/repository, and queue. It never reads `.env` or discovers a
+database. `run_paper_wallet()` drains every ready message before an aligned
+wait, accepts an injected clock/sleep/stop event, translates SIGINT/SIGTERM
+into a cooperative stop, and closes queue-owned reads on exit. Signal and
+candle connections issue SELECT only; the atomic ledger transaction writes
+only `wallet_db`, including `wallet_signal_consumption`. PostgreSQL integration
+tests are opt-in and reject any DSN that is not local and whose database name
+does not end in `_test`. The wallet connection remains repository-owned.
 
 ## Checks
 

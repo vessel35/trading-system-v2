@@ -1,10 +1,16 @@
-"""Assemble the inert paper wallet driver from explicitly injected adapters."""
+"""Assemble and run the paper wallet from explicitly injected adapters."""
 
+import signal
+import threading
+import time
+from collections.abc import Callable
 from decimal import Decimal
+from threading import Event
+from types import FrameType
 
 from core_lib.ports import CostModel
 
-from wallet_service.application import SignalQueue, WalletService
+from wallet_service.application import SignalQueue, WalletPollingRunner, WalletService
 from wallet_service.core import RiskPolicy
 from wallet_service.infrastructure import (
     PaperBroker,
@@ -71,3 +77,50 @@ def build_signal_db_paper_wallet(
         cost_model=cost_model,
         schema=wallet_schema,
     )
+
+
+def run_paper_wallet(
+    service: WalletService,
+    *,
+    poll_interval_seconds: int = 60,
+    poll_buffer_seconds: int = 2,
+    wall_clock: Callable[[], float] = time.time,
+    sleep: Callable[[float], object] | None = None,
+    stop_event: Event | None = None,
+) -> None:
+    """Run and close an injected paper wallet on cooperative process shutdown."""
+
+    runner = WalletPollingRunner(
+        service,
+        poll_interval_seconds=poll_interval_seconds,
+        poll_buffer_seconds=poll_buffer_seconds,
+        wall_clock=wall_clock,
+        sleep=sleep,
+        stop_event=stop_event,
+    )
+    try:
+        _run_with_shutdown_signals(runner)
+    finally:
+        service.close()
+
+
+def _run_with_shutdown_signals(runner: WalletPollingRunner) -> None:
+    if threading.current_thread() is not threading.main_thread():
+        runner.run()
+        return
+
+    previous_handlers = {
+        signum: signal.getsignal(signum) for signum in (signal.SIGINT, signal.SIGTERM)
+    }
+
+    def request_stop(signum: int, frame: FrameType | None) -> None:
+        del signum, frame
+        runner.stop()
+
+    try:
+        for signum in previous_handlers:
+            signal.signal(signum, request_stop)
+        runner.run()
+    finally:
+        for signum, handler in previous_handlers.items():
+            signal.signal(signum, handler)

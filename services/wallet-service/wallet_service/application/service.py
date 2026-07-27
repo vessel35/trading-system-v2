@@ -64,6 +64,7 @@ class WalletService:
         self._cash = normalized_cash
         self._position: Position | None = None
         self._open_risk: tuple[str, PositionSide, float] | None = None
+        self._last_run_received = False
 
     @property
     def cash_balance(self) -> Decimal:
@@ -80,15 +81,23 @@ class WalletService:
         """Return the risk guard's fail-closed state."""
         return self._risk_guard.kill_switch_engaged
 
+    @property
+    def last_run_received(self) -> bool:
+        """Report whether the latest ``run_once`` call received a queue message."""
+
+        return self._last_run_received
+
     def engage_kill_switch(self) -> None:
         """Block every subsequent signal before sizing or Broker submission."""
         self._risk_guard.engage_kill_switch()
 
     def run_once(self) -> WalletExecution | None:
         """Consume one ready signal and terminally receipt every permanent outcome."""
+        self._last_run_received = False
         message = self._queue.receive()
         if message is None:
             return None
+        self._last_run_received = True
         try:
             execution = self.process(message)
         except RiskRejected:
