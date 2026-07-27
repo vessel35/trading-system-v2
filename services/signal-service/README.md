@@ -30,6 +30,11 @@ wiring translates SIGINT/SIGTERM into a cooperative stop. `SignalQueue` remains
 an injected wallet-service boundary; there is no exchange client, order
 submission, or `wallet_db` adapter here.
 
+If polling observes multiple unprocessed candles or a finalized-series gap, the
+runner performs a full warm-up from the latest available history before
+continuing. Other feed or strategy failures remain ordinary poll errors and do
+not reset indicator state.
+
 ## Local verification
 
 From this directory, with the repository development environment installed:

@@ -32,6 +32,7 @@ class _Generator:
         self._stop_after_polls = stop_after_polls
         self.starts: list[tuple[SignalGenerationConfig, datetime]] = []
         self.polls: list[datetime] = []
+        self.rewarms: list[datetime] = []
 
     def start(
         self,
@@ -45,6 +46,19 @@ class _Generator:
         self.polls.append(decision_time)
         if len(self.polls) == self._stop_after_polls:
             self._stop_event.set()
+        return None
+
+    def rewarm(self, decision_time: datetime) -> object:
+        self.rewarms.append(decision_time)
+        return None
+
+
+class _UnrecoverableGenerator(_Generator):
+    def poll(self, decision_time: datetime) -> object:
+        self.polls.append(decision_time)
+        if len(self.polls) == 1:
+            raise ValueError("malformed fundingTime")
+        self._stop_event.set()
         return None
 
 
@@ -77,6 +91,7 @@ def test_main_warms_once_then_polls_aligned_boundaries_for_finite_cycles() -> No
         datetime(1970, 1, 1, 0, 2, 2, tzinfo=UTC),
     ]
     assert clock.sleeps == [47.0, 60.0]
+    assert generator.rewarms == []
 
 
 def test_stop_during_sleep_prevents_another_poll() -> None:
@@ -101,6 +116,29 @@ def test_stop_during_sleep_prevents_another_poll() -> None:
     assert generator.polls == []
     assert clock.sleeps == [2.5]
     assert runner.stopped is True
+
+
+def test_unrelated_poll_error_does_not_trigger_indicator_rewarm(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    stop_event = Event()
+    clock = _Clock(15.0)
+    generator = _UnrecoverableGenerator(stop_event, stop_after_polls=2)
+    runner = SignalPollingRunner(
+        generator,
+        _config(),
+        wall_clock=clock,
+        sleep=clock.sleep,
+        stop_event=stop_event,
+    )
+
+    with caplog.at_level("ERROR"):
+        runner.run()
+
+    assert len(generator.polls) == 2
+    assert generator.rewarms == []
+    assert "signal_poll_failed" in caplog.text
+    assert "signal_poll_rewarmed" not in caplog.text
 
 
 @pytest.mark.parametrize(

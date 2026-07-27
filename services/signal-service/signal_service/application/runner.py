@@ -11,6 +11,8 @@ from typing import Protocol
 
 from signal_service.core import SignalGenerationConfig
 
+from .service import SignalStateRecoveryRequired
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -26,6 +28,9 @@ class SignalGenerator(Protocol):
 
     def poll(self, decision_time: datetime) -> object:
         """Judge the next finalized candle, if one is available."""
+
+    def rewarm(self, decision_time: datetime) -> object:
+        """Re-seed indicator state at the latest finalized candle."""
 
 
 def seconds_until_next_poll(
@@ -105,8 +110,27 @@ class SignalPollingRunner:
             self._sleep(delay)
             if self._stop_event.is_set():
                 break
+            decision_time = self._decision_time()
             try:
-                self._generator.poll(self._decision_time())
+                self._generator.poll(decision_time)
+            except SignalStateRecoveryRequired as exc:
+                try:
+                    self._generator.rewarm(decision_time)
+                except Exception:
+                    _LOGGER.exception(
+                        "signal_rewarm_failed strategy_id=%s symbol=%s timeframe=%s",
+                        self._config.strategy_id,
+                        self._config.symbol,
+                        self._config.timeframe,
+                    )
+                else:
+                    _LOGGER.warning(
+                        "signal_poll_rewarmed strategy_id=%s symbol=%s timeframe=%s reason=%s",
+                        self._config.strategy_id,
+                        self._config.symbol,
+                        self._config.timeframe,
+                        exc,
+                    )
             except Exception:
                 _LOGGER.exception(
                     "signal_poll_failed strategy_id=%s symbol=%s timeframe=%s",

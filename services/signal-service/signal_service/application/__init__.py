@@ -2,7 +2,11 @@
 
 from .ports import SignalDataFeed, SignalQueue, SignalSink
 from .runner import SignalGenerator, SignalPollingRunner, seconds_until_next_poll
-from .service import SignalCycleResult, SignalGenerationService
+from .service import (
+    SignalCycleResult,
+    SignalGenerationService,
+    SignalStateRecoveryRequired,
+)
 
 __all__ = [
     "SignalCycleResult",
@@ -12,5 +16,6 @@ __all__ = [
     "SignalPollingRunner",
     "SignalQueue",
     "SignalSink",
+    "SignalStateRecoveryRequired",
     "seconds_until_next_poll",
 ]

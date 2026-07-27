@@ -27,6 +27,10 @@ from .ports import SignalDataFeed, SignalQueue, SignalSink
 _LOGGER = logging.getLogger(__name__)
 
 
+class SignalStateRecoveryRequired(RuntimeError):
+    """A finalized-candle discontinuity requires a fresh indicator seed."""
+
+
 @dataclass(frozen=True, slots=True)
 class SignalCycleResult:
     """Return one cycle's optional signal and explicit missing-candle reports."""
@@ -124,6 +128,25 @@ class SignalGenerationService:
         persisted = self._process(decision_window[-1], boundary, current_position)
         return SignalCycleResult(persisted, gaps)
 
+    def rewarm(
+        self,
+        decision_time: datetime,
+        *,
+        current_position: Position | None = None,
+    ) -> SignalCycleResult:
+        """Discard incremental state and warm again at the latest finalized candle."""
+
+        config = self._require_config()
+        self._config = None
+        self._strategy = None
+        self._specs = []
+        self._states = {}
+        self._confirmed = []
+        self._last_close = None
+        self._resolved_params = {}
+        self._reported_missing_until = None
+        return self.start(config, decision_time, current_position=current_position)
+
     def poll(
         self,
         decision_time: datetime,
@@ -140,9 +163,13 @@ class SignalGenerationService:
         gaps = self._report_poll_gaps(config, last_close, fresh, boundary)
         if not fresh:
             return SignalCycleResult(None, gaps)
+        if gaps:
+            raise SignalStateRecoveryRequired(
+                "finalized candle gap requires indicator state recovery"
+            )
         if len(fresh) > 1:
-            raise RuntimeError(
-                "multiple unprocessed candles require state recovery, which is outside this slice"
+            raise SignalStateRecoveryRequired(
+                "multiple unprocessed candles require indicator state recovery"
             )
         persisted = self._process(fresh[0], boundary, current_position)
         return SignalCycleResult(persisted, gaps)

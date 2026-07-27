@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+from threading import Event
 from typing import ClassVar
 
 import pytest
@@ -24,8 +25,10 @@ from core_lib.types import Candle, MarketType, Position, TradingSignal
 from signal_service.application import (
     SignalDataFeed,
     SignalGenerationService,
+    SignalPollingRunner,
     SignalQueue,
     SignalSink,
+    SignalStateRecoveryRequired,
 )
 from signal_service.core import SignalGenerationConfig
 from signal_service.domain import PersistedSignal, SignalIntent, SignalMode
@@ -268,15 +271,79 @@ def test_unfinalized_mock_candle_is_rejected_before_indicator_update() -> None:
         service.start(_config(), values[-2].close_time)
 
 
-def test_poll_refuses_out_of_scope_multi_candle_state_recovery() -> None:
+def test_poll_marks_multi_candle_backlog_as_recoverable_state() -> None:
     values = _candles(10)
     feed = _Feed(values)
     service = SignalGenerationService(feed, _manager(), _Sink())
     service.start(_config(), values[-1].close_time)
     feed.values.extend(_candles(12)[10:])
 
-    with pytest.raises(RuntimeError, match="state recovery"):
+    with pytest.raises(SignalStateRecoveryRequired, match="state recovery"):
         service.poll(feed.values[-1].close_time)
+
+
+def test_runner_rewarms_multi_candle_backlog_and_resumes_signals(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    initial = _candles(10)
+    available = _candles(13)
+    feed = _Feed(initial)
+    stop_event = Event()
+
+    class _StoppingSink(_Sink):
+        def store(self, signal: PersistedSignal) -> bool:
+            inserted = super().store(signal)
+            if signal.candle.close_time == available[-1].close_time:
+                stop_event.set()
+            return inserted
+
+    class _LagClock:
+        def __init__(self) -> None:
+            self.now = initial[-1].close_time.timestamp()
+            self.batches = [available[10:12], available[12:]]
+            self.sleeps: list[float] = []
+
+        def __call__(self) -> float:
+            return self.now
+
+        def sleep(self, delay: float) -> None:
+            self.sleeps.append(delay)
+            if not self.batches:
+                stop_event.set()
+                return
+            batch = self.batches.pop(0)
+            feed.values.extend(batch)
+            self.now = batch[-1].close_time.timestamp()
+
+    sink = _StoppingSink()
+    clock = _LagClock()
+    service = SignalGenerationService(feed, _manager(), sink)
+    runner = SignalPollingRunner(
+        service,
+        _config(),
+        wall_clock=clock,
+        sleep=clock.sleep,
+        stop_event=stop_event,
+    )
+
+    with caplog.at_level("WARNING"):
+        runner.run()
+
+    assert [signal.candle.close_time for signal in sink.values] == [
+        initial[-1].close_time,
+        available[11].close_time,
+        available[12].close_time,
+    ]
+    assert feed.calls == [
+        initial[-1].close_time,
+        available[11].close_time,
+    ]
+    assert feed.incremental_calls == [
+        (initial[-1].close_time, available[11].close_time),
+        (available[11].close_time, available[12].close_time),
+    ]
+    assert clock.sleeps == [2.0, 2.0]
+    assert "signal_poll_rewarmed" in caplog.text
 
 
 def test_duplicate_sink_result_does_not_publish_to_queue() -> None:
