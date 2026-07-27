@@ -10,8 +10,6 @@ from web_api.database import connect_catalog
 from web_api.main import app
 from web_api.repository import _decimal_strings
 
-pytestmark = pytest.mark.integration
-
 
 def test_decimal_serialization_uses_fixed_point_notation() -> None:
     converted = _decimal_strings(
@@ -98,6 +96,7 @@ def client(catalog_rows: dict[str, object]) -> Iterator[TestClient]:
         yield test_client
 
 
+@pytest.mark.integration
 def test_runs_lists_real_rows_filters_sorts_and_pages(
     client: TestClient,
     catalog_rows: dict[str, object],
@@ -141,6 +140,7 @@ def test_runs_lists_real_rows_filters_sorts_and_pages(
     assert invalid_limit.json()["error"]["code"] == "invalid_query"
 
 
+@pytest.mark.integration
 def test_run_header_returns_every_reproducibility_field_and_decimal_strings(
     client: TestClient,
     catalog_rows: dict[str, object],
@@ -163,6 +163,7 @@ def test_run_header_returns_every_reproducibility_field_and_decimal_strings(
     assert missing.json()["error"]["code"] == "run_not_found"
 
 
+@pytest.mark.integration
 def test_run_summary_supports_one_and_zero_rows_with_decimal_strings(
     client: TestClient,
     catalog_rows: dict[str, object],
@@ -198,6 +199,7 @@ def test_run_summary_supports_one_and_zero_rows_with_decimal_strings(
         assert absent_body["summary_status"] != "available"
 
 
+@pytest.mark.integration
 def test_decimal_zeroes_use_fixed_point_notation(
     client: TestClient,
     catalog_rows: dict[str, object],
@@ -222,6 +224,7 @@ def test_decimal_zeroes_use_fixed_point_notation(
     assert all("E" not in value.upper() for value in values)
 
 
+@pytest.mark.integration
 def test_health_proves_read_only_real_catalog_connection(
     client: TestClient,
     catalog_rows: dict[str, object],
@@ -237,6 +240,7 @@ def test_health_proves_read_only_real_catalog_connection(
     assert body["catalog"]["schema_version"] == "20260724"
 
 
+@pytest.mark.integration
 def test_openapi_exposes_five_surfaces_and_decimal_formats(client: TestClient) -> None:
     response = client.get("/openapi.json")
     assert response.status_code == 200
