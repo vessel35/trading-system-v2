@@ -21,10 +21,13 @@ rolls back on failure. Its idempotency identity includes the core-resolved
 strategy parameters and exchange, so distinct deployments cannot silently
 discard each other's signals.
 
-The package intentionally has no executable CLI and does not load `.env`.
-Opening production connections, streaming/recovery, and running the service are
-deployment work outside this slice. `SignalQueue` is only the future
-wallet-service boundary; there is no queue transport, exchange client, order
+The package intentionally has no environment-driven executable CLI and does not
+load `.env`. Operators inject the configuration and already-opened connections,
+then may call `run_signal_generator()` to warm once and poll each wall-clock
+minute boundary plus the close buffer. The runner accepts an injected clock,
+sleep function, and stop event; its default wait is interruptible and the main
+wiring translates SIGINT/SIGTERM into a cooperative stop. `SignalQueue` remains
+an injected wallet-service boundary; there is no exchange client, order
 submission, or `wallet_db` adapter here.
 
 ## Local verification
