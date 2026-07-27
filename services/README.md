@@ -26,10 +26,11 @@ test-path arguments produces the same result. Integration tests are excluded unl
 explicitly selected.
 
 ```bash
-.venv/bin/pytest services/core-lib/tests services/backtest-service/tests services/signal-service/tests services/wallet-service/tests
-.venv/bin/ruff check services/core-lib services/backtest-service services/signal-service services/wallet-service
-.venv/bin/ruff format --check services/core-lib services/backtest-service services/signal-service services/wallet-service
+.venv/bin/pytest services/core-lib/tests services/service-commons/tests services/backtest-service/tests services/signal-service/tests services/wallet-service/tests
+.venv/bin/ruff check services/core-lib services/service-commons services/backtest-service services/signal-service services/wallet-service
+.venv/bin/ruff format --check services/core-lib services/service-commons services/backtest-service services/signal-service services/wallet-service
 (cd services/core-lib && ../../.venv/bin/mypy)
+(cd services/service-commons && ../../.venv/bin/mypy)
 (cd services/backtest-service && ../../.venv/bin/mypy)
 (cd services/signal-service && ../../.venv/bin/mypy)
 (cd services/wallet-service && ../../.venv/bin/mypy)
