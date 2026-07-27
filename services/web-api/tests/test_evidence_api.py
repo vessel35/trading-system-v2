@@ -18,8 +18,6 @@ from web_api.database import connect_crypto, get_settings
 from web_api.main import _epoch_ms, _utc_datetime, app
 from web_api.repository import MarketDataRepository
 
-pytestmark = pytest.mark.integration
-
 REPOSITORY_ROOT = Path(__file__).parents[3]
 ENDPOINT_TABLES = {
     "trades": "TRADE",
@@ -127,6 +125,7 @@ def seeded_evidence(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Seeded
         get_settings.cache_clear()
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("endpoint", ENDPOINT_TABLES)
 def test_seed_evidence_endpoint_counts_and_cursor_contract(
     seeded_evidence: SeededEvidence,
@@ -160,6 +159,7 @@ def test_seed_evidence_endpoint_counts_and_cursor_contract(
         assert following_body["data"] != body["data"]
 
 
+@pytest.mark.integration
 def test_scaled_decimals_timestamps_json_and_real_values_are_typed(
     seeded_evidence: SeededEvidence,
 ) -> None:
@@ -220,6 +220,7 @@ def test_scaled_decimals_timestamps_json_and_real_values_are_typed(
     assert isinstance(snapshot["pinned_impl"], bool)
 
 
+@pytest.mark.integration
 def test_filters_support_core_tabs_and_trade_drawer(
     seeded_evidence: SeededEvidence,
 ) -> None:
@@ -355,6 +356,7 @@ def test_filters_support_core_tabs_and_trade_drawer(
         assert response.json()["page"]["total"] == expected
 
 
+@pytest.mark.integration
 def test_offset_free_temporal_filters_are_utc(
     seeded_evidence: SeededEvidence,
 ) -> None:
@@ -376,6 +378,7 @@ def test_offset_free_temporal_filters_are_utc(
         assert offset_free.json() == with_utc.json()
 
 
+@pytest.mark.integration
 def test_execution_join_deduplicates_shared_reversal_fill(
     seeded_evidence: SeededEvidence,
 ) -> None:
@@ -435,6 +438,7 @@ def test_execution_join_deduplicates_shared_reversal_fill(
             connection.commit()
 
 
+@pytest.mark.integration
 def test_missing_run_and_missing_artifact_have_distinct_errors(
     seeded_evidence: SeededEvidence,
 ) -> None:
@@ -453,10 +457,8 @@ def test_missing_run_and_missing_artifact_have_distinct_errors(
         parked.replace(seeded_evidence.path)
 
 
-def test_openapi_exposes_p1a_and_decimal_formats(
-    seeded_evidence: SeededEvidence,
-) -> None:
-    document = seeded_evidence.client.get("/openapi.json").json()
+def test_openapi_exposes_p1a_and_decimal_formats() -> None:
+    document = app.openapi()
     paths = document["paths"]
     for endpoint in ENDPOINT_TABLES:
         assert f"/api/v1/runs/{{run_id}}/{endpoint}" in paths
@@ -465,6 +467,7 @@ def test_openapi_exposes_p1a_and_decimal_formats(
     assert schemas["EquityPoint"]["properties"]["total_equity"]["format"] == "decimal"
 
 
+@pytest.mark.integration
 def test_candles_use_read_only_crypto_data_and_feed_compatible_aggregation(
     seeded_evidence: SeededEvidence,
 ) -> None:
@@ -555,6 +558,7 @@ def test_candles_use_read_only_crypto_data_and_feed_compatible_aggregation(
     assert truncated.page.truncated is True
 
 
+@pytest.mark.integration
 def test_prereg_compare_empty_extensions_and_findings_metadata(
     seeded_evidence: SeededEvidence,
 ) -> None:
