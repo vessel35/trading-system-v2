@@ -32,255 +32,285 @@ type CursorResponse<T> = {
   };
 };
 
+export const EVIDENCE_ROW_LIMIT = 5_000;
+export const EVIDENCE_PAGE_LIMIT = 25;
+
+export interface EvidencePage<T> {
+  readonly rows: T[];
+  readonly truncated: boolean;
+  readonly limit: number;
+  readonly pageLimit: number;
+}
+
+function evidencePage<T>(rows: T[], truncated: boolean): EvidencePage<T> {
+  return {
+    rows,
+    truncated,
+    limit: EVIDENCE_ROW_LIMIT,
+    pageLimit: EVIDENCE_PAGE_LIMIT,
+  };
+}
+
+export function isTruncatedEvidence(
+  value: EvidencePage<unknown> | null | undefined,
+): boolean {
+  return value?.truncated ?? false;
+}
+
 export async function allPages<T>(
   request: (afterSeq: number) => Promise<CursorResponse<T>>,
-): Promise<T[]> {
+): Promise<EvidencePage<T>> {
   const rows: T[] = [];
   let afterSeq = 0;
-  for (;;) {
+  for (let pageCount = 1; pageCount <= EVIDENCE_PAGE_LIMIT; pageCount += 1) {
     const page = await request(afterSeq);
-    rows.push(...page.data);
+    const remaining = EVIDENCE_ROW_LIMIT - rows.length;
+    rows.push(...page.data.slice(0, remaining));
     if (!page.page.has_more || page.page.next_after_seq === null) {
-      return rows;
+      return evidencePage(rows, page.data.length > remaining);
+    }
+    if (
+      rows.length >= EVIDENCE_ROW_LIMIT ||
+      pageCount >= EVIDENCE_PAGE_LIMIT ||
+      page.page.next_after_seq === afterSeq
+    ) {
+      return evidencePage(rows, true);
     }
     afterSeq = page.page.next_after_seq;
   }
+  return evidencePage(rows, true);
 }
 
-function cursorQuery<T>(
+function useCursorQuery<T>(
   queryKey: readonly unknown[],
   request: (afterSeq: number) => Promise<CursorResponse<T>>,
+  enabled = true,
 ) {
-  return useQuery({
+  const query = useQuery({
     queryKey,
     queryFn: () => allPages(request),
+    enabled,
   });
+  return {
+    ...query,
+    data: query.data?.rows,
+    evidence: query.data,
+  };
 }
 
 export function useTrades(runId: string) {
-  return useQuery({
-    queryKey: ["evidence", runId, "trades"],
-    queryFn: () =>
-      allPages<Trade>(async (after_seq) => {
-        const { data, error } = await apiClient.GET(
-          "/api/v1/runs/{run_id}/trades",
-          {
-            params: { path: { run_id: runId }, query: { after_seq, limit: 200 } },
-          },
-        );
-        if (error) throw apiRequestError(error);
-        if (!data) throw new Error("거래 Evidence 응답이 비어 있습니다.");
-        return data;
-      }),
-  });
+  return useCursorQuery<Trade>(
+    ["evidence", runId, "trades"],
+    async (after_seq) => {
+      const { data, error } = await apiClient.GET(
+        "/api/v1/runs/{run_id}/trades",
+        {
+          params: { path: { run_id: runId }, query: { after_seq, limit: 200 } },
+        },
+      );
+      if (error) throw apiRequestError(error);
+      if (!data) throw new Error("거래 Evidence 응답이 비어 있습니다.");
+      return data;
+    },
+  );
 }
 
 export function useEquityEvidence(runId: string) {
-  const chart = useQuery({
-    queryKey: ["evidence", runId, "chart-summaries"],
-    queryFn: () =>
-      allPages<ChartSummary>(async (after_seq) => {
-        const { data, error } = await apiClient.GET(
-          "/api/v1/runs/{run_id}/chart-summaries",
-          {
-            params: { path: { run_id: runId }, query: { after_seq, limit: 200 } },
-          },
-        );
-        if (error) throw apiRequestError(error);
-        if (!data) throw new Error("차트 Evidence 응답이 비어 있습니다.");
-        return data;
-      }),
-  });
+  const chart = useCursorQuery<ChartSummary>(
+    ["evidence", runId, "chart-summaries"],
+    async (after_seq) => {
+      const { data, error } = await apiClient.GET(
+        "/api/v1/runs/{run_id}/chart-summaries",
+        {
+          params: { path: { run_id: runId }, query: { after_seq, limit: 200 } },
+        },
+      );
+      if (error) throw apiRequestError(error);
+      if (!data) throw new Error("차트 Evidence 응답이 비어 있습니다.");
+      return data;
+    },
+  );
   const chartHasEquity =
     chart.data?.some((point) => point.series_name === "equity") ?? false;
-  const equity = useQuery({
-    queryKey: ["evidence", runId, "equity"],
-    queryFn: () =>
-      allPages<EquityPoint>(async (after_seq) => {
-        const { data, error } = await apiClient.GET(
-          "/api/v1/runs/{run_id}/equity",
-          {
-            params: { path: { run_id: runId }, query: { after_seq, limit: 200 } },
-          },
-        );
-        if (error) throw apiRequestError(error);
-        if (!data) throw new Error("자본 Evidence 응답이 비어 있습니다.");
-        return data;
-      }),
-    enabled: chart.isSuccess && !chartHasEquity,
-  });
+  const equity = useCursorQuery<EquityPoint>(
+    ["evidence", runId, "equity"],
+    async (after_seq) => {
+      const { data, error } = await apiClient.GET(
+        "/api/v1/runs/{run_id}/equity",
+        {
+          params: { path: { run_id: runId }, query: { after_seq, limit: 200 } },
+        },
+      );
+      if (error) throw apiRequestError(error);
+      if (!data) throw new Error("자본 Evidence 응답이 비어 있습니다.");
+      return data;
+    },
+    chart.isSuccess && !chartHasEquity,
+  );
   return { chart, equity };
 }
 
 export function useExecutions(runId: string, tradeId?: number) {
-  return useQuery({
-    queryKey: ["evidence", runId, "executions", tradeId ?? "all"],
-    queryFn: () =>
-      allPages<Execution>(async (after_seq) => {
-        const { data, error } = await apiClient.GET(
-          "/api/v1/runs/{run_id}/executions",
-          {
-            params: {
-              path: { run_id: runId },
-              query: { after_seq, limit: 200, trade_id: tradeId },
-            },
+  return useCursorQuery<Execution>(
+    ["evidence", runId, "executions", tradeId ?? "all"],
+    async (after_seq) => {
+      const { data, error } = await apiClient.GET(
+        "/api/v1/runs/{run_id}/executions",
+        {
+          params: {
+            path: { run_id: runId },
+            query: { after_seq, limit: 200, trade_id: tradeId },
           },
-        );
-        if (error) throw apiRequestError(error);
-        if (!data) throw new Error("체결 Evidence 응답이 비어 있습니다.");
-        return data;
-      }),
-    enabled: tradeId === undefined || tradeId > 0,
-  });
+        },
+      );
+      if (error) throw apiRequestError(error);
+      if (!data) throw new Error("체결 Evidence 응답이 비어 있습니다.");
+      return data;
+    },
+    tradeId === undefined || tradeId > 0,
+  );
 }
 
 export function useDrawdownEpisodes(runId: string) {
-  return useQuery({
-    queryKey: ["evidence", runId, "drawdown-episodes"],
-    queryFn: () =>
-      allPages<DrawdownEpisode>(async (after_seq) => {
-        const { data, error } = await apiClient.GET(
-          "/api/v1/runs/{run_id}/drawdown-episodes",
-          {
-            params: {
-              path: { run_id: runId },
-              query: { after_seq, limit: 200, kind: "drawdown" },
-            },
+  return useCursorQuery<DrawdownEpisode>(
+    ["evidence", runId, "drawdown-episodes"],
+    async (after_seq) => {
+      const { data, error } = await apiClient.GET(
+        "/api/v1/runs/{run_id}/drawdown-episodes",
+        {
+          params: {
+            path: { run_id: runId },
+            query: { after_seq, limit: 200, kind: "drawdown" },
           },
-        );
-        if (error) throw apiRequestError(error);
-        if (!data) throw new Error("드로다운 Evidence 응답이 비어 있습니다.");
-        return data;
-      }),
-  });
+        },
+      );
+      if (error) throw apiRequestError(error);
+      if (!data) throw new Error("드로다운 Evidence 응답이 비어 있습니다.");
+      return data;
+    },
+  );
 }
 
 export function useOutcomeBuckets(runId: string) {
-  return useQuery({
-    queryKey: ["evidence", runId, "outcome-buckets"],
-    queryFn: () =>
-      allPages<OutcomeBucket>(async (after_seq) => {
-        const { data, error } = await apiClient.GET(
-          "/api/v1/runs/{run_id}/outcome-buckets",
-          {
-            params: {
-              path: { run_id: runId },
-              query: {
-                after_seq,
-                limit: 200,
-                subject_kind: "trade",
-                bucket_name: "outcome_class",
-              },
+  return useCursorQuery<OutcomeBucket>(
+    ["evidence", runId, "outcome-buckets"],
+    async (after_seq) => {
+      const { data, error } = await apiClient.GET(
+        "/api/v1/runs/{run_id}/outcome-buckets",
+        {
+          params: {
+            path: { run_id: runId },
+            query: {
+              after_seq,
+              limit: 200,
+              subject_kind: "trade",
+              bucket_name: "outcome_class",
             },
           },
-        );
-        if (error) throw apiRequestError(error);
-        if (!data) throw new Error("결과 버킷 응답이 비어 있습니다.");
-        return data;
-      }),
-  });
+        },
+      );
+      if (error) throw apiRequestError(error);
+      if (!data) throw new Error("결과 버킷 응답이 비어 있습니다.");
+      return data;
+    },
+  );
 }
 
 export function useIntegrityChecks(runId: string) {
-  return useQuery({
-    queryKey: ["evidence", runId, "integrity-checks"],
-    queryFn: () =>
-      allPages<IntegrityCheck>(async (after_seq) => {
-        const { data, error } = await apiClient.GET(
-          "/api/v1/runs/{run_id}/integrity-checks",
-          {
-            params: { path: { run_id: runId }, query: { after_seq, limit: 200 } },
-          },
-        );
-        if (error) throw apiRequestError(error);
-        if (!data) throw new Error("무결성 Evidence 응답이 비어 있습니다.");
-        return data;
-      }),
-  });
+  return useCursorQuery<IntegrityCheck>(
+    ["evidence", runId, "integrity-checks"],
+    async (after_seq) => {
+      const { data, error } = await apiClient.GET(
+        "/api/v1/runs/{run_id}/integrity-checks",
+        {
+          params: { path: { run_id: runId }, query: { after_seq, limit: 200 } },
+        },
+      );
+      if (error) throw apiRequestError(error);
+      if (!data) throw new Error("무결성 Evidence 응답이 비어 있습니다.");
+      return data;
+    },
+  );
 }
 
 export function useTradeDrawerEvidence(runId: string, tradeId: number | null) {
   const enabled = tradeId !== null;
-  const funding = useQuery({
-    queryKey: ["evidence", runId, "funding", tradeId],
-    queryFn: () =>
-      allPages<FundingSettlement>(async (after_seq) => {
-        const { data, error } = await apiClient.GET(
-          "/api/v1/runs/{run_id}/funding-settlements",
-          {
-            params: {
-              path: { run_id: runId },
-              query: { after_seq, limit: 200, trade_id: tradeId ?? undefined },
+  const funding = useCursorQuery<FundingSettlement>(
+    ["evidence", runId, "funding", tradeId],
+    async (after_seq) => {
+      const { data, error } = await apiClient.GET(
+        "/api/v1/runs/{run_id}/funding-settlements",
+        {
+          params: {
+            path: { run_id: runId },
+            query: { after_seq, limit: 200, trade_id: tradeId ?? undefined },
+          },
+        },
+      );
+      if (error) throw apiRequestError(error);
+      if (!data) throw new Error("펀딩 Evidence 응답이 비어 있습니다.");
+      return data;
+    },
+    enabled,
+  );
+  const features = useCursorQuery<TradeFeature>(
+    ["evidence", runId, "trade-features", tradeId],
+    async (after_seq) => {
+      const { data, error } = await apiClient.GET(
+        "/api/v1/runs/{run_id}/trade-features",
+        {
+          params: {
+            path: { run_id: runId },
+            query: { after_seq, limit: 200, trade_id: tradeId ?? undefined },
+          },
+        },
+      );
+      if (error) throw apiRequestError(error);
+      if (!data) throw new Error("거래 특징 응답이 비어 있습니다.");
+      return data;
+    },
+    enabled,
+  );
+  const candidates = useCursorQuery<CandidateEvent>(
+    ["evidence", runId, "candidate-events", tradeId],
+    async (after_seq) => {
+      const { data, error } = await apiClient.GET(
+        "/api/v1/runs/{run_id}/candidate-events",
+        {
+          params: {
+            path: { run_id: runId },
+            query: {
+              after_seq,
+              limit: 200,
+              linked_trade_id: tradeId ?? undefined,
             },
           },
-        );
-        if (error) throw apiRequestError(error);
-        if (!data) throw new Error("펀딩 Evidence 응답이 비어 있습니다.");
-        return data;
-      }),
+        },
+      );
+      if (error) throw apiRequestError(error);
+      if (!data) throw new Error("후보 Evidence 응답이 비어 있습니다.");
+      return data;
+    },
     enabled,
-  });
-  const features = useQuery({
-    queryKey: ["evidence", runId, "trade-features", tradeId],
-    queryFn: () =>
-      allPages<TradeFeature>(async (after_seq) => {
-        const { data, error } = await apiClient.GET(
-          "/api/v1/runs/{run_id}/trade-features",
-          {
-            params: {
-              path: { run_id: runId },
-              query: { after_seq, limit: 200, trade_id: tradeId ?? undefined },
-            },
+  );
+  const positions = useCursorQuery<Position>(
+    ["evidence", runId, "positions", tradeId],
+    async (after_seq) => {
+      const { data, error } = await apiClient.GET(
+        "/api/v1/runs/{run_id}/positions",
+        {
+          params: {
+            path: { run_id: runId },
+            query: { after_seq, limit: 200, trade_id: tradeId ?? undefined },
           },
-        );
-        if (error) throw apiRequestError(error);
-        if (!data) throw new Error("거래 특징 응답이 비어 있습니다.");
-        return data;
-      }),
+        },
+      );
+      if (error) throw apiRequestError(error);
+      if (!data) throw new Error("포지션 Evidence 응답이 비어 있습니다.");
+      return data;
+    },
     enabled,
-  });
-  const candidates = useQuery({
-    queryKey: ["evidence", runId, "candidate-events", tradeId],
-    queryFn: () =>
-      allPages<CandidateEvent>(async (after_seq) => {
-        const { data, error } = await apiClient.GET(
-          "/api/v1/runs/{run_id}/candidate-events",
-          {
-            params: {
-              path: { run_id: runId },
-              query: {
-                after_seq,
-                limit: 200,
-                linked_trade_id: tradeId ?? undefined,
-              },
-            },
-          },
-        );
-        if (error) throw apiRequestError(error);
-        if (!data) throw new Error("후보 Evidence 응답이 비어 있습니다.");
-        return data;
-      }),
-    enabled,
-  });
-  const positions = useQuery({
-    queryKey: ["evidence", runId, "positions", tradeId],
-    queryFn: () =>
-      allPages<Position>(async (after_seq) => {
-        const { data, error } = await apiClient.GET(
-          "/api/v1/runs/{run_id}/positions",
-          {
-            params: {
-              path: { run_id: runId },
-              query: { after_seq, limit: 200, trade_id: tradeId ?? undefined },
-            },
-          },
-        );
-        if (error) throw apiRequestError(error);
-        if (!data) throw new Error("포지션 Evidence 응답이 비어 있습니다.");
-        return data;
-      }),
-    enabled,
-  });
+  );
   return { funding, features, candidates, positions };
 }
 
@@ -299,7 +329,7 @@ export function useChartEvidence(runId: string) {
       return data as CandleCollection;
     },
   });
-  const indicators = cursorQuery<IndicatorSnapshot>(
+  const indicators = useCursorQuery<IndicatorSnapshot>(
     ["evidence", runId, "indicator-snapshots"],
     async (after_seq) => {
       const { data, error } = await apiClient.GET(
@@ -320,7 +350,7 @@ export function useChartEvidence(runId: string) {
 }
 
 export function useSignals(runId: string) {
-  return cursorQuery<Signal>(["evidence", runId, "signals"], async (after_seq) => {
+  return useCursorQuery<Signal>(["evidence", runId, "signals"], async (after_seq) => {
     const { data, error } = await apiClient.GET("/api/v1/runs/{run_id}/signals", {
       params: { path: { run_id: runId }, query: { after_seq, limit: 200 } },
     });
@@ -331,7 +361,7 @@ export function useSignals(runId: string) {
 }
 
 export function useDecisions(runId: string) {
-  return cursorQuery<Decision>(
+  return useCursorQuery<Decision>(
     ["evidence", runId, "decisions"],
     async (after_seq) => {
       const { data, error } = await apiClient.GET(
@@ -348,7 +378,7 @@ export function useDecisions(runId: string) {
 }
 
 export function useCandidateEvents(runId: string) {
-  return cursorQuery<CandidateEvent>(
+  return useCursorQuery<CandidateEvent>(
     ["evidence", runId, "candidate-events", "all"],
     async (after_seq) => {
       const { data, error } = await apiClient.GET(
@@ -365,7 +395,7 @@ export function useCandidateEvents(runId: string) {
 }
 
 export function useMissedOpportunities(runId: string) {
-  return cursorQuery<MissedOpportunity>(
+  return useCursorQuery<MissedOpportunity>(
     ["evidence", runId, "missed-opportunities"],
     async (after_seq) => {
       const { data, error } = await apiClient.GET(
@@ -382,7 +412,7 @@ export function useMissedOpportunities(runId: string) {
 }
 
 export function useResearchEvidence(runId: string) {
-  const conditional = cursorQuery<ConditionalExpectancy>(
+  const conditional = useCursorQuery<ConditionalExpectancy>(
     ["evidence", runId, "conditional-expectancy"],
     async (after_seq) => {
       const { data, error } = await apiClient.GET(
@@ -396,7 +426,7 @@ export function useResearchEvidence(runId: string) {
       return data;
     },
   );
-  const findings = cursorQuery<Finding>(
+  const findings = useCursorQuery<Finding>(
     ["evidence", runId, "findings"],
     async (after_seq) => {
       const { data, error } = await apiClient.GET("/api/v1/runs/{run_id}/findings", {

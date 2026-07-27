@@ -47,12 +47,49 @@ import {
   TableHeader,
   TableRow,
 } from "../ui/table";
-import { EvidenceError, EvidenceLoading } from "./evidence-state";
+import {
+  EvidenceError,
+  EvidenceLoading,
+  EvidenceTruncationNotice,
+} from "./evidence-state";
 
-type EquityDatum = { time: UTCTimestamp; value: number };
+export type EquityDatum = { time: UTCTimestamp; value: number };
+
+export interface EquityMarkerScale {
+  first: number;
+  bucketWidth: number;
+}
 
 function epochSeconds(value: string): UTCTimestamp {
   return Math.floor(new Date(value).getTime() / 1000) as UTCTimestamp;
+}
+
+export function equityMarkerScale(
+  data: readonly EquityDatum[],
+): EquityMarkerScale | null {
+  if (data.length < 2) return null;
+  let first = Number(data[0].time);
+  let previous = first;
+  let bucketWidth = Number.POSITIVE_INFINITY;
+  for (let index = 1; index < data.length; index += 1) {
+    const current = Number(data[index].time);
+    first = Math.min(first, current);
+    const width = current - previous;
+    if (width > 0) bucketWidth = Math.min(bucketWidth, width);
+    previous = current;
+  }
+  return Number.isFinite(bucketWidth) ? { first, bucketWidth } : null;
+}
+
+export function equityMarkerTime(
+  value: string,
+  scale: EquityMarkerScale | null,
+): UTCTimestamp {
+  if (!scale) return epochSeconds(value);
+  const { first, bucketWidth } = scale;
+  const instant = Number(epochSeconds(value));
+  const bucket = Math.max(0, Math.floor((instant - first) / bucketWidth));
+  return (first + bucket * bucketWidth) as UTCTimestamp;
 }
 
 function EquityChart({
@@ -67,6 +104,7 @@ function EquityChart({
   logarithmic: boolean;
 }) {
   const container = useRef<HTMLDivElement>(null);
+  const markerScale = useMemo(() => equityMarkerScale(data), [data]);
 
   useEffect(() => {
     if (!container.current || data.length === 0) return;
@@ -96,14 +134,15 @@ function EquityChart({
     });
     series.setData(data);
     if (markersVisible) {
-      const markers: SeriesMarker<UTCTimestamp>[] = executions.map((execution) => ({
-        time: (Math.floor(new Date(execution.execution_ts).getTime() / 3_600_000) *
-          3600) as UTCTimestamp,
-        position: execution.side === "BUY" ? "belowBar" : "aboveBar",
-        color: execution.side === "BUY" ? "#34d399" : "#fb7185",
-        shape: execution.side === "BUY" ? "arrowUp" : "arrowDown",
-        text: execution.trade_id ? `#${execution.trade_id}` : execution.side,
-      }));
+      const markers: SeriesMarker<UTCTimestamp>[] = executions
+        .map((execution) => ({
+          time: equityMarkerTime(execution.execution_ts, markerScale),
+          position: execution.side === "BUY" ? "belowBar" as const : "aboveBar" as const,
+          color: execution.side === "BUY" ? "#34d399" : "#fb7185",
+          shape: execution.side === "BUY" ? "arrowUp" as const : "arrowDown" as const,
+          text: execution.trade_id ? `#${execution.trade_id}` : execution.side,
+        }))
+        .sort((left, right) => Number(left.time) - Number(right.time));
       createSeriesMarkers(series, markers);
     }
     chart.timeScale().fitContent();
@@ -115,7 +154,7 @@ function EquityChart({
       resize.disconnect();
       chart.remove();
     };
-  }, [data, executions, logarithmic, markersVisible]);
+  }, [data, executions, logarithmic, markerScale, markersVisible]);
 
   return <div ref={container} className="h-[310px] w-full" aria-label="자본곡선" />;
 }
@@ -221,8 +260,10 @@ export function EquityDrawdownTab({
   const episodes = useDrawdownEpisodes(runId);
   const [markersVisible, setMarkersVisible] = useState(true);
   const [logarithmic, setLogarithmic] = useState(false);
-  const deepestEpisode = episodes.data?.reduce((deepest, episode) =>
-    episode.depth_pct < deepest.depth_pct ? episode : deepest,
+  const deepestEpisode = episodes.data?.reduce<DrawdownEpisode | null>(
+    (deepest, episode) =>
+      deepest === null || episode.depth_pct < deepest.depth_pct ? episode : deepest,
+    null,
   );
 
   const equitySeries = useMemo(() => {
@@ -246,7 +287,7 @@ export function EquityDrawdownTab({
           (point): point is ChartSummary & { value: number } =>
             point.series_name === "drawdown" && point.value !== null,
         )
-        .map((point) => ({ ts: point.bucket_ts, value: point.value * 100 }));
+        .map((point) => ({ ts: point.bucket_ts, value: point.value! * 100 }));
       return stored.length > 0
         ? stored
         : (equity.data ?? []).map((point) => ({
@@ -265,6 +306,14 @@ export function EquityDrawdownTab({
 
   return (
     <div className="space-y-4">
+      <EvidenceTruncationNotice
+        sources={[
+          chart.evidence,
+          equity.evidence,
+          executions.evidence,
+          episodes.evidence,
+        ]}
+      />
       <Card>
         <CardHeader className="flex-row items-start justify-between gap-3">
           <div>

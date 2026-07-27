@@ -24,7 +24,11 @@ import {
   TableHeader,
   TableRow,
 } from "../ui/table";
-import { EvidenceError, EvidenceLoading } from "./evidence-state";
+import {
+  EvidenceError,
+  EvidenceLoading,
+  EvidenceTruncationNotice,
+} from "./evidence-state";
 
 function observedMetric(summary: RunSummary | null, metric: string): number | null {
   if (!summary) return null;
@@ -96,6 +100,9 @@ export function ResearchNotesTab({
 
   return (
     <div className="space-y-4">
+      <EvidenceTruncationNotice
+        sources={[evidence.conditional.evidence, evidence.findings.evidence]}
+      />
       <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
         <Card>
           <CardHeader>
@@ -144,9 +151,11 @@ export function ResearchNotesTab({
               <div className="grid min-h-72 place-items-center rounded-lg border border-dashed text-center">
                 <div>
                   <FileSearch className="mx-auto h-8 w-8 text-muted-foreground" />
-                  <p className="mt-3 font-medium">이 실행은 조건부 분석을 산출하지 않음</p>
+                  <p className="mt-3 font-medium">조건부 기대값은 미구현·유보 상태입니다.</p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    빈 Evidence는 오류가 아니며 아래 사전등록은 계속 표시됩니다.
+                    이 지표는 아직 기록 경로가 미구현이라 유보되었습니다(3차).
+                    CONDITION_SIGNATURE × CONDITIONAL_EXPECTANCY 기록 경로가 마련되면
+                    표시됩니다.
                   </p>
                 </div>
               </div>
@@ -299,7 +308,9 @@ export function ResearchNotesTab({
             </div>
           ) : (
             <p className="py-14 text-center text-sm text-muted-foreground">
-              이 실행은 연구 노트(FINDING_CLAIM)를 산출하지 않았습니다.
+              연구 노트(FINDING_CLAIM)는 아직 기록 경로가 미구현이라
+              유보되었습니다(3차). 기록 경로가 마련되면 이 위치에서 근거와 함께
+              표시됩니다.
             </p>
           )}
         </CardContent>

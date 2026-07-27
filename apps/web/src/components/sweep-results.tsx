@@ -94,12 +94,18 @@ function SweepCell({
   );
 }
 
-export function SweepResults({ sweep }: { sweep: TrackedSweep | undefined }) {
+export function SweepResults({
+  sweep,
+  sweepId,
+}: {
+  sweep: TrackedSweep | undefined;
+  sweepId?: string | null;
+}) {
   const [, navigate] = useLocation();
   const basket = useComparisonBasket();
-  const result = useSweep(
-    sweep?.status.status === "SUCCEEDED" ? sweep.status.sweep_id : null,
-  );
+  const resolvedSweepId =
+    sweepId ?? (sweep?.status.status === "SUCCEEDED" ? sweep.status.sweep_id : null);
+  const result = useSweep(resolvedSweepId);
   const [metric, setMetric] = useState<MetricName>("sortino");
   const [view, setView] = useState<"heatmap" | "list">("heatmap");
   const [selected, setSelected] = useState<string[]>([]);
@@ -148,9 +154,9 @@ export function SweepResults({ sweep }: { sweep: TrackedSweep | undefined }) {
     selected.includes(item.run.run_id),
   );
 
-  if (!sweep) return null;
+  if (!sweep && !resolvedSweepId) return null;
 
-  if (sweep.status.status !== "SUCCEEDED") {
+  if (!resolvedSweepId && sweep && sweep.status.status !== "SUCCEEDED") {
     return (
       <Card>
         <CardContent className="flex items-center gap-3 p-5">

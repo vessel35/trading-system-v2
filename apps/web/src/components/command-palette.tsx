@@ -1,13 +1,15 @@
 import {
+  AlertTriangle,
   BarChart3,
-  BookOpenCheck,
   FlaskConical,
   LayoutList,
   Search,
 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 
+import { apiClient, requestErrorMessage } from "../api/client";
 import { useCatalogFilters } from "../contexts/catalog-filters";
 import {
   Dialog,
@@ -30,29 +32,55 @@ const commands = [
     icon: LayoutList,
   },
   {
-    label: "Evidence 분석",
-    description: "P1에서 활성화",
-    path: null,
+    label: "실행 비교 분석",
+    description: "선택한 실행의 저장 지표와 설정 비교",
+    path: "/compare",
     icon: BarChart3,
   },
   {
     label: "실행 관리",
-    description: "P2 dry-run 관리에서 활성화",
-    path: null,
+    description: "dry-run 트리거·스윕과 실행 상태 확인",
+    path: "/manage",
     icon: FlaskConical,
   },
-  {
-    label: "전략",
-    description: "전략 레지스트리 참조 예정",
-    path: null,
-    icon: BookOpenCheck,
-  },
 ] as const;
+
+const COMMAND_PALETTE_RUN_LIMIT = 1_000;
+const COMMAND_PALETTE_PAGE_LIMIT = 10;
 
 export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const [, navigate] = useLocation();
   const { updateFilters } = useCatalogFilters();
   const [search, setSearch] = useState("");
+  const runs = useQuery({
+    queryKey: ["command-palette", "runs"],
+    enabled: open,
+    staleTime: 30_000,
+    queryFn: async () => {
+      const rows = [];
+      let offset = 0;
+      let truncated = false;
+      for (
+        let pageCount = 0;
+        pageCount < COMMAND_PALETTE_PAGE_LIMIT;
+        pageCount += 1
+      ) {
+        const { data, error } = await apiClient.GET("/api/v1/runs", {
+          params: { query: { limit: 100, offset, sort: "-created_at" } },
+        });
+        if (error) throw new Error(requestErrorMessage(error));
+        if (!data) throw new Error("실행 검색 응답이 비어 있습니다.");
+        rows.push(...data.data);
+        if (!data.page.has_more) break;
+        if (pageCount === COMMAND_PALETTE_PAGE_LIMIT - 1) {
+          truncated = true;
+          break;
+        }
+        offset += data.page.limit;
+      }
+      return { rows, truncated };
+    },
+  });
 
   useEffect(() => {
     if (!open) {
@@ -66,9 +94,25 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       !normalized ||
       `${command.label} ${command.description}`.toLowerCase().includes(normalized),
   );
+  const runRows = runs.data?.rows ?? [];
+  const matchingRuns = runRows
+    .filter((run) =>
+      `${run.run_id} ${run.run_name}`.toLowerCase().includes(normalized),
+    )
+    .slice(0, 6);
 
   function submitSearch() {
     if (!normalized) return;
+    const exactRun = runRows.find(
+      (run) =>
+        run.run_id.toLowerCase() === normalized ||
+        run.run_name.toLowerCase() === normalized,
+    );
+    if (exactRun) {
+      navigate(`/runs/${encodeURIComponent(exactRun.run_id)}`);
+      onOpenChange(false);
+      return;
+    }
     updateFilters({ symbol: search.trim().toUpperCase() });
     navigate("/runs");
     onOpenChange(false);
@@ -80,7 +124,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
         <div>
           <DialogTitle>명령 팔레트</DialogTitle>
           <DialogDescription>
-            구획을 이동하거나 심볼로 카탈로그를 바로 좁힙니다.
+            구획을 이동하거나 run_id·run_name을 열고 심볼로 카탈로그를 좁힙니다.
           </DialogDescription>
         </div>
         <div className="relative">
@@ -92,11 +136,23 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
               if (event.key === "Enter") submitSearch();
             }}
             autoFocus
-            placeholder="명령 또는 심볼 검색…"
+            placeholder="명령, run_id, run_name 또는 심볼 검색…"
             className="pl-9"
           />
         </div>
         <div className="space-y-1">
+          {runs.data?.truncated && (
+            <div
+              role="status"
+              className="mb-2 flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 p-3 text-xs text-amber-100"
+            >
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <p>
+                최근 {COMMAND_PALETTE_RUN_LIMIT.toLocaleString()}개 실행까지만
+                조회했습니다. 이전 실행을 찾으려면 카탈로그에서 조건을 좁히세요.
+              </p>
+            </div>
+          )}
           {visible.map((command) => {
             const Icon = command.icon;
             return (
@@ -121,6 +177,34 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
               </button>
             );
           })}
+          {normalized && matchingRuns.length > 0 && (
+            <div className="border-t pt-2">
+              <p className="px-3 pb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                실행 검색
+              </p>
+              {matchingRuns.map((run) => (
+                <button
+                  key={run.run_id}
+                  type="button"
+                  onClick={() => {
+                    navigate(`/runs/${encodeURIComponent(run.run_id)}`);
+                    onOpenChange(false);
+                  }}
+                  className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-accent"
+                >
+                  <Search className="h-4 w-4 text-teal-400" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium">
+                      {run.run_name}
+                    </span>
+                    <span className="block truncate font-mono text-[10px] text-muted-foreground">
+                      {run.run_id}
+                    </span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
           {normalized && (
             <button
               type="button"
