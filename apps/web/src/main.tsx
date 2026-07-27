@@ -3,6 +3,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import { App } from "./app";
+import { ErrorBoundary } from "./components/error-boundary";
 import { CatalogFilterProvider } from "./contexts/catalog-filters";
 import { ComparisonBasketProvider } from "./contexts/comparison-basket";
 import { RunJobsProvider } from "./contexts/run-jobs";
@@ -25,14 +26,16 @@ if (!root) {
 
 createRoot(root).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <CatalogFilterProvider>
-        <ComparisonBasketProvider>
-          <RunJobsProvider>
-            <App />
-          </RunJobsProvider>
-        </ComparisonBasketProvider>
-      </CatalogFilterProvider>
-    </QueryClientProvider>
+    <ErrorBoundary scope="app">
+      <QueryClientProvider client={queryClient}>
+        <CatalogFilterProvider>
+          <ComparisonBasketProvider>
+            <RunJobsProvider>
+              <App />
+            </RunJobsProvider>
+          </ComparisonBasketProvider>
+        </CatalogFilterProvider>
+      </QueryClientProvider>
+    </ErrorBoundary>
   </StrictMode>,
 );

@@ -10,7 +10,7 @@ import {
   ShieldCheck,
   XCircle,
 } from "lucide-react";
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "wouter";
 
 import {
@@ -277,7 +277,7 @@ function statusIcon(status: JobStatus["status"]) {
   return <Clock3 className="h-4 w-4 text-amber-300" />;
 }
 
-function JobRow({
+export function JobRow({
   job,
   onEdit,
 }: {
@@ -308,8 +308,18 @@ function JobRow({
             </p>
           )}
           {status.status === "RUNNING" && (
-            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted">
-              <div className="h-full w-2/3 animate-pulse rounded-full bg-teal-400/80" />
+            <div className="mt-3">
+              <div
+                role="progressbar"
+                aria-label="실행 중"
+                aria-valuetext="서버 수치 진행률 미제공"
+                className="h-1.5 overflow-hidden rounded-full bg-muted"
+              >
+                <div className="h-full w-full animate-pulse bg-gradient-to-r from-transparent via-teal-400/80 to-transparent" />
+              </div>
+              <p className="mt-1.5 text-[10px] text-muted-foreground">
+                서버가 수치 진행률을 제공하지 않아 완료율은 표시하지 않습니다.
+              </p>
             </div>
           )}
           {status.error && (
@@ -349,7 +359,13 @@ function JobRow({
   );
 }
 
-function SweepJobRow({ sweep }: { sweep: TrackedSweep }) {
+function SweepJobRow({
+  sweep,
+  onSelectResult,
+}: {
+  sweep: TrackedSweep;
+  onSelectResult: (sweepId: string) => void;
+}) {
   return (
     <div className="rounded-lg border bg-background/45 p-4">
       <div className="flex items-start gap-3">
@@ -368,18 +384,40 @@ function SweepJobRow({ sweep }: { sweep: TrackedSweep }) {
             {formatTimestamp(sweep.submittedAt)}
           </p>
           {sweep.status.status === "RUNNING" && (
-            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted">
-              <div className="h-full w-2/3 animate-pulse rounded-full bg-teal-400/80" />
+            <div className="mt-3">
+              <div
+                role="progressbar"
+                aria-label="스윕 실행 중"
+                aria-valuetext="서버 수치 진행률 미제공"
+                className="h-1.5 overflow-hidden rounded-full bg-muted"
+              >
+                <div className="h-full w-full animate-pulse bg-gradient-to-r from-transparent via-teal-400/80 to-transparent" />
+              </div>
+              <p className="mt-1.5 text-[10px] text-muted-foreground">
+                서버가 수치 진행률을 제공하지 않아 완료율은 표시하지 않습니다.
+              </p>
             </div>
           )}
           {sweep.status.error && (
             <p className="mt-2 text-xs text-red-300">{sweep.status.error.message}</p>
           )}
           {sweep.status.sweep_id && (
-            <p className="mt-2 font-mono text-[10px] text-muted-foreground">
-              {sweep.status.sweep_id} · {sweep.status.run_count ?? "—"} runs ·
-              representative {shortHash(sweep.status.run_id, 18)}
-            </p>
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+              <p className="font-mono text-[10px] text-muted-foreground">
+                {sweep.status.sweep_id} · {sweep.status.run_count ?? "—"} runs ·
+                representative {shortHash(sweep.status.run_id, 18)}
+              </p>
+              {sweep.status.status === "SUCCEEDED" && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => onSelectResult(sweep.status.sweep_id!)}
+                >
+                  결과 보기
+                </Button>
+              )}
+            </div>
           )}
         </div>
       </div>
@@ -389,6 +427,7 @@ function SweepJobRow({ sweep }: { sweep: TrackedSweep }) {
 
 export function RunManagementPage() {
   const { jobs, sweeps, track, trackSweep } = useRunJobs();
+  const formRef = useRef<HTMLFormElement>(null);
   const [form, setForm] = useState<FormState>(initialForm);
   const [busy, setBusy] = useState<"validate" | "trigger" | "sweep" | null>(
     null,
@@ -408,6 +447,14 @@ export function RunManagementPage() {
     kind: "success" | "error";
     message: string;
   } | null>(null);
+  const initialSweepId =
+    typeof window === "undefined"
+      ? ""
+      : new URLSearchParams(window.location.search).get("sweep_id") ?? "";
+  const [sweepLookup, setSweepLookup] = useState(initialSweepId);
+  const [selectedSweepId, setSelectedSweepId] = useState<string | null>(
+    initialSweepId || null,
+  );
 
   const strategies = useQuery({
     queryKey: ["strategies"],
@@ -470,8 +517,40 @@ export function RunManagementPage() {
     setSplit(alignedDefaultSplit(form.start, form.end, form.timeframe));
   }, [form.end, form.start, form.timeframe, splitCustomized]);
 
+  useEffect(() => {
+    const onPopState = () => {
+      const sweepId = new URLSearchParams(window.location.search).get("sweep_id") ?? "";
+      setSweepLookup(sweepId);
+      setSelectedSweepId(sweepId || null);
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  useEffect(() => {
+    if (selectedSweepId) return;
+    const latestSucceeded = sweeps.find(
+      (sweep) =>
+        sweep.status.status === "SUCCEEDED" && Boolean(sweep.status.sweep_id),
+    )?.status.sweep_id;
+    if (latestSucceeded) {
+      setSweepLookup(latestSucceeded);
+      setSelectedSweepId(latestSucceeded);
+    }
+  }, [selectedSweepId, sweeps]);
+
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((current) => ({ ...current, [key]: value }));
+  }
+
+  function openSweepResult(sweepId: string) {
+    const normalized = sweepId.trim();
+    if (!normalized) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set("sweep_id", normalized);
+    window.history.pushState(null, "", url);
+    setSweepLookup(normalized);
+    setSelectedSweepId(normalized);
   }
 
   async function validateConfig(event: FormEvent) {
@@ -650,7 +729,7 @@ export function RunManagementPage() {
       </section>
 
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1.55fr)_minmax(360px,0.85fr)]">
-        <form onSubmit={validateConfig}>
+        <form ref={formRef} onSubmit={validateConfig}>
           <Card>
             <CardHeader>
               <CardTitle>새 백테스트 트리거</CardTitle>
@@ -859,7 +938,11 @@ export function RunManagementPage() {
                   <Label className="sm:col-span-2">
                     risk_per_trade (0 &lt; x ≤ 0.01)
                     <Input
+                      type="number"
                       inputMode="decimal"
+                      min={Number.MIN_VALUE}
+                      max={0.01}
+                      step="any"
                       value={form.riskPerTrade}
                       onChange={(event) => update("riskPerTrade", event.target.value)}
                       required
@@ -869,7 +952,11 @@ export function RunManagementPage() {
                   <Label className="sm:col-span-2">
                     position_size_pct (0 &lt; x ≤ 1)
                     <Input
+                      type="number"
                       inputMode="decimal"
+                      min={Number.MIN_VALUE}
+                      max={1}
+                      step="any"
                       value={form.positionSizePct}
                       onChange={(event) => update("positionSizePct", event.target.value)}
                       required
@@ -975,11 +1062,19 @@ export function RunManagementPage() {
                     onChange={(event) => update("preregEnabled", event.target.checked)}
                     className="h-4 w-4 accent-teal-500"
                   />
-                  선택 사전등록
+                  실행 제출 메타데이터
                   <span className="text-xs font-normal text-muted-foreground">
-                    연구 규율상 가설·주지표 입력 권장
+                    가설·주지표를 제출 payload에 포함
                   </span>
                 </label>
+                <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 p-3 text-xs text-amber-100">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <p>
+                    사전등록 잠금은 쓰기 엔드포인트 미구현으로 유보(3차)되었습니다.
+                    아래 값은 현재 실행 제출에만 포함되며 초안 저장·잠금·불변성을 보장하지
+                    않습니다.
+                  </p>
+                </div>
                 {form.preregEnabled && (
                   <div className="mt-4 grid gap-4 rounded-lg border bg-muted/20 p-4 sm:grid-cols-2">
                     <Label className="sm:col-span-2">
@@ -1254,7 +1349,9 @@ export function RunManagementPage() {
                   </Button>
                   <Button
                     type="button"
-                    onClick={() => void triggerRun()}
+                    onClick={() => {
+                      if (formRef.current?.reportValidity()) void triggerRun();
+                    }}
                     disabled={busy !== null || Boolean(coverageWarning)}
                     title={
                       coverageWarning
@@ -1272,7 +1369,9 @@ export function RunManagementPage() {
                   <Button
                     type="button"
                     variant="secondary"
-                    onClick={() => void triggerSweep()}
+                    onClick={() => {
+                      if (formRef.current?.reportValidity()) void triggerSweep();
+                    }}
                     disabled={busy !== null || Boolean(coverageWarning)}
                     title={
                       coverageWarning
@@ -1316,7 +1415,11 @@ export function RunManagementPage() {
               ) : (
                 <>
                   {sweeps.map((sweep) => (
-                    <SweepJobRow key={sweep.accepted.job_id} sweep={sweep} />
+                    <SweepJobRow
+                      key={sweep.accepted.job_id}
+                      sweep={sweep}
+                      onSelectResult={openSweepResult}
+                    />
                   ))}
                   {jobs.map((job) => (
                     <JobRow
@@ -1331,7 +1434,65 @@ export function RunManagementPage() {
           </CardContent>
         </Card>
       </div>
-      <SweepResults sweep={sweeps[0]} />
+      <Card>
+        <CardHeader>
+          <CardTitle>저장된 스윕 결과 열기</CardTitle>
+          <CardDescription>
+            현재 세션 밖에서 생성된 결과도 sweep_id로 조회하며 선택은 URL에 보존됩니다.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form
+            className="flex flex-col gap-2 sm:flex-row"
+            onSubmit={(event) => {
+              event.preventDefault();
+              openSweepResult(sweepLookup);
+            }}
+          >
+            <Input
+              aria-label="스윕 ID"
+              value={sweepLookup}
+              onChange={(event) => setSweepLookup(event.target.value)}
+              placeholder="sweep_id"
+              required
+            />
+            {sweeps.some((sweep) => sweep.status.sweep_id) && (
+              <select
+                aria-label="현재 세션 스윕 선택"
+                value={selectedSweepId ?? ""}
+                onChange={(event) => {
+                  setSweepLookup(event.target.value);
+                  openSweepResult(event.target.value);
+                }}
+                className={selectClass}
+              >
+                <option value="" disabled>
+                  현재 세션에서 선택
+                </option>
+                {sweeps.flatMap((sweep) =>
+                  sweep.status.sweep_id
+                    ? [
+                        <option key={sweep.status.sweep_id} value={sweep.status.sweep_id}>
+                          {sweep.submission.config.run_name} · {sweep.status.sweep_id}
+                        </option>,
+                      ]
+                    : [],
+                )}
+              </select>
+            )}
+            <Button type="submit" variant="outline">
+              결과 열기
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+      <SweepResults
+        sweep={
+          sweeps.find((sweep) => sweep.status.sweep_id === selectedSweepId) ??
+          (selectedSweepId ? undefined : sweeps[0])
+        }
+        sweepId={selectedSweepId}
+      />
     </div>
   );
 }

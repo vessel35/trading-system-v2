@@ -32,19 +32,52 @@ type CursorResponse<T> = {
   };
 };
 
+export const EVIDENCE_ROW_LIMIT = 5_000;
+export const EVIDENCE_PAGE_LIMIT = 25;
+
+export type EvidenceRows<T> = T[] & {
+  readonly truncated: boolean;
+  readonly limit: number;
+  readonly pageLimit: number;
+};
+
+function evidenceRows<T>(rows: T[], truncated: boolean): EvidenceRows<T> {
+  Object.defineProperties(rows, {
+    truncated: { value: truncated, enumerable: false },
+    limit: { value: EVIDENCE_ROW_LIMIT, enumerable: false },
+    pageLimit: { value: EVIDENCE_PAGE_LIMIT, enumerable: false },
+  });
+  return rows as EvidenceRows<T>;
+}
+
+export function isTruncatedEvidence(
+  value: readonly unknown[] | null | undefined,
+): value is EvidenceRows<unknown> {
+  return Boolean(value && "truncated" in value && value.truncated);
+}
+
 export async function allPages<T>(
   request: (afterSeq: number) => Promise<CursorResponse<T>>,
-): Promise<T[]> {
+): Promise<EvidenceRows<T>> {
   const rows: T[] = [];
   let afterSeq = 0;
-  for (;;) {
+  for (let pageCount = 1; pageCount <= EVIDENCE_PAGE_LIMIT; pageCount += 1) {
     const page = await request(afterSeq);
-    rows.push(...page.data);
+    const remaining = EVIDENCE_ROW_LIMIT - rows.length;
+    rows.push(...page.data.slice(0, remaining));
     if (!page.page.has_more || page.page.next_after_seq === null) {
-      return rows;
+      return evidenceRows(rows, page.data.length > remaining);
+    }
+    if (
+      rows.length >= EVIDENCE_ROW_LIMIT ||
+      pageCount >= EVIDENCE_PAGE_LIMIT ||
+      page.page.next_after_seq === afterSeq
+    ) {
+      return evidenceRows(rows, true);
     }
     afterSeq = page.page.next_after_seq;
   }
+  return evidenceRows(rows, true);
 }
 
 function cursorQuery<T>(

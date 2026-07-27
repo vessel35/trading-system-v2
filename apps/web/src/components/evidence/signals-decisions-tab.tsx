@@ -1,4 +1,4 @@
-import { AlertTriangle, GitBranch, ShieldX } from "lucide-react";
+import { AlertTriangle, FilterX, GitBranch, ShieldX } from "lucide-react";
 import { useMemo, useState } from "react";
 import {
   Bar,
@@ -19,6 +19,7 @@ import {
 } from "../../hooks/use-evidence";
 import { formatMetric, formatTimestamp } from "../../lib/utils";
 import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
 import {
   Table,
@@ -29,7 +30,11 @@ import {
   TableRow,
 } from "../ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
-import { EvidenceError, EvidenceLoading } from "./evidence-state";
+import {
+  EvidenceError,
+  EvidenceLoading,
+  EvidenceTruncationNotice,
+} from "./evidence-state";
 
 type DistributionDatum = { name: string; count: number };
 
@@ -282,6 +287,14 @@ export function SignalsDecisionsTab({
 
   return (
     <div className="space-y-4">
+      <EvidenceTruncationNotice
+        sources={[
+          signalQuery.data,
+          decisionQuery.data,
+          candidateQuery.data,
+          missedQuery.data,
+        ]}
+      />
       <Card>
         <CardHeader>
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -316,6 +329,18 @@ export function SignalsDecisionsTab({
                   <option key={value.name}>{value.name}</option>
                 ))}
               </select>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setAction("");
+                  setSkipReason("");
+                  setBlockedBy("");
+                }}
+              >
+                <FilterX className="mr-1 h-3.5 w-3.5" />
+                초기화
+              </Button>
             </div>
           </div>
         </CardHeader>
@@ -401,7 +426,8 @@ export function SignalsDecisionsTab({
                 </Table>
               ) : (
                 <p className="py-16 text-center text-sm text-muted-foreground">
-                  이 실행은 MISSED_OPPORTUNITY를 산출하지 않았습니다.
+                  놓친 기회(MISSED_OPPORTUNITY)는 기록 경로가 미구현이라
+                  유보되었습니다(3차). 후보 차단 사유는 후보 탭에서 확인하세요.
                 </p>
               )}
             </TabsContent>

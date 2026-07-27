@@ -23,7 +23,11 @@ import { cn } from "../../lib/utils";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
-import { EvidenceError, EvidenceLoading } from "./evidence-state";
+import {
+  EvidenceError,
+  EvidenceLoading,
+  EvidenceTruncationNotice,
+} from "./evidence-state";
 
 const INDICATOR_COLORS = ["#2dd4bf", "#38bdf8", "#fbbf24", "#c084fc", "#fb7185"];
 
@@ -251,6 +255,14 @@ export function ChartTab({
 
   return (
     <div className="space-y-4">
+      <EvidenceTruncationNotice
+        sources={[
+          evidence.indicators.data,
+          evidence.signals.data,
+          evidence.candidates.data,
+          evidence.executions.data,
+        ]}
+      />
       <Card>
         <CardHeader>
           <div className="flex flex-wrap items-start justify-between gap-3">

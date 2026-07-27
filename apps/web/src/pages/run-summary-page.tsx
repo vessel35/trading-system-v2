@@ -17,6 +17,7 @@ import type { RunSummary } from "../api/client";
 import { Badge, type BadgeProps } from "../components/ui/badge";
 import { EquityDrawdownTab } from "../components/evidence/equity-drawdown-tab";
 import { ChartTab } from "../components/evidence/chart-tab";
+import { ErrorBoundary } from "../components/error-boundary";
 import { IntegrityCostTab } from "../components/evidence/integrity-cost-tab";
 import { ResearchNotesTab } from "../components/evidence/research-notes-tab";
 import { SignalsDecisionsTab } from "../components/evidence/signals-decisions-tab";
@@ -510,25 +511,37 @@ export function RunSummaryPage({ runId }: { runId: string }) {
           )}
         </TabsContent>
         <TabsContent value="equity">
-          <EquityDrawdownTab runId={runId} onSelectTrade={setSelectedTradeId} />
+          <ErrorBoundary key={`${runId}:equity`} scope="evidence">
+            <EquityDrawdownTab runId={runId} onSelectTrade={setSelectedTradeId} />
+          </ErrorBoundary>
         </TabsContent>
         <TabsContent value="trades">
-          <TradesTab runId={runId} onSelectTrade={setSelectedTradeId} />
+          <ErrorBoundary key={`${runId}:trades`} scope="evidence">
+            <TradesTab runId={runId} onSelectTrade={setSelectedTradeId} />
+          </ErrorBoundary>
         </TabsContent>
         <TabsContent value="chart">
-          <ChartTab runId={runId} onSelectTrade={setSelectedTradeId} />
+          <ErrorBoundary key={`${runId}:chart`} scope="evidence">
+            <ChartTab runId={runId} onSelectTrade={setSelectedTradeId} />
+          </ErrorBoundary>
         </TabsContent>
         <TabsContent value="signals">
-          <SignalsDecisionsTab
-            runId={runId}
-            onSelectTrade={setSelectedTradeId}
-          />
+          <ErrorBoundary key={`${runId}:signals`} scope="evidence">
+            <SignalsDecisionsTab
+              runId={runId}
+              onSelectTrade={setSelectedTradeId}
+            />
+          </ErrorBoundary>
         </TabsContent>
         <TabsContent value="integrity">
-          <IntegrityCostTab runId={runId} summary={summaryEnvelope.summary} />
+          <ErrorBoundary key={`${runId}:integrity`} scope="evidence">
+            <IntegrityCostTab runId={runId} summary={summaryEnvelope.summary} />
+          </ErrorBoundary>
         </TabsContent>
         <TabsContent value="research">
-          <ResearchNotesTab runId={runId} summary={summaryEnvelope.summary} />
+          <ErrorBoundary key={`${runId}:research`} scope="evidence">
+            <ResearchNotesTab runId={runId} summary={summaryEnvelope.summary} />
+          </ErrorBoundary>
         </TabsContent>
       </Tabs>
 

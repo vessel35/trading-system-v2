@@ -47,12 +47,36 @@ import {
   TableHeader,
   TableRow,
 } from "../ui/table";
-import { EvidenceError, EvidenceLoading } from "./evidence-state";
+import {
+  EvidenceError,
+  EvidenceLoading,
+  EvidenceTruncationNotice,
+} from "./evidence-state";
 
 type EquityDatum = { time: UTCTimestamp; value: number };
 
 function epochSeconds(value: string): UTCTimestamp {
   return Math.floor(new Date(value).getTime() / 1000) as UTCTimestamp;
+}
+
+export function equityMarkerTime(
+  value: string,
+  data: EquityDatum[],
+): UTCTimestamp {
+  if (data.length < 2) return epochSeconds(value);
+  const times = [...new Set(data.map((point) => Number(point.time)))].sort(
+    (left, right) => left - right,
+  );
+  const widths = times
+    .slice(1)
+    .map((time, index) => time - times[index])
+    .filter((width) => width > 0);
+  if (widths.length === 0) return epochSeconds(value);
+  const bucketWidth = Math.min(...widths);
+  const first = times[0];
+  const instant = Number(epochSeconds(value));
+  const bucket = Math.max(0, Math.floor((instant - first) / bucketWidth));
+  return (first + bucket * bucketWidth) as UTCTimestamp;
 }
 
 function EquityChart({
@@ -96,14 +120,15 @@ function EquityChart({
     });
     series.setData(data);
     if (markersVisible) {
-      const markers: SeriesMarker<UTCTimestamp>[] = executions.map((execution) => ({
-        time: (Math.floor(new Date(execution.execution_ts).getTime() / 3_600_000) *
-          3600) as UTCTimestamp,
-        position: execution.side === "BUY" ? "belowBar" : "aboveBar",
-        color: execution.side === "BUY" ? "#34d399" : "#fb7185",
-        shape: execution.side === "BUY" ? "arrowUp" : "arrowDown",
-        text: execution.trade_id ? `#${execution.trade_id}` : execution.side,
-      }));
+      const markers: SeriesMarker<UTCTimestamp>[] = executions
+        .map((execution) => ({
+          time: equityMarkerTime(execution.execution_ts, data),
+          position: execution.side === "BUY" ? "belowBar" as const : "aboveBar" as const,
+          color: execution.side === "BUY" ? "#34d399" : "#fb7185",
+          shape: execution.side === "BUY" ? "arrowUp" as const : "arrowDown" as const,
+          text: execution.trade_id ? `#${execution.trade_id}` : execution.side,
+        }))
+        .sort((left, right) => Number(left.time) - Number(right.time));
       createSeriesMarkers(series, markers);
     }
     chart.timeScale().fitContent();
@@ -221,8 +246,10 @@ export function EquityDrawdownTab({
   const episodes = useDrawdownEpisodes(runId);
   const [markersVisible, setMarkersVisible] = useState(true);
   const [logarithmic, setLogarithmic] = useState(false);
-  const deepestEpisode = episodes.data?.reduce((deepest, episode) =>
-    episode.depth_pct < deepest.depth_pct ? episode : deepest,
+  const deepestEpisode = episodes.data?.reduce<DrawdownEpisode | null>(
+    (deepest, episode) =>
+      deepest === null || episode.depth_pct < deepest.depth_pct ? episode : deepest,
+    null,
   );
 
   const equitySeries = useMemo(() => {
@@ -246,7 +273,7 @@ export function EquityDrawdownTab({
           (point): point is ChartSummary & { value: number } =>
             point.series_name === "drawdown" && point.value !== null,
         )
-        .map((point) => ({ ts: point.bucket_ts, value: point.value * 100 }));
+        .map((point) => ({ ts: point.bucket_ts, value: point.value! * 100 }));
       return stored.length > 0
         ? stored
         : (equity.data ?? []).map((point) => ({
@@ -265,6 +292,9 @@ export function EquityDrawdownTab({
 
   return (
     <div className="space-y-4">
+      <EvidenceTruncationNotice
+        sources={[chart.data, equity.data, executions.data, episodes.data]}
+      />
       <Card>
         <CardHeader className="flex-row items-start justify-between gap-3">
           <div>

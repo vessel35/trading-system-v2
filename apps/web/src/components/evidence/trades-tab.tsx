@@ -26,7 +26,11 @@ import { cn, formatDecimalString, formatMetric, formatTimestamp } from "../../li
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
-import { EvidenceError, EvidenceLoading } from "./evidence-state";
+import {
+  EvidenceError,
+  EvidenceLoading,
+  EvidenceTruncationNotice,
+} from "./evidence-state";
 
 const column = createColumnHelper<Trade>();
 
@@ -244,21 +248,25 @@ export function TradesTab({
   if (error) return <EvidenceError error={error} />;
   if (trades.length === 0) {
     return (
-      <Card>
-        <CardContent className="grid min-h-64 place-items-center text-center">
-          <div>
-            <p className="font-medium">거래가 없습니다.</p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              신호·의사결정 탭에서 진입 차단 사유를 확인하세요.
-            </p>
-          </div>
-        </CardContent>
-      </Card>
+      <div className="space-y-4">
+        <EvidenceTruncationNotice sources={[tradesQuery.data, bucketsQuery.data]} />
+        <Card>
+          <CardContent className="grid min-h-64 place-items-center text-center">
+            <div>
+              <p className="font-medium">거래가 없습니다.</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                신호·의사결정 탭에서 진입 차단 사유를 확인하세요.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
     );
   }
 
   return (
     <div className="space-y-4">
+      <EvidenceTruncationNotice sources={[tradesQuery.data, bucketsQuery.data]} />
       <Card>
         <CardHeader>
           <div className="flex flex-wrap items-start justify-between gap-3">
