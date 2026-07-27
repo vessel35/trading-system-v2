@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import UTC, datetime
 
 import collector_service.main as collector_main
 import pytest
+from collector_service.application.observability import RunnerLogFormatter
 from collector_service.core import Settings
 
 
@@ -59,6 +61,24 @@ def test_default_run_keeps_collect_path_and_closes_runtime(
     assert runtime.backfill.calls == []
     assert runtime.funding_backfill.calls == []
     assert runtime.closed
+
+
+def test_main_configures_info_logging_with_structured_formatter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = StubRuntime()
+    monkeypatch.setattr(collector_main, "Settings", lambda **_: settings())
+    monkeypatch.setattr(collector_main, "build_runtime", lambda configured: runtime)
+
+    collector_main.main([])
+
+    assert runtime.collector.calls == [(None, None)]
+    assert runtime.closed is True
+    assert logging.getLogger().level == logging.INFO
+    assert all(
+        isinstance(handler.formatter, RunnerLogFormatter)
+        for handler in logging.getLogger().handlers
+    )
 
 
 def test_bounded_modes_dispatch_the_exact_range(

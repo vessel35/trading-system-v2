@@ -9,6 +9,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Literal
 
+from collector_service.application.observability import configure_logging
 from collector_service.core import Settings, build_runtime
 
 Mode = Literal["collect", "backfill", "funding-backfill"]
@@ -51,10 +52,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     if arguments.symbol is not None:
         settings_arguments["symbol"] = arguments.symbol
     settings = Settings(**settings_arguments)
-    logging.basicConfig(
-        level=getattr(logging, settings.log_level),
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
+    configure_logging(getattr(logging, settings.log_level))
     try:
         asyncio.run(
             _run(

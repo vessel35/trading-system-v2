@@ -12,6 +12,7 @@ from .observability import (
     RunnerHealthSnapshot,
     RunnerMetricsSnapshot,
     RunnerObservability,
+    safe_exception_info,
 )
 from .service import WalletService
 
@@ -49,6 +50,7 @@ class WalletPollingRunner:
         sleep: Callable[[float], object] | None = None,
         stop_event: Event | None = None,
         stale_after_seconds: float | None = None,
+        failure_streak_threshold: int = 3,
     ) -> None:
         seconds_until_next_poll(
             0.0,
@@ -63,9 +65,17 @@ class WalletPollingRunner:
         self._sleep = self._stop_event.wait if sleep is None else sleep
         self._observability = RunnerObservability(
             "wallet",
+            counter_names=(
+                "poll_cycles",
+                "poll_errors",
+                "signals_consumed_filled",
+                "signals_consumed_rejected",
+                "signals_consumed_skipped",
+            ),
             stale_after_seconds=(
                 poll_interval_seconds * 3.0 if stale_after_seconds is None else stale_after_seconds
             ),
+            failure_streak_threshold=failure_streak_threshold,
             clock=self._decision_time,
         )
 
@@ -147,8 +157,10 @@ class WalletPollingRunner:
                             error_type=type(exc).__name__,
                             symbol=self._service.last_run_symbol or "unknown",
                         ),
+                        exc_info=safe_exception_info(exc),
                     )
                 else:
+                    self._observability.record_poll_success()
                     _LOGGER.info(
                         "paper_wallet_queue_drained",
                         extra=self._event_fields(

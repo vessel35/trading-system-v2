@@ -15,6 +15,7 @@ from .observability import (
     RunnerHealthSnapshot,
     RunnerMetricsSnapshot,
     RunnerObservability,
+    safe_exception_info,
 )
 from .service import SignalCycleResult, SignalStateRecoveryRequired
 
@@ -70,6 +71,7 @@ class SignalPollingRunner:
         sleep: Callable[[float], object] | None = None,
         stop_event: Event | None = None,
         stale_after_seconds: float | None = None,
+        failure_streak_threshold: int = 3,
     ) -> None:
         seconds_until_next_poll(
             0.0,
@@ -85,9 +87,17 @@ class SignalPollingRunner:
         self._sleep = self._stop_event.wait if sleep is None else sleep
         self._observability = RunnerObservability(
             "signal",
+            counter_names=(
+                "warmups",
+                "poll_cycles",
+                "poll_errors",
+                "signals_generated",
+                "gap_rewarmups",
+            ),
             stale_after_seconds=(
                 poll_interval_seconds * 3.0 if stale_after_seconds is None else stale_after_seconds
             ),
+            failure_streak_threshold=failure_streak_threshold,
             clock=self._decision_time,
         )
 
@@ -162,6 +172,7 @@ class SignalPollingRunner:
                                 reason="gap_rewarmup_failed",
                                 error_type=type(exc).__name__,
                             ),
+                            exc_info=safe_exception_info(exc),
                         )
                     else:
                         self._observability.record_warmup()
@@ -175,7 +186,7 @@ class SignalPollingRunner:
                                 reason="state_recovery_required",
                             ),
                         )
-                        self._log_poll_completed(generated)
+                        self._log_poll_completed(generated, gap_rewarmed=True)
                 except Exception as exc:
                     self._observability.record_poll_error()
                     _LOGGER.error(
@@ -187,6 +198,7 @@ class SignalPollingRunner:
                             reason="poll_failed",
                             error_type=type(exc).__name__,
                         ),
+                        exc_info=safe_exception_info(exc),
                     )
                 else:
                     self._log_poll_completed(self._record_generated(result))
@@ -219,7 +231,8 @@ class SignalPollingRunner:
         )
         return 1
 
-    def _log_poll_completed(self, generated: int) -> None:
+    def _log_poll_completed(self, generated: int, *, gap_rewarmed: bool = False) -> None:
+        self._observability.record_poll_success(gap_rewarmed=gap_rewarmed)
         _LOGGER.info(
             "signal_poll_completed",
             extra=self._event_fields(

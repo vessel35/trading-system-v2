@@ -13,6 +13,7 @@ from wallet_service.application import (
     WalletPollingRunner,
     WalletService,
 )
+from wallet_service.application.observability import RunnerLogFormatter
 from wallet_service.core import RiskPolicy
 from wallet_service.domain import (
     PaperIntent,
@@ -24,6 +25,8 @@ from wallet_service.infrastructure import PaperBroker, PaperCostModel
 from wallet_service.main import run_paper_wallet
 
 from tests.conftest import QueueDouble, RepositoryDouble, paper_signal
+
+SENSITIVE_ERROR = "postgresql://operator:fake-password@db.example/wallet"
 
 
 class _Clock:
@@ -69,7 +72,7 @@ class _SelectiveRepository(RepositoryDouble):
 
 class _PoisonQueue(QueueDouble):
     def receive(self) -> PaperSignal | None:
-        raise ValueError("postgresql://operator:fake-password@db.example/wallet")
+        raise ValueError(SENSITIVE_ERROR)
 
 
 def test_main_drains_rejection_then_fill_and_repeats_until_stopped() -> None:
@@ -100,6 +103,11 @@ def test_main_drains_rejection_then_fill_and_repeats_until_stopped() -> None:
     assert len(repository.executions) == 2
     assert repository.executions[-1].position is None
     assert clock.sleeps == [47.0, 60.0, 60.0]
+    assert logging.getLogger().level == logging.INFO
+    assert all(
+        isinstance(handler.formatter, RunnerLogFormatter)
+        for handler in logging.getLogger().handlers
+    )
 
 
 def test_drain_once_checks_stop_without_touching_the_queue() -> None:
@@ -160,25 +168,25 @@ def test_observability_counts_every_consumption_outcome_and_structured_events(
         wall_clock=wall_clock,
         sleep=stop_after_first_cycle,
         stop_event=stop_event,
-        stale_after_seconds=30,
     )
 
     with caplog.at_level(logging.INFO):
         runner.run()
 
     metrics = runner.metrics_snapshot()
-    assert metrics.poll_cycles == 1
-    assert metrics.poll_errors == 0
-    assert metrics.signals_consumed == {
-        "filled": 1,
-        "rejected": 1,
-        "skipped": 1,
+    assert metrics.counters == {
+        "poll_cycles": 1,
+        "poll_errors": 0,
+        "signals_consumed_filled": 1,
+        "signals_consumed_rejected": 1,
+        "signals_consumed_skipped": 1,
     }
     assert metrics.last_progress_at is not None
     assert len(snapshots) == 1
     assert snapshots[0].last_progress_at is not None
-    assert snapshots[0].stale is True
-    assert snapshots[0].healthy is False
+    assert snapshots[0].stale is False
+    assert snapshots[0].stale_reason is None
+    assert snapshots[0].healthy is True
     records = [
         record for record in caplog.records if getattr(record, "event", None) == "signal_consumed"
     ]
@@ -190,6 +198,10 @@ def test_observability_counts_every_consumption_outcome_and_structured_events(
     assert all(getattr(record, "service", None) == "wallet" for record in records)
     assert all(getattr(record, "symbol", None) == "BTCUSDT" for record in records)
     assert all(getattr(record, "count", None) == 1 for record in records)
+    formatted = RunnerLogFormatter().format(records[0])
+    assert 'event="signal_consumed"' in formatted
+    assert 'service="wallet"' in formatted
+    assert 'symbol="BTCUSDT"' in formatted
     events = {getattr(record, "event", None) for record in caplog.records}
     assert {
         "runner_started",
@@ -208,6 +220,7 @@ def test_poison_poll_error_is_secret_safe_and_staleness_is_visible(
     service = _paper_service(queue, repository)
     stop_event = Event()
     now = 15.0
+    sleep_calls = 0
     snapshots: list[RunnerHealthSnapshot] = []
     runner: WalletPollingRunner
 
@@ -215,36 +228,51 @@ def test_poison_poll_error_is_secret_safe_and_staleness_is_visible(
         return now
 
     def inspect_after_error(delay: float) -> None:
-        nonlocal now
+        nonlocal now, sleep_calls
         now += delay
-        snapshots.append(runner.health_snapshot())
-        stop_event.set()
+        sleep_calls += 1
+        if sleep_calls == 3:
+            snapshots.append(runner.health_snapshot())
+            stop_event.set()
 
     runner = WalletPollingRunner(
         service,
         wall_clock=wall_clock,
         sleep=inspect_after_error,
         stop_event=stop_event,
-        stale_after_seconds=30,
+        stale_after_seconds=600,
     )
 
     with caplog.at_level(logging.ERROR):
         runner.run()
 
     metrics = runner.metrics_snapshot()
-    assert metrics.poll_cycles == 1
-    assert metrics.poll_errors == 1
+    assert metrics.counters == {
+        "poll_cycles": 3,
+        "poll_errors": 3,
+        "signals_consumed_filled": 0,
+        "signals_consumed_rejected": 0,
+        "signals_consumed_skipped": 0,
+    }
     assert metrics.last_progress_at is None
     assert len(snapshots) == 1
     assert snapshots[0].running is True
     assert snapshots[0].stale is True
+    assert snapshots[0].stale_reason == "poll_errors"
     assert snapshots[0].healthy is False
+    assert snapshots[0].metrics.failure_streaks == {"poll_errors": 3}
     error_record = next(
         record for record in caplog.records if getattr(record, "event", None) == "runner_poll_error"
     )
     assert getattr(error_record, "service", None) == "wallet"
     assert getattr(error_record, "error_type", None) == "ValueError"
     assert getattr(error_record, "reason", None) == "poll_failed"
+    assert error_record.exc_info is not None
+    formatted = RunnerLogFormatter().format(error_record)
+    assert "Traceback (most recent call last)" in formatted
+    assert 'event="runner_poll_error"' in formatted
+    assert 'service="wallet"' in formatted
+    assert "fake-password" not in formatted
     assert "fake-password" not in caplog.text
     assert "fake-password" not in repr(metrics)
     assert "fake-password" not in repr(runner.health_snapshot())

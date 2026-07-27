@@ -26,6 +26,7 @@ from .observability import (
     RunnerHealthSnapshot,
     RunnerMetricsSnapshot,
     RunnerObservability,
+    safe_exception_info,
 )
 
 logger = logging.getLogger(__name__)
@@ -81,6 +82,7 @@ class LiveCollector:
         wall_clock: Callable[[], float] = time.time,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         stale_after_seconds: float | None = None,
+        failure_streak_threshold: int = 3,
     ) -> None:
         if timeframe != "1m":
             raise ValueError("live collector supports only 1m ingestion")
@@ -100,9 +102,17 @@ class LiveCollector:
         self._ingestion_lock = asyncio.Lock()
         self._observability = RunnerObservability(
             "collector",
+            counter_names=(
+                "warmups",
+                "poll_cycles",
+                "poll_errors",
+                "records_processed",
+                "gaps_detected",
+            ),
             stale_after_seconds=(
                 poll_interval_seconds * 3.0 if stale_after_seconds is None else stale_after_seconds
             ),
+            failure_streak_threshold=failure_streak_threshold,
             clock=self._decision_time,
         )
 
@@ -240,12 +250,14 @@ class LiveCollector:
                             reason="poll_failed",
                             error_type=type(exc).__name__,
                         ),
+                        exc_info=safe_exception_info(exc),
                     )
                 else:
                     self._observability.record_processed(
                         result.persisted_count,
                         gaps_detected=len(result.gaps),
                     )
+                    self._observability.record_poll_success()
                     logger.info(
                         "collector_poll_completed",
                         extra=self._event_fields(
