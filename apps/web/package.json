@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "typecheck": "tsc -p tsconfig.app.json --noEmit",
     "test": "vitest run",
+    "e2e": "playwright test",
     "generate:api": "../../.venv/bin/python ../../services/web-api/scripts/export_openapi.py --output src/api/openapi.json && openapi-typescript src/api/openapi.json -o src/api/schema.d.ts"
   },
   "dependencies": {
@@ -29,6 +30,7 @@
     "wouter": "^3.10.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.0",
     "@testing-library/jest-dom": "^7.0.0",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
