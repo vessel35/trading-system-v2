@@ -6,6 +6,7 @@ from .backfill import (
     FundingBackfillResult,
     HistoricalBackfill,
 )
+from .observability import RunnerHealthSnapshot, RunnerMetricsSnapshot
 from .service import (
     CollectorConfigurationError,
     IngestionResult,
@@ -21,5 +22,7 @@ __all__ = [
     "HistoricalBackfill",
     "IngestionResult",
     "LiveCollector",
+    "RunnerHealthSnapshot",
+    "RunnerMetricsSnapshot",
     "seconds_until_next_poll",
 ]

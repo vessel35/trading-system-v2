@@ -65,6 +65,9 @@ class WalletService:
         self._position: Position | None = None
         self._open_risk: tuple[str, PositionSide, float] | None = None
         self._last_run_received = False
+        self._last_run_outcome: SignalConsumptionStatus | None = None
+        self._last_run_symbol: str | None = None
+        self._last_run_reason: str | None = None
 
     @property
     def cash_balance(self) -> Decimal:
@@ -87,6 +90,24 @@ class WalletService:
 
         return self._last_run_received
 
+    @property
+    def last_run_outcome(self) -> SignalConsumptionStatus | None:
+        """Return the terminal outcome of the latest received signal."""
+
+        return self._last_run_outcome
+
+    @property
+    def last_run_symbol(self) -> str | None:
+        """Return the non-sensitive symbol of the latest received signal."""
+
+        return self._last_run_symbol
+
+    @property
+    def last_run_reason(self) -> str | None:
+        """Return a bounded reason category for the latest terminal outcome."""
+
+        return self._last_run_reason
+
     def engage_kill_switch(self) -> None:
         """Block every subsequent signal before sizing or Broker submission."""
         self._risk_guard.engage_kill_switch()
@@ -94,10 +115,14 @@ class WalletService:
     def run_once(self) -> WalletExecution | None:
         """Consume one ready signal and terminally receipt every permanent outcome."""
         self._last_run_received = False
+        self._last_run_outcome = None
+        self._last_run_symbol = None
+        self._last_run_reason = None
         message = self._queue.receive()
         if message is None:
             return None
         self._last_run_received = True
+        self._last_run_symbol = message.signal.symbol
         try:
             execution = self.process(message)
         except RiskRejected:
@@ -107,6 +132,8 @@ class WalletService:
                 SignalConsumptionStatus.REJECTED,
                 message.execution_candle.close_time,
             )
+            self._last_run_outcome = SignalConsumptionStatus.REJECTED
+            self._last_run_reason = "risk_rejected"
             return None
         if execution is None:
             self._repository.record_consumption(
@@ -115,6 +142,11 @@ class WalletService:
                 SignalConsumptionStatus.SKIPPED,
                 message.execution_candle.close_time,
             )
+            self._last_run_outcome = SignalConsumptionStatus.SKIPPED
+            self._last_run_reason = "not_persisted"
+        else:
+            self._last_run_outcome = SignalConsumptionStatus.FILLED
+            self._last_run_reason = "execution_committed"
         return execution
 
     def close(self) -> None:

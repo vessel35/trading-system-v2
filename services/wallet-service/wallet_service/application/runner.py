@@ -5,8 +5,14 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable
+from datetime import UTC, datetime
 from threading import Event
 
+from .observability import (
+    RunnerHealthSnapshot,
+    RunnerMetricsSnapshot,
+    RunnerObservability,
+)
 from .service import WalletService
 
 _LOGGER = logging.getLogger(__name__)
@@ -42,6 +48,7 @@ class WalletPollingRunner:
         wall_clock: Callable[[], float] = time.time,
         sleep: Callable[[float], object] | None = None,
         stop_event: Event | None = None,
+        stale_after_seconds: float | None = None,
     ) -> None:
         seconds_until_next_poll(
             0.0,
@@ -54,6 +61,13 @@ class WalletPollingRunner:
         self._wall_clock = wall_clock
         self._stop_event = Event() if stop_event is None else stop_event
         self._sleep = self._stop_event.wait if sleep is None else sleep
+        self._observability = RunnerObservability(
+            "wallet",
+            stale_after_seconds=(
+                poll_interval_seconds * 3.0 if stale_after_seconds is None else stale_after_seconds
+            ),
+            clock=self._decision_time,
+        )
 
     @property
     def stopped(self) -> bool:
@@ -66,6 +80,16 @@ class WalletPollingRunner:
 
         self._stop_event.set()
 
+    def metrics_snapshot(self) -> RunnerMetricsSnapshot:
+        """Return the current in-process wallet-runner counters."""
+
+        return self._observability.metrics_snapshot()
+
+    def health_snapshot(self) -> RunnerHealthSnapshot:
+        """Return liveness and signal-consumption progress for health checks."""
+
+        return self._observability.health_snapshot()
+
     def drain_once(self) -> int:
         """Process ready messages until the queue reports that it is empty."""
 
@@ -75,25 +99,92 @@ class WalletPollingRunner:
             if not self._service.last_run_received:
                 break
             consumed += 1
+            outcome = self._service.last_run_outcome
+            if outcome is not None:
+                self._observability.record_signal_consumed(outcome.value)
+                _LOGGER.info(
+                    "paper_wallet_signal_consumed",
+                    extra=self._event_fields(
+                        "signal_consumed",
+                        count=1,
+                        outcome=outcome.value,
+                        reason=self._service.last_run_reason or "terminal_outcome",
+                        symbol=self._service.last_run_symbol or "unknown",
+                    ),
+                )
         return consumed
 
     def run(self) -> None:
         """Poll and drain until the injected stop event is set."""
 
-        _LOGGER.info("paper_wallet_runner_started")
-        while not self._stop_event.is_set():
-            try:
-                consumed = self.drain_once()
-                if consumed:
-                    _LOGGER.info("paper_wallet_queue_drained messages=%d", consumed)
-            except Exception:
-                _LOGGER.exception("paper_wallet_poll_failed")
-            if self._stop_event.is_set():
-                break
-            delay = seconds_until_next_poll(
-                self._wall_clock(),
+        self._observability.mark_running()
+        _LOGGER.info(
+            "paper_wallet_runner_started",
+            extra=self._event_fields(
+                "runner_started",
+                count=0,
                 poll_interval_seconds=self._poll_interval_seconds,
-                poll_buffer_seconds=self._poll_buffer_seconds,
+            ),
+        )
+        try:
+            while not self._stop_event.is_set():
+                self._observability.record_poll()
+                _LOGGER.info(
+                    "paper_wallet_poll_started",
+                    extra=self._event_fields("runner_poll_started", count=0),
+                )
+                try:
+                    consumed = self.drain_once()
+                except Exception as exc:
+                    self._observability.record_poll_error()
+                    _LOGGER.error(
+                        "paper_wallet_poll_failed",
+                        extra=self._event_fields(
+                            "runner_poll_error",
+                            count=1,
+                            outcome="error",
+                            reason="poll_failed",
+                            error_type=type(exc).__name__,
+                            symbol=self._service.last_run_symbol or "unknown",
+                        ),
+                    )
+                else:
+                    _LOGGER.info(
+                        "paper_wallet_queue_drained",
+                        extra=self._event_fields(
+                            "runner_poll_completed",
+                            count=consumed,
+                            outcome="completed",
+                        ),
+                    )
+                if self._stop_event.is_set():
+                    break
+                delay = seconds_until_next_poll(
+                    self._wall_clock(),
+                    poll_interval_seconds=self._poll_interval_seconds,
+                    poll_buffer_seconds=self._poll_buffer_seconds,
+                )
+                self._sleep(delay)
+        finally:
+            self._observability.mark_stopped()
+            _LOGGER.info(
+                "paper_wallet_runner_stopped",
+                extra=self._event_fields(
+                    "runner_shutdown",
+                    count=0,
+                    outcome="stopped",
+                    reason="stop_requested",
+                ),
             )
-            self._sleep(delay)
-        _LOGGER.info("paper_wallet_runner_stopped")
+
+    def _decision_time(self) -> datetime:
+        return datetime.fromtimestamp(self._wall_clock(), tz=UTC)
+
+    @staticmethod
+    def _event_fields(event: str, **fields: object) -> dict[str, object]:
+        return {
+            "event": event,
+            "service": "wallet",
+            "symbol": "unknown",
+            **fields,
+        }
