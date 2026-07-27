@@ -10,6 +10,7 @@ requires-python = ">=3.12"
 dependencies = [
     "core-lib==0.2.0",
     "psycopg[binary]>=3.2",
+    "service-commons==0.1.0",
 ]
 
 [project.optional-dependencies]
@@ -28,6 +29,7 @@ wallet_service = ["py.typed"]
 
 [tool.uv.sources]
 core-lib = { path = "../core-lib", editable = true }
+service-commons = { path = "../service-commons", editable = true }
 
 [tool.pytest.ini_options]
 addopts = [
@@ -52,7 +54,7 @@ select = ["B", "E", "F", "I", "UP"]
 
 [tool.mypy]
 files = ["wallet_service", "tests"]
-mypy_path = "$MYPY_CONFIG_FILE_DIR/../core-lib:$MYPY_CONFIG_FILE_DIR/../signal-service"
+mypy_path = "$MYPY_CONFIG_FILE_DIR/../core-lib:$MYPY_CONFIG_FILE_DIR/../service-commons:$MYPY_CONFIG_FILE_DIR/../signal-service"
 python_version = "3.12"
 strict = true
 warn_unreachable = true

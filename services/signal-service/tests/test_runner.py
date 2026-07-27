@@ -9,14 +9,13 @@ from typing import cast
 
 import pytest
 from core_lib.types import MarketType
+from service_commons.observability import RunnerLogFormatter
 from signal_service.application import (
     RunnerHealthSnapshot,
     SignalCycleResult,
     SignalPollingRunner,
     SignalStateRecoveryRequired,
-    seconds_until_next_poll,
 )
-from signal_service.application.observability import RunnerLogFormatter
 from signal_service.core import SignalGenerationConfig
 from signal_service.domain import PersistedSignal, SignalMode
 from signal_service.main import run_signal_generator
@@ -348,24 +347,3 @@ def test_health_snapshot_detects_repeated_gap_rewarmup_stall() -> None:
         "poll_errors": 0,
         "gap_rewarmups": 3,
     }
-
-
-@pytest.mark.parametrize(
-    ("interval", "buffer", "message"),
-    [
-        (0, 0, "positive"),
-        (60, -1, "within"),
-        (60, 60, "within"),
-    ],
-)
-def test_poll_alignment_rejects_invalid_configuration(
-    interval: int,
-    buffer: int,
-    message: str,
-) -> None:
-    with pytest.raises(ValueError, match=message):
-        seconds_until_next_poll(
-            0.0,
-            poll_interval_seconds=interval,
-            poll_buffer_seconds=buffer,
-        )

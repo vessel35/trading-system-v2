@@ -13,10 +13,9 @@ from collector_service.application import (
     CollectorConfigurationError,
     LiveCollector,
     RunnerHealthSnapshot,
-    seconds_until_next_poll,
 )
-from collector_service.application.observability import RunnerLogFormatter
 from collector_service.domain import Candle, Symbol
+from service_commons.observability import RunnerLogFormatter
 
 BASE = datetime(2026, 7, 26, 0, 0, tzinfo=UTC)
 SENSITIVE_ERROR = "postgresql://operator:fake-password@db.example/collector"
@@ -328,21 +327,3 @@ def test_transient_collector_poll_error_keeps_health_and_stack_is_secret_safe(
     assert "fake-password" not in caplog.text
     assert "fake-password" not in repr(metrics)
     assert "fake-password" not in repr(service.health_snapshot())
-
-
-@pytest.mark.parametrize(
-    ("now", "expected"),
-    [
-        (0.0, 2.0),
-        (1.25, 0.75),
-        (2.0, 60.0),
-        (15.0, 47.0),
-        (59.5, 2.5),
-        (60.0, 2.0),
-    ],
-)
-def test_polling_is_minute_aligned_with_two_second_buffer(
-    now: float,
-    expected: float,
-) -> None:
-    assert seconds_until_next_poll(now) == expected

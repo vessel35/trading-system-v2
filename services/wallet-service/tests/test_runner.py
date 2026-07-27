@@ -8,12 +8,12 @@ from decimal import Decimal
 from threading import Event
 
 import pytest
+from service_commons.observability import RunnerLogFormatter
 from wallet_service.application import (
     RunnerHealthSnapshot,
     WalletPollingRunner,
     WalletService,
 )
-from wallet_service.application.observability import RunnerLogFormatter
 from wallet_service.core import RiskPolicy
 from wallet_service.domain import (
     PaperIntent,

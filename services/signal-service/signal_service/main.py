@@ -13,6 +13,7 @@ from types import FrameType
 from core_lib.strategy import AdapterManager, InProcessStrategyRegistry
 from core_lib.strategy.adaptees import STRATEGY_ID as VESSEL_STRATEGY_ID
 from core_lib.strategy.adaptees import VesselReference
+from service_commons.observability import configure_logging
 
 from signal_service.application import (
     SignalGenerationService,
@@ -20,7 +21,6 @@ from signal_service.application import (
     SignalPollingRunner,
     SignalQueue,
 )
-from signal_service.application.observability import configure_logging
 from signal_service.core import SignalGenerationConfig
 from signal_service.infrastructure import (
     CryptoDataFeed,
