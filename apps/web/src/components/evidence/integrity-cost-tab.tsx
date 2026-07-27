@@ -52,7 +52,7 @@ export function IntegrityCostTab({
 
   return (
     <div className="space-y-4">
-      <EvidenceTruncationNotice sources={[checks.data]} />
+      <EvidenceTruncationNotice sources={[checks.evidence]} />
       {diagnosticOnly && (
         <div className="flex gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />

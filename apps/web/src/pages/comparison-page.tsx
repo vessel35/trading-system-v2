@@ -113,8 +113,8 @@ async function fetchEquity(runId: string): Promise<EquityDatum[]> {
     if (!data) throw new Error("자본곡선 요약 응답이 비어 있습니다.");
     return data;
   });
-  if (chart.some((point) => point.value !== null)) {
-    return chart.flatMap((point) =>
+  if (chart.rows.some((point) => point.value !== null)) {
+    return chart.rows.flatMap((point) =>
       point.value === null
         ? []
         : [
@@ -133,7 +133,7 @@ async function fetchEquity(runId: string): Promise<EquityDatum[]> {
     if (!data) throw new Error("자본 Evidence 응답이 비어 있습니다.");
     return data;
   });
-  return equity.map((point) => ({
+  return equity.rows.map((point) => ({
     time: Math.floor(new Date(point.ts).getTime() / 1000) as UTCTimestamp,
     value: Number(point.total_equity),
   }));

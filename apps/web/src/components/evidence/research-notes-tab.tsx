@@ -100,7 +100,9 @@ export function ResearchNotesTab({
 
   return (
     <div className="space-y-4">
-      <EvidenceTruncationNotice sources={[evidence.conditional.data, evidence.findings.data]} />
+      <EvidenceTruncationNotice
+        sources={[evidence.conditional.evidence, evidence.findings.evidence]}
+      />
       <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
         <Card>
           <CardHeader>

@@ -249,7 +249,9 @@ export function TradesTab({
   if (trades.length === 0) {
     return (
       <div className="space-y-4">
-        <EvidenceTruncationNotice sources={[tradesQuery.data, bucketsQuery.data]} />
+        <EvidenceTruncationNotice
+          sources={[tradesQuery.evidence, bucketsQuery.evidence]}
+        />
         <Card>
           <CardContent className="grid min-h-64 place-items-center text-center">
             <div>
@@ -266,7 +268,9 @@ export function TradesTab({
 
   return (
     <div className="space-y-4">
-      <EvidenceTruncationNotice sources={[tradesQuery.data, bucketsQuery.data]} />
+      <EvidenceTruncationNotice
+        sources={[tradesQuery.evidence, bucketsQuery.evidence]}
+      />
       <Card>
         <CardHeader>
           <div className="flex flex-wrap items-start justify-between gap-3">

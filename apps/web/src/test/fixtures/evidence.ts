@@ -102,3 +102,35 @@ export const largeEvidenceHandlers = [
     });
   }),
 ];
+
+export function changingLargeEvidenceHandler() {
+  let version = 0;
+  return http.get(
+    "http://localhost/api/v1/runs/:runId/signals",
+    ({ request }) => {
+      const afterSeq = Number(
+        new URL(request.url).searchParams.get("after_seq") ?? 0,
+      );
+      if (afterSeq === 0) version += 1;
+      const nextAfterSeq = Math.min(afterSeq + 200, LARGE_EVIDENCE_TOTAL);
+      const data = Array.from(
+        { length: nextAfterSeq - afterSeq },
+        (_, index) => ({
+          ...signal(afterSeq + index + 1),
+          reason: `large fixture v${version}`,
+        }),
+      );
+      const hasMore = nextAfterSeq < LARGE_EVIDENCE_TOTAL;
+      return HttpResponse.json({
+        data,
+        page: {
+          limit: 200,
+          after_seq: afterSeq,
+          next_after_seq: hasMore ? nextAfterSeq : null,
+          total: LARGE_EVIDENCE_TOTAL,
+          has_more: hasMore,
+        },
+      });
+    },
+  );
+}

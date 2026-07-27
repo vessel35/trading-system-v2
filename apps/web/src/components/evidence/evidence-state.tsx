@@ -5,6 +5,7 @@ import {
   EVIDENCE_PAGE_LIMIT,
   EVIDENCE_ROW_LIMIT,
   isTruncatedEvidence,
+  type EvidencePage,
 } from "../../hooks/use-evidence";
 import { Badge } from "../ui/badge";
 import { Card, CardContent } from "../ui/card";
@@ -47,7 +48,7 @@ export function EvidenceError({ error }: { error: unknown }) {
 export function EvidenceTruncationNotice({
   sources,
 }: {
-  sources: Array<readonly unknown[] | null | undefined>;
+  sources: Array<EvidencePage<unknown> | null | undefined>;
 }) {
   if (!sources.some(isTruncatedEvidence)) return null;
   return (

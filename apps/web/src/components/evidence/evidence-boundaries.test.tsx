@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ErrorBoundary } from "../error-boundary";
@@ -7,6 +8,7 @@ import {
   useSignals,
 } from "../../hooks/use-evidence";
 import {
+  changingLargeEvidenceHandler,
   largeEvidenceHandlers,
   standardErrorHandlers,
 } from "../../test/fixtures/evidence";
@@ -15,6 +17,7 @@ import { server } from "../../test/server";
 import { EvidenceTruncationNotice } from "./evidence-state";
 import {
   EquityDrawdownTab,
+  equityMarkerScale,
   equityMarkerTime,
 } from "./equity-drawdown-tab";
 import { SignalsDecisionsTab } from "./signals-decisions-tab";
@@ -30,7 +33,22 @@ function LargeEvidenceProbe() {
   return (
     <>
       <output aria-label="로드된 Evidence 행">{signals.data?.length ?? 0}</output>
-      <EvidenceTruncationNotice sources={[signals.data]} />
+      <EvidenceTruncationNotice sources={[signals.evidence]} />
+    </>
+  );
+}
+
+function RefetchEvidenceProbe() {
+  const signals = useSignals("fixture-changing");
+  if (signals.isLoading) return <p>loading</p>;
+  if (signals.error) throw signals.error;
+  return (
+    <>
+      <output aria-label="첫 Evidence 사유">{signals.data?.[0]?.reason}</output>
+      <button type="button" onClick={() => void signals.refetch()}>
+        다시 조회
+      </button>
+      <EvidenceTruncationNotice sources={[signals.evidence]} />
     </>
   );
 }
@@ -70,6 +88,33 @@ describe("Evidence 경계 시나리오", () => {
     expect(notice).toHaveTextContent("25페이지");
   });
 
+  it("내용이 바뀐 같은 질의를 재조회해도 절단 고지를 유지한다", async () => {
+    const user = userEvent.setup();
+    server.use(changingLargeEvidenceHandler());
+    renderWithQuery(<RefetchEvidenceProbe />);
+
+    expect(await screen.findByLabelText("첫 Evidence 사유")).toHaveTextContent(
+      "large fixture v1",
+    );
+    expect(screen.getByText(/Evidence 안전 상한/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "다시 조회" }));
+
+    expect(await screen.findByLabelText("첫 Evidence 사유")).toHaveTextContent(
+      "large fixture v2",
+    );
+    expect(screen.getByText(/Evidence 안전 상한/)).toBeInTheDocument();
+  });
+
+  it("Signals 탭의 실제 배선이 절단된 Evidence 고지를 표시한다", async () => {
+    server.use(...largeEvidenceHandlers);
+    renderWithQuery(
+      <SignalsDecisionsTab runId="fixture-large" onSelectTrade={vi.fn()} />,
+    );
+
+    expect(await screen.findByText(/Evidence 안전 상한/)).toBeInTheDocument();
+  });
+
   it("앱 루트 ErrorBoundary가 백지 화면 대신 복구 UI를 표시한다", () => {
     render(
       <ErrorBoundary scope="app">
@@ -102,8 +147,41 @@ describe("Evidence 경계 시나리오", () => {
       { time: (start + 600) as never, value: 102 },
     ];
 
-    expect(equityMarkerTime("2025-01-01T10:07:45Z", data)).toBe(
+    expect(
+      equityMarkerTime(
+        "2025-01-01T10:07:45Z",
+        equityMarkerScale(data),
+      ),
+    ).toBe(
       start + 300,
     );
+  });
+
+  it("큰 자본계열을 한 번만 훑고 실행 마커는 실행 수에 선형으로 계산한다", () => {
+    const start = Date.parse("2025-01-01T00:00:00Z") / 1_000;
+    const data = Array.from({ length: 5_000 }, (_, index) => ({
+      time: (start + index * 300) as never,
+      value: 100 + index,
+    }));
+    let pointReads = 0;
+    const observedData = new Proxy(data, {
+      get(target, property, receiver) {
+        if (/^\d+$/.test(String(property))) pointReads += 1;
+        return Reflect.get(target, property, receiver);
+      },
+    });
+
+    const scale = equityMarkerScale(observedData);
+    const readsAfterScale = pointReads;
+    const markerTimes = Array.from({ length: 5_000 }, (_, index) =>
+      equityMarkerTime(
+        new Date((start + index * 300 + 45) * 1_000).toISOString(),
+        scale,
+      ),
+    );
+
+    expect(readsAfterScale).toBe(data.length);
+    expect(pointReads).toBe(readsAfterScale);
+    expect(markerTimes.at(-1)).toBe(start + 4_999 * 300);
   });
 });

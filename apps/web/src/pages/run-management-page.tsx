@@ -116,6 +116,8 @@ const selectClass =
   "flex h-9 w-full rounded-md border border-input bg-background/70 px-3 py-1 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50";
 const textareaClass =
   "min-h-24 w-full rounded-md border border-input bg-background/70 px-3 py-2 font-mono text-xs shadow-sm outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring";
+// HTML min은 배타적 하한을 표현할 수 없어, 0 초과를 강제할 명시적인 최소 양수를 둔다.
+const POSITIVE_NUMBER_INPUT_MIN = "0.000000000001";
 
 function Label({
   children,
@@ -359,7 +361,7 @@ export function JobRow({
   );
 }
 
-function SweepJobRow({
+export function SweepJobRow({
   sweep,
   onSelectResult,
 }: {
@@ -940,7 +942,7 @@ export function RunManagementPage() {
                     <Input
                       type="number"
                       inputMode="decimal"
-                      min={Number.MIN_VALUE}
+                      min={POSITIVE_NUMBER_INPUT_MIN}
                       max={0.01}
                       step="any"
                       value={form.riskPerTrade}
@@ -954,7 +956,7 @@ export function RunManagementPage() {
                     <Input
                       type="number"
                       inputMode="decimal"
-                      min={Number.MIN_VALUE}
+                      min={POSITIVE_NUMBER_INPUT_MIN}
                       max={1}
                       step="any"
                       value={form.positionSizePct}

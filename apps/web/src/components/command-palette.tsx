@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   BarChart3,
   FlaskConical,
   LayoutList,
@@ -44,6 +45,9 @@ const commands = [
   },
 ] as const;
 
+const COMMAND_PALETTE_RUN_LIMIT = 1_000;
+const COMMAND_PALETTE_PAGE_LIMIT = 10;
+
 export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const [, navigate] = useLocation();
   const { updateFilters } = useCatalogFilters();
@@ -55,7 +59,12 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     queryFn: async () => {
       const rows = [];
       let offset = 0;
-      for (let pageCount = 0; pageCount < 10; pageCount += 1) {
+      let truncated = false;
+      for (
+        let pageCount = 0;
+        pageCount < COMMAND_PALETTE_PAGE_LIMIT;
+        pageCount += 1
+      ) {
         const { data, error } = await apiClient.GET("/api/v1/runs", {
           params: { query: { limit: 100, offset, sort: "-created_at" } },
         });
@@ -63,9 +72,13 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
         if (!data) throw new Error("실행 검색 응답이 비어 있습니다.");
         rows.push(...data.data);
         if (!data.page.has_more) break;
+        if (pageCount === COMMAND_PALETTE_PAGE_LIMIT - 1) {
+          truncated = true;
+          break;
+        }
         offset += data.page.limit;
       }
-      return rows;
+      return { rows, truncated };
     },
   });
 
@@ -81,7 +94,8 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       !normalized ||
       `${command.label} ${command.description}`.toLowerCase().includes(normalized),
   );
-  const matchingRuns = (runs.data ?? [])
+  const runRows = runs.data?.rows ?? [];
+  const matchingRuns = runRows
     .filter((run) =>
       `${run.run_id} ${run.run_name}`.toLowerCase().includes(normalized),
     )
@@ -89,7 +103,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
   function submitSearch() {
     if (!normalized) return;
-    const exactRun = (runs.data ?? []).find(
+    const exactRun = runRows.find(
       (run) =>
         run.run_id.toLowerCase() === normalized ||
         run.run_name.toLowerCase() === normalized,
@@ -127,6 +141,18 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
           />
         </div>
         <div className="space-y-1">
+          {runs.data?.truncated && (
+            <div
+              role="status"
+              className="mb-2 flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 p-3 text-xs text-amber-100"
+            >
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <p>
+                최근 {COMMAND_PALETTE_RUN_LIMIT.toLocaleString()}개 실행까지만
+                조회했습니다. 이전 실행을 찾으려면 카탈로그에서 조건을 좁히세요.
+              </p>
+            </div>
+          )}
           {visible.map((command) => {
             const Icon = command.icon;
             return (

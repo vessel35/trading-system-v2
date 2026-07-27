@@ -69,4 +69,34 @@ describe("명령 팔레트", () => {
       await screen.findByRole("button", { name: /alpha-breakout.*run-2025-alpha/ }),
     ).toBeInTheDocument();
   });
+
+  it("1,000건 조회 상한 뒤에도 더 있으면 일부 조회임을 고지한다", async () => {
+    server.use(
+      http.get("http://localhost/api/v1/runs", ({ request }) => {
+        const offset = Number(new URL(request.url).searchParams.get("offset") ?? 0);
+        return HttpResponse.json({
+          data: Array.from({ length: 100 }, (_, index) => ({
+            ...catalogFixture,
+            run_id: `run-${offset + index}`,
+            run_name: `fixture-${offset + index}`,
+          })),
+          page: {
+            limit: 100,
+            offset,
+            total: 1_001,
+            has_more: true,
+          },
+        });
+      }),
+    );
+    renderWithQuery(
+      <CatalogFilterProvider>
+        <CommandPalette open onOpenChange={vi.fn()} />
+      </CatalogFilterProvider>,
+    );
+
+    const notice = await screen.findByRole("status");
+    expect(notice).toHaveTextContent("최근 1,000개 실행까지만");
+    expect(notice).toHaveTextContent("카탈로그에서 조건을 좁히세요");
+  });
 });

@@ -3,11 +3,15 @@ import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { describe, expect, it, vi } from "vitest";
 
-import type { TrackedJob } from "../contexts/run-jobs";
+import type { TrackedJob, TrackedSweep } from "../contexts/run-jobs";
 import { RunJobsProvider } from "../contexts/run-jobs";
 import { renderWithQuery } from "../test/render";
 import { server } from "../test/server";
-import { JobRow, RunManagementPage } from "./run-management-page";
+import {
+  JobRow,
+  RunManagementPage,
+  SweepJobRow,
+} from "./run-management-page";
 
 vi.mock("../components/sweep-results", () => ({
   SweepResults: ({ sweepId }: { sweepId?: string | null }) => (
@@ -103,12 +107,12 @@ describe("실행 관리 보강", () => {
     renderManagement();
 
     const risk = await screen.findByLabelText(/risk_per_trade/);
-    expect(Number(risk.getAttribute("min"))).toBeGreaterThan(0);
+    expect(risk).toHaveAttribute("min", "0.000000000001");
     expect(risk).toHaveAttribute("max", "0.01");
 
     await user.selectOptions(screen.getByLabelText("사이징"), "pct");
     const position = screen.getByLabelText(/position_size_pct/);
-    expect(Number(position.getAttribute("min"))).toBeGreaterThan(0);
+    expect(position).toHaveAttribute("min", "0.000000000001");
     expect(position).toHaveAttribute("max", "1");
   });
 
@@ -134,6 +138,41 @@ describe("실행 관리 보강", () => {
     renderWithQuery(<JobRow job={tracked} onEdit={vi.fn()} />);
 
     const progress = screen.getByRole("progressbar", { name: "실행 중" });
+    expect(progress).not.toHaveAttribute("aria-valuenow");
+    expect(progress).toHaveAttribute(
+      "aria-valuetext",
+      "서버 수치 진행률 미제공",
+    );
+    expect(
+      screen.getByText(/완료율은 표시하지 않습니다/),
+    ).toBeInTheDocument();
+  });
+
+  it("수치가 없는 RUNNING 스윕도 완료율 없는 무기한 표시자로 렌더한다", () => {
+    const tracked = {
+      accepted: {
+        job_id: "sweep-running",
+        status: "QUEUED",
+        events_url: "/events",
+        status_url: "/status",
+      },
+      status: {
+        job_id: "sweep-running",
+        status: "RUNNING",
+        updated_at: "2025-01-01T00:00:00Z",
+      },
+      submission: {
+        type: "grid",
+        config: { run_name: "sweep-fixture" },
+      },
+      submittedAt: "2025-01-01T00:00:00Z",
+    } as TrackedSweep;
+
+    renderWithQuery(
+      <SweepJobRow sweep={tracked} onSelectResult={vi.fn()} />,
+    );
+
+    const progress = screen.getByRole("progressbar", { name: "스윕 실행 중" });
     expect(progress).not.toHaveAttribute("aria-valuenow");
     expect(progress).toHaveAttribute(
       "aria-valuetext",

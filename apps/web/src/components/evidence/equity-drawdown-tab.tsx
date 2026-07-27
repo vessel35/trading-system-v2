@@ -53,27 +53,40 @@ import {
   EvidenceTruncationNotice,
 } from "./evidence-state";
 
-type EquityDatum = { time: UTCTimestamp; value: number };
+export type EquityDatum = { time: UTCTimestamp; value: number };
+
+export interface EquityMarkerScale {
+  first: number;
+  bucketWidth: number;
+}
 
 function epochSeconds(value: string): UTCTimestamp {
   return Math.floor(new Date(value).getTime() / 1000) as UTCTimestamp;
 }
 
+export function equityMarkerScale(
+  data: readonly EquityDatum[],
+): EquityMarkerScale | null {
+  if (data.length < 2) return null;
+  let first = Number(data[0].time);
+  let previous = first;
+  let bucketWidth = Number.POSITIVE_INFINITY;
+  for (let index = 1; index < data.length; index += 1) {
+    const current = Number(data[index].time);
+    first = Math.min(first, current);
+    const width = current - previous;
+    if (width > 0) bucketWidth = Math.min(bucketWidth, width);
+    previous = current;
+  }
+  return Number.isFinite(bucketWidth) ? { first, bucketWidth } : null;
+}
+
 export function equityMarkerTime(
   value: string,
-  data: EquityDatum[],
+  scale: EquityMarkerScale | null,
 ): UTCTimestamp {
-  if (data.length < 2) return epochSeconds(value);
-  const times = [...new Set(data.map((point) => Number(point.time)))].sort(
-    (left, right) => left - right,
-  );
-  const widths = times
-    .slice(1)
-    .map((time, index) => time - times[index])
-    .filter((width) => width > 0);
-  if (widths.length === 0) return epochSeconds(value);
-  const bucketWidth = Math.min(...widths);
-  const first = times[0];
+  if (!scale) return epochSeconds(value);
+  const { first, bucketWidth } = scale;
   const instant = Number(epochSeconds(value));
   const bucket = Math.max(0, Math.floor((instant - first) / bucketWidth));
   return (first + bucket * bucketWidth) as UTCTimestamp;
@@ -91,6 +104,7 @@ function EquityChart({
   logarithmic: boolean;
 }) {
   const container = useRef<HTMLDivElement>(null);
+  const markerScale = useMemo(() => equityMarkerScale(data), [data]);
 
   useEffect(() => {
     if (!container.current || data.length === 0) return;
@@ -122,7 +136,7 @@ function EquityChart({
     if (markersVisible) {
       const markers: SeriesMarker<UTCTimestamp>[] = executions
         .map((execution) => ({
-          time: equityMarkerTime(execution.execution_ts, data),
+          time: equityMarkerTime(execution.execution_ts, markerScale),
           position: execution.side === "BUY" ? "belowBar" as const : "aboveBar" as const,
           color: execution.side === "BUY" ? "#34d399" : "#fb7185",
           shape: execution.side === "BUY" ? "arrowUp" as const : "arrowDown" as const,
@@ -140,7 +154,7 @@ function EquityChart({
       resize.disconnect();
       chart.remove();
     };
-  }, [data, executions, logarithmic, markersVisible]);
+  }, [data, executions, logarithmic, markerScale, markersVisible]);
 
   return <div ref={container} className="h-[310px] w-full" aria-label="자본곡선" />;
 }
@@ -293,7 +307,12 @@ export function EquityDrawdownTab({
   return (
     <div className="space-y-4">
       <EvidenceTruncationNotice
-        sources={[chart.data, equity.data, executions.data, episodes.data]}
+        sources={[
+          chart.evidence,
+          equity.evidence,
+          executions.evidence,
+          episodes.evidence,
+        ]}
       />
       <Card>
         <CardHeader className="flex-row items-start justify-between gap-3">

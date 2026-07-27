@@ -257,10 +257,10 @@ export function ChartTab({
     <div className="space-y-4">
       <EvidenceTruncationNotice
         sources={[
-          evidence.indicators.data,
-          evidence.signals.data,
-          evidence.candidates.data,
-          evidence.executions.data,
+          evidence.indicators.evidence,
+          evidence.signals.evidence,
+          evidence.candidates.evidence,
+          evidence.executions.evidence,
         ]}
       />
       <Card>

@@ -289,10 +289,10 @@ export function SignalsDecisionsTab({
     <div className="space-y-4">
       <EvidenceTruncationNotice
         sources={[
-          signalQuery.data,
-          decisionQuery.data,
-          candidateQuery.data,
-          missedQuery.data,
+          signalQuery.evidence,
+          decisionQuery.evidence,
+          candidateQuery.evidence,
+          missedQuery.evidence,
         ]}
       />
       <Card>
