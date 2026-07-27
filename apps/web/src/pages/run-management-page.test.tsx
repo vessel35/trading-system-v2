@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { describe, expect, it, vi } from "vitest";
@@ -70,6 +70,46 @@ function renderManagement() {
 }
 
 describe("실행 관리 보강", () => {
+  it("전략 파라미터 도움말에서 의미·계산식·예시를 확인하고 Esc와 닫기로 종료한다", async () => {
+    const user = userEvent.setup();
+    renderManagement();
+
+    const helpButton = await screen.findByRole("button", {
+      name: "전략 파라미터 도움말",
+    });
+    await user.click(helpButton);
+
+    let dialog = screen.getByRole("dialog", {
+      name: "전략 파라미터 도움말 · Vessel Reference",
+    });
+    expect(within(dialog).getByText("atr_stop_multiple")).toBeInTheDocument();
+    expect(within(dialog).getByText("reward_risk")).toBeInTheDocument();
+    expect(within(dialog).getByText("leverage")).toBeInTheDocument();
+    expect(
+      within(dialog).getByText(
+        "손절폭(stop_distance) = ATR(14) × atr_stop_multiple",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByText(
+        "롱 청산가 = 진입가 × (1 − 1/leverage + mmr)",
+      ),
+    ).toBeInTheDocument();
+    expect(within(dialog).getByText(/롱 손절가 = .*41,000/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/롱 목표가 = .*44,000/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/청산가 = .*≈ 28,210/)).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    await user.click(helpButton);
+    dialog = screen.getByRole("dialog", {
+      name: "전략 파라미터 도움말 · Vessel Reference",
+    });
+    await user.click(within(dialog).getByRole("button", { name: "닫기" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
   it("트리거와 스윕 버튼 모두 HTML 폼 검증을 우회하지 않는다", async () => {
     const user = userEvent.setup();
     const runPost = vi.fn();

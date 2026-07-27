@@ -23,6 +23,7 @@ import {
   type SweepAxis,
   type SweepSubmission,
 } from "../api/client";
+import { StrategyParamHelpDialog } from "../components/strategy-param-help-dialog";
 import { SweepResults } from "../components/sweep-results";
 import { Badge, type BadgeProps } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -792,15 +793,19 @@ export function RunManagementPage() {
                     {" · "}출처 {selectedStrategy.source}
                   </div>
                 )}
-                <Label className="md:col-span-2">
-                  전략 파라미터 JSON
+                <div className="grid gap-1.5 text-xs font-medium md:col-span-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <label htmlFor="strategy-parameters">전략 파라미터 JSON</label>
+                    <StrategyParamHelpDialog strategyId={form.strategyId} />
+                  </div>
                   <textarea
+                    id="strategy-parameters"
                     className={textareaClass}
                     value={form.params}
                     onChange={(event) => update("params", event.target.value)}
                     spellCheck={false}
                   />
-                </Label>
+                </div>
               </section>
 
               <section className="grid gap-4 border-t pt-5 sm:grid-cols-2 lg:grid-cols-4">
