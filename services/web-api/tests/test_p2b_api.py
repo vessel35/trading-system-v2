@@ -17,6 +17,8 @@ from web_api.main import app, market_repository, repository
 from web_api.models import (
     BacktestTag,
     DataSourceCoverage,
+    DataSourceInventory,
+    InventoryItem,
     RunTagsResponse,
     SweepSubmission,
     TagFacetsResponse,
@@ -296,7 +298,9 @@ def test_tag_crud_uses_idempotent_short_lived_writer(
         app.dependency_overrides.clear()
 
 
-def test_facets_and_coverage_are_read_only_dependency_queries(client: TestClient) -> None:
+def test_facets_coverage_and_inventory_are_read_only_dependency_queries(
+    client: TestClient,
+) -> None:
     class FakeCatalog:
         @staticmethod
         def tag_facets() -> TagFacetsResponse:
@@ -316,6 +320,24 @@ def test_facets_and_coverage_are_read_only_dependency_queries(client: TestClient
                 missing_1m_rows=1,
             )
 
+        @staticmethod
+        def inventory(**kwargs: str) -> DataSourceInventory:
+            return DataSourceInventory(
+                data_source=kwargs["data_source"],
+                items=[
+                    InventoryItem(
+                        symbol="BTC/USDT:USDT",
+                        exchange="binance",
+                        available_from=datetime(2025, 1, 1, tzinfo=UTC),
+                        available_to=datetime(2025, 1, 2, tzinfo=UTC),
+                        row_count=1440,
+                        expected_1m_rows=1441,
+                        missing_1m_rows=1,
+                        coverage_ratio=1440 / 1441,
+                    )
+                ],
+            )
+
     app.dependency_overrides[repository] = FakeCatalog
     app.dependency_overrides[market_repository] = FakeMarket
     try:
@@ -330,6 +352,28 @@ def test_facets_and_coverage_are_read_only_dependency_queries(client: TestClient
         assert coverage.status_code == 200
         assert coverage.json()["missing_1m_rows"] == 1
         assert coverage.json()["source_timeframe"] == "1m"
+
+        inventory = client.get(
+            "/api/v1/data-sources/crypto_data.ohlcv_futures/inventory"
+        )
+        assert inventory.status_code == 200
+        assert inventory.json()["items"][0]["timeframe"] == "1m"
+        assert inventory.json()["items"][0]["missing_1m_rows"] == 1
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_inventory_rejects_unsupported_data_source(client: TestClient) -> None:
+    class FakeMarket:
+        @staticmethod
+        def inventory(**_kwargs: str) -> DataSourceInventory:
+            raise ValueError("run data_source is not a supported OHLCV table")
+
+    app.dependency_overrides[market_repository] = FakeMarket
+    try:
+        response = client.get("/api/v1/data-sources/crypto_data.trades/inventory")
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "unsupported_data_source"
     finally:
         app.dependency_overrides.clear()
 

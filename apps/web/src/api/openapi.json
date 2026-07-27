@@ -952,6 +952,55 @@
         }
       }
     },
+    "/api/v1/data-sources/{data_source}/inventory": {
+      "get": {
+        "summary": "Get Data Source Inventory",
+        "operationId": "get_data_source_inventory_api_v1_data_sources__data_source__inventory_get",
+        "parameters": [
+          {
+            "name": "data_source",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Data Source"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataSourceInventory"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
     "/api/v1/runs:compare": {
       "get": {
         "summary": "Compare Runs",
@@ -4136,6 +4185,27 @@
         ],
         "title": "DataSourceCoverage"
       },
+      "DataSourceInventory": {
+        "properties": {
+          "data_source": {
+            "type": "string",
+            "title": "Data Source"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/InventoryItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data_source",
+          "items"
+        ],
+        "title": "DataSourceInventory"
+      },
       "Decision": {
         "properties": {
           "decision_id": {
@@ -5401,6 +5471,78 @@
           "checked_at"
         ],
         "title": "IntegrityCheck"
+      },
+      "InventoryItem": {
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "title": "Symbol"
+          },
+          "exchange": {
+            "type": "string",
+            "title": "Exchange"
+          },
+          "timeframe": {
+            "type": "string",
+            "const": "1m",
+            "title": "Timeframe",
+            "default": "1m"
+          },
+          "available_from": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Available From"
+          },
+          "available_to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Available To"
+          },
+          "row_count": {
+            "type": "integer",
+            "title": "Row Count"
+          },
+          "expected_1m_rows": {
+            "type": "integer",
+            "title": "Expected 1M Rows"
+          },
+          "missing_1m_rows": {
+            "type": "integer",
+            "title": "Missing 1M Rows"
+          },
+          "coverage_ratio": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Coverage Ratio"
+          }
+        },
+        "type": "object",
+        "required": [
+          "symbol",
+          "exchange",
+          "available_from",
+          "available_to",
+          "row_count",
+          "expected_1m_rows",
+          "missing_1m_rows",
+          "coverage_ratio"
+        ],
+        "title": "InventoryItem"
       },
       "JobError": {
         "properties": {

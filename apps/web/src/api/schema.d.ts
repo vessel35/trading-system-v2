@@ -158,6 +158,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/data-sources/{data_source}/inventory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Data Source Inventory */
+        get: operations["get_data_source_inventory_api_v1_data_sources__data_source__inventory_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs:compare": {
         parameters: {
             query?: never;
@@ -788,6 +805,13 @@ export interface components {
             /** Missing 1M Rows */
             missing_1m_rows: number;
         };
+        /** DataSourceInventory */
+        DataSourceInventory: {
+            /** Data Source */
+            data_source: string;
+            /** Items */
+            items: components["schemas"]["InventoryItem"][];
+        };
         /** Decision */
         Decision: {
             /** Decision Id */
@@ -1292,6 +1316,31 @@ export interface components {
              * Format: date-time
              */
             checked_at: string;
+        };
+        /** InventoryItem */
+        InventoryItem: {
+            /** Symbol */
+            symbol: string;
+            /** Exchange */
+            exchange: string;
+            /**
+             * Timeframe
+             * @default 1m
+             * @constant
+             */
+            timeframe: "1m";
+            /** Available From */
+            available_from: string | null;
+            /** Available To */
+            available_to: string | null;
+            /** Row Count */
+            row_count: number;
+            /** Expected 1M Rows */
+            expected_1m_rows: number;
+            /** Missing 1M Rows */
+            missing_1m_rows: number;
+            /** Coverage Ratio */
+            coverage_ratio: number;
         };
         /** JobError */
         JobError: {
@@ -2898,6 +2947,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DataSourceCoverage"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_data_source_inventory_api_v1_data_sources__data_source__inventory_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                data_source: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataSourceInventory"];
                 };
             };
             /** @description Bad Request */

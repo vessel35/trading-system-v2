@@ -640,6 +640,23 @@ class DataSourceCoverage(BaseModel):
     missing_1m_rows: int
 
 
+class InventoryItem(BaseModel):
+    symbol: str
+    exchange: str
+    timeframe: Literal["1m"] = "1m"
+    available_from: datetime | None
+    available_to: datetime | None
+    row_count: int
+    expected_1m_rows: int
+    missing_1m_rows: int
+    coverage_ratio: float = Field(ge=0, le=1)
+
+
+class DataSourceInventory(BaseModel):
+    data_source: str
+    items: list[InventoryItem]
+
+
 class CatalogHealth(BaseModel):
     status: Literal["connected"]
     database: str

@@ -58,6 +58,7 @@ from web_api.models import (
     ChartSummary,
     ConditionalExpectancy,
     DataSourceCoverage,
+    DataSourceInventory,
     Decision,
     DrawdownEpisode,
     EquityPoint,
@@ -663,6 +664,26 @@ def get_data_source_coverage(
             symbol=symbol,
             exchange=exchange,
         )
+    except ValueError as exc:
+        raise ApiError(
+            status_code=400,
+            code="unsupported_data_source",
+            message=str(exc),
+            details={"data_source": data_source},
+        ) from exc
+
+
+@app.get(
+    "/api/v1/data-sources/{data_source}/inventory",
+    response_model=DataSourceInventory,
+    responses={400: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+)
+def get_data_source_inventory(
+    data_source: str,
+    market: Annotated[MarketDataRepository, Depends(market_repository)],
+) -> DataSourceInventory:
+    try:
+        return market.inventory(data_source=data_source)
     except ValueError as exc:
         raise ApiError(
             status_code=400,

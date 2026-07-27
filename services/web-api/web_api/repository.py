@@ -17,7 +17,9 @@ from web_api.models import (
     CandlePage,
     CatalogHealth,
     DataSourceCoverage,
+    DataSourceInventory,
     HealthResponse,
+    InventoryItem,
     Page,
     Preregistration,
     PreregistrationResponse,
@@ -694,6 +696,45 @@ class MarketDataRepository:
             expected_1m_rows=expected,
             missing_1m_rows=max(0, expected - row_count),
         )
+
+    def inventory(self, *, data_source: str) -> DataSourceInventory:
+        table = self._source_table(data_source)
+        rows = self._connection.execute(
+            f"""
+            SELECT
+                symbol,
+                exchange,
+                min(time) AS available_from,
+                max(time) AS available_to,
+                count(DISTINCT time) AS row_count,
+                CASE
+                    WHEN min(time) IS NULL THEN 0
+                    ELSE floor(extract(epoch FROM (max(time) - min(time))) / 60)::bigint + 1
+                END AS expected_1m_rows
+            FROM public.{table}
+            WHERE timeframe = '1m'
+            GROUP BY symbol, exchange
+            ORDER BY symbol, exchange
+            """
+        ).fetchall()
+        items = []
+        for row in rows:
+            row_count = int(row["row_count"])
+            expected = int(row["expected_1m_rows"])
+            coverage_ratio = min(1.0, max(0.0, row_count / expected)) if expected else 0.0
+            items.append(
+                InventoryItem(
+                    symbol=row["symbol"],
+                    exchange=row["exchange"],
+                    available_from=row["available_from"],
+                    available_to=row["available_to"],
+                    row_count=row_count,
+                    expected_1m_rows=expected,
+                    missing_1m_rows=max(0, expected - row_count),
+                    coverage_ratio=coverage_ratio,
+                )
+            )
+        return DataSourceInventory(data_source=data_source, items=items)
 
     @staticmethod
     def _source_table(data_source: str) -> str:
