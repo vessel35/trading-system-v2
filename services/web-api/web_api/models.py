@@ -874,6 +874,8 @@ class StrategyOption(BaseModel):
     required_indicators: list[dict[str, object]]
     min_history: int
     default_params: dict[str, object]
+    supported_money_management: list[Literal["manual", "turtle"]]
+    default_money_management: dict[str, object]
     is_active: bool
     is_deprecated: bool
     source: Literal["strategy_registry", "code_registry"]

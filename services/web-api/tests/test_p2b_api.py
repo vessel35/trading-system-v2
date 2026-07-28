@@ -111,8 +111,45 @@ def test_grid_sweep_expands_validated_configs_and_reports_completion(
     assert status["sweep_id"].startswith("S-")
     configs = cast(list[Any], received["configs"])
     assert [config.params["reward_risk"] for config in configs] == [1.5, 2.5]
+    assert [
+        config.money_management.reward_risk for config in configs
+    ] == [1.5, 2.5]
     assert {config.sweep["sweep_id"] for config in configs} == {status["sweep_id"]}
     assert [config.run_name for config in configs] == ["p2b-sweep-g1", "p2b-sweep-g2"]
+
+
+def test_grid_sweep_assigns_explicit_money_management_axis(
+    run_config_payload: dict[str, object],
+) -> None:
+    payload = SweepSubmission.model_validate(
+        {
+            "type": "grid",
+            "config": {
+                **run_config_payload,
+                "params": {},
+                "money_management": {
+                    "mode": "turtle",
+                    "n_period": 20,
+                    "n_timeframe": "1d",
+                    "stop_n_multiple": 2.0,
+                    "leverage_cap": 10,
+                },
+            },
+            "axes": [
+                {
+                    "parameter": "money_management.stop_n_multiple",
+                    "values": [1.5, 2.5],
+                }
+            ],
+        }
+    )
+    plan = main_module._prepare_sweep(payload)
+    assert plan.configs is not None
+    assert [
+        config.money_management.stop_n_multiple
+        for config in plan.configs
+    ] == [1.5, 2.5]
+    assert [config.params for config in plan.configs] == [{}, {}]
 
 
 @pytest.mark.parametrize(

@@ -403,6 +403,31 @@ def _assign_axis(params: dict[str, object], parameter: str, value: object) -> No
     current[path[-1]] = value
 
 
+def _assign_sweep_axis(
+    cell: dict[str, object],
+    parameter: str,
+    value: object,
+) -> None:
+    if parameter.startswith("money_management."):
+        money_management = cast(dict[str, object], cell["money_management"])
+        _assign_axis(
+            money_management,
+            parameter.removeprefix("money_management."),
+            value,
+        )
+        return
+    params = cast(dict[str, object], cell["params"])
+    _assign_axis(params, parameter, value)
+    legacy_name = parameter.removeprefix("params.")
+    money_management = cast(dict[str, object], cell["money_management"])
+    if (
+        cell.get("strategy_id") == "vessel-reference"
+        and money_management.get("mode") == "manual"
+        and legacy_name in {"leverage", "reward_risk", "atr_stop_multiple"}
+    ):
+        money_management[legacy_name] = value
+
+
 def _validate_sweep_boundaries(config: RunConfig, payload: SweepSubmission) -> None:
     if payload.type == "grid":
         return
@@ -467,9 +492,8 @@ def _prepare_sweep(payload: SweepSubmission) -> SweepPlan:
     value_sets = [axis.values for axis in payload.axes]
     for index, combination in enumerate(product(*value_sets)):
         cell = deepcopy(base_payload)
-        params = cast(dict[str, object], cell["params"])
         for axis, value in zip(payload.axes, combination, strict=True):
-            _assign_axis(params, axis.parameter, value)
+            _assign_sweep_axis(cell, axis.parameter, value)
         cell["run_name"] = _sweep_run_name(base.run_name, index)
         cell["sweep"] = {
             **sweep_meta,

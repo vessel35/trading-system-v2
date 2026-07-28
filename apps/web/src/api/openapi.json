@@ -178,6 +178,24 @@
                     "minLength": 1,
                     "title": "Profile Ref"
                   },
+                  "money_management": {
+                    "oneOf": [
+                      {
+                        "$ref": "#/components/schemas/ManualMoneyManagementConfig"
+                      },
+                      {
+                        "$ref": "#/components/schemas/TurtleMoneyManagementConfig"
+                      }
+                    ],
+                    "title": "Money Management",
+                    "discriminator": {
+                      "propertyName": "mode",
+                      "mapping": {
+                        "manual": "#/components/schemas/ManualMoneyManagementConfig",
+                        "turtle": "#/components/schemas/TurtleMoneyManagementConfig"
+                      }
+                    }
+                  },
                   "sweep": {
                     "anyOf": [
                       {
@@ -799,7 +817,7 @@
       },
       "post": {
         "summary": "Queue a collector data job",
-        "description": "Launches a collector subprocess with external Binance network access and crypto_data write capability after validation. Half-open [start, end) ranges longer than 730 days are rejected.",
+        "description": "Launches a collector subprocess with external Binance network access and crypto_data write capability after validation. Half-open [start, end) ranges longer than 2000 days are rejected.",
         "operationId": "trigger_data_job_api_v1_data_jobs_post",
         "requestBody": {
           "content": {
@@ -6007,6 +6025,41 @@
         "title": "JobStatus"
       },
       "JsonValue": {},
+      "ManualMoneyManagementConfig": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "const": "manual",
+            "title": "Mode",
+            "default": "manual"
+          },
+          "leverage": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Leverage",
+            "default": 1
+          },
+          "reward_risk": {
+            "type": "number",
+            "maximum": 10.0,
+            "minimum": 0.1,
+            "title": "Reward Risk",
+            "default": 2.0
+          },
+          "atr_stop_multiple": {
+            "type": "number",
+            "maximum": 10.0,
+            "minimum": 0.1,
+            "title": "Atr Stop Multiple",
+            "default": 2.0
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ManualMoneyManagementConfig",
+        "description": "Legacy-compatible explicit ATR protection and leverage settings."
+      },
       "MissedOpportunity": {
         "properties": {
           "miss_id": {
@@ -6777,6 +6830,24 @@
             "type": "string",
             "minLength": 1,
             "title": "Profile Ref"
+          },
+          "money_management": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ManualMoneyManagementConfig"
+              },
+              {
+                "$ref": "#/components/schemas/TurtleMoneyManagementConfig"
+              }
+            ],
+            "title": "Money Management",
+            "discriminator": {
+              "propertyName": "mode",
+              "mapping": {
+                "manual": "#/components/schemas/ManualMoneyManagementConfig",
+                "turtle": "#/components/schemas/TurtleMoneyManagementConfig"
+              }
+            }
           },
           "sweep": {
             "anyOf": [
@@ -7595,6 +7666,24 @@
                 "minLength": 1,
                 "title": "Profile Ref"
               },
+              "money_management": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/ManualMoneyManagementConfig"
+                  },
+                  {
+                    "$ref": "#/components/schemas/TurtleMoneyManagementConfig"
+                  }
+                ],
+                "title": "Money Management",
+                "discriminator": {
+                  "propertyName": "mode",
+                  "mapping": {
+                    "manual": "#/components/schemas/ManualMoneyManagementConfig",
+                    "turtle": "#/components/schemas/TurtleMoneyManagementConfig"
+                  }
+                }
+              },
               "sweep": {
                 "anyOf": [
                   {
@@ -8404,6 +8493,22 @@
             "type": "object",
             "title": "Default Params"
           },
+          "supported_money_management": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "manual",
+                "turtle"
+              ]
+            },
+            "type": "array",
+            "title": "Supported Money Management"
+          },
+          "default_money_management": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Default Money Management"
+          },
           "is_active": {
             "type": "boolean",
             "title": "Is Active"
@@ -8430,6 +8535,8 @@
           "required_indicators",
           "min_history",
           "default_params",
+          "supported_money_management",
+          "default_money_management",
           "is_active",
           "is_deprecated",
           "source"
@@ -8723,6 +8830,24 @@
                 "type": "string",
                 "minLength": 1,
                 "title": "Profile Ref"
+              },
+              "money_management": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/ManualMoneyManagementConfig"
+                  },
+                  {
+                    "$ref": "#/components/schemas/TurtleMoneyManagementConfig"
+                  }
+                ],
+                "title": "Money Management",
+                "discriminator": {
+                  "propertyName": "mode",
+                  "mapping": {
+                    "manual": "#/components/schemas/ManualMoneyManagementConfig",
+                    "turtle": "#/components/schemas/TurtleMoneyManagementConfig"
+                  }
+                }
               },
               "sweep": {
                 "anyOf": [
@@ -9295,6 +9420,47 @@
           "excursion_r"
         ],
         "title": "TradeFeature"
+      },
+      "TurtleMoneyManagementConfig": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "const": "turtle",
+            "title": "Mode",
+            "default": "turtle"
+          },
+          "n_period": {
+            "type": "integer",
+            "maximum": 200.0,
+            "minimum": 2.0,
+            "title": "N Period",
+            "default": 20
+          },
+          "n_timeframe": {
+            "type": "string",
+            "const": "1d",
+            "title": "N Timeframe",
+            "default": "1d"
+          },
+          "stop_n_multiple": {
+            "type": "number",
+            "maximum": 10.0,
+            "minimum": 0.1,
+            "title": "Stop N Multiple",
+            "default": 2.0
+          },
+          "leverage_cap": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Leverage Cap",
+            "default": 10
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "TurtleMoneyManagementConfig",
+        "description": "Turtle-derived daily-N money management under the global risk cap."
       },
       "ValidationError": {
         "properties": {

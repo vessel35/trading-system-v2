@@ -102,7 +102,7 @@ export interface paths {
         put?: never;
         /**
          * Queue a collector data job
-         * @description Launches a collector subprocess with external Binance network access and crypto_data write capability after validation. Half-open [start, end) ranges longer than 730 days are rejected.
+         * @description Launches a collector subprocess with external Binance network access and crypto_data write capability after validation. Half-open [start, end) ranges longer than 2000 days are rejected.
          */
         post: operations["trigger_data_job_api_v1_data_jobs_post"];
         delete?: never;
@@ -1518,6 +1518,32 @@ export interface components {
             error?: components["schemas"]["JobError"] | null;
         };
         JsonValue: unknown;
+        /**
+         * ManualMoneyManagementConfig
+         * @description Legacy-compatible explicit ATR protection and leverage settings.
+         */
+        ManualMoneyManagementConfig: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            mode: "manual";
+            /**
+             * Leverage
+             * @default 1
+             */
+            leverage: number;
+            /**
+             * Reward Risk
+             * @default 2
+             */
+            reward_risk: number;
+            /**
+             * Atr Stop Multiple
+             * @default 2
+             */
+            atr_stop_multiple: number;
+        };
         /** MissedOpportunity */
         MissedOpportunity: {
             /** Miss Id */
@@ -1818,6 +1844,8 @@ export interface components {
             fill_timing: "immediate" | "next_bar";
             /** Profile Ref */
             profile_ref: string;
+            /** Money Management */
+            money_management?: components["schemas"]["ManualMoneyManagementConfig"] | components["schemas"]["TurtleMoneyManagementConfig"];
             /** Sweep */
             sweep?: {
                 [key: string]: unknown;
@@ -2099,6 +2127,8 @@ export interface components {
                 fill_timing: "immediate" | "next_bar";
                 /** Profile Ref */
                 profile_ref: string;
+                /** Money Management */
+                money_management?: components["schemas"]["ManualMoneyManagementConfig"] | components["schemas"]["TurtleMoneyManagementConfig"];
                 /** Sweep */
                 sweep?: {
                     [key: string]: unknown;
@@ -2317,6 +2347,12 @@ export interface components {
             default_params: {
                 [key: string]: unknown;
             };
+            /** Supported Money Management */
+            supported_money_management: ("manual" | "turtle")[];
+            /** Default Money Management */
+            default_money_management: {
+                [key: string]: unknown;
+            };
             /** Is Active */
             is_active: boolean;
             /** Is Deprecated */
@@ -2446,6 +2482,8 @@ export interface components {
                 fill_timing: "immediate" | "next_bar";
                 /** Profile Ref */
                 profile_ref: string;
+                /** Money Management */
+                money_management?: components["schemas"]["ManualMoneyManagementConfig"] | components["schemas"]["TurtleMoneyManagementConfig"];
                 /** Sweep */
                 sweep?: {
                     [key: string]: unknown;
@@ -2626,6 +2664,38 @@ export interface components {
             /** Excursion R */
             excursion_r: number | null;
         };
+        /**
+         * TurtleMoneyManagementConfig
+         * @description Turtle-derived daily-N money management under the global risk cap.
+         */
+        TurtleMoneyManagementConfig: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            mode: "turtle";
+            /**
+             * N Period
+             * @default 20
+             */
+            n_period: number;
+            /**
+             * N Timeframe
+             * @default 1d
+             * @constant
+             */
+            n_timeframe: "1d";
+            /**
+             * Stop N Multiple
+             * @default 2
+             */
+            stop_n_multiple: number;
+            /**
+             * Leverage Cap
+             * @default 10
+             */
+            leverage_cap: number;
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -2734,6 +2804,8 @@ export interface operations {
                     fill_timing?: "immediate" | "next_bar";
                     /** Profile Ref */
                     profile_ref: string;
+                    /** Money Management */
+                    money_management?: components["schemas"]["ManualMoneyManagementConfig"] | components["schemas"]["TurtleMoneyManagementConfig"];
                     /** Sweep */
                     sweep?: {
                         [key: string]: unknown;

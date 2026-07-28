@@ -47,12 +47,21 @@ type PrimaryMetric = NonNullable<PreregistrationInput["primary_metric"]>;
 type SizingMethod = NonNullable<RunConfigInput["sizing_method"]>;
 type IndicatorMode = NonNullable<RunConfigInput["indicator_mode"]>;
 type MarketType = RunConfigInput["market_type"];
+type MoneyManagementMode = NonNullable<
+  RunConfigInput["money_management"]
+>["mode"];
 type SweepType = SweepSubmission["type"];
 
 interface FormState {
-  runName: string;
   strategyId: string;
   params: string;
+  moneyManagementMode: MoneyManagementMode;
+  manualLeverage: string;
+  manualRewardRisk: string;
+  manualAtrStopMultiple: string;
+  turtleNPeriod: string;
+  turtleStopNMultiple: string;
+  turtleLeverageCap: string;
   symbol: string;
   exchange: string;
   timeframe: string;
@@ -82,9 +91,15 @@ interface FormState {
 }
 
 const initialForm: FormState = {
-  runName: "p2a-dry-run",
   strategyId: "vessel-reference",
   params: "{}",
+  moneyManagementMode: "manual",
+  manualLeverage: "1",
+  manualRewardRisk: "2",
+  manualAtrStopMultiple: "2",
+  turtleNPeriod: "20",
+  turtleStopNMultiple: "2",
+  turtleLeverageCap: "10",
   symbol: "BTC/USDT:USDT",
   exchange: "binance",
   timeframe: "1h",
@@ -93,7 +108,7 @@ const initialForm: FormState = {
   start: "2025-07-01T00:00",
   end: "2025-07-04T00:00",
   initialCapital: "10000",
-  seed: "976",
+  seed: "0",
   sizingMethod: "risk_based",
   riskPerTrade: "0.01",
   positionSizePct: "0.1",
@@ -119,6 +134,11 @@ const textareaClass =
   "min-h-24 w-full rounded-md border border-input bg-background/70 px-3 py-2 font-mono text-xs shadow-sm outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring";
 // HTML min은 배타적 하한을 표현할 수 없어, 0 초과를 강제할 명시적인 최소 양수를 둔다.
 const POSITIVE_NUMBER_INPUT_MIN = "0.000000000001";
+const MONEY_MANAGEMENT_PARAM_NAMES = new Set([
+  "leverage",
+  "reward_risk",
+  "atr_stop_multiple",
+]);
 
 function Label({
   children,
@@ -181,6 +201,52 @@ function localDateTime(value: string): string {
   return local.toISOString().slice(0, 16);
 }
 
+function inferredMarketType(symbol: string): MarketType {
+  return symbol.includes(":") ? "futures" : "spot";
+}
+
+function inferredDataSource(marketType: MarketType): string {
+  return marketType === "futures"
+    ? "crypto_data.ohlcv_futures"
+    : "crypto_data.ohlcv";
+}
+
+function automaticRunName(strategyId: string, symbol: string): string {
+  const strategy = strategyId
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  const asset = (symbol.split("/")[0] ?? "asset")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return `bt-${strategy || "strategy"}-${asset || "asset"}`
+    .slice(0, 24)
+    .replace(/-+$/g, "");
+}
+
+function automaticProfileRef(strategyId: string): string {
+  return `${strategyId}-v1`;
+}
+
+function paramsForDisplay(value: string): Record<string, unknown> {
+  try {
+    return parseObject(value, "전략 파라미터");
+  } catch {
+    return {};
+  }
+}
+
+function strategyOnlyParams(
+  params: Record<string, unknown>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(params).filter(
+      ([name]) => !MONEY_MANAGEMENT_PARAM_NAMES.has(name),
+    ),
+  );
+}
+
 function timeframeMilliseconds(timeframe: string): number | null {
   const match = /^([1-9]\d*)([mhd])$/.exec(timeframe);
   if (!match) return null;
@@ -215,10 +281,26 @@ function optionalNumber(value: string): number | undefined {
 }
 
 function buildSubmission(form: FormState): RunSubmission {
+  const moneyManagement: NonNullable<RunConfigInput["money_management"]> =
+    form.moneyManagementMode === "manual"
+      ? {
+          mode: "manual",
+          leverage: Number(form.manualLeverage),
+          reward_risk: Number(form.manualRewardRisk),
+          atr_stop_multiple: Number(form.manualAtrStopMultiple),
+        }
+      : {
+          mode: "turtle",
+          n_period: Number(form.turtleNPeriod),
+          n_timeframe: "1d",
+          stop_n_multiple: Number(form.turtleStopNMultiple),
+          leverage_cap: Number(form.turtleLeverageCap),
+        };
   const config: RunSubmission["config"] = {
-    run_name: form.runName.trim(),
+    run_name: automaticRunName(form.strategyId, form.symbol),
     strategy_id: form.strategyId,
-    params: parseObject(form.params, "전략 파라미터"),
+    params: strategyOnlyParams(parseObject(form.params, "전략 파라미터")),
+    money_management: moneyManagement,
     symbol: form.symbol.trim(),
     exchange: form.exchange.trim(),
     timeframe: form.timeframe.trim(),
@@ -432,9 +514,7 @@ export function RunManagementPage() {
   const { jobs, sweeps, track, trackSweep } = useRunJobs();
   const formRef = useRef<HTMLFormElement>(null);
   const [form, setForm] = useState<FormState>(initialForm);
-  const [busy, setBusy] = useState<"validate" | "trigger" | "sweep" | null>(
-    null,
-  );
+  const [busy, setBusy] = useState<"trigger" | "sweep" | null>(null);
   const [sweepType, setSweepType] = useState<SweepType>("grid");
   const [axisOneParameter, setAxisOneParameter] = useState("reward_risk");
   const [axisOneValues, setAxisOneValues] = useState("[1.5, 2.0, 2.5]");
@@ -472,9 +552,43 @@ export function RunManagementPage() {
     () => strategies.data?.find((item) => item.strategy_id === form.strategyId),
     [form.strategyId, strategies.data],
   );
-  const axisCandidates = useMemo(
-    () => Object.keys(selectedStrategy?.default_params ?? {}),
+  const supportedMoneyManagement = useMemo(
+    () =>
+      selectedStrategy?.supported_money_management?.length
+        ? selectedStrategy.supported_money_management
+        : (["manual"] as MoneyManagementMode[]),
     [selectedStrategy],
+  );
+  const axisCandidates = useMemo(
+    () => [
+      ...Object.keys(
+        strategyOnlyParams(selectedStrategy?.default_params ?? {}),
+      ),
+      ...(form.moneyManagementMode === "manual"
+        ? [
+            "money_management.leverage",
+            "money_management.reward_risk",
+            "money_management.atr_stop_multiple",
+          ]
+        : [
+            "money_management.n_period",
+            "money_management.stop_n_multiple",
+            "money_management.leverage_cap",
+          ]),
+    ],
+    [form.moneyManagementMode, selectedStrategy],
+  );
+  const strategyParams = useMemo(
+    () => strategyOnlyParams(paramsForDisplay(form.params)),
+    [form.params],
+  );
+  const strategyParamEntries = useMemo(
+    () =>
+      Object.entries({
+        ...strategyOnlyParams(selectedStrategy?.default_params ?? {}),
+        ...strategyParams,
+      }),
+    [selectedStrategy, strategyParams],
   );
   const coverage = useCoverage(form.dataSource, form.symbol, form.exchange);
   const coverageWarning = useMemo(() => {
@@ -493,13 +607,56 @@ export function RunManagementPage() {
   }, [coverage.data, form.end, form.start]);
 
   useEffect(() => {
-    if (!selectedStrategy || form.params !== "{}") return;
+    if (!selectedStrategy) return;
+    setForm((current) => {
+      const supportedTimeframes = selectedStrategy.supported_timeframes;
+      const defaultMoneyManagement =
+        selectedStrategy.default_money_management ?? {};
+      const defaultMode =
+        defaultMoneyManagement.mode === "turtle" ? "turtle" : "manual";
+      const mode = selectedStrategy.supported_money_management?.includes(
+        current.moneyManagementMode,
+      )
+        ? current.moneyManagementMode
+        : defaultMode;
+      return {
+        ...current,
+        params:
+          current.params === "{}"
+            ? JSON.stringify(
+                strategyOnlyParams(selectedStrategy.default_params),
+                null,
+                2,
+              )
+            : current.params,
+        moneyManagementMode: mode,
+        manualLeverage: String(
+          defaultMoneyManagement.leverage ?? current.manualLeverage,
+        ),
+        manualRewardRisk: String(
+          defaultMoneyManagement.reward_risk ?? current.manualRewardRisk,
+        ),
+        manualAtrStopMultiple: String(
+          defaultMoneyManagement.atr_stop_multiple ??
+            current.manualAtrStopMultiple,
+        ),
+        timeframe: supportedTimeframes.includes(current.timeframe)
+          ? current.timeframe
+          : (supportedTimeframes[0] ?? current.timeframe),
+        profileRef: automaticProfileRef(selectedStrategy.strategy_id),
+      };
+    });
+  }, [selectedStrategy]);
+
+  useEffect(() => {
+    const marketType = inferredMarketType(form.symbol);
     setForm((current) => ({
       ...current,
-      params: JSON.stringify(selectedStrategy.default_params, null, 2),
-      timeframe: selectedStrategy.supported_timeframes[0] ?? current.timeframe,
+      exchange: "binance",
+      marketType,
+      dataSource: inferredDataSource(marketType),
     }));
-  }, [form.params, selectedStrategy]);
+  }, [form.symbol]);
 
   useEffect(() => {
     if (axisCandidates.length === 0) return;
@@ -546,6 +703,26 @@ export function RunManagementPage() {
     setForm((current) => ({ ...current, [key]: value }));
   }
 
+  function updateStrategyParam(
+    parameter: string,
+    rawValue: string | boolean,
+    exampleValue: unknown,
+  ) {
+    setForm((current) => {
+      const params = paramsForDisplay(current.params);
+      const value =
+        typeof rawValue === "boolean"
+          ? rawValue
+          : typeof exampleValue === "number" && rawValue !== ""
+            ? Number(rawValue)
+            : rawValue;
+      return {
+        ...current,
+        params: JSON.stringify({ ...params, [parameter]: value }, null, 2),
+      };
+    });
+  }
+
   function openSweepResult(sweepId: string) {
     const normalized = sweepId.trim();
     if (!normalized) return;
@@ -554,31 +731,6 @@ export function RunManagementPage() {
     window.history.pushState(null, "", url);
     setSweepLookup(normalized);
     setSelectedSweepId(normalized);
-  }
-
-  async function validateConfig(event: FormEvent) {
-    event.preventDefault();
-    setBusy("validate");
-    setNotice(null);
-    try {
-      const submission = buildSubmission(form);
-      const { data, error } = await apiClient.POST("/api/v1/run-config:validate", {
-        body: submission.config,
-      });
-      if (error) throw new Error(requestErrorMessage(error));
-      if (!data) throw new Error("검증 응답이 비어 있습니다.");
-      setNotice({
-        kind: "success",
-        message: `설정 검증 완료 · UTC ${data.start} → ${data.end}`,
-      });
-    } catch (error) {
-      setNotice({
-        kind: "error",
-        message: error instanceof Error ? error.message : "설정을 검증하지 못했습니다.",
-      });
-    } finally {
-      setBusy(null);
-    }
   }
 
   async function triggerRun() {
@@ -660,11 +812,46 @@ export function RunManagementPage() {
   function loadSubmission(submission: RunSubmission) {
     const config = submission.config;
     const prereg = submission.prereg;
+    const moneyManagement = config.money_management;
     setForm((current) => ({
       ...current,
-      runName: config.run_name,
       strategyId: config.strategy_id,
-      params: JSON.stringify(config.params ?? {}, null, 2),
+      params: JSON.stringify(
+        strategyOnlyParams(config.params ?? {}),
+        null,
+        2,
+      ),
+      moneyManagementMode: moneyManagement?.mode ?? "manual",
+      manualLeverage: String(
+        moneyManagement?.mode === "manual"
+          ? moneyManagement.leverage
+          : current.manualLeverage,
+      ),
+      manualRewardRisk: String(
+        moneyManagement?.mode === "manual"
+          ? moneyManagement.reward_risk
+          : current.manualRewardRisk,
+      ),
+      manualAtrStopMultiple: String(
+        moneyManagement?.mode === "manual"
+          ? moneyManagement.atr_stop_multiple
+          : current.manualAtrStopMultiple,
+      ),
+      turtleNPeriod: String(
+        moneyManagement?.mode === "turtle"
+          ? moneyManagement.n_period
+          : current.turtleNPeriod,
+      ),
+      turtleStopNMultiple: String(
+        moneyManagement?.mode === "turtle"
+          ? moneyManagement.stop_n_multiple
+          : current.turtleStopNMultiple,
+      ),
+      turtleLeverageCap: String(
+        moneyManagement?.mode === "turtle"
+          ? moneyManagement.leverage_cap
+          : current.turtleLeverageCap,
+      ),
       symbol: config.symbol,
       exchange: config.exchange,
       timeframe: config.timeframe,
@@ -732,41 +919,34 @@ export function RunManagementPage() {
       </section>
 
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1.55fr)_minmax(360px,0.85fr)]">
-        <form ref={formRef} onSubmit={validateConfig}>
+        <form
+          ref={formRef}
+          onSubmit={(event: FormEvent) => {
+            event.preventDefault();
+            void triggerRun();
+          }}
+        >
           <Card>
             <CardHeader>
-              <CardTitle>새 백테스트 트리거</CardTitle>
+              <CardTitle>새 백테스트 설정</CardTitle>
               <CardDescription>
-                모든 금액·비용 값은 Decimal 문자열로 전송되며 서버 RunConfig가 최종
-                검증합니다.
+                전략과 데이터 범위만 선택하세요. 나머지 실행 설정은 전략과 데이터셋에서
+                자동으로 결정합니다.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               <section className="grid gap-4 md:grid-cols-2">
-                <Label>
-                  <span className="flex items-center justify-between gap-2">
-                    실행 이름
-                    <span className="font-normal text-muted-foreground">
-                      24자 이하 소문자 kebab-case
-                    </span>
-                  </span>
-                  <Input
-                    value={form.runName}
-                    maxLength={24}
-                    pattern="^[a-z0-9]+(?:-[a-z0-9]+)*$"
-                    title="24자 이하 소문자 kebab-case로 입력하세요."
-                    onChange={(event) => update("runName", event.target.value)}
-                    required
-                  />
-                </Label>
-                <Label>
+                <Label className="md:col-span-2">
                   전략
                   <select
                     className={selectClass}
                     value={form.strategyId}
                     onChange={(event) => {
-                      update("strategyId", event.target.value);
-                      update("params", "{}");
+                      setForm((current) => ({
+                        ...current,
+                        strategyId: event.target.value,
+                        params: "{}",
+                      }));
                     }}
                     disabled={strategies.isLoading}
                   >
@@ -782,80 +962,299 @@ export function RunManagementPage() {
                 </Label>
                 {selectedStrategy && (
                   <div className="md:col-span-2 rounded-lg border bg-muted/25 p-3 text-xs text-muted-foreground">
-                    <span className="text-foreground">
-                      지원 {selectedStrategy.supported_timeframes.join(", ")}
-                    </span>
-                    {" · "}최소 이력 {selectedStrategy.min_history}
+                    최소 이력 {selectedStrategy.min_history}
                     {" · "}필수 지표{" "}
-                    {selectedStrategy.required_indicators
-                      .map((item) => String(item.name ?? "unknown"))
-                      .join(", ")}
+                    {selectedStrategy.required_indicators.length
+                      ? selectedStrategy.required_indicators
+                          .map((item) => String(item.name ?? "unknown"))
+                          .join(", ")
+                      : "전략이 자동 결정"}
                     {" · "}출처 {selectedStrategy.source}
                   </div>
                 )}
                 <div className="grid gap-1.5 text-xs font-medium md:col-span-2">
+                  <span>전략 파라미터</span>
+                  {strategyParamEntries.length ? (
+                    <div className="grid gap-3 rounded-lg border bg-muted/10 p-4 sm:grid-cols-2">
+                      {strategyParamEntries.map(([parameter, currentValue]) => {
+                        const exampleValue =
+                          selectedStrategy?.default_params[parameter] ??
+                          currentValue;
+                        return typeof exampleValue === "boolean" ? (
+                          <label
+                            key={parameter}
+                            className="flex items-center gap-2 text-xs font-medium"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={Boolean(strategyParams[parameter])}
+                              onChange={(event) =>
+                                updateStrategyParam(
+                                  parameter,
+                                  event.target.checked,
+                                  exampleValue,
+                                )
+                              }
+                              className="h-4 w-4 accent-teal-500"
+                            />
+                            {parameter}
+                          </label>
+                        ) : typeof exampleValue === "number" ||
+                          typeof exampleValue === "string" ? (
+                          <Label key={parameter}>
+                            {parameter}
+                            <Input
+                              aria-label={`전략 파라미터 ${parameter}`}
+                              type={
+                                typeof exampleValue === "number" ? "number" : "text"
+                              }
+                              step={
+                                typeof exampleValue === "number" ? "any" : undefined
+                              }
+                              value={String(
+                                strategyParams[parameter] ?? exampleValue,
+                              )}
+                              onChange={(event) =>
+                                updateStrategyParam(
+                                  parameter,
+                                  event.target.value,
+                                  exampleValue,
+                                )
+                              }
+                              required
+                            />
+                          </Label>
+                        ) : null;
+                      })}
+                    </div>
+                  ) : (
+                    <p className="rounded-lg border bg-muted/10 p-3 font-normal text-muted-foreground">
+                      이 전략에는 사용자가 조정할 기본 파라미터가 없습니다.
+                    </p>
+                  )}
+                  <details className="rounded-lg border bg-muted/10 px-3 py-2 font-normal">
+                    <summary className="cursor-pointer text-xs text-muted-foreground">
+                      JSON 직접 편집
+                    </summary>
+                    <label
+                      htmlFor="strategy-parameters"
+                      className="mt-3 grid gap-1.5 text-xs font-medium"
+                    >
+                      전략 파라미터 JSON
+                      <textarea
+                        id="strategy-parameters"
+                        className={textareaClass}
+                        value={form.params}
+                        onChange={(event) => update("params", event.target.value)}
+                        spellCheck={false}
+                      />
+                    </label>
+                  </details>
+                </div>
+                <div className="grid gap-3 rounded-lg border border-teal-500/20 bg-teal-500/5 p-4 md:col-span-2">
                   <div className="flex items-center justify-between gap-2">
-                    <label htmlFor="strategy-parameters">전략 파라미터 JSON</label>
-                    <StrategyParamHelpDialog strategyId={form.strategyId} />
+                    <div>
+                      <p className="text-sm font-semibold text-teal-100">
+                        자금 관리
+                      </p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        전략 판단은 그대로 두고 손절·수량·레버리지만 선택한 정책이
+                        계산합니다.
+                      </p>
+                    </div>
+                    {form.moneyManagementMode === "manual" && (
+                      <StrategyParamHelpDialog strategyId={form.strategyId} />
+                    )}
                   </div>
-                  <textarea
-                    id="strategy-parameters"
-                    className={textareaClass}
-                    value={form.params}
-                    onChange={(event) => update("params", event.target.value)}
-                    spellCheck={false}
-                  />
+                  {supportedMoneyManagement.length > 1 ? (
+                    <Label>
+                      자금 관리 방법
+                      <select
+                        aria-label="자금 관리 방법"
+                        className={selectClass}
+                        value={form.moneyManagementMode}
+                        onChange={(event) => {
+                          const mode = event.target
+                            .value as MoneyManagementMode;
+                          setForm((current) => ({
+                            ...current,
+                            moneyManagementMode: mode,
+                            sizingMethod:
+                              mode === "turtle"
+                                ? "risk_based"
+                                : current.sizingMethod,
+                          }));
+                        }}
+                      >
+                        {supportedMoneyManagement.includes("manual") && (
+                          <option value="manual">직접 설정</option>
+                        )}
+                        {supportedMoneyManagement.includes("turtle") && (
+                          <option value="turtle">Turtle 자동 관리</option>
+                        )}
+                      </select>
+                    </Label>
+                  ) : (
+                    <p className="rounded border bg-background/40 p-2 text-xs">
+                      {form.moneyManagementMode === "turtle"
+                        ? "Turtle 자동 관리"
+                        : "직접 설정"}
+                    </p>
+                  )}
+                  {form.moneyManagementMode === "manual" ? (
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <Label>
+                        레버리지
+                        <Input
+                          aria-label="수동 레버리지"
+                          type="number"
+                          min={1}
+                          max={100}
+                          step={1}
+                          value={form.manualLeverage}
+                          onChange={(event) =>
+                            update("manualLeverage", event.target.value)
+                          }
+                          required
+                        />
+                      </Label>
+                      <Label>
+                        손익비
+                        <Input
+                          aria-label="수동 reward_risk"
+                          type="number"
+                          min={0.1}
+                          max={10}
+                          step="any"
+                          value={form.manualRewardRisk}
+                          onChange={(event) =>
+                            update("manualRewardRisk", event.target.value)
+                          }
+                          required
+                        />
+                      </Label>
+                      <Label>
+                        ATR 손절 배수
+                        <Input
+                          aria-label="수동 atr_stop_multiple"
+                          type="number"
+                          min={0.1}
+                          max={10}
+                          step="any"
+                          value={form.manualAtrStopMultiple}
+                          onChange={(event) =>
+                            update(
+                              "manualAtrStopMultiple",
+                              event.target.value,
+                            )
+                          }
+                          required
+                        />
+                      </Label>
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border bg-background/40 p-3 text-xs">
+                      <p className="font-medium text-teal-100">
+                        확정 일봉 N으로 거래당 위험 1% 이내 자동 계산
+                      </p>
+                      <p className="mt-1 leading-relaxed text-muted-foreground">
+                        고정 목표가는 만들지 않고 전략의 청산 판단을 사용합니다.
+                        현재 진행 중인 일봉은 N 계산에서 제외합니다.
+                      </p>
+                      <details className="mt-3">
+                        <summary className="cursor-pointer text-muted-foreground">
+                          Turtle 고급값
+                        </summary>
+                        <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                          <Label>
+                            N 기간 (1d)
+                            <Input
+                              aria-label="Turtle N 기간"
+                              type="number"
+                              min={2}
+                              max={200}
+                              step={1}
+                              value={form.turtleNPeriod}
+                              onChange={(event) =>
+                                update("turtleNPeriod", event.target.value)
+                              }
+                              required
+                            />
+                          </Label>
+                          <Label>
+                            손절 N 배수
+                            <Input
+                              aria-label="Turtle 손절 N 배수"
+                              type="number"
+                              min={0.1}
+                              max={10}
+                              step="any"
+                              value={form.turtleStopNMultiple}
+                              onChange={(event) =>
+                                update(
+                                  "turtleStopNMultiple",
+                                  event.target.value,
+                                )
+                              }
+                              required
+                            />
+                          </Label>
+                          <Label>
+                            레버리지 상한
+                            <Input
+                              aria-label="Turtle 레버리지 상한"
+                              type="number"
+                              min={1}
+                              max={100}
+                              step={1}
+                              value={form.turtleLeverageCap}
+                              onChange={(event) =>
+                                update(
+                                  "turtleLeverageCap",
+                                  event.target.value,
+                                )
+                              }
+                              required
+                            />
+                          </Label>
+                        </div>
+                      </details>
+                    </div>
+                  )}
                 </div>
               </section>
 
-              <section className="grid gap-4 border-t pt-5 sm:grid-cols-2 lg:grid-cols-4">
+              <section className="grid gap-4 border-t pt-5 sm:grid-cols-2">
                 <Label className="sm:col-span-2">
                   심볼
                   <Input
                     value={form.symbol}
+                    pattern="^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*(?::[A-Za-z0-9][A-Za-z0-9._-]*)?$"
+                    title="BASE/QUOTE 또는 BASE/QUOTE:SETTLE 형식으로 입력하세요."
                     onChange={(event) => update("symbol", event.target.value)}
                     required
                   />
                 </Label>
+                {selectedStrategy &&
+                  selectedStrategy.supported_timeframes.length > 1 && (
+                    <Label className="sm:col-span-2">
+                      타임프레임
+                      <select
+                        className={selectClass}
+                        value={form.timeframe}
+                        onChange={(event) =>
+                          update("timeframe", event.target.value)
+                        }
+                      >
+                        {selectedStrategy.supported_timeframes.map((timeframe) => (
+                          <option key={timeframe} value={timeframe}>
+                            {timeframe}
+                          </option>
+                        ))}
+                      </select>
+                    </Label>
+                  )}
                 <Label>
-                  거래소
-                  <Input
-                    value={form.exchange}
-                    onChange={(event) => update("exchange", event.target.value)}
-                    required
-                  />
-                </Label>
-                <Label>
-                  마켓
-                  <select
-                    className={selectClass}
-                    value={form.marketType}
-                    onChange={(event) =>
-                      update("marketType", event.target.value as MarketType)
-                    }
-                  >
-                    <option value="futures">futures</option>
-                    <option value="spot">spot</option>
-                  </select>
-                </Label>
-                <Label>
-                  타임프레임
-                  <Input
-                    value={form.timeframe}
-                    pattern="^[1-9][0-9]*[mhd]$"
-                    onChange={(event) => update("timeframe", event.target.value)}
-                    required
-                  />
-                </Label>
-                <Label className="sm:col-span-2 lg:col-span-3">
-                  데이터 소스
-                  <Input
-                    value={form.dataSource}
-                    onChange={(event) => update("dataSource", event.target.value)}
-                    required
-                  />
-                </Label>
-                <Label className="sm:col-span-2">
                   시작 (브라우저 로컬 시간)
                   <Input
                     type="datetime-local"
@@ -864,7 +1263,7 @@ export function RunManagementPage() {
                     required
                   />
                 </Label>
-                <Label className="sm:col-span-2">
+                <Label>
                   종료 (브라우저 로컬 시간)
                   <Input
                     type="datetime-local"
@@ -875,7 +1274,7 @@ export function RunManagementPage() {
                 </Label>
                 <div
                   className={cn(
-                    "sm:col-span-2 lg:col-span-4 rounded-lg border p-3 text-xs",
+                    "sm:col-span-2 rounded-lg border p-3 text-xs",
                     coverageWarning
                       ? "border-amber-500/25 bg-amber-500/10 text-amber-200"
                       : "bg-muted/20 text-muted-foreground",
@@ -906,184 +1305,208 @@ export function RunManagementPage() {
                   )}
                   {coverageWarning && <p className="mt-1 font-medium">{coverageWarning}</p>}
                 </div>
-              </section>
-
-              <section className="grid gap-4 border-t pt-5 sm:grid-cols-2 lg:grid-cols-4">
-                <Label className="sm:col-span-2">
-                  초기 자본 (Decimal)
-                  <Input
-                    inputMode="decimal"
-                    value={form.initialCapital}
-                    onChange={(event) => update("initialCapital", event.target.value)}
-                    required
-                  />
-                </Label>
-                <Label>
-                  시드
-                  <Input
-                    type="number"
-                    step="1"
-                    value={form.seed}
-                    onChange={(event) => update("seed", event.target.value)}
-                    required
-                  />
-                </Label>
-                <Label>
-                  사이징
-                  <select
-                    className={selectClass}
-                    value={form.sizingMethod}
-                    onChange={(event) =>
-                      update("sizingMethod", event.target.value as SizingMethod)
-                    }
-                  >
-                    <option value="risk_based">risk_based</option>
-                    <option value="pct">pct</option>
-                  </select>
-                </Label>
-                {form.sizingMethod === "risk_based" ? (
-                  <Label className="sm:col-span-2">
-                    risk_per_trade (0 &lt; x ≤ 0.01)
-                    <Input
-                      type="number"
-                      inputMode="decimal"
-                      min={POSITIVE_NUMBER_INPUT_MIN}
-                      max={0.01}
-                      step="any"
-                      value={form.riskPerTrade}
-                      onChange={(event) => update("riskPerTrade", event.target.value)}
-                      required
-                    />
-                  </Label>
-                ) : (
-                  <Label className="sm:col-span-2">
-                    position_size_pct (0 &lt; x ≤ 1)
-                    <Input
-                      type="number"
-                      inputMode="decimal"
-                      min={POSITIVE_NUMBER_INPUT_MIN}
-                      max={1}
-                      step="any"
-                      value={form.positionSizePct}
-                      onChange={(event) => update("positionSizePct", event.target.value)}
-                      required
-                    />
-                  </Label>
-                )}
-                <Label className="sm:col-span-2">
-                  프로필 참조
-                  <Input
-                    value={form.profileRef}
-                    onChange={(event) => update("profileRef", event.target.value)}
-                    required
-                  />
-                </Label>
-              </section>
-
-              <section className="grid gap-4 border-t pt-5 sm:grid-cols-2">
-                <Label>
-                  futures_taker_fee_rate
-                  <Input
-                    inputMode="decimal"
-                    value={form.futuresTakerFeeRate}
-                    onChange={(event) =>
-                      update("futuresTakerFeeRate", event.target.value)
-                    }
-                  />
-                </Label>
-                <Label>
-                  futures_entry_slippage_rate
-                  <Input
-                    inputMode="decimal"
-                    value={form.futuresEntrySlippageRate}
-                    onChange={(event) =>
-                      update("futuresEntrySlippageRate", event.target.value)
-                    }
-                  />
-                </Label>
-                <Label>
-                  exit_slippage_rate
-                  <Input
-                    inputMode="decimal"
-                    value={form.exitSlippageRate}
-                    onChange={(event) => update("exitSlippageRate", event.target.value)}
-                  />
-                </Label>
-                <Label>
-                  funding_fallback_rate
-                  <Input
-                    inputMode="decimal"
-                    value={form.fundingFallbackRate}
-                    onChange={(event) =>
-                      update("fundingFallbackRate", event.target.value)
-                    }
-                  />
-                </Label>
-              </section>
-
-              <section className="grid gap-4 border-t pt-5 sm:grid-cols-2">
-                <Label>
-                  지표 모드
-                  <select
-                    className={selectClass}
-                    value={form.indicatorMode}
-                    onChange={(event) =>
-                      update("indicatorMode", event.target.value as IndicatorMode)
-                    }
-                  >
-                    <option value="auto">auto</option>
-                    <option value="explicit">explicit</option>
-                    <option value="all">all</option>
-                  </select>
-                </Label>
-                <div className="grid grid-cols-2 gap-3">
-                  <Label>
-                    trigger_feed
-                    <Input value="tf_candle" disabled />
-                  </Label>
-                  <Label>
-                    fill_timing
-                    <Input value="next_bar" disabled />
-                  </Label>
+                <div className="sm:col-span-2 rounded-lg border border-teal-500/20 bg-teal-500/5 p-3 text-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-medium text-teal-100">자동 설정</p>
+                    <Badge variant="outline">제출 payload에 기록</Badge>
+                  </div>
+                  <dl className="mt-2 grid gap-x-4 gap-y-1 text-muted-foreground sm:grid-cols-2">
+                    <div>
+                      <dt className="inline">실행 이름 </dt>
+                      <dd className="inline font-mono text-foreground">
+                        {automaticRunName(form.strategyId, form.symbol)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="inline">타임프레임 </dt>
+                      <dd className="inline text-foreground">{form.timeframe}</dd>
+                    </div>
+                    <div>
+                      <dt className="inline">거래소·마켓 </dt>
+                      <dd className="inline text-foreground">
+                        Binance · {form.marketType === "futures" ? "선물" : "현물"}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="inline">데이터셋 </dt>
+                      <dd className="inline font-mono text-foreground">
+                        {form.dataSource}
+                      </dd>
+                    </div>
+                    <div className="sm:col-span-2">
+                      <dt className="inline">지표·체결 </dt>
+                      <dd className="inline text-foreground">
+                        전략 자동 지표 · 다음 봉 체결
+                      </dd>
+                    </div>
+                  </dl>
                 </div>
-                {form.indicatorMode === "explicit" && (
-                  <Label className="sm:col-span-2">
-                    명시 지표 JSON
-                    <textarea
-                      className={textareaClass}
-                      value={form.explicitIndicators}
-                      onChange={(event) =>
-                        update("explicitIndicators", event.target.value)
-                      }
-                      spellCheck={false}
-                    />
-                  </Label>
-                )}
               </section>
 
-              <section className="border-t pt-5">
-                <label className="flex items-center gap-2 text-sm font-medium">
-                  <input
-                    type="checkbox"
-                    checked={form.preregEnabled}
-                    onChange={(event) => update("preregEnabled", event.target.checked)}
-                    className="h-4 w-4 accent-teal-500"
-                  />
-                  실행 제출 메타데이터
-                  <span className="text-xs font-normal text-muted-foreground">
-                    가설·주지표를 제출 payload에 포함
+              <details className="group border-t pt-5">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-lg border bg-muted/15 px-4 py-3">
+                  <span>
+                    <span className="block text-sm font-semibold">고급 실행 가정</span>
+                    <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
+                      자본·포지션 크기·수수료는 기본값을 사용합니다.
+                    </span>
                   </span>
-                </label>
-                <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 p-3 text-xs text-amber-100">
-                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                  <p>
-                    사전등록 잠금은 쓰기 엔드포인트 미구현으로 유보(3차)되었습니다.
-                    아래 값은 현재 실행 제출에만 포함되며 초안 저장·잠금·불변성을 보장하지
-                    않습니다.
+                  <span className="text-xs text-muted-foreground group-open:hidden">
+                    펼치기
+                  </span>
+                  <span className="hidden text-xs text-muted-foreground group-open:inline">
+                    접기
+                  </span>
+                </summary>
+                <div className="mt-4 grid gap-4 rounded-lg border bg-muted/10 p-4 sm:grid-cols-2">
+                  <Label>
+                    초기 자본
+                    <Input
+                      inputMode="decimal"
+                      value={form.initialCapital}
+                      onChange={(event) =>
+                        update("initialCapital", event.target.value)
+                      }
+                      required
+                    />
+                  </Label>
+                  {form.moneyManagementMode === "turtle" ? (
+                    <div className="rounded-lg border bg-background/40 p-3 text-xs">
+                      <p className="font-medium">사이징 · 자동</p>
+                      <p className="mt-1 text-muted-foreground">
+                        Turtle 정책은 전역 거래당 리스크 상한을 사용합니다.
+                      </p>
+                    </div>
+                  ) : (
+                    <Label>
+                      사이징
+                      <select
+                        className={selectClass}
+                        value={form.sizingMethod}
+                        onChange={(event) =>
+                          update(
+                            "sizingMethod",
+                            event.target.value as SizingMethod,
+                          )
+                        }
+                      >
+                        <option value="risk_based">리스크 기준</option>
+                        <option value="pct">자본 비율</option>
+                      </select>
+                    </Label>
+                  )}
+                  {form.sizingMethod === "risk_based" ? (
+                    <Label>
+                      거래당 리스크 (0 &lt; x ≤ 0.01)
+                      <Input
+                        aria-label="risk_per_trade"
+                        type="number"
+                        inputMode="decimal"
+                        min={POSITIVE_NUMBER_INPUT_MIN}
+                        max={0.01}
+                        step="any"
+                        value={form.riskPerTrade}
+                        onChange={(event) =>
+                          update("riskPerTrade", event.target.value)
+                        }
+                        required
+                      />
+                    </Label>
+                  ) : (
+                    <Label>
+                      포지션 자본 비율 (0 &lt; x ≤ 1)
+                      <Input
+                        aria-label="position_size_pct"
+                        type="number"
+                        inputMode="decimal"
+                        min={POSITIVE_NUMBER_INPUT_MIN}
+                        max={1}
+                        step="any"
+                        value={form.positionSizePct}
+                        onChange={(event) =>
+                          update("positionSizePct", event.target.value)
+                        }
+                        required
+                      />
+                    </Label>
+                  )}
+                  <div className="hidden sm:block" aria-hidden="true" />
+                  <Label>
+                    선물 taker 수수료율
+                    <Input
+                      inputMode="decimal"
+                      value={form.futuresTakerFeeRate}
+                      onChange={(event) =>
+                        update("futuresTakerFeeRate", event.target.value)
+                      }
+                    />
+                  </Label>
+                  <Label>
+                    진입 슬리피지율
+                    <Input
+                      inputMode="decimal"
+                      value={form.futuresEntrySlippageRate}
+                      onChange={(event) =>
+                        update("futuresEntrySlippageRate", event.target.value)
+                      }
+                    />
+                  </Label>
+                  <Label>
+                    청산 슬리피지율
+                    <Input
+                      inputMode="decimal"
+                      value={form.exitSlippageRate}
+                      onChange={(event) =>
+                        update("exitSlippageRate", event.target.value)
+                      }
+                    />
+                  </Label>
+                  <Label>
+                    펀딩비 대체율
+                    <Input
+                      inputMode="decimal"
+                      value={form.fundingFallbackRate}
+                      onChange={(event) =>
+                        update("fundingFallbackRate", event.target.value)
+                      }
+                    />
+                  </Label>
+                  <p className="text-xs leading-relaxed text-muted-foreground sm:col-span-2">
+                    시드 0 · 프로필 {form.profileRef} · 지표 자동 선택 · tf_candle
+                    신호를 다음 봉에 체결
                   </p>
                 </div>
-                {form.preregEnabled && (
-                  <div className="mt-4 grid gap-4 rounded-lg border bg-muted/20 p-4 sm:grid-cols-2">
+              </details>
+
+              <details className="border-t pt-5">
+                <summary className="cursor-pointer text-sm font-semibold">
+                  연구 가설 (선택)
+                  <span className="ml-2 text-xs font-normal text-muted-foreground">
+                    가설·주지표를 제출 payload에 포함
+                  </span>
+                </summary>
+                <div className="mt-4">
+                  <label className="flex items-center gap-2 text-sm font-medium">
+                    <input
+                      type="checkbox"
+                      checked={form.preregEnabled}
+                      onChange={(event) =>
+                        update("preregEnabled", event.target.checked)
+                      }
+                      className="h-4 w-4 accent-teal-500"
+                    />
+                    실행 제출 메타데이터 사용
+                  </label>
+                  <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 p-3 text-xs text-amber-100">
+                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    <p>
+                      사전등록 잠금은 쓰기 엔드포인트 미구현으로 유보(3차)되었습니다.
+                      아래 값은 현재 실행 제출에만 포함되며 초안 저장·잠금·불변성을
+                      보장하지 않습니다.
+                    </p>
+                  </div>
+                  {form.preregEnabled && (
+                    <div className="mt-4 grid gap-4 rounded-lg border bg-muted/20 p-4 sm:grid-cols-2">
                     <Label className="sm:col-span-2">
                       가설
                       <Input
@@ -1159,21 +1582,29 @@ export function RunManagementPage() {
                       />
                       높을수록 좋음
                     </label>
-                  </div>
-                )}
-              </section>
-
-              <section className="border-t pt-5">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-semibold">스윕 빌더</p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      위 기준 RunConfig와 인라인 사전등록을 그대로 재사용합니다.
-                    </p>
-                  </div>
-                  <Badge variant="outline">BATCH DRY-RUN</Badge>
+                    </div>
+                  )}
                 </div>
-                <div className="mt-4 grid gap-4 rounded-lg border bg-muted/15 p-4 sm:grid-cols-2">
+              </details>
+
+              <details className="border-t pt-5">
+                <summary className="cursor-pointer text-sm font-semibold">
+                  스윕 설정
+                  <span className="ml-2 text-xs font-normal text-muted-foreground">
+                    여러 파라미터 조합을 비교할 때만 펼치세요.
+                  </span>
+                </summary>
+                <section className="mt-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-semibold">스윕 빌더</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        위 기준 RunConfig와 인라인 사전등록을 그대로 재사용합니다.
+                      </p>
+                    </div>
+                    <Badge variant="outline">BATCH DRY-RUN</Badge>
+                  </div>
+                  <div className="mt-4 grid gap-4 rounded-lg border bg-muted/15 p-4 sm:grid-cols-2">
                   <Label>
                     유형
                     <select
@@ -1325,8 +1756,9 @@ export function RunManagementPage() {
                       )}
                     </>
                   )}
-                </div>
-              </section>
+                  </div>
+                </section>
+              </details>
 
               {notice && (
                 <div
@@ -1348,17 +1780,8 @@ export function RunManagementPage() {
                   미리보기와 중복 차단은 이 단계에 포함되지 않습니다.
                 </p>
                 <div className="flex gap-2">
-                  <Button type="submit" variant="outline" disabled={busy !== null}>
-                    {busy === "validate" && (
-                      <LoaderCircle className="mr-1.5 h-4 w-4 animate-spin" />
-                    )}
-                    설정 검증
-                  </Button>
                   <Button
-                    type="button"
-                    onClick={() => {
-                      if (formRef.current?.reportValidity()) void triggerRun();
-                    }}
+                    type="submit"
                     disabled={busy !== null || Boolean(coverageWarning)}
                     title={
                       coverageWarning
@@ -1371,7 +1794,7 @@ export function RunManagementPage() {
                     ) : (
                       <Play className="mr-1.5 h-4 w-4" />
                     )}
-                    트리거(모의)
+                    백테스트 실행
                   </Button>
                   <Button
                     type="button"
@@ -1391,7 +1814,7 @@ export function RunManagementPage() {
                     ) : (
                       <FlaskConical className="mr-1.5 h-4 w-4" />
                     )}
-                    스윕 트리거(모의)
+                    스윕 실행
                   </Button>
                 </div>
               </div>

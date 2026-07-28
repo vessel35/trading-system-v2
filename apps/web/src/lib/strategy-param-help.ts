@@ -24,7 +24,7 @@ export const strategyParamHelpById: Readonly<Record<string, StrategyHelp>> = {
   "vessel-reference": {
     displayName: "Vessel Reference",
     overview:
-      "EMA 레짐 추종 — EMA(9)가 EMA(21) 위면 롱, 아래면 숏 진입하며 교차 이탈 시 청산합니다. ATR(14) 기반 고정 손절·목표를 사용하고 트레일링은 없습니다.",
+      "Vessel의 EMA 진입·청산 판단과 분리된 수동 자금 관리 정책입니다. ATR(14) 기반 고정 손절·목표와 지정 레버리지를 사용하며 전략의 판단 자체는 바꾸지 않습니다.",
     parameters: [
       {
         name: "atr_stop_multiple",

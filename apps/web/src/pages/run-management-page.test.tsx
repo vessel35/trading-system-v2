@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { describe, expect, it, vi } from "vitest";
@@ -19,7 +19,7 @@ vi.mock("../components/sweep-results", () => ({
   ),
 }));
 
-function managementHandlers() {
+function managementHandlers(supportedTimeframes = ["1h"]) {
   return [
     http.get("http://localhost/api/v1/strategies", () =>
       HttpResponse.json({
@@ -28,10 +28,17 @@ function managementHandlers() {
             strategy_id: "vessel-reference",
             display_name: "Vessel",
             strategy_version: "1",
-            supported_timeframes: ["1h"],
+            supported_timeframes: supportedTimeframes,
             required_indicators: [],
             min_history: 10,
             default_params: {
+              reward_risk: 2,
+              atr_stop_multiple: 1.5,
+            },
+            supported_money_management: ["manual", "turtle"],
+            default_money_management: {
+              mode: "manual",
+              leverage: 1,
               reward_risk: 2,
               atr_stop_multiple: 1.5,
             },
@@ -70,17 +77,17 @@ function renderManagement() {
 }
 
 describe("실행 관리 보강", () => {
-  it("전략 파라미터 도움말에서 의미·계산식·예시를 확인하고 Esc와 닫기로 종료한다", async () => {
+  it("수동 자금 관리 도움말에서 의미·계산식·예시를 확인하고 Esc와 닫기로 종료한다", async () => {
     const user = userEvent.setup();
     renderManagement();
 
     const helpButton = await screen.findByRole("button", {
-      name: "전략 파라미터 도움말",
+      name: "수동 자금 관리 도움말",
     });
     await user.click(helpButton);
 
     let dialog = screen.getByRole("dialog", {
-      name: "전략 파라미터 도움말 · Vessel Reference",
+      name: "수동 자금 관리 도움말 · Vessel Reference",
     });
     expect(within(dialog).getByText("atr_stop_multiple")).toBeInTheDocument();
     expect(within(dialog).getByText("reward_risk")).toBeInTheDocument();
@@ -104,7 +111,7 @@ describe("실행 관리 보강", () => {
 
     await user.click(helpButton);
     dialog = screen.getByRole("dialog", {
-      name: "전략 파라미터 도움말 · Vessel Reference",
+      name: "수동 자금 관리 도움말 · Vessel Reference",
     });
     await user.click(within(dialog).getByRole("button", { name: "닫기" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -131,13 +138,12 @@ describe("실행 관리 보강", () => {
       </RunJobsProvider>,
     );
 
-    const runName = await screen.findByLabelText(/실행 이름/);
-    await user.clear(runName);
-    await user.type(runName, "Invalid Name");
-    expect(runName).toBeInvalid();
+    const symbol = await screen.findByLabelText("심볼");
+    await user.clear(symbol);
+    expect(symbol).toBeInvalid();
 
-    await user.click(screen.getByRole("button", { name: "트리거(모의)" }));
-    await user.click(screen.getByRole("button", { name: "스윕 트리거(모의)" }));
+    await user.click(screen.getByRole("button", { name: "백테스트 실행" }));
+    await user.click(screen.getByRole("button", { name: "스윕 실행" }));
     expect(runPost).not.toHaveBeenCalled();
     expect(sweepPost).not.toHaveBeenCalled();
   });
@@ -146,6 +152,7 @@ describe("실행 관리 보강", () => {
     const user = userEvent.setup();
     renderManagement();
 
+    await user.click(await screen.findByText("고급 실행 가정"));
     const risk = await screen.findByLabelText(/risk_per_trade/);
     expect(risk).toHaveAttribute("min", "0.000000000001");
     expect(risk).toHaveAttribute("max", "0.01");
@@ -154,6 +161,159 @@ describe("실행 관리 보강", () => {
     const position = screen.getByLabelText(/position_size_pct/);
     expect(position).toHaveAttribute("min", "0.000000000001");
     expect(position).toHaveAttribute("max", "1");
+  });
+
+  it("단일 timeframe과 데이터 계약값은 숨기고 자동 설정 요약에 표시한다", async () => {
+    renderManagement();
+
+    expect(await screen.findByText("새 백테스트 설정")).toBeInTheDocument();
+    expect(screen.queryByLabelText("실행 이름")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("타임프레임")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("거래소")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("마켓")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("데이터 소스")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("시드")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("지표 모드")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("trigger_feed")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("fill_timing")).not.toBeInTheDocument();
+
+    expect(screen.getByText("bt-vessel-reference-btc")).toBeInTheDocument();
+    expect(screen.getByText("Binance · 선물")).toBeInTheDocument();
+    expect(screen.getByText("crypto_data.ohlcv_futures")).toBeInTheDocument();
+    expect(screen.getByText("전략 자동 지표 · 다음 봉 체결")).toBeInTheDocument();
+  });
+
+  it("전략이 여러 timeframe을 지원할 때만 선택기를 노출한다", async () => {
+    const user = userEvent.setup();
+    server.use(...managementHandlers(["15m", "1h"]));
+    renderWithQuery(
+      <RunJobsProvider>
+        <RunManagementPage />
+      </RunJobsProvider>,
+    );
+
+    const timeframe = await screen.findByLabelText("타임프레임");
+    expect(timeframe).toHaveValue("1h");
+    await user.selectOptions(timeframe, "15m");
+    expect(timeframe).toHaveValue("15m");
+  });
+
+  it("심볼 형식에서 현물 데이터셋과 마켓을 자동 해석한다", async () => {
+    const user = userEvent.setup();
+    renderManagement();
+
+    const symbol = await screen.findByLabelText("심볼");
+    await user.clear(symbol);
+    await user.type(symbol, "ETH/USDT");
+
+    expect(await screen.findByText("Binance · 현물")).toBeInTheDocument();
+    expect(screen.getByText("crypto_data.ohlcv")).toBeInTheDocument();
+  });
+
+  it("숨긴 값과 간단 파라미터를 완전한 RunConfig로 자동 제출한다", async () => {
+    const user = userEvent.setup();
+    let submitted: unknown;
+    server.use(
+      ...managementHandlers(),
+      http.post("http://localhost/api/v1/runs", async ({ request }) => {
+        submitted = await request.json();
+        return HttpResponse.json({
+          job_id: "job-automatic-config",
+          status: "QUEUED",
+          events_url: "/api/v1/runs/jobs/job-automatic-config/events",
+          status_url: "/api/v1/runs/jobs/job-automatic-config",
+        });
+      }),
+    );
+    renderWithQuery(
+      <RunJobsProvider>
+        <RunManagementPage />
+      </RunJobsProvider>,
+    );
+
+    expect(
+      await screen.findByText(
+        "이 전략에는 사용자가 조정할 기본 파라미터가 없습니다.",
+      ),
+    ).toBeInTheDocument();
+    const rewardRisk = await screen.findByLabelText("수동 reward_risk");
+    expect(rewardRisk).toHaveValue(2);
+    await user.clear(rewardRisk);
+    await user.type(rewardRisk, "2.5");
+    await user.click(screen.getByRole("button", { name: "백테스트 실행" }));
+
+    await waitFor(() => expect(submitted).toBeDefined());
+    expect(submitted).toMatchObject({
+      config: {
+        run_name: "bt-vessel-reference-btc",
+        strategy_id: "vessel-reference",
+        params: {},
+        money_management: {
+          mode: "manual",
+          leverage: 1,
+          reward_risk: 2.5,
+          atr_stop_multiple: 1.5,
+        },
+        symbol: "BTC/USDT:USDT",
+        exchange: "binance",
+        timeframe: "1h",
+        market_type: "futures",
+        data_source: "crypto_data.ohlcv_futures",
+        seed: 0,
+        indicator_mode: "auto",
+        explicit_indicators: [],
+        trigger_feed: "tf_candle",
+        fill_timing: "next_bar",
+        profile_ref: "vessel-reference-v1",
+      },
+    });
+  });
+
+  it("Turtle 자동 관리에서는 수동값을 숨기고 일봉 N 정책만 제출한다", async () => {
+    const user = userEvent.setup();
+    let submitted: unknown;
+    server.use(
+      ...managementHandlers(),
+      http.post("http://localhost/api/v1/runs", async ({ request }) => {
+        submitted = await request.json();
+        return HttpResponse.json({
+          job_id: "job-turtle-config",
+          status: "QUEUED",
+          events_url: "/api/v1/runs/jobs/job-turtle-config/events",
+          status_url: "/api/v1/runs/jobs/job-turtle-config",
+        });
+      }),
+    );
+    renderWithQuery(
+      <RunJobsProvider>
+        <RunManagementPage />
+      </RunJobsProvider>,
+    );
+
+    const mode = await screen.findByLabelText("자금 관리 방법");
+    await user.selectOptions(mode, "turtle");
+    expect(screen.queryByLabelText("수동 레버리지")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("수동 reward_risk")).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/확정 일봉 N으로 거래당 위험 1% 이내 자동 계산/),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "백테스트 실행" }));
+    await waitFor(() => expect(submitted).toBeDefined());
+    expect(submitted).toMatchObject({
+      config: {
+        params: {},
+        sizing_method: "risk_based",
+        risk_per_trade: 0.01,
+        money_management: {
+          mode: "turtle",
+          n_period: 20,
+          n_timeframe: "1d",
+          stop_n_multiple: 2,
+          leverage_cap: 10,
+        },
+      },
+    });
   });
 
   it("수치가 없는 RUNNING 상태를 완료율 없는 무기한 표시자로 렌더한다", () => {

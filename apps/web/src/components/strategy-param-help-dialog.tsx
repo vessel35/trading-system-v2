@@ -28,7 +28,7 @@ export function StrategyParamHelpDialog({
           variant="ghost"
           size="sm"
           className="h-7 gap-1.5 px-2 text-muted-foreground"
-          aria-label="전략 파라미터 도움말"
+          aria-label="수동 자금 관리 도움말"
         >
           <CircleHelp className="h-4 w-4" aria-hidden="true" />
           도움말
@@ -37,7 +37,7 @@ export function StrategyParamHelpDialog({
       <DialogContent className="top-[5vh] max-h-[90vh] max-w-4xl overflow-hidden">
         <div className="space-y-1 pr-8">
           <DialogTitle>
-            전략 파라미터 도움말 · {help.displayName}
+            수동 자금 관리 도움말 · {help.displayName}
           </DialogTitle>
           <DialogDescription className="leading-relaxed">
             {help.overview}
@@ -50,7 +50,7 @@ export function StrategyParamHelpDialog({
               id="strategy-parameter-heading"
               className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground"
             >
-              파라미터
+              수동 정책 파라미터
             </h2>
             <div className="grid gap-3 lg:grid-cols-3">
               {help.parameters.map((parameter) => (
