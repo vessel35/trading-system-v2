@@ -9,6 +9,7 @@ from core_lib.strategy import (
     AdapterManager,
     FieldSpec,
     InProcessStrategyRegistry,
+    MoneyManagementSupport,
     ParameterSchema,
     ResolvedConfig,
     StrategyAdapter,
@@ -111,6 +112,22 @@ class FakeCatalog(StrategyRegistry):
         self.rows[strategy_id] = {"strategy_id": strategy_id, **meta}
 
 
+class MoneyManagedAdaptee(FakeAdaptee):
+    """Declare a bounded policy surface for runtime-composition tests."""
+
+    @classmethod
+    def get_metadata(cls) -> StrategyMetadata:
+        metadata = super().get_metadata()
+        metadata.money_management = MoneyManagementSupport(
+            supported=("manual",),
+            default="manual",
+            supports_external_stop=True,
+            supports_external_take_profit=True,
+            supports_signal_exit=True,
+        )
+        return metadata
+
+
 def make_manager() -> tuple[AdapterManager, InProcessStrategyRegistry, FakeCatalog]:
     plugins = InProcessStrategyRegistry()
     plugins.register("fake-breakout", FakeAdaptee)
@@ -176,4 +193,34 @@ def test_catalog_access_is_delegated_and_inactive_rows_cannot_execute() -> None:
         manager.create(
             "fake-breakout",
             {"strategy_id": "fake-breakout", "params": {"fast": 10}},
+        )
+
+
+def test_runtime_composes_only_a_strategy_supported_money_policy() -> None:
+    events: list[str] = []
+    plugins = InProcessStrategyRegistry()
+    plugins.register("money-breakout", MoneyManagedAdaptee)
+    catalog = FakeCatalog(events)
+    catalog.rows["money-breakout"] = {
+        "strategy_id": "money-breakout",
+        "class_name": MoneyManagedAdaptee.__name__,
+        "module_path": MoneyManagedAdaptee.__module__,
+        "is_active": True,
+        "is_deprecated": False,
+    }
+    manager = AdapterManager(catalog, plugins)
+    runtime = manager.create_runtime(
+        "money-breakout",
+        {"strategy_id": "money-breakout", "params": {"fast": 10}},
+        {"mode": "manual", "leverage": 3},
+    )
+    assert isinstance(runtime.strategy, MoneyManagedAdaptee)
+    assert runtime.money_management is not None
+    assert runtime.money_management.id == "manual"
+
+    with pytest.raises(ValueError, match="does not support"):
+        manager.create_runtime(
+            "money-breakout",
+            {"strategy_id": "money-breakout", "params": {"fast": 10}},
+            {"mode": "turtle"},
         )

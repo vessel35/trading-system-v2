@@ -10,6 +10,7 @@ effort: high
 isolation: worktree
 tools: Read, Write, Edit, MultiEdit, Grep, Glob, Bash
 skills:
+  - develop-trading-strategies
   - quant-backtest
   - decimal-arithmetic-discipline
   - clean-code

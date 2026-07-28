@@ -9,6 +9,7 @@ model: sonnet
 effort: medium
 tools: Read, Grep, Glob, mcp__codex-cli__codex, mcp__codex-cli__review
 skills:
+  - develop-trading-strategies
   - statistical-validation
   - clean-code
   - execution-modeling

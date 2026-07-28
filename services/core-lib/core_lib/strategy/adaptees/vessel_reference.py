@@ -4,9 +4,16 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from core_lib.types import Candle, MarketType, Position, PositionSide, TradingSignal
+from core_lib.types import (
+    Candle,
+    DecisionAction,
+    DecisionIntent,
+    MarketType,
+    Position,
+    PositionSide,
+)
 
-from ..base import StrategyMetadata
+from ..base import MoneyManagementSupport, StrategyMetadata
 from ..config import FieldSpec, ParameterSchema, ResolvedConfig
 from ..profile import StrategyProfile
 
@@ -14,13 +21,11 @@ STRATEGY_ID = "vessel-reference"
 
 _FAST_EMA = "ema:period=9"
 _SLOW_EMA = "ema:period=21"
-_ATR = "atr:period=14"
-
 
 class VesselReference:
-    """Use an EMA regime with fixed ATR protection and no trailing state."""
+    """Own only the EMA entry/exit edge; runtime policies own money management."""
 
-    VERSION = "1.0.0"
+    VERSION = "2.0.0"
 
     def __init__(self, config: ResolvedConfig) -> None:
         if config.strategy_id != STRATEGY_ID:
@@ -34,7 +39,6 @@ class VesselReference:
             required_indicators=[
                 {"name": "EMA", "params": {"period": 9}},
                 {"name": "EMA", "params": {"period": 21}},
-                {"name": "ATR", "params": {"period": 14}},
             ],
             min_history=21,
             supported_timeframes=["1h"],
@@ -52,11 +56,19 @@ class VesselReference:
                 envelope_tolerance=0.20,
                 envelope_status="provisional",
             ),
+            money_management=MoneyManagementSupport(
+                supported=("manual", "turtle"),
+                default="manual",
+                supports_external_stop=True,
+                supports_external_take_profit=True,
+                supports_signal_exit=True,
+                supports_pyramiding=False,
+            ),
         )
 
     @classmethod
     def get_parameter_schema(cls) -> ParameterSchema:
-        """Declare fixed-protection and leverage parameters owned by the Adaptee."""
+        """Temporarily accept legacy money fields until all stored configs migrate."""
         return ParameterSchema(
             fields={
                 "atr_stop_multiple": FieldSpec(
@@ -81,8 +93,8 @@ class VesselReference:
         self,
         market_data: dict[str, object],
         current_position: Position | None,
-    ) -> TradingSignal | None:
-        """Emit EMA-regime entries/exits using fixed ATR stop and target levels."""
+    ) -> DecisionIntent | None:
+        """Emit explicit EMA-regime entry and exit decisions without sizing fields."""
         candle = market_data.get("candle")
         indicators = market_data.get("indicators")
         market_type_value = market_data.get("market_type")
@@ -95,9 +107,7 @@ class VesselReference:
 
         fast = self._indicator(indicators, _FAST_EMA)
         slow = self._indicator(indicators, _SLOW_EMA)
-        atr = self._indicator(indicators, _ATR)
         market_type = MarketType(market_type_value)
-        leverage = self._integer_param("leverage")
 
         if current_position is not None:
             should_exit = (current_position.side is PositionSide.LONG and fast <= slow) or (
@@ -105,12 +115,9 @@ class VesselReference:
             )
             if not should_exit:
                 return None
-            return self._signal(
+            return self._decision(
                 candle,
-                market_type,
-                leverage,
-                stop_loss=None,
-                take_profit=None,
+                DecisionAction.EXIT,
                 reason="vessel-ema-regime-exit",
             )
 
@@ -119,22 +126,9 @@ class VesselReference:
         is_long = fast > slow
         if market_type is MarketType.SPOT and not is_long:
             return None
-        stop_distance = atr * self._number_param("atr_stop_multiple")
-        reward_distance = stop_distance * self._number_param("reward_risk")
-        if is_long:
-            stop_loss = candle.close - stop_distance
-            take_profit = candle.close + reward_distance
-        else:
-            stop_loss = candle.close + stop_distance
-            take_profit = candle.close - reward_distance
-        if stop_loss <= 0.0 or take_profit <= 0.0:
-            return None
-        return self._signal(
+        return self._decision(
             candle,
-            market_type,
-            leverage,
-            stop_loss=stop_loss,
-            take_profit=take_profit,
+            DecisionAction.ENTER_LONG if is_long else DecisionAction.ENTER_SHORT,
             reason="vessel-ema-regime-entry",
         )
 
@@ -145,37 +139,19 @@ class VesselReference:
             raise TypeError(f"indicator {key!r} must be numeric")
         return float(value)
 
-    def _number_param(self, name: str) -> float:
-        value = self.config.params[name]
-        if isinstance(value, bool) or not isinstance(value, float | int):
-            raise TypeError(f"resolved parameter {name!r} must be numeric")
-        return float(value)
-
-    def _integer_param(self, name: str) -> int:
-        value = self.config.params[name]
-        if isinstance(value, bool) or not isinstance(value, int):
-            raise TypeError(f"resolved parameter {name!r} must be integer")
-        return value
-
     @staticmethod
-    def _signal(
+    def _decision(
         candle: Candle,
-        market_type: MarketType,
-        leverage: int,
+        action: DecisionAction,
         *,
-        stop_loss: float | None,
-        take_profit: float | None,
         reason: str,
-    ) -> TradingSignal:
-        return TradingSignal(
+    ) -> DecisionIntent:
+        return DecisionIntent(
+            action=action,
             symbol=candle.symbol,
             timestamp=candle.close_time,
+            reference_price=float(candle.close),
             confidence=1.0,
-            price=float(candle.close),
-            stop_loss=stop_loss,
-            take_profit=take_profit,
-            market_type=market_type,
-            leverage=leverage,
             reason=reason,
             metadata={"adaptee": STRATEGY_ID, "trailing": False},
         )

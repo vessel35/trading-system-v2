@@ -13,6 +13,7 @@ effort: xhigh
 memory: project
 tools: Read, Grep, Glob, mcp__wallet_db__query, mcp__signal__query, mcp__crypto_data__query
 skills:
+  - develop-trading-strategies
   - genius-thinking
   - backend-principles
   - statistical-validation

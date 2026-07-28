@@ -33,6 +33,7 @@ def test_valid_config_defaults_and_manager_selection() -> None:
     assert config.trigger_feed == "tf_candle"
     assert config.indicator_mode == "auto"
     assert config.risk_per_trade == 0.01
+    assert config.money_management.mode == "manual"
     assert config.selection() == {
         "strategy_id": "fake-breakout",
         "params": {"strategy_owned_unknown": {"nested": True}},
@@ -104,4 +105,58 @@ def test_json_schema_exposes_run_choices_but_no_strategy_parameter_schema() -> N
     properties = schema["properties"]
     assert properties["trigger_feed"]["enum"] == ["tf_candle", "m1_subcandle"]
     assert properties["fill_timing"]["enum"] == ["immediate", "next_bar"]
+    assert properties["money_management"]["discriminator"]["propertyName"] == "mode"
     assert "strategy_parameter_schema" not in properties
+
+
+def test_vessel_legacy_money_fields_normalize_to_manual_policy() -> None:
+    config = RunConfig.model_validate(
+        {
+            **_raw_config(),
+            "strategy_id": "vessel-reference",
+            "params": {
+                "leverage": 3,
+                "reward_risk": 2.5,
+                "atr_stop_multiple": 1.5,
+            },
+        }
+    )
+    assert config.money_management.model_dump() == {
+        "mode": "manual",
+        "leverage": 3,
+        "reward_risk": 2.5,
+        "atr_stop_multiple": 1.5,
+    }
+    assert config.params["reward_risk"] == 2.5
+
+
+def test_turtle_policy_is_discriminated_and_requires_global_risk_sizing() -> None:
+    config = RunConfig.model_validate(
+        {
+            **_raw_config(),
+            "money_management": {
+                "mode": "turtle",
+                "n_period": 20,
+                "n_timeframe": "1d",
+                "stop_n_multiple": 2.0,
+                "leverage_cap": 10,
+            },
+        }
+    )
+    assert config.money_management.mode == "turtle"
+    with pytest.raises(ValidationError, match="risk_based"):
+        RunConfig.model_validate(
+            {
+                **_raw_config(),
+                "sizing_method": "pct",
+                "position_size_pct": 0.2,
+                "money_management": {"mode": "turtle"},
+            }
+        )
+    with pytest.raises(ValidationError, match="Extra inputs"):
+        RunConfig.model_validate(
+            {
+                **_raw_config(),
+                "money_management": {"mode": "manual", "api_key": "forbidden"},
+            }
+        )

@@ -10,7 +10,7 @@ from decimal import Decimal
 from types import MappingProxyType
 from typing import Final
 
-EVIDENCE_SCHEMA_VERSION: Final = "1.3.0"
+EVIDENCE_SCHEMA_VERSION: Final = "1.4.0"
 MINIMUM_SQLITE_VERSION: Final = (3, 37, 0)
 DECIMAL_PLACES: Final = 8
 DECIMAL_SCALE: Final = Decimal(10) ** DECIMAL_PLACES
@@ -76,7 +76,15 @@ HASH_TABLES: Final = tuple(
 HASH_GLOBAL_EXCLUDED_COLUMNS: Final = frozenset({"run_id", "backtest_run_id"})
 HASH_EXCLUDED_COLUMNS: Final = MappingProxyType(
     {
-        "BACKTEST_RUN_LOCAL": frozenset({"run_seq", "run_name", "prereg_json", "created_at"}),
+        "BACKTEST_RUN_LOCAL": frozenset(
+            {
+                "run_seq",
+                "run_name",
+                "submitted_money_management_json",
+                "prereg_json",
+                "created_at",
+            }
+        ),
         "INTEGRITY_CHECK": frozenset({"checked_at"}),
         "FINDING_CLAIM": frozenset({"created_at"}),
     }
@@ -144,6 +152,8 @@ CREATE TABLE IF NOT EXISTS BACKTEST_RUN_LOCAL (
     strategy_name TEXT NOT NULL,
     strategy_version TEXT NOT NULL,
     params_json TEXT NOT NULL DEFAULT '{{}}',
+    submitted_money_management_json TEXT NOT NULL DEFAULT '{{}}',
+    money_management_json TEXT NOT NULL DEFAULT '{{}}',
     resolved_indicators_json TEXT NOT NULL DEFAULT '[]',
     params_schema_version TEXT NOT NULL,
     symbol TEXT NOT NULL,

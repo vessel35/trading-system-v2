@@ -21,13 +21,12 @@ VALUES (
     'VesselReference',
     'core_lib.strategy.adaptees.vessel_reference',
     'Vessel Reference',
-    'Trailing-free Vessel reference Adaptee for deterministic pipeline validation.',
-    '1.0.0',
+    'EMA decision-only Vessel Adaptee with injected money-management policies.',
+    '2.0.0',
     ARRAY['1h']::text[],
     '[
         {"name": "EMA", "params": {"period": 9}},
-        {"name": "EMA", "params": {"period": 21}},
-        {"name": "ATR", "params": {"period": 14}}
+        {"name": "EMA", "params": {"period": 21}}
     ]'::jsonb,
     21,
     '{

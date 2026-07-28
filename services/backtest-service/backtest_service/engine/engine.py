@@ -38,6 +38,14 @@ from core_lib.execution import (
     to_decimal,
 )
 from core_lib.indicators import DEFAULT_REGISTRY, IndicatorSpec, IndicatorState
+from core_lib.money_management import (
+    AccountRiskSnapshot,
+    MarketSnapshot,
+    MoneyManagementError,
+    MoneyManagementPolicy,
+    RiskLimits,
+    turtle_n_series,
+)
 from core_lib.ports import Broker, CatalogStore, Clock, CostModel, DataFeed, EvidenceSink
 from core_lib.sizing import exposure_limit, wallet_pct_size
 from core_lib.sizing import size as risk_size
@@ -45,6 +53,8 @@ from core_lib.strategy import AdapterManager, StrategyAdapter, StrategyConfig
 from core_lib.types import (
     ZERO,
     Candle,
+    DecisionAction,
+    DecisionIntent,
     ExitReason,
     Fill,
     MarginType,
@@ -264,6 +274,7 @@ class Engine:
         self.config: RunConfig | None = None
         self.pending: list[_PendingOrder] = []
         self._strategy: StrategyAdapter | None = None
+        self._money_management: MoneyManagementPolicy | None = None
         self._history: list[Candle] = []
         self._preload: list[Candle] = []
         self._evaluation: list[Candle] = []
@@ -272,6 +283,7 @@ class Engine:
         self._indicator_specs: list[IndicatorSpec] = []
         self._indicator_states: dict[str, IndicatorState] = {}
         self._indicator_values: dict[str, object] = {}
+        self._turtle_n_values: tuple[tuple[datetime, float], ...] = ()
         self._funding_rates: dict[datetime, tuple[Decimal, str]] = {}
         self._funding_diagnostics = {
             "exact_count": 0,
@@ -318,10 +330,13 @@ class Engine:
             raise NotImplementedError("m1_subcandle trigger walk remains reserved")
         self.config = config
         self._cash = self._checked_cash(config.initial_capital, context="run initialization")
-        self._strategy = self.manager.create(
+        runtime = self.manager.create_runtime(
             config.strategy_id,
             {"strategy_id": config.strategy_id, "params": dict(config.params)},
+            config.money_management.model_dump(),
         )
+        self._strategy = runtime.strategy
+        self._money_management = runtime.money_management
         self.manager.activate(config.strategy_id)
         metadata = self._strategy.get_metadata()
         if config.timeframe not in metadata.supported_timeframes:
@@ -330,15 +345,19 @@ class Engine:
             self._strategy.get_parameter_schema(),
             {"strategy_id": config.strategy_id, "params": dict(config.params)},
         )
+        required_indicators = [
+            *metadata.required_indicators,
+            *self._strategy_timeframe_policy_indicators(),
+        ]
         self._indicator_specs = DEFAULT_REGISTRY.resolve_specs(
             config.indicator_mode,
-            metadata.required_indicators,
+            required_indicators,
             config.explicit_indicators,
         )
         if config.indicator_mode == "explicit":
             required_ids = {
                 spec.identifier
-                for spec in DEFAULT_REGISTRY.specs_from_descriptors(metadata.required_indicators)
+                for spec in DEFAULT_REGISTRY.specs_from_descriptors(required_indicators)
             }
             explicit_ids = {spec.identifier for spec in self._indicator_specs}
             missing_required = sorted(required_ids - explicit_ids)
@@ -376,10 +395,14 @@ class Engine:
         if not self._evaluation:
             raise ValueError("evaluation period contains no confirmed candles")
         self._prepare_indicator_states()
+        self._prepare_money_management_sources()
         self._prepare_funding_sources()
 
         profile = metadata.profile
-        params_json = dict(resolved.params)
+        params_json = {
+            **dict(resolved.params),
+            "_money_management": self._money_management_evidence(),
+        }
         profile_json = asdict(profile)
         self._run_meta = {
             "run_name": config.run_name,
@@ -394,7 +417,8 @@ class Engine:
                     "version": spec.version,
                 }
                 for spec in self._indicator_specs
-            ],
+            ]
+            + self._daily_policy_indicator_evidence(),
             "params_schema_version": resolved.schema_version,
             "symbol": config.symbol,
             "exchange": config.exchange,
@@ -535,6 +559,22 @@ class Engine:
         )
         if signal is None:
             return
+        if isinstance(signal, DecisionIntent):
+            decision = signal
+            if decision.action is DecisionAction.HOLD:
+                return
+            if decision.timestamp > candle.close_time:
+                raise ValueError("strategy decision cannot be later than the confirmed candle")
+            try:
+                signal = self._managed_signal(candle, decision)
+            except MoneyManagementError:
+                side = (
+                    PositionSide.LONG
+                    if decision.action is DecisionAction.ENTER_LONG
+                    else PositionSide.SHORT
+                )
+                self._record_blocked_candidate(candle, side, "money_management_rejected")
+                return
         if signal.timestamp > candle.close_time:
             raise ValueError("strategy signal cannot be later than the confirmed candle")
         self._handle_signal(candle, signal)
@@ -933,15 +973,114 @@ class Engine:
         if stop_distance <= 0.0:
             raise ValueError("entry sizing requires a positive stop distance")
         if self._config().sizing_method == "risk_based":
-            risk = self._config().risk_per_trade
-            assert risk is not None
-            quantity = risk_size(risk, float(self._current_equity()), stop_distance)
+            money_management = signal.metadata.get("money_management")
+            requested = (
+                money_management.get("requested_quantity")
+                if isinstance(money_management, Mapping)
+                else None
+            )
+            if isinstance(requested, bool) or not isinstance(requested, float | int):
+                risk = self._config().risk_per_trade
+                assert risk is not None
+                quantity = risk_size(risk, float(self._current_equity()), stop_distance)
+            else:
+                quantity = float(requested)
         else:
             pct = self._config().position_size_pct
             assert pct is not None
             notional = wallet_pct_size(float(self._cash), pct)
             quantity = notional / signal.price
         return quantity, stop_distance
+
+    def _managed_signal(
+        self,
+        candle: Candle,
+        decision: DecisionIntent,
+    ) -> TradingSignal:
+        policy = self._money_management
+        if decision.action is DecisionAction.EXIT:
+            return TradingSignal(
+                symbol=decision.symbol,
+                timestamp=decision.timestamp,
+                confidence=decision.confidence,
+                price=decision.reference_price,
+                stop_loss=None,
+                take_profit=None,
+                market_type=self._market_type(),
+                leverage=1,
+                reason=decision.reason,
+                metadata={
+                    **dict(decision.metadata),
+                    "decision_action": decision.action.value,
+                    "money_management": self._money_management_evidence(),
+                },
+            )
+        if policy is None:
+            raise MoneyManagementError("strategy entry requires a money-management policy")
+        volatility, volatility_name, volatility_timestamp = (
+            self._money_management_volatility(candle, policy)
+        )
+        risk_per_trade = self._config().risk_per_trade or 0.01
+        plan = policy.plan_entry(
+            decision,
+            MarketSnapshot(
+                reference_price=decision.reference_price,
+                volatility=volatility,
+                volatility_name=volatility_name,
+                volatility_timestamp=volatility_timestamp,
+            ),
+            AccountRiskSnapshot(
+                equity=float(self._current_equity()),
+                available_cash=float(self._cash),
+                market_type=self._market_type(),
+            ),
+            RiskLimits(
+                risk_per_trade=float(risk_per_trade),
+                maintenance_margin_rate=float(self._maintenance_margin_rate()),
+            ),
+        )
+        return TradingSignal(
+            symbol=decision.symbol,
+            timestamp=decision.timestamp,
+            confidence=decision.confidence,
+            price=decision.reference_price,
+            stop_loss=plan.stop_loss,
+            take_profit=plan.take_profit,
+            market_type=self._market_type(),
+            leverage=plan.requested_leverage,
+            reason=decision.reason,
+            metadata={
+                **dict(decision.metadata),
+                "decision_action": decision.action.value,
+                "money_management": {
+                    **self._money_management_evidence(),
+                    **dict(plan.diagnostics),
+                    "requested_quantity": plan.requested_quantity,
+                    "requested_leverage": plan.requested_leverage,
+                    "initial_risk_amount": plan.initial_risk_amount,
+                },
+            },
+        )
+
+    def _money_management_volatility(
+        self,
+        candle: Candle,
+        policy: MoneyManagementPolicy,
+    ) -> tuple[float, str, datetime]:
+        if policy.id == "manual":
+            value = self._indicator_values.get("atr:period=14")
+            if isinstance(value, bool) or not isinstance(value, float | int):
+                raise MoneyManagementError("manual policy requires current ATR(14)")
+            return float(value), "ATR(14)", candle.close_time
+        if policy.id == "turtle":
+            available = [
+                item for item in self._turtle_n_values if item[0] <= candle.close_time
+            ]
+            if not available:
+                raise MoneyManagementError("turtle policy requires finalized daily N")
+            timestamp, value = available[-1]
+            return value, "TURTLE_N", timestamp
+        raise MoneyManagementError(f"unsupported policy runtime: {policy.id!r}")
 
     def _entry_request(
         self,
@@ -1472,6 +1611,85 @@ class Engine:
             spec.identifier: spec.make_state() for spec in self._indicator_specs
         }
 
+    def _strategy_timeframe_policy_indicators(self) -> list[dict[str, object]]:
+        policy = self._money_management
+        if policy is None:
+            return []
+        return [
+            {"name": requirement.name, "params": dict(requirement.params)}
+            for requirement in policy.required_indicators()
+            if requirement.timeframe == "strategy"
+        ]
+
+    def _daily_policy_indicator_evidence(self) -> list[dict[str, object]]:
+        policy = self._money_management
+        if policy is None:
+            return []
+        return [
+            {
+                "name": requirement.name,
+                "params": {
+                    **dict(requirement.params),
+                    "timeframe": requirement.timeframe,
+                },
+                "version": policy.version,
+            }
+            for requirement in policy.required_indicators()
+            if requirement.timeframe == "1d"
+        ]
+
+    def _prepare_money_management_sources(self) -> None:
+        policy = self._money_management
+        if policy is None or policy.id != "turtle":
+            self._turtle_n_values = ()
+            return
+        requirements = [
+            item
+            for item in policy.required_indicators()
+            if item.name == "TURTLE_N" and item.timeframe == "1d"
+        ]
+        if len(requirements) != 1:
+            raise ValueError("turtle policy must declare exactly one daily N requirement")
+        period = requirements[0].params.get("period")
+        if isinstance(period, bool) or not isinstance(period, int):
+            raise TypeError("turtle N period must be an integer")
+        daily = sorted(
+            (
+                candle
+                for candle in self.feed.candles(
+                    self._config().symbol,
+                    "1d",
+                    self._config().end,
+                )
+                if candle.close_time <= self._config().end
+            ),
+            key=lambda candle: candle.open_time,
+        )
+        self._turtle_n_values = turtle_n_series(daily, period=period)
+        if not any(
+            timestamp <= self._config().start
+            for timestamp, _ in self._turtle_n_values
+        ):
+            raise ValueError(
+                "insufficient finalized daily history for turtle N at run start"
+            )
+
+    def _money_management_evidence(self) -> dict[str, object]:
+        policy = self._money_management
+        if policy is None:
+            return {
+                "policy_id": "legacy_signal",
+                "policy_version": "1.0.0",
+                "config_schema_version": "1.0.0",
+                "resolved_config": {},
+            }
+        return {
+            "policy_id": policy.id,
+            "policy_version": policy.version,
+            "config_schema_version": "1.0.0",
+            "resolved_config": dict(policy.resolved_config()),
+        }
+
     def _prepare_funding_sources(self) -> None:
         if self._config().timeframe == "1m":
             self._minute_history = list(self._history)
@@ -1639,6 +1857,10 @@ class Engine:
                     "strategy_name": self._run_meta["strategy_name"],
                     "strategy_version": self._run_meta["strategy_version"],
                     "params_json": self._run_meta["params_json"],
+                    "submitted_money_management_json": (
+                        config.money_management.model_dump(exclude_unset=True)
+                    ),
+                    "money_management_json": self._money_management_evidence(),
                     "resolved_indicators_json": self._run_meta["resolved_indicators_json"],
                     "params_schema_version": self._run_meta["params_schema_version"],
                     "symbol": config.symbol,
