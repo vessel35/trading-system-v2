@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import sys
 import time
 from collections.abc import Iterator
@@ -118,6 +119,12 @@ def test_data_job_invokes_exact_collector_argv_and_safe_environment(
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
     monkeypatch.setenv("COLLECTOR_BINANCE_API_KEY", "must-not-be-inherited")
     monkeypatch.setenv("COLLECTOR_BINANCE_API_SECRET", "must-not-be-inherited")
+    monkeypatch.setenv("SERVICE_API_KEY", "must-not-be-inherited")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "must-not-be-inherited")
+    monkeypatch.setenv("OAUTH_TOKEN", "must-not-be-inherited")
+    monkeypatch.setenv("DATABASE_PASSWORD", "must-not-be-inherited")
+    monkeypatch.setenv("FEATURE_FLAG", "not-required-by-collector")
+    monkeypatch.setenv("PATH", "/safe/system/path")
 
     response = client.post(
         "/api/v1/data-jobs",
@@ -163,6 +170,12 @@ def test_data_job_invokes_exact_collector_argv_and_safe_environment(
     )
     assert "COLLECTOR_BINANCE_API_KEY" not in environment
     assert "COLLECTOR_BINANCE_API_SECRET" not in environment
+    assert "SERVICE_API_KEY" not in environment
+    assert "AWS_SECRET_ACCESS_KEY" not in environment
+    assert "OAUTH_TOKEN" not in environment
+    assert "DATABASE_PASSWORD" not in environment
+    assert "FEATURE_FLAG" not in environment
+    assert environment["PATH"] == "/safe/system/path"
     assert options["cwd"] == data_jobs.COLLECTOR_WORKING_DIRECTORY
     assert options["stdout"] is asyncio.subprocess.PIPE
     assert options["stderr"] is asyncio.subprocess.STDOUT
@@ -186,6 +199,7 @@ def test_data_job_failure_uses_exit_code_and_redacted_output_tail(
     client: TestClient,
     database_settings: DatabaseSettings,
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     async def fake_spawn(*_args: object, **kwargs: object) -> FakeProcess:
         environment = cast(dict[str, str], kwargs["env"])
@@ -197,6 +211,7 @@ def test_data_job_failure_uses_exit_code_and_redacted_output_tail(
 
     monkeypatch.setattr(data_jobs, "get_settings", lambda: database_settings)
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
+    caplog.set_level(logging.INFO, logger="web_api.data_jobs")
 
     accepted = client.post("/api/v1/data-jobs", json=_payload()).json()
     status = _wait_for_terminal(client, accepted["job_id"])
@@ -207,7 +222,20 @@ def test_data_job_failure_uses_exit_code_and_redacted_output_tail(
     assert "[redacted]" in message
     assert database_settings.password not in message
     assert "another-secret" not in message
+    assert "dbname=crypto_data" not in message
     assert status["finished_at"] is not None
+
+    result_record = next(
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) == "data_job_finished"
+        and getattr(record, "job_id", None) == accepted["job_id"]
+    )
+    assert result_record.__dict__["status"] == "FAILED"
+    assert result_record.__dict__["error_code"] == "collector_failed"
+    error_message = cast(str, result_record.__dict__["error_message"])
+    assert database_settings.password not in error_message
+    assert "dbname=crypto_data" not in error_message
 
 
 def test_data_job_exposes_running_and_wakes_sse_subscriber(
@@ -265,6 +293,226 @@ def test_data_job_exposes_running_and_wakes_sse_subscriber(
         fallback_release.cancel()
     assert '"status":"RUNNING"' in stream
     assert '"status":"SUCCEEDED"' in stream
+
+
+def test_data_jobs_run_serially_and_leave_second_job_queued(
+    client: TestClient,
+    database_settings: DatabaseSettings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_started = Event()
+    release_first = Event()
+    second_spawned = Event()
+    spawn_count = 0
+
+    class SequencedProcess:
+        returncode = 0
+
+        def __init__(self, sequence: int) -> None:
+            self.sequence = sequence
+
+        async def communicate(self) -> tuple[bytes, None]:
+            if self.sequence == 1:
+                first_started.set()
+                await asyncio.to_thread(release_first.wait, 2)
+            return b"collector completed", None
+
+        def terminate(self) -> None:
+            self.returncode = -15
+            release_first.set()
+
+        def kill(self) -> None:
+            self.returncode = -9
+            release_first.set()
+
+        async def wait(self) -> int:
+            return self.returncode
+
+    async def fake_spawn(*_args: object, **_kwargs: object) -> SequencedProcess:
+        nonlocal spawn_count
+        spawn_count += 1
+        if spawn_count == 2:
+            second_spawned.set()
+        return SequencedProcess(spawn_count)
+
+    monkeypatch.setattr(data_jobs, "get_settings", lambda: database_settings)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
+
+    first = client.post("/api/v1/data-jobs", json=_payload()).json()
+    assert first_started.wait(timeout=1)
+    second = client.post(
+        "/api/v1/data-jobs",
+        json={
+            **_payload(),
+            "symbol": "BTC/USDT:USDT",
+        },
+    ).json()
+
+    try:
+        assert not second_spawned.wait(timeout=0.1)
+        waiting = client.get(f"/api/v1/data-jobs/{second['job_id']}").json()
+        assert waiting["status"] == "QUEUED"
+        assert waiting["started_at"] is None
+    finally:
+        release_first.set()
+
+    assert _wait_for_terminal(client, first["job_id"])["status"] == "SUCCEEDED"
+    assert _wait_for_terminal(client, second["job_id"])["status"] == "SUCCEEDED"
+    assert spawn_count == 2
+
+
+def test_data_job_acceptance_and_completion_emit_safe_structured_audit_logs(
+    client: TestClient,
+    database_settings: DatabaseSettings,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    async def fake_spawn(*_args: object, **_kwargs: object) -> FakeProcess:
+        return FakeProcess(returncode=0)
+
+    monkeypatch.setattr(data_jobs, "get_settings", lambda: database_settings)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
+    caplog.set_level(logging.INFO, logger="web_api.data_jobs")
+
+    accepted = client.post("/api/v1/data-jobs", json=_payload()).json()
+    assert _wait_for_terminal(client, accepted["job_id"])["status"] == "SUCCEEDED"
+
+    accepted_record = next(
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) == "data_job_accepted"
+        and getattr(record, "job_id", None) == accepted["job_id"]
+    )
+    assert accepted_record.__dict__["operation"] == "backfill"
+    assert accepted_record.__dict__["symbol"] == "ETH/USDT:USDT"
+    assert accepted_record.__dict__["exchange"] == "binance"
+    assert accepted_record.__dict__["start"] == "2025-01-01T00:00:00+00:00"
+    assert accepted_record.__dict__["end"] == "2025-01-02T00:00:00+00:00"
+    accepted_at = cast(str, accepted_record.__dict__["accepted_at"])
+    assert accepted_at.endswith("+00:00")
+
+    result_record = next(
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) == "data_job_finished"
+        and getattr(record, "job_id", None) == accepted["job_id"]
+    )
+    assert result_record.__dict__["status"] == "SUCCEEDED"
+    assert result_record.__dict__["error_code"] is None
+    safe_log_fields = " ".join(
+        str(getattr(record, field, ""))
+        for record in (accepted_record, result_record)
+        for field in (
+            "operation",
+            "symbol",
+            "exchange",
+            "start",
+            "end",
+            "job_id",
+            "accepted_at",
+            "status",
+            "error_code",
+            "error_message",
+        )
+    )
+    assert database_settings.password not in safe_log_fields
+    assert "COLLECTOR_CONFIG_DB_URL" not in safe_log_fields
+    assert "COLLECTOR_DATA_DB_URL" not in safe_log_fields
+
+
+@pytest.mark.parametrize(
+    ("operation", "timeframes"),
+    [
+        ("backfill", None),
+        ("refresh_aggregates", ["5m"]),
+    ],
+)
+def test_data_job_rejects_ranges_over_the_configured_limit(
+    client: TestClient,
+    operation: str,
+    timeframes: list[str] | None,
+) -> None:
+    existing_job_ids = {state.job_id for state in data_jobs.registry.list()}
+    payload = _payload(operation=operation, timeframes=timeframes)
+    payload["end"] = "2027-01-02T00:00:00Z"
+
+    response = client.post("/api/v1/data-jobs", json=payload)
+
+    assert response.status_code == 400
+    error = response.json()["error"]
+    assert error["code"] == "range_too_large"
+    assert error["details"] == {
+        "max_range_days": data_jobs.DATA_JOB_MAX_RANGE_DAYS,
+        "range_semantics": "[start, end)",
+    }
+    assert {state.job_id for state in data_jobs.registry.list()} == existing_job_ids
+
+
+def test_data_job_accepts_range_at_the_configured_limit(
+    client: TestClient,
+    database_settings: DatabaseSettings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_spawn(*_args: object, **_kwargs: object) -> FakeProcess:
+        return FakeProcess(returncode=0)
+
+    monkeypatch.setattr(data_jobs, "get_settings", lambda: database_settings)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
+    payload = _payload()
+    payload["end"] = "2027-01-01T00:00:00Z"
+
+    response = client.post("/api/v1/data-jobs", json=payload)
+
+    assert response.status_code == 202
+    assert _wait_for_terminal(client, response.json()["job_id"])["status"] == "SUCCEEDED"
+
+
+def test_shutdown_terminates_and_reaps_running_collector(
+    database_settings: DatabaseSettings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = Event()
+    terminated = Event()
+    release = Event()
+
+    class ShutdownProcess:
+        returncode: int | None = None
+
+        async def communicate(self) -> tuple[bytes, None]:
+            started.set()
+            await asyncio.to_thread(release.wait, 2)
+            return b"", None
+
+        def terminate(self) -> None:
+            self.returncode = -15
+            terminated.set()
+            release.set()
+
+        def kill(self) -> None:
+            self.returncode = -9
+            release.set()
+
+        async def wait(self) -> int:
+            return self.returncode or 0
+
+    process = ShutdownProcess()
+
+    async def fake_spawn(*_args: object, **_kwargs: object) -> ShutdownProcess:
+        return process
+
+    monkeypatch.setattr(data_jobs, "get_settings", lambda: database_settings)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
+
+    with TestClient(app) as shutdown_client:
+        accepted = shutdown_client.post("/api/v1/data-jobs", json=_payload()).json()
+        assert started.wait(timeout=1)
+
+    assert terminated.is_set()
+    state = data_jobs.registry.get(accepted["job_id"])
+    assert state is not None
+    assert state.status == "FAILED"
+    assert state.error is not None
+    assert state.error.code == "collector_cancelled"
 
 
 @pytest.mark.parametrize(

@@ -102,7 +102,7 @@ export interface paths {
         put?: never;
         /**
          * Queue a collector data job
-         * @description Launches a collector subprocess with external Binance network access and crypto_data write capability after validation.
+         * @description Launches a collector subprocess with external Binance network access and crypto_data write capability after validation. Half-open [start, end) ranges longer than 730 days are rejected.
          */
         post: operations["trigger_data_job_api_v1_data_jobs_post"];
         delete?: never;

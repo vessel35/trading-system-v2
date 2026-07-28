@@ -1034,11 +1034,15 @@ def test_catalog_wide_exception_handlers_use_standard_error(
 
 
 def test_query_validation_error_uses_standard_error() -> None:
-    with TestClient(app) as client:
-        response = client.get(
-            f"/api/v1/runs/{RUN_ID}/trades",
-            params={"limit": 0},
-        )
+    app.dependency_overrides[repository] = lambda: _FakeEvidenceCatalog(evidence_path=None)
+    try:
+        with TestClient(app) as client:
+            response = client.get(
+                f"/api/v1/runs/{RUN_ID}/trades",
+                params={"limit": 0},
+            )
+    finally:
+        app.dependency_overrides.clear()
     assert response.status_code == 400
     error = response.json()["error"]
     assert error["code"] == "invalid_query"

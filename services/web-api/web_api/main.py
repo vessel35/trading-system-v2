@@ -27,6 +27,7 @@ from pydantic import SkipValidation, ValidationError
 
 from web_api import __version__ as web_api_version
 from web_api.data_jobs import (
+    DATA_JOB_MAX_RANGE_DAYS,
     TERMINAL_DATA_JOB_STATES,
     shutdown_data_jobs,
     submit_data_job,
@@ -643,7 +644,8 @@ def _data_job_not_found(job_id: str) -> NoReturn:
     summary="Queue a collector data job",
     description=(
         "Launches a collector subprocess with external Binance network access and "
-        "crypto_data write capability after validation."
+        "crypto_data write capability after validation. Half-open [start, end) ranges "
+        f"longer than {DATA_JOB_MAX_RANGE_DAYS} days are rejected."
     ),
 )
 async def trigger_data_job(payload: DataJobRequest) -> DataJobStatus:
@@ -653,6 +655,18 @@ async def trigger_data_job(payload: DataJobRequest) -> DataJobStatus:
             code="unsupported_exchange",
             message=f"Exchange '{payload.exchange}' is not supported for data jobs.",
             details={"exchange": payload.exchange},
+        )
+    if payload.end - payload.start > timedelta(days=DATA_JOB_MAX_RANGE_DAYS):
+        raise ApiError(
+            status_code=400,
+            code="range_too_large",
+            message=(
+                f"The data job range exceeds the allowed maximum of {DATA_JOB_MAX_RANGE_DAYS} days."
+            ),
+            details={
+                "max_range_days": DATA_JOB_MAX_RANGE_DAYS,
+                "range_semantics": "[start, end)",
+            },
         )
     state = submit_data_job(payload)
     return state.public_status()

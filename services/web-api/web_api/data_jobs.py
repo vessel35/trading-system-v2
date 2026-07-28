@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
 import sys
@@ -26,6 +27,7 @@ from web_api.models import (
 
 DataJobStateValue = Literal["QUEUED", "RUNNING", "SUCCEEDED", "FAILED"]
 TERMINAL_DATA_JOB_STATES = frozenset({"SUCCEEDED", "FAILED"})
+DATA_JOB_MAX_RANGE_DAYS = 730
 OPERATION_MODES: dict[DataJobOperation, str] = {
     "backfill": "backfill",
     "funding_backfill": "funding-backfill",
@@ -37,6 +39,32 @@ _OUTPUT_TAIL_BYTES = 4_096
 _MAX_ERROR_MESSAGE = 500
 _URI_CREDENTIALS = re.compile(r"(?P<scheme>[a-z][a-z0-9+.-]*://)[^\s/@]+@", re.IGNORECASE)
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+_SENSITIVE_ENVIRONMENT_KEY = re.compile(
+    r"(?:API_KEY|SECRET|TOKEN|PASSWORD|COLLECTOR_)",
+    re.IGNORECASE,
+)
+_SYSTEM_ENVIRONMENT_KEYS = frozenset(
+    {
+        "COMSPEC",
+        "CURL_CA_BUNDLE",
+        "LANG",
+        "PATH",
+        "PATHEXT",
+        "PYTHONHOME",
+        "PYTHONPATH",
+        "REQUESTS_CA_BUNDLE",
+        "SSL_CERT_DIR",
+        "SSL_CERT_FILE",
+        "SYSTEMROOT",
+        "TEMP",
+        "TMP",
+        "TMPDIR",
+        "TZ",
+        "VIRTUAL_ENV",
+        "WINDIR",
+    }
+)
+logger = logging.getLogger(__name__)
 
 
 def _now() -> datetime:
@@ -173,6 +201,8 @@ class DataJobRegistry:
 
 registry = DataJobRegistry()
 _tasks: set[asyncio.Task[None]] = set()
+_execution_semaphore: asyncio.Semaphore | None = None
+_execution_loop: asyncio.AbstractEventLoop | None = None
 
 
 def _database_dsn(settings: DatabaseSettings, database: str) -> str:
@@ -189,7 +219,10 @@ def _collector_environment(settings: DatabaseSettings) -> tuple[dict[str, str], 
     """Build a clean collector environment without inheriting exchange credentials."""
 
     environment = {
-        key: value for key, value in os.environ.items() if not key.upper().startswith("COLLECTOR_")
+        key: value
+        for key, value in os.environ.items()
+        if (key.upper() in _SYSTEM_ENVIRONMENT_KEYS or key.upper().startswith("LC_"))
+        and _SENSITIVE_ENVIRONMENT_KEY.search(key) is None
     }
     config_dsn = _database_dsn(settings, settings.config_database)
     data_dsn = _database_dsn(settings, settings.crypto_database)
@@ -225,11 +258,67 @@ def _safe_output_tail(output: bytes | None, sensitive_values: tuple[str, ...]) -
         return ""
     message = output[-_OUTPUT_TAIL_BYTES:].decode("utf-8", errors="replace")
     message = _ANSI_ESCAPE.sub("", message)
-    for value in sensitive_values:
-        if value:
-            message = message.replace(value, "[redacted]")
+    for value in sorted({value for value in sensitive_values if value}, key=len, reverse=True):
+        message = message.replace(value, "[redacted]")
     message = _URI_CREDENTIALS.sub(r"\g<scheme>[redacted]@", message)
     return " ".join(message.split())[-_MAX_ERROR_MESSAGE:]
+
+
+def _execution_limit() -> asyncio.Semaphore:
+    """Return a loop-local gate that permits exactly one collector process."""
+
+    global _execution_loop, _execution_semaphore
+    loop = asyncio.get_running_loop()
+    if _execution_semaphore is None or _execution_loop is not loop:
+        _execution_loop = loop
+        _execution_semaphore = asyncio.Semaphore(1)
+    return _execution_semaphore
+
+
+def _audit_fields(state: DataJobState) -> dict[str, object]:
+    return {
+        "operation": state.operation,
+        "symbol": state.symbol,
+        "exchange": state.exchange,
+        "start": state.start.isoformat(),
+        "end": state.end.isoformat(),
+        "job_id": state.job_id,
+        "accepted_at": state.created_at.isoformat(),
+    }
+
+
+def _log_data_job_accepted(state: DataJobState) -> None:
+    fields = _audit_fields(state)
+    fields["event"] = "data_job_accepted"
+    logger.info("data_job_accepted", extra=fields)
+
+
+def _log_data_job_result(state: DataJobState) -> None:
+    fields = _audit_fields(state)
+    fields.update(
+        {
+            "event": "data_job_finished",
+            "status": state.status,
+            "finished_at": (
+                state.finished_at.isoformat() if state.finished_at is not None else None
+            ),
+            "error_code": state.error.code if state.error is not None else None,
+            "error_message": state.error.message if state.error is not None else None,
+        }
+    )
+    log_method = logger.warning if state.status == "FAILED" else logger.info
+    log_method("data_job_finished", extra=fields)
+
+
+def _finish_data_job(
+    job_id: str,
+    status: Literal["SUCCEEDED", "FAILED"],
+    *,
+    error: JobError | None = None,
+) -> DataJobState:
+    state = registry.update(job_id, status, error=error)
+    _log_data_job_result(state)
+    return state
 
 
 async def _stop_process(process: asyncio.subprocess.Process) -> None:
@@ -256,50 +345,55 @@ async def _run_data_job(job_id: str) -> None:
     process: asyncio.subprocess.Process | None = None
     sensitive_values: tuple[str, ...] = ()
     try:
-        registry.update(job_id, "RUNNING")
-        settings = get_settings()
-        environment, sensitive_values = _collector_environment(settings)
-        process = await asyncio.create_subprocess_exec(
-            *_collector_argv(state),
-            cwd=COLLECTOR_WORKING_DIRECTORY,
-            env=environment,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-        output, _ = await process.communicate()
-        if process.returncode == 0:
-            registry.update(job_id, "SUCCEEDED")
-            return
-        tail = _safe_output_tail(output, sensitive_values)
-        message = f"Collector exited with code {process.returncode}."
-        if tail:
-            message = f"{message} Output: {tail}"
-        registry.update(
-            job_id,
-            "FAILED",
-            error=JobError(code="collector_failed", message=message[:_MAX_ERROR_MESSAGE]),
-        )
+        async with _execution_limit():
+            registry.update(job_id, "RUNNING")
+            settings = get_settings()
+            environment, sensitive_values = _collector_environment(settings)
+            process = await asyncio.create_subprocess_exec(
+                *_collector_argv(state),
+                cwd=COLLECTOR_WORKING_DIRECTORY,
+                env=environment,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            output, _ = await process.communicate()
+            if process.returncode == 0:
+                _finish_data_job(job_id, "SUCCEEDED")
+                return
+            tail = _safe_output_tail(output, sensitive_values)
+            message = f"Collector exited with code {process.returncode}."
+            if tail:
+                message = f"{message} Output: {tail}"
+            _finish_data_job(
+                job_id,
+                "FAILED",
+                error=JobError(code="collector_failed", message=message[:_MAX_ERROR_MESSAGE]),
+            )
     except asyncio.CancelledError:
         if process is not None:
             await _stop_process(process)
-        registry.update(
-            job_id,
-            "FAILED",
-            error=JobError(
-                code="collector_cancelled",
-                message="The collector job was cancelled during web API shutdown.",
-            ),
-        )
+        current = registry.get(job_id)
+        if current is not None and current.status not in TERMINAL_DATA_JOB_STATES:
+            _finish_data_job(
+                job_id,
+                "FAILED",
+                error=JobError(
+                    code="collector_cancelled",
+                    message="The collector job was cancelled during web API shutdown.",
+                ),
+            )
         raise
     except Exception:
-        registry.update(
-            job_id,
-            "FAILED",
-            error=JobError(
-                code="collector_launch_failed",
-                message="The collector process could not be started.",
-            ),
-        )
+        current = registry.get(job_id)
+        if current is not None and current.status not in TERMINAL_DATA_JOB_STATES:
+            _finish_data_job(
+                job_id,
+                "FAILED",
+                error=JobError(
+                    code="collector_launch_failed",
+                    message="The collector process could not be started.",
+                ),
+            )
 
 
 def _job_done(job_id: str, task: asyncio.Task[None]) -> None:
@@ -310,7 +404,7 @@ def _job_done(job_id: str, task: asyncio.Task[None]) -> None:
     state = registry.get(job_id)
     if error is None or state is None or state.status in TERMINAL_DATA_JOB_STATES:
         return
-    registry.update(
+    _finish_data_job(
         job_id,
         "FAILED",
         error=JobError(
@@ -324,6 +418,7 @@ def submit_data_job(request: DataJobRequest) -> DataJobState:
     """Queue a subprocess that can access Binance and write the crypto_data database."""
 
     state = registry.register(request)
+    _log_data_job_accepted(state)
     task = asyncio.create_task(_run_data_job(state.job_id), name=f"data-job-{state.job_id}")
     _tasks.add(task)
     task.add_done_callback(lambda completed: _job_done(state.job_id, completed))
@@ -341,6 +436,7 @@ async def shutdown_data_jobs() -> None:
 
 
 __all__ = [
+    "DATA_JOB_MAX_RANGE_DAYS",
     "DataJobRegistry",
     "DataJobState",
     "TERMINAL_DATA_JOB_STATES",
