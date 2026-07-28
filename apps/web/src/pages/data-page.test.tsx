@@ -1,7 +1,22 @@
-import { screen, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
-import { describe, expect, it } from "vitest";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
+import type { DataJobStatus } from "../api/client";
 import { renderWithQuery } from "../test/render";
 import {
   inventoryFixture,
@@ -12,6 +27,77 @@ import { DataPage } from "./data-page";
 
 const endpoint =
   "http://localhost/api/v1/data-sources/crypto_data.ohlcv_futures/inventory";
+const dataJobsEndpoint = "http://localhost/api/v1/data-jobs";
+const originalEventSource = globalThis.EventSource;
+
+function dataJob(
+  status: DataJobStatus["status"],
+  overrides: Partial<DataJobStatus> = {},
+): DataJobStatus {
+  return {
+    job_id: "data-job-1",
+    operation: "backfill",
+    symbol: "BTC/USDT:USDT",
+    exchange: "binance",
+    start: "2026-01-01T00:00:00Z",
+    end: "2026-01-02T00:00:00Z",
+    status,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+class MockEventSource {
+  static instances: MockEventSource[] = [];
+
+  readonly url: string;
+  onerror: ((event: Event) => void) | null = null;
+  private readonly listeners = new Map<string, EventListener[]>();
+
+  constructor(url: string | URL) {
+    this.url = url.toString();
+    MockEventSource.instances.push(this);
+  }
+
+  addEventListener(type: string, listener: EventListener) {
+    const current = this.listeners.get(type) ?? [];
+    this.listeners.set(type, [...current, listener]);
+  }
+
+  close() {}
+
+  emitStatus(status: DataJobStatus) {
+    const event = new MessageEvent("status", {
+      data: JSON.stringify(status),
+    });
+    this.listeners.get("status")?.forEach((listener) => listener(event));
+  }
+}
+
+function installEventSourceMock() {
+  MockEventSource.instances = [];
+  Object.defineProperty(globalThis, "EventSource", {
+    configurable: true,
+    writable: true,
+    value: MockEventSource,
+  });
+}
+
+beforeEach(() => {
+  server.use(
+    http.get(dataJobsEndpoint, () => HttpResponse.json([])),
+  );
+});
+
+afterEach(() => {
+  Object.defineProperty(globalThis, "EventSource", {
+    configurable: true,
+    writable: true,
+    value: originalEventSource,
+  });
+  MockEventSource.instances = [];
+});
 
 describe("시장 데이터 인벤토리", () => {
   it("MSW 인벤토리 픽스처를 커버리지 표로 렌더한다", async () => {
@@ -72,5 +158,223 @@ describe("시장 데이터 인벤토리", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("crypto_data 연결을 열 수 없습니다.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "다시 시도" })).toBeInTheDocument();
+  });
+});
+
+describe("데이터 수집·backfill 실행", () => {
+  it("쓰기 경고와 폼을 렌더하고 refresh_aggregates에서만 기본 timeframes를 표시한다", async () => {
+    const user = userEvent.setup();
+    server.use(...inventoryHandlers);
+    renderWithQuery(<DataPage />);
+
+    expect(
+      screen.getByText("인벤토리 조회만 읽기 전용"),
+    ).toBeInTheDocument();
+    const warning = screen.getByRole("alert");
+    expect(
+      within(warning).getByText("실제 쓰기 작업 · DRY-RUN 아님"),
+    ).toBeInTheDocument();
+    expect(
+      within(warning).getByText(/실제 시장 데이터를 crypto_data에 씁니다/),
+    ).toBeInTheDocument();
+    expect(await screen.findByLabelText("심볼 (CCXT 형식)")).toHaveValue(
+      "BTC/USDT:USDT",
+    );
+    expect(screen.getByLabelText("거래소")).toBeDisabled();
+    expect(screen.getByLabelText("작업")).toHaveValue("backfill");
+    expect(screen.getByLabelText("시작 (UTC)")).toHaveAttribute(
+      "type",
+      "datetime-local",
+    );
+    expect(screen.getByLabelText("종료 (UTC)")).toHaveAttribute(
+      "type",
+      "datetime-local",
+    );
+    expect(screen.queryByRole("group", { name: "timeframes" })).not.toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText("작업"), "refresh_aggregates");
+    const timeframes = screen.getByRole("group", { name: "timeframes" });
+    const checkboxes = within(timeframes).getAllByRole("checkbox");
+    expect(checkboxes).toHaveLength(5);
+    checkboxes.forEach((checkbox) => expect(checkbox).toBeChecked());
+
+    await user.selectOptions(screen.getByLabelText("작업"), "funding_backfill");
+    expect(screen.queryByRole("group", { name: "timeframes" })).not.toBeInTheDocument();
+  });
+
+  it("빈 심볼과 역전 기간을 제출 전에 차단하며 확인 Dialog와 POST를 만들지 않는다", async () => {
+    const user = userEvent.setup();
+    const post = vi.fn();
+    server.use(
+      ...inventoryHandlers,
+      http.post(dataJobsEndpoint, () => {
+        post();
+        return HttpResponse.json(dataJob("QUEUED"), { status: 202 });
+      }),
+    );
+    renderWithQuery(<DataPage />);
+
+    const symbol = await screen.findByLabelText("심볼 (CCXT 형식)");
+    await user.clear(symbol);
+    fireEvent.change(screen.getByLabelText("시작 (UTC)"), {
+      target: { value: "2026-01-02T00:00" },
+    });
+    fireEvent.change(screen.getByLabelText("종료 (UTC)"), {
+      target: { value: "2026-01-01T00:00" },
+    });
+    await user.click(screen.getByRole("button", { name: "실행 내용 확인" }));
+
+    expect(screen.getByText("심볼을 입력하세요.")).toBeInTheDocument();
+    expect(
+      screen.getByText("종료 시각은 시작 시각보다 뒤여야 합니다."),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it("확인 Dialog에서는 심볼·작업·기간을 되비추며 명시적 실행 전에는 POST하지 않는다", async () => {
+    const user = userEvent.setup();
+    const post = vi.fn();
+    server.use(
+      ...inventoryHandlers,
+      http.post(dataJobsEndpoint, () => {
+        post();
+        return HttpResponse.json(dataJob("QUEUED"), { status: 202 });
+      }),
+    );
+    renderWithQuery(<DataPage />);
+
+    await screen.findByLabelText("심볼 (CCXT 형식)");
+    fireEvent.change(screen.getByLabelText("시작 (UTC)"), {
+      target: { value: "2026-01-01T00:00" },
+    });
+    fireEvent.change(screen.getByLabelText("종료 (UTC)"), {
+      target: { value: "2026-01-02T00:00" },
+    });
+    await user.click(screen.getByRole("button", { name: "실행 내용 확인" }));
+
+    const dialog = screen.getByRole("dialog", {
+      name: "실제 시장 데이터 쓰기를 실행하시겠습니까?",
+    });
+    expect(within(dialog).getByText("BTC/USDT:USDT")).toBeInTheDocument();
+    expect(
+      within(dialog).getByText("backfill · OHLCV 1분봉"),
+    ).toBeInTheDocument();
+    expect(within(dialog).getByText(/2026/)).toBeInTheDocument();
+    expect(post).not.toHaveBeenCalled();
+
+    await user.click(within(dialog).getByRole("button", { name: "취소" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it("확인 후 POST하고 SSE로 QUEUED→RUNNING→SUCCEEDED 상태를 갱신한다", async () => {
+    installEventSourceMock();
+    const user = userEvent.setup();
+    const postBodies: unknown[] = [];
+    const queued = dataJob("QUEUED");
+    server.use(
+      ...inventoryHandlers,
+      http.post(dataJobsEndpoint, async ({ request }) => {
+        postBodies.push(await request.json());
+        return HttpResponse.json(queued, { status: 202 });
+      }),
+    );
+    renderWithQuery(<DataPage />);
+
+    await screen.findByLabelText("심볼 (CCXT 형식)");
+    fireEvent.change(screen.getByLabelText("시작 (UTC)"), {
+      target: { value: "2026-01-01T00:00" },
+    });
+    fireEvent.change(screen.getByLabelText("종료 (UTC)"), {
+      target: { value: "2026-01-02T00:00" },
+    });
+    await user.click(screen.getByRole("button", { name: "실행 내용 확인" }));
+    expect(postBodies).toHaveLength(0);
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "실행" }),
+    );
+
+    const row = await screen.findByTestId("data-job-data-job-1");
+    expect(within(row).getByText("QUEUED")).toBeInTheDocument();
+    expect(postBodies).toEqual([
+      {
+        operation: "backfill",
+        symbol: "BTC/USDT:USDT",
+        exchange: "binance",
+        start: "2026-01-01T00:00:00.000Z",
+        end: "2026-01-02T00:00:00.000Z",
+      },
+    ]);
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+
+    act(() => {
+      MockEventSource.instances[0].emitStatus(
+        dataJob("RUNNING", { updated_at: "2026-01-01T00:01:00Z" }),
+      );
+    });
+    expect(await within(row).findByText("RUNNING")).toBeInTheDocument();
+    const progress = within(row).getByRole("progressbar", {
+      name: "BTC/USDT:USDT 데이터 작업 실행 중",
+    });
+    expect(progress).not.toHaveAttribute("aria-valuenow");
+    expect(progress).toHaveAttribute(
+      "aria-valuetext",
+      "서버 수치 진행률 미제공",
+    );
+
+    act(() => {
+      MockEventSource.instances[0].emitStatus(
+        dataJob("SUCCEEDED", { updated_at: "2026-01-01T00:02:00Z" }),
+      );
+    });
+    expect(await within(row).findByText("SUCCEEDED")).toBeInTheDocument();
+  });
+
+  it("SSE 오류 시 개별 상태 GET으로 폴백한다", async () => {
+    installEventSourceMock();
+    const queued = dataJob("QUEUED");
+    const succeeded = dataJob("SUCCEEDED", {
+      updated_at: "2026-01-01T00:03:00Z",
+    });
+    server.use(
+      ...inventoryHandlers,
+      http.get(dataJobsEndpoint, () => HttpResponse.json([queued])),
+      http.get(`${dataJobsEndpoint}/:jobId`, () => HttpResponse.json(succeeded)),
+    );
+    renderWithQuery(<DataPage />);
+
+    const row = await screen.findByTestId("data-job-data-job-1");
+    expect(within(row).getByText("QUEUED")).toBeInTheDocument();
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+    act(() => {
+      MockEventSource.instances[0].onerror?.(new Event("error"));
+    });
+
+    expect(await within(row).findByText("SUCCEEDED")).toBeInTheDocument();
+  });
+
+  it("FAILED 상태에서 서버의 안전한 오류 code와 message를 표시한다", async () => {
+    server.use(
+      ...inventoryHandlers,
+      http.get(dataJobsEndpoint, () =>
+        HttpResponse.json([
+          dataJob("FAILED", {
+            error: {
+              code: "collector_failed",
+              message: "수집기가 안전하게 종료되었습니다.",
+            },
+          }),
+        ]),
+      ),
+    );
+    renderWithQuery(<DataPage />);
+
+    const row = await screen.findByTestId("data-job-data-job-1");
+    expect(within(row).getByText("FAILED")).toBeInTheDocument();
+    expect(within(row).getByText("collector_failed")).toBeInTheDocument();
+    expect(
+      within(row).getByText("수집기가 안전하게 종료되었습니다."),
+    ).toBeInTheDocument();
   });
 });
