@@ -27,7 +27,10 @@ from web_api.models import (
 
 DataJobStateValue = Literal["QUEUED", "RUNNING", "SUCCEEDED", "FAILED"]
 TERMINAL_DATA_JOB_STATES = frozenset({"SUCCEEDED", "FAILED"})
-DATA_JOB_MAX_RANGE_DAYS = 730
+# crypto_data retention 창(init-scripts 02: drop_after 2000 days)과 일치. 이보다 먼 과거를
+# backfill해도 retention이 곧 삭제하므로 무의미하다. 이 상한은 한 번에 거는 backfill 범위를
+# 보관 창 안으로 묶는 안전장치다.
+DATA_JOB_MAX_RANGE_DAYS = 2000
 OPERATION_MODES: dict[DataJobOperation, str] = {
     "backfill": "backfill",
     "funding_backfill": "funding-backfill",

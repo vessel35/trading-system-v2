@@ -177,9 +177,10 @@ describe("데이터 수집·backfill 실행", () => {
     expect(
       within(warning).getByText(/실제 시장 데이터를 crypto_data에 씁니다/),
     ).toBeInTheDocument();
-    expect(await screen.findByLabelText("심볼 (CCXT 형식)")).toHaveValue(
-      "BTC/USDT:USDT",
-    );
+    const symbolInput = await screen.findByLabelText("심볼 (CCXT 형식)");
+    expect(symbolInput).toHaveValue("BTC/USDT:USDT");
+    expect(symbolInput).not.toHaveAttribute("list");
+    expect(document.querySelector("datalist")).not.toBeInTheDocument();
     expect(screen.getByLabelText("거래소")).toBeDisabled();
     expect(screen.getByLabelText("작업")).toHaveValue("backfill");
     expect(screen.getByLabelText("시작 (UTC)")).toHaveAttribute(
@@ -272,15 +273,20 @@ describe("데이터 수집·backfill 실행", () => {
     installEventSourceMock();
     const user = userEvent.setup();
     const postBodies: unknown[] = [];
+    let inventoryRequests = 0;
     const queued = dataJob("QUEUED");
     server.use(
-      ...inventoryHandlers,
+      http.get(endpoint, () => {
+        inventoryRequests += 1;
+        return HttpResponse.json(inventoryFixture);
+      }),
       http.post(dataJobsEndpoint, async ({ request }) => {
         postBodies.push(await request.json());
         return HttpResponse.json(queued, { status: 202 });
       }),
     );
-    renderWithQuery(<DataPage />);
+    const { queryClient } = renderWithQuery(<DataPage />);
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
 
     await screen.findByLabelText("심볼 (CCXT 형식)");
     fireEvent.change(screen.getByLabelText("시작 (UTC)"), {
@@ -329,6 +335,8 @@ describe("데이터 수집·backfill 실행", () => {
       );
     });
     expect(await within(row).findByText("SUCCEEDED")).toBeInTheDocument();
+    await waitFor(() => expect(inventoryRequests).toBe(2));
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["coverage"] });
   });
 
   it("SSE 오류 시 개별 상태 GET으로 폴백한다", async () => {
@@ -376,5 +384,23 @@ describe("데이터 수집·backfill 실행", () => {
     expect(
       within(row).getByText("수집기가 안전하게 종료되었습니다."),
     ).toBeInTheDocument();
+  });
+
+  it("이미 성공한 작업을 처음 불러올 때 인벤토리를 중복 조회하지 않는다", async () => {
+    let inventoryRequests = 0;
+    server.use(
+      http.get(endpoint, () => {
+        inventoryRequests += 1;
+        return HttpResponse.json(inventoryFixture);
+      }),
+      http.get(dataJobsEndpoint, () =>
+        HttpResponse.json([dataJob("SUCCEEDED")]),
+      ),
+    );
+    renderWithQuery(<DataPage />);
+
+    const row = await screen.findByTestId("data-job-data-job-1");
+    expect(within(row).getByText("SUCCEEDED")).toBeInTheDocument();
+    await waitFor(() => expect(inventoryRequests).toBe(1));
   });
 });

@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useRef,
   useState,
 } from "react";
 import {
@@ -78,6 +79,7 @@ export function useDataJob(
   initialData?: DataJobStatus,
 ) {
   const queryClient = useQueryClient();
+  const dependentQueriesRefreshed = useRef(initialData?.status === "SUCCEEDED");
   const [sseUnavailable, setSseUnavailable] = useState(
     () => typeof EventSource === "undefined",
   );
@@ -103,6 +105,17 @@ export function useDataJob(
       return 1_500;
     },
   });
+
+  useEffect(() => {
+    if (query.data?.status !== "SUCCEEDED" || dependentQueriesRefreshed.current) {
+      return;
+    }
+    dependentQueriesRefreshed.current = true;
+    void Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["inventory"] }),
+      queryClient.invalidateQueries({ queryKey: ["coverage"] }),
+    ]);
+  }, [query.data?.status, queryClient]);
 
   useEffect(() => {
     if (!jobId || typeof EventSource === "undefined") return;

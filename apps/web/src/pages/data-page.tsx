@@ -8,11 +8,7 @@ import {
   ShieldCheck,
   XCircle,
 } from "lucide-react";
-import {
-  type FormEvent,
-  useMemo,
-  useState,
-} from "react";
+import { type FormEvent, useState } from "react";
 
 import {
   ApiRequestError,
@@ -53,7 +49,8 @@ import { useInventory } from "../hooks/use-inventory";
 import { formatTimestamp } from "../lib/utils";
 
 const DATA_SOURCE = "crypto_data.ohlcv_futures";
-const MAX_RANGE_DAYS = 730;
+// 백엔드 DATA_JOB_MAX_RANGE_DAYS(= crypto_data retention 2000일)과 일치.
+const MAX_RANGE_DAYS = 2000;
 const MAX_RANGE_MS = MAX_RANGE_DAYS * 24 * 60 * 60 * 1_000;
 const symbolPattern =
   /^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*:[A-Za-z0-9][A-Za-z0-9._-]*$/;
@@ -344,10 +341,6 @@ export function DataPage() {
   const inventory = useInventory(DATA_SOURCE);
   const dataJobs = useDataJobs();
   const items = inventory.data?.items ?? [];
-  const inventorySymbols = useMemo(
-    () => Array.from(new Set(items.map((item) => item.symbol))),
-    [items],
-  );
   const [form, setForm] = useState<DataJobForm>(initialForm);
   const [errors, setErrors] = useState<FormErrors>({});
   const [confirmation, setConfirmation] = useState<DataJobRequest | null>(null);
@@ -551,24 +544,18 @@ export function DataPage() {
                       id="data-job-symbol"
                       aria-describedby={errors.symbol ? "symbol-error" : "symbol-help"}
                       aria-invalid={Boolean(errors.symbol)}
-                      list="inventory-symbols"
                       maxLength={60}
                       placeholder="BTC/USDT:USDT"
                       value={form.symbol}
                       onChange={(event) => updateForm("symbol", event.target.value)}
                     />
-                    <datalist id="inventory-symbols">
-                      {inventorySymbols.map((symbol) => (
-                        <option key={symbol} value={symbol} />
-                      ))}
-                    </datalist>
                     {errors.symbol ? (
                       <span id="symbol-error" className="block text-xs text-red-300">
                         {errors.symbol}
                       </span>
                     ) : (
                       <span id="symbol-help" className="block text-xs text-muted-foreground">
-                        인벤토리에서 선택하거나 직접 입력할 수 있습니다.
+                        BASE/QUOTE:SETTLE 형식으로 직접 입력하세요.
                       </span>
                     )}
                   </div>

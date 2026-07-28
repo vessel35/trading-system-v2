@@ -434,7 +434,8 @@ def test_data_job_rejects_ranges_over_the_configured_limit(
 ) -> None:
     existing_job_ids = {state.job_id for state in data_jobs.registry.list()}
     payload = _payload(operation=operation, timeframes=timeframes)
-    payload["end"] = "2027-01-02T00:00:00Z"
+    # 기본 start 2025-01-01 기준 약 2191일 → 2000일 상한 초과.
+    payload["end"] = "2031-01-01T00:00:00Z"
 
     response = client.post("/api/v1/data-jobs", json=payload)
 
