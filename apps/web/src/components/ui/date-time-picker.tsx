@@ -1,4 +1,10 @@
-import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  CalendarDays,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+} from "lucide-react";
 import {
   useEffect,
   useId,
@@ -59,6 +65,14 @@ function addDays(value: Date, amount: number): Date {
 
 function addMonths(value: Date, amount: number): Date {
   return dateAtNoon(value.getFullYear(), value.getMonth() + amount, 1);
+}
+
+function shiftMonths(value: Date, amount: number): Date {
+  const month = value.getMonth() + amount;
+  // Day 0 of the following month is the last day of the target month, which keeps
+  // 1월 31일 from spilling into 3월 when a shorter month is the destination.
+  const lastDay = new Date(value.getFullYear(), month + 1, 0).getDate();
+  return dateAtNoon(value.getFullYear(), month, Math.min(value.getDate(), lastDay));
 }
 
 function parseValue(value: string): { date: Date; time: string } | null {
@@ -150,16 +164,26 @@ export function DateTimePickerField({
   }
 
   function handleDayKeyDown(event: KeyboardEvent<HTMLButtonElement>, date: Date) {
-    const increments: Record<string, number> = {
+    const dayIncrements: Record<string, number> = {
       ArrowLeft: -1,
       ArrowRight: 1,
       ArrowUp: -7,
       ArrowDown: 7,
     };
-    const increment = increments[event.key];
-    if (increment === undefined) return;
+    const dayIncrement = dayIncrements[event.key];
+    if (dayIncrement !== undefined) {
+      event.preventDefault();
+      selectDate(addDays(date, dayIncrement));
+      return;
+    }
+
+    // PageUp/PageDown step a month, and with Shift a year, so a multi-year backtest
+    // window is reachable from the keyboard without clicking through every month.
+    const pageDirections: Record<string, number> = { PageUp: -1, PageDown: 1 };
+    const pageDirection = pageDirections[event.key];
+    if (pageDirection === undefined) return;
     event.preventDefault();
-    selectDate(addDays(date, increment));
+    selectDate(shiftMonths(date, pageDirection * (event.shiftKey ? 12 : 1)));
   }
 
   const weeks = monthGrid(viewMonth);
@@ -198,28 +222,50 @@ export function DateTimePickerField({
         </div>
 
         <div className="rounded-lg border bg-background/40 p-3">
-          <div className="mb-3 flex items-center justify-between">
-            <Button
-              type="button"
-              size="icon"
-              variant="ghost"
-              aria-label="이전 달"
-              onClick={() => setViewMonth((current) => addMonths(current, -1))}
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
+          <div className="mb-3 flex items-center justify-between gap-1">
+            <div className="flex items-center">
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                aria-label="이전 해"
+                onClick={() => setViewMonth((current) => addMonths(current, -12))}
+              >
+                <ChevronsLeft className="h-4 w-4" />
+              </Button>
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                aria-label="이전 달"
+                onClick={() => setViewMonth((current) => addMonths(current, -1))}
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+            </div>
             <div className="font-medium" aria-live="polite">
               {monthFormatter.format(viewMonth)}
             </div>
-            <Button
-              type="button"
-              size="icon"
-              variant="ghost"
-              aria-label="다음 달"
-              onClick={() => setViewMonth((current) => addMonths(current, 1))}
-            >
-              <ChevronRight className="h-4 w-4" />
-            </Button>
+            <div className="flex items-center">
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                aria-label="다음 달"
+                onClick={() => setViewMonth((current) => addMonths(current, 1))}
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                aria-label="다음 해"
+                onClick={() => setViewMonth((current) => addMonths(current, 12))}
+              >
+                <ChevronsRight className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
 
           <div role="grid" aria-label="날짜 선택" className="space-y-1">
