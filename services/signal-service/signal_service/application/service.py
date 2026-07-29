@@ -339,9 +339,7 @@ class SignalGenerationService:
             )
         policy = self._money_management
         if not isinstance(policy, ManualMoneyManagement):
-            raise ValueError(
-                "signal generation currently requires manual money management"
-            )
+            raise ValueError("signal generation currently requires manual money management")
         atr = indicators.get("atr:period=14")
         if isinstance(atr, bool) or not isinstance(atr, float | int):
             raise ValueError("manual money management requires current ATR(14)")

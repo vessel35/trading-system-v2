@@ -147,9 +147,7 @@ class _VesselTurtleFeed(_Feed):
         if tf == "1d":
             assert symbol == "BTCUSDT"
             self.candle_calls += 1
-            return [
-                candle for candle in self._daily if candle.close_time <= up_to
-            ]
+            return [candle for candle in self._daily if candle.close_time <= up_to]
         return super().candles(symbol, tf, up_to)
 
 
@@ -1416,13 +1414,10 @@ def test_vessel_turtle_uses_only_prior_finalized_daily_n_and_records_plan(
         assert metadata["requested_quantity"] == 25.0
         assert metadata["initial_risk_amount"] == 100.0
         assert (
-            datetime.fromisoformat(metadata["volatility_timestamp"]).timestamp()
-            * 1_000
+            datetime.fromisoformat(metadata["volatility_timestamp"]).timestamp() * 1_000
             <= decision_ts
         )
-        assert connection.execute(
-            "SELECT COUNT(*) FROM INDICATOR_SNAPSHOT"
-        ).fetchone() == (12,)
+        assert connection.execute("SELECT COUNT(*) FROM INDICATOR_SNAPSHOT").fetchone() == (12,)
 
 
 def test_resolved_manual_policy_has_stable_config_and_evidence_hash(
@@ -1453,10 +1448,7 @@ def test_resolved_manual_policy_has_stable_config_and_evidence_hash(
     first = _vessel_engine(tmp_path / "compact", catalog).run(compact)
     second = _vessel_engine(tmp_path / "explicit", catalog).run(explicit)
 
-    assert (
-        catalog.runs[first.run_id]["config_hash"]
-        == catalog.runs[second.run_id]["config_hash"]
-    )
+    assert catalog.runs[first.run_id]["config_hash"] == catalog.runs[second.run_id]["config_hash"]
     assert first.evidence_hash == second.evidence_hash
     with sqlite3.connect(first.evidence_path) as connection:
         submitted = json.loads(

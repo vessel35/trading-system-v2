@@ -128,9 +128,7 @@ class ManualMoneyManagement:
         stop_distance = market.volatility * float(self.atr_stop_multiple)
         risk_budget, quantity = _risk_inputs(market, account, global_limits, stop_distance)
         stop_loss = market.reference_price - side * stop_distance
-        take_profit = (
-            market.reference_price + side * stop_distance * float(self.reward_risk)
-        )
+        take_profit = market.reference_price + side * stop_distance * float(self.reward_risk)
         if stop_loss <= 0.0 or take_profit <= 0.0:
             raise MoneyManagementError("manual protection prices must remain positive")
         leverage = self.leverage if account.market_type is MarketType.FUTURES else 1
@@ -279,8 +277,7 @@ def turtle_n_series(
         raise ValueError("period must be an integer of at least 2")
     ordered = list(candles)
     if any(
-        right.open_time <= left.open_time
-        for left, right in zip(ordered, ordered[1:], strict=False)
+        right.open_time <= left.open_time for left, right in zip(ordered, ordered[1:], strict=False)
     ):
         raise ValueError("turtle N candles must be strictly increasing")
     true_ranges: list[float] = []
