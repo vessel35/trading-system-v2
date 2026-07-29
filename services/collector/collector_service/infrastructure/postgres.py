@@ -106,9 +106,14 @@ class ConfigSymbolRepository:
         self,
         connections: ConnectionProvider,
         *,
+        writable_connections: ConnectionProvider | None = None,
         table: TableName = _CONFIG_SYMBOLS_TABLE,
     ) -> None:
+        # Reading the universe stays on a read-only session. Registration is the one
+        # write this service makes to config_db, so it gets its own explicit provider
+        # rather than widening the connection every read already uses.
         self._connections = connections
+        self._writable_connections = writable_connections
         self._table = table
 
     def active_symbols(
@@ -134,6 +139,21 @@ class ConfigSymbolRepository:
         with self._connections() as connection:
             rows = connection.execute(query, params).fetchall()
         return [Symbol(value=cast(str, row[0]), exchange=cast(str, row[1])) for row in rows]
+
+    def register(self, *, exchange: str, symbol: str) -> None:
+        """Insert the symbol, or reactivate it when it was previously deactivated."""
+        if self._writable_connections is None:
+            raise PermissionError("config_db symbol registration requires a writable session")
+        query = sql.SQL(
+            """
+            INSERT INTO {} (symbol, exchange, is_active)
+            VALUES (%s, %s, TRUE)
+            ON CONFLICT (symbol, exchange)
+            DO UPDATE SET is_active = TRUE, updated_at = CURRENT_TIMESTAMP
+            """
+        ).format(self._table.identifier())
+        with self._writable_connections() as connection:
+            connection.execute(query, [symbol, exchange])
 
 
 class PostgresOhlcvRepository:

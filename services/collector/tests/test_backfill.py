@@ -9,6 +9,7 @@ from decimal import Decimal
 
 import pytest
 from collector_service.application import FundingBackfill, HistoricalBackfill
+from collector_service.application.service import CollectorConfigurationError
 from collector_service.domain import Candle, FundingRate, Symbol
 from collector_service.infrastructure.exchange import BinanceUsdMClient
 
@@ -41,6 +42,10 @@ def funding(hour: int, rate: str, mark: str | None = None) -> FundingRate:
 
 
 class MemorySymbols:
+    def __init__(self, configured: list[Symbol] | None = None) -> None:
+        self.configured = [TARGET] if configured is None else configured
+        self.registered: list[tuple[str, str]] = []
+
     def active_symbols(
         self,
         *,
@@ -48,8 +53,21 @@ class MemorySymbols:
         symbol: str | None,
     ) -> list[Symbol]:
         assert exchange == "binance"
-        assert symbol is None
-        return [TARGET]
+        return list(self.configured)
+
+    def register(self, *, exchange: str, symbol: str) -> None:
+        self.registered.append((exchange, symbol))
+        self.configured = [Symbol(value=symbol, exchange=exchange)]
+
+
+class MemoryMarkets:
+    def __init__(self, listed: set[str]) -> None:
+        self.listed = listed
+        self.queried: list[str] = []
+
+    async def supports_symbol(self, symbol: str) -> bool:
+        self.queried.append(symbol)
+        return symbol in self.listed
 
 
 class MockHistoricalExchange:
@@ -158,6 +176,11 @@ class InvalidMarkCcxt:
 
     def close(self) -> object:
         return None
+
+    listed_symbols: tuple[str, ...] = ("BTC/USDT:USDT", "ETH/USDT:USDT")
+
+    def load_markets(self, reload: bool = False) -> dict[str, dict[str, object]]:
+        return {symbol: {"swap": True, "linear": True} for symbol in self.listed_symbols}
 
 
 class MemoryFunding:
@@ -273,3 +296,86 @@ def test_invalid_marks_become_null_without_blocking_funding_backfill(
 def test_funding_domain_lowers_nonpositive_decimal_mark_to_none() -> None:
     assert funding(0, "0.0001", "0").mark_price is None
     assert funding(0, "0.0001", "-1").mark_price is None
+
+
+class PermissiveHistoricalExchange:
+    """Accept any configured symbol so registration behavior can be observed alone."""
+
+    def __init__(self) -> None:
+        self.symbols: list[str] = []
+
+    async def fetch_ohlcv_page(
+        self,
+        symbol: Symbol,
+        *,
+        timeframe: str,
+        since: datetime,
+        limit: int,
+    ) -> list[Candle]:
+        del timeframe, since, limit
+        self.symbols.append(symbol.value)
+        return []
+
+
+def test_backfill_registers_a_listed_symbol_that_is_not_in_the_universe() -> None:
+    symbols = MemorySymbols(configured=[])
+    markets = MemoryMarkets({"ETH/USDT:USDT"})
+    exchange = PermissiveHistoricalExchange()
+    service = HistoricalBackfill(
+        symbols=symbols,
+        exchange=exchange,
+        candles=MemoryCandles(),
+        symbol_selector="ETH/USDT:USDT",
+        markets=markets,
+    )
+
+    asyncio.run(service.run(start=BASE, end=BASE + timedelta(minutes=5)))
+
+    assert markets.queried == ["ETH/USDT:USDT"]
+    assert symbols.registered == [("binance", "ETH/USDT:USDT")]
+    assert exchange.symbols == ["ETH/USDT:USDT"]
+
+
+def test_backfill_refuses_to_register_a_symbol_the_exchange_does_not_list() -> None:
+    symbols = MemorySymbols(configured=[])
+    service = HistoricalBackfill(
+        symbols=symbols,
+        exchange=PermissiveHistoricalExchange(),
+        candles=MemoryCandles(),
+        symbol_selector="NOPE/USDT:USDT",
+        markets=MemoryMarkets({"ETH/USDT:USDT"}),
+    )
+
+    with pytest.raises(CollectorConfigurationError, match="does not list"):
+        asyncio.run(service.run(start=BASE, end=BASE + timedelta(minutes=5)))
+
+    assert symbols.registered == []
+
+
+def test_backfill_leaves_an_already_registered_symbol_untouched() -> None:
+    symbols = MemorySymbols()
+    markets = MemoryMarkets({TARGET.value})
+    service = HistoricalBackfill(
+        symbols=symbols,
+        exchange=PermissiveHistoricalExchange(),
+        candles=MemoryCandles(),
+        symbol_selector=TARGET.value,
+        markets=markets,
+    )
+
+    asyncio.run(service.run(start=BASE, end=BASE + timedelta(minutes=5)))
+
+    assert markets.queried == []
+    assert symbols.registered == []
+
+
+def test_backfill_without_a_catalogue_reports_the_unregistered_symbol() -> None:
+    service = HistoricalBackfill(
+        symbols=MemorySymbols(configured=[]),
+        exchange=PermissiveHistoricalExchange(),
+        candles=MemoryCandles(),
+        symbol_selector="ETH/USDT:USDT",
+    )
+
+    with pytest.raises(CollectorConfigurationError, match="not registered"):
+        asyncio.run(service.run(start=BASE, end=BASE + timedelta(minutes=5)))

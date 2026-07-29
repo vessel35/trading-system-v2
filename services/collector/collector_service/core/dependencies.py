@@ -50,7 +50,12 @@ def build_runtime(settings: Settings) -> Runtime:
             settings.config_db_url.get_secret_value(),
             read_only=True,
             application_name="collector-config-reader",
-        )
+        ),
+        writable_connections=connection_provider(
+            settings.config_db_url.get_secret_value(),
+            read_only=False,
+            application_name="collector-config-writer",
+        ),
     )
     candles = PostgresOhlcvRepository(
         connection_provider(
@@ -92,6 +97,7 @@ def build_runtime(settings: Settings) -> Runtime:
         exchange_name=settings.exchange,
         symbol_selector=settings.symbol,
         timeframe=settings.timeframe,
+        markets=exchange,
     )
     funding_backfill = FundingBackfill(
         symbols=symbols,
@@ -99,6 +105,7 @@ def build_runtime(settings: Settings) -> Runtime:
         funding=funding,
         exchange_name=settings.exchange,
         symbol_selector=settings.symbol,
+        markets=exchange,
     )
     aggregate_refresh = AggregateRefresh(aggregate_refresher)
     return Runtime(

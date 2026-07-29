@@ -11,9 +11,12 @@ from typing import Literal
 
 from service_commons.observability import configure_logging
 
+from collector_service.application.service import CollectorConfigurationError
 from collector_service.core import Settings, build_runtime
 
 Mode = Literal["collect", "backfill", "funding-backfill", "refresh-aggregates"]
+# Distinguishes a refused request from an unexpected collector crash.
+CONFIGURATION_EXIT_CODE = 2
 
 
 async def _run(
@@ -75,6 +78,12 @@ def main(argv: Sequence[str] | None = None) -> None:
                 timeframes=arguments.timeframes,
             )
         )
+    except CollectorConfigurationError as error:
+        # A rejected request is an answer, not a crash. Callers capture the tail of this
+        # process output, so a bare reason reaches the operator instead of a traceback
+        # fragment cut off mid-sentence.
+        logging.getLogger(__name__).error("collector_rejected %s", error)
+        raise SystemExit(CONFIGURATION_EXIT_CODE) from None
     except KeyboardInterrupt:
         logging.getLogger(__name__).info("collector_stopped")
 

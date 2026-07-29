@@ -324,6 +324,18 @@ def _finish_data_job(
     return state
 
 
+_COLLECTOR_REJECTED_EXIT_CODE = 2
+_REJECTION_MARKER = "collector_rejected "
+
+
+def _rejection_reason(tail: str) -> str:
+    """Extract the collector's stated reason from its final log line."""
+    marker = tail.rfind(_REJECTION_MARKER)
+    if marker == -1:
+        return tail or "The collector refused the request."
+    return tail[marker + len(_REJECTION_MARKER) :].strip()
+
+
 async def _stop_process(process: asyncio.subprocess.Process) -> None:
     if process.returncode is not None:
         return
@@ -364,6 +376,19 @@ async def _run_data_job(job_id: str) -> None:
                 _finish_data_job(job_id, "SUCCEEDED")
                 return
             tail = _safe_output_tail(output, sensitive_values)
+            if process.returncode == _COLLECTOR_REJECTED_EXIT_CODE:
+                # The collector refused the request rather than crashing, so the operator
+                # gets its stated reason instead of an exit code and a log fragment.
+                reason = _rejection_reason(tail)
+                _finish_data_job(
+                    job_id,
+                    "FAILED",
+                    error=JobError(
+                        code="request_rejected",
+                        message=reason[:_MAX_ERROR_MESSAGE],
+                    ),
+                )
+                return
             message = f"Collector exited with code {process.returncode}."
             if tail:
                 message = f"{message} Output: {tail}"
