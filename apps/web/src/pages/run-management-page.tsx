@@ -23,6 +23,7 @@ import {
   type SweepAxis,
   type SweepSubmission,
 } from "../api/client";
+import { ResearchHelpDialog } from "../components/research-help-dialog";
 import { StrategyParamHelpDialog } from "../components/strategy-param-help-dialog";
 import { SweepResults } from "../components/sweep-results";
 import { Badge, type BadgeProps } from "../components/ui/badge";
@@ -1478,14 +1479,15 @@ export function RunManagementPage() {
                 </div>
               </details>
 
-              <details className="border-t pt-5">
-                <summary className="cursor-pointer text-sm font-semibold">
-                  연구 가설 (선택)
-                  <span className="ml-2 text-xs font-normal text-muted-foreground">
-                    가설·주지표를 제출 payload에 포함
-                  </span>
-                </summary>
-                <div className="mt-4">
+              <div className="relative border-t pt-5">
+                <details>
+                  <summary className="cursor-pointer pr-32 text-sm font-semibold">
+                    연구 가설 (선택)
+                    <span className="ml-2 text-xs font-normal text-muted-foreground">
+                      가설·주지표를 제출 payload에 포함
+                    </span>
+                  </summary>
+                  <div className="mt-4">
                   <label className="flex items-center gap-2 text-sm font-medium">
                     <input
                       type="checkbox"
@@ -1584,8 +1586,12 @@ export function RunManagementPage() {
                     </label>
                     </div>
                   )}
+                  </div>
+                </details>
+                <div className="absolute right-0 top-4">
+                  <ResearchHelpDialog helpId="preregistration" />
                 </div>
-              </details>
+              </div>
 
               <details className="border-t pt-5">
                 <summary className="cursor-pointer text-sm font-semibold">
@@ -1597,7 +1603,10 @@ export function RunManagementPage() {
                 <section className="mt-4">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
-                      <p className="text-sm font-semibold">스윕 빌더</p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-semibold">스윕 빌더</p>
+                        <ResearchHelpDialog helpId="sweep" />
+                      </div>
                       <p className="mt-1 text-xs text-muted-foreground">
                         위 기준 RunConfig와 인라인 사전등록을 그대로 재사용합니다.
                       </p>

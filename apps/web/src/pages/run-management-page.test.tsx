@@ -77,6 +77,48 @@ function renderManagement() {
 }
 
 describe("실행 관리 보강", () => {
+  it("연구 가설 도움말에서 사전등록 개념과 필드를 확인하고 Esc로 닫는다", async () => {
+    const user = userEvent.setup();
+    renderManagement();
+
+    await user.click(
+      await screen.findByRole("button", { name: "연구 가설 도움말" }),
+    );
+
+    const dialog = screen.getByRole("dialog", {
+      name: "연구 가설(사전등록) 도움말",
+    });
+    expect(within(dialog).getByText(/사후 합리화/)).toBeInTheDocument();
+    expect(within(dialog).getByText("가설")).toBeInTheDocument();
+    expect(within(dialog).getByText("주지표")).toBeInTheDocument();
+    expect(within(dialog).getByText("방향")).toBeInTheDocument();
+    expect(within(dialog).getByText(/잠금.*미구현·유보/)).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("스윕 설정 도움말에서 격자 조합과 과적합 주의를 확인하고 닫기 버튼으로 닫는다", async () => {
+    const user = userEvent.setup();
+    renderManagement();
+
+    await user.click(await screen.findByText("스윕 설정"));
+    await user.click(
+      await screen.findByRole("button", { name: "스윕 설정 도움말" }),
+    );
+
+    const dialog = screen.getByRole("dialog", {
+      name: "스윕 설정 도움말",
+    });
+    expect(within(dialog).getAllByText(/격자/).length).toBeGreaterThan(0);
+    expect(within(dialog).getByText(/6개 조합/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/과적합\(overfitting\)/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/OOS 재검증/)).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: "닫기" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
   it("수동 자금 관리 도움말에서 의미·계산식·예시를 확인하고 Esc와 닫기로 종료한다", async () => {
     const user = userEvent.setup();
     renderManagement();
