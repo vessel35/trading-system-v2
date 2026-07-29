@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import math
 import sqlite3
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -17,7 +17,7 @@ import pytest
 from backtest_service.adapters.data_feed import BacktestDataFeed, ReadConnection
 from backtest_service.config import RunConfig
 from backtest_service.engine import RunResult
-from backtest_service.runner import build_harness, run_backtest
+from backtest_service.runner import FeedDecorator, build_harness, run_backtest
 from core_lib.ports import StrategyRegistry
 from core_lib.strategy import (
     AdapterManager,
@@ -652,6 +652,8 @@ def reversal_run(
 def coverage_failure_run(
     env: dict[str, str],
     evidence_root: Path,
+    declared_gap_decorator: Callable[[frozenset[datetime]], FeedDecorator],
+    coverage_failure_withheld: frozenset[datetime],
 ) -> RunResult:
     config = _vessel_config(
         "acc-coverage-fail",
@@ -664,6 +666,7 @@ def coverage_failure_run(
         _prereg("large immutable source gap blocks promotion"),
         evidence_root=evidence_root / "coverage-failure",
         env=env,
+        feed_decorator=declared_gap_decorator(coverage_failure_withheld),
     )
 
 
@@ -671,6 +674,8 @@ def coverage_failure_run(
 def normal_gap_run(
     env: dict[str, str],
     evidence_root: Path,
+    declared_gap_decorator: Callable[[frozenset[datetime]], FeedDecorator],
+    normal_gap_withheld: frozenset[datetime],
 ) -> RunResult:
     config = _vessel_config(
         "acc-normal-gaps",
@@ -683,6 +688,7 @@ def normal_gap_run(
         _prereg("bounded normal gaps preserve complete long-window Evidence"),
         evidence_root=evidence_root / "normal-gaps",
         env=env,
+        feed_decorator=declared_gap_decorator(normal_gap_withheld),
     )
 
 

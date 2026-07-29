@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import cast
 
 import psycopg
+from core_lib.ports import DataFeed
 from core_lib.strategy import AdapterManager, InProcessStrategyRegistry
 from core_lib.strategy.adaptees import STRATEGY_ID as VESSEL_STRATEGY_ID
 from core_lib.strategy.adaptees import VesselReference
@@ -26,6 +27,9 @@ from backtest_service.harness import Harness
 
 _REQUIRED_POSTGRES_KEYS = ("PGHOST", "PGPORT", "PGUSER", "PGPASSWORD")
 ManagerFactory = Callable[[ReadConnection], AdapterManager]
+# Tests decorate the production feed to declare gaps that live data no longer
+# carries; production always passes None and keeps the feed exactly as built.
+FeedDecorator = Callable[[DataFeed], DataFeed]
 
 
 def _connection(
@@ -70,8 +74,11 @@ def _engine(
     signal_connection: ReadConnection,
     catalog: BacktestCatalogStore,
     manager_factory: ManagerFactory,
+    feed_decorator: FeedDecorator | None = None,
 ) -> Engine:
-    feed = BacktestDataFeed(crypto_connection, exchange=config.exchange)
+    feed: DataFeed = BacktestDataFeed(crypto_connection, exchange=config.exchange)
+    if feed_decorator is not None:
+        feed = feed_decorator(feed)
     history = feed.candles(config.symbol, config.timeframe, config.end)
     costs = BacktestCostModel(
         config.cost_values,
@@ -96,6 +103,7 @@ def run_backtest(
     evidence_root: Path,
     env: Mapping[str, str],
     manager_factory: ManagerFactory | None = None,
+    feed_decorator: FeedDecorator | None = None,
 ) -> RunResult:
     """Run one fully assembled backtest and close every database/file handle."""
     evidence = BacktestEvidenceSink(evidence_root)
@@ -114,6 +122,7 @@ def run_backtest(
                 signal_connection=cast(ReadConnection, signal_connection),
                 catalog=catalog,
                 manager_factory=_manager if manager_factory is None else manager_factory,
+                feed_decorator=feed_decorator,
             )
             return engine.run(config)
     finally:

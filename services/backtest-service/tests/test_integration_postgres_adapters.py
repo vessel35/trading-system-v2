@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -26,6 +27,7 @@ from backtest_service.adapters.evidence_sink import BacktestEvidenceSink
 from backtest_service.adapters.strategy_registry import BacktestStrategyRegistry
 from backtest_service.config import RunConfig
 from backtest_service.engine import Engine, RunResult
+from backtest_service.runner import FeedDecorator
 from core_lib.ports import DataFeed, StrategyRegistry
 from core_lib.strategy import (
     AdapterManager,
@@ -325,7 +327,7 @@ def test_crypto_data_adapter_reads_only_contract_tables() -> None:
             assert funding_feed.mark_price(funding_symbol, at).is_finite()
 
 
-def test_crypto_data_funding_maps_derivative_symbol_and_collection_jitter() -> None:
+def test_crypto_data_funding_reads_ccxt_symbol_and_collection_jitter() -> None:
     boundary = datetime(2025, 7, 1, 8, tzinfo=UTC)
     with _connect("crypto_data") as connection:
         feed = BacktestDataFeed(
@@ -970,7 +972,11 @@ def _real_vessel_config(
     )
 
 
-def _run_real_vessel(root: Path, config: RunConfig) -> RunResult:
+def _run_real_vessel(
+    root: Path,
+    config: RunConfig,
+    feed_decorator: FeedDecorator | None = None,
+) -> RunResult:
     prereg = {
         "hypothesis": "Vessel must survive real measured funding",
         "primary_metric": "pf",
@@ -984,10 +990,12 @@ def _run_real_vessel(root: Path, config: RunConfig) -> RunResult:
         _connect_writer("backtest_db") as catalog_connection,
         _connect("signal_db") as signal_connection,
     ):
-        feed = BacktestDataFeed(
+        feed: DataFeed = BacktestDataFeed(
             cast(ReadConnection, crypto_connection),
             exchange=config.exchange,
         )
+        if feed_decorator is not None:
+            feed = feed_decorator(feed)
         history = feed.candles(config.symbol, config.timeframe, config.end)
         costs = BacktestCostModel(config.cost_values)
         result = Engine(
@@ -1722,6 +1730,8 @@ def test_real_funding_sign_matrix_completes_without_negative_cash(
 @pytest.mark.real_data_long
 def test_real_missing_candles_complete_330_day_evidence(
     tmp_path: Path,
+    declared_gap_decorator: Callable[[frozenset[datetime]], FeedDecorator],
+    missing_data_330d_withheld: frozenset[datetime],
 ) -> None:
     case = _matrix_case("missing-data-330d")
     result = _run_real_vessel(
@@ -1731,6 +1741,7 @@ def test_real_missing_candles_complete_330_day_evidence(
             start=case.start,
             end=case.end,
         ),
+        feed_decorator=declared_gap_decorator(missing_data_330d_withheld),
     )
 
     with sqlite3.connect(result.evidence_path) as evidence:
@@ -1755,14 +1766,14 @@ def test_real_missing_candles_complete_330_day_evidence(
         )
         _assert_matrix_axes(evidence, case)
 
-        assert evidence.execute("SELECT COUNT(*) FROM PORTFOLIO_PNL").fetchone() == (7_457,)
-        assert evidence.execute("SELECT COUNT(*) FROM TRADE").fetchone() == (563,)
+        assert evidence.execute("SELECT COUNT(*) FROM PORTFOLIO_PNL").fetchone() == (7_901,)
+        assert evidence.execute("SELECT COUNT(*) FROM TRADE").fetchone() == (600,)
         assert evidence.execute(
             "SELECT COUNT(*) FROM EXECUTION WHERE exit_reason = 'DATA_GAP'"
-        ).fetchone() == (3,)
+        ).fetchone() == (6,)
         assert evidence.execute(
             "SELECT COUNT(*) FROM DECISION WHERE skip_reason = 'next_candle_gap'"
-        ).fetchone() == (3,)
+        ).fetchone() == (1,)
         assert evidence.execute(
             """
             SELECT max(e.execution_ts - d.decision_ts)
@@ -1771,17 +1782,17 @@ def test_real_missing_candles_complete_330_day_evidence(
             """
         ).fetchone() == (3_600_000,)
 
-    assert hourly_count == 7_478
-    assert hourly_gaps == 463
-    assert hourly_gap_evidence["normal_gap_count"] == 453
-    assert hourly_gap_evidence["partial_bucket_count"] == 10
-    assert hourly_gap_evidence["evaluation_grid_gap_count"] == 463
+    assert hourly_count == 7_922
+    assert hourly_gaps == 19
+    assert hourly_gap_evidence["normal_gap_count"] == 15
+    assert hourly_gap_evidence["partial_bucket_count"] == 4
+    assert hourly_gap_evidence["evaluation_grid_gap_count"] == 19
     assert hourly_gap_evidence["origin_validation_status"] == "verified"
-    assert minute_count == 449_203
-    assert minute_gaps == 27_257
-    assert minute_gap_evidence["normal_gap_count"] == 27_257
+    assert minute_count == 475_440
+    assert minute_gaps == 1_020
+    assert minute_gap_evidence["normal_gap_count"] == 1_020
     assert minute_gap_evidence["partial_bucket_count"] == 0
-    assert minute_gap_evidence["evaluation_grid_gap_count"] == 27_257
+    assert minute_gap_evidence["evaluation_grid_gap_count"] == 1_020
     assert minute_gap_evidence["origin_validation_status"] == "verified"
     assert integrity == {
         "accounting_identity": 1,
@@ -1806,10 +1817,13 @@ def test_real_missing_candles_complete_330_day_evidence(
             (result.run_id,),
         ).fetchone()
     assert coverage is not None
-    assert coverage[:4] == (7_920, 7_457, 453, 10)
-    assert coverage[4] == pytest.approx(7_457 / 7_920)
-    assert coverage[5:10] == (455, 1_638_000, False, 57, 3)
-    assert coverage[10] == ["data_coverage_ratio", "max_consecutive_gap"]
+    # 15 absent buckets (three five-hour blocks) plus 4 partial buckets = 19 omitted
+    # of 7_920, so the declared gaps stay inside both coverage gates.
+    assert coverage[:4] == (7_920, 7_901, 15, 4)
+    assert coverage[4] == pytest.approx(7_901 / 7_920)
+    assert coverage[5:10] == (5, 18_000, True, 1, 6)
+    gate_failed = cast(list[str], coverage[10])
+    assert {"data_coverage_ratio", "max_consecutive_gap"}.isdisjoint(gate_failed)
     assert result.integrity_status == "passed"
     assert result.decision.route == "retest"
 
