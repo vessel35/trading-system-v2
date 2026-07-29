@@ -19,6 +19,7 @@ from collector_service.domain.ports import (
     FundingExchangeClient,
     FundingRepository,
     HistoricalExchangeClient,
+    MarketCatalog,
     SymbolRepository,
 )
 
@@ -55,23 +56,63 @@ class _SingleSymbolUseCase:
         symbols: SymbolRepository,
         exchange_name: str,
         symbol_selector: str | None,
+        markets: MarketCatalog | None = None,
     ) -> None:
         self._symbols = symbols
         self._exchange_name = exchange_name
         self._symbol_selector = symbol_selector
+        self._markets = markets
 
     async def load_symbol(self) -> Symbol:
-        configured = await asyncio.to_thread(
-            self._symbols.active_symbols,
-            exchange=self._exchange_name,
-            symbol=self._symbol_selector,
-        )
+        configured = await self._active_symbols()
+        if not configured and self._symbol_selector is not None:
+            configured = await self._register_selected_symbol()
         if len(configured) != 1:
             raise CollectorConfigurationError(
                 "backfill requires exactly one active Binance futures symbol; "
                 f"config_db returned {len(configured)}"
             )
         return configured[0]
+
+    async def _active_symbols(self) -> list[Symbol]:
+        return await asyncio.to_thread(
+            self._symbols.active_symbols,
+            exchange=self._exchange_name,
+            symbol=self._symbol_selector,
+        )
+
+    async def _register_selected_symbol(self) -> list[Symbol]:
+        """Admit a requested symbol the exchange lists, then re-read the universe.
+
+        The collection universe starts empty on a freshly provisioned config_db, so a
+        request for a symbol nobody registered yet is ordinary rather than an error. It
+        is admitted only after the exchange confirms it, because this same universe is
+        what the live collector reads.
+        """
+        selector = self._symbol_selector
+        if selector is None:
+            return []
+        if self._markets is None:
+            raise CollectorConfigurationError(
+                f"{selector} is not registered and no exchange catalogue is available "
+                "to validate it"
+            )
+        if not await self._markets.supports_symbol(selector):
+            raise CollectorConfigurationError(
+                f"{self._exchange_name} does not list {selector} as a USD-margined "
+                "perpetual, so it was not registered"
+            )
+        await asyncio.to_thread(
+            self._symbols.register,
+            exchange=self._exchange_name,
+            symbol=selector,
+        )
+        logger.info(
+            "symbol_registered symbol=%s exchange=%s",
+            selector,
+            self._exchange_name,
+        )
+        return await self._active_symbols()
 
 
 class HistoricalBackfill(_SingleSymbolUseCase):
@@ -86,11 +127,13 @@ class HistoricalBackfill(_SingleSymbolUseCase):
         exchange_name: str = "binance",
         symbol_selector: str | None = None,
         timeframe: str = "1m",
+        markets: MarketCatalog | None = None,
     ) -> None:
         super().__init__(
             symbols=symbols,
             exchange_name=exchange_name,
             symbol_selector=symbol_selector,
+            markets=markets,
         )
         if timeframe != "1m":
             raise ValueError("historical backfill supports only 1m ingestion")
@@ -189,11 +232,13 @@ class FundingBackfill(_SingleSymbolUseCase):
         funding: FundingRepository,
         exchange_name: str = "binance",
         symbol_selector: str | None = None,
+        markets: MarketCatalog | None = None,
     ) -> None:
         super().__init__(
             symbols=symbols,
             exchange_name=exchange_name,
             symbol_selector=symbol_selector,
+            markets=markets,
         )
         self._exchange = exchange
         self._funding = funding

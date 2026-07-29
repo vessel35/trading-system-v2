@@ -86,7 +86,7 @@ class AggregateRefreshRepository(Protocol):
 
 
 class SymbolRepository(Protocol):
-    """Read the collection target from config_db."""
+    """Read and extend the collection target in config_db."""
 
     def active_symbols(
         self,
@@ -95,3 +95,17 @@ class SymbolRepository(Protocol):
         symbol: str | None,
     ) -> list[Symbol]:
         """Return at most two rows so the application can enforce singularity."""
+
+    def register(self, *, exchange: str, symbol: str) -> None:
+        """Insert or reactivate one collection target.
+
+        Only a symbol the exchange confirmed may be registered; the caller validates
+        before calling so a typo cannot enter the universe the live collector reads.
+        """
+
+
+class MarketCatalog(Protocol):
+    """Confirm that the exchange actually lists a symbol before it is registered."""
+
+    async def supports_symbol(self, symbol: str) -> bool:
+        """Return whether the exchange trades ``symbol`` as a USD-margined perpetual."""
