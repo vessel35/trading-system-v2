@@ -213,13 +213,15 @@ def test_data_feed_rejects_present_but_incomplete_source_rows() -> None:
     assert feed.dropped_bucket_count == 0
 
 
-def test_data_feed_normalizes_symbol_and_one_second_collection_jitter() -> None:
+def test_data_feed_keeps_ccxt_symbol_and_normalizes_one_second_collection_jitter() -> None:
     at = datetime(2026, 1, 1, 8, tzinfo=UTC)
     observed_at = at + timedelta(milliseconds=2)
 
     def handler(query: str, params: tuple[object, ...]) -> list[Sequence[object]]:
+        # funding_rates and ohlcv_futures are written under the same CCXT symbol, so
+        # folding it into the exchange form would match no row and silently fall back.
         assert params == (
-            "BTCUSDT",
+            "BTC/USDT:USDT",
             "binance",
             at,
             at + timedelta(seconds=1),

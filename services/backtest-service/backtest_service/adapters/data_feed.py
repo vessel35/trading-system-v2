@@ -32,6 +32,16 @@ WHERE symbol = %s
   AND time < %s
 ORDER BY time
 """
+_CANDLES_SINCE_SQL = """
+SELECT time, open, high, low, close, volume, quote_volume, trade_count
+FROM public.ohlcv_futures
+WHERE symbol = %s
+  AND exchange = %s
+  AND timeframe = '1m'
+  AND time >= %s
+  AND time < %s
+ORDER BY time
+"""
 _SOURCE_CANDLES_SQL = """
 SELECT time, open, high, low, close, volume, quote_volume, trade_count
 FROM public.ohlcv_futures
@@ -114,11 +124,17 @@ def _decimal(value: object, *, name: str) -> Decimal:
 
 
 def _funding_symbol(symbol: str) -> str:
+    """Validate the symbol and keep the form crypto_data stores.
+
+    ``funding_rates`` and ``ohlcv_futures`` are written by the same v2 collector under
+    one identifier, the CCXT symbol, so both tables are queried by the same value. An
+    earlier revision folded ``BTC/USDT:USDT`` into ``BTCUSDT`` because the referenced v1
+    database stored the exchange form; against a v2 database that mapping matches no row,
+    every lookup misses, and the Engine silently settles on the fallback rate instead of
+    measured funding.
+    """
     normalized = symbol.strip().upper()
-    match = _DERIVATIVE_SYMBOL.fullmatch(normalized)
-    if match is not None:
-        return f"{match.group('base')}{match.group('quote')}"
-    if normalized and normalized.isalnum():
+    if _DERIVATIVE_SYMBOL.fullmatch(normalized) or normalized.isalnum():
         return normalized
     raise ValueError(f"unsupported crypto_data symbol format: {symbol!r}")
 
@@ -138,10 +154,29 @@ class BacktestDataFeed(DataFeed):
         self._mark_exact_count = 0
         self._mark_normalized_count = 0
         self._mark_missing_count = 0
+        self._history_floor: datetime | None = None
         self._source_cache: dict[
-            tuple[str, datetime],
+            tuple[str, datetime, datetime | None],
             tuple[Sequence[object], ...],
         ] = {}
+        # Resampling a multi-year 1m series costs far more than the single query that
+        # produced it, and the Engine asks for the same series more than once per run.
+        self._candle_cache: dict[tuple[str, str, datetime, datetime | None], list[Candle]] = {}
+
+    def limit_history(self, floor: datetime | None) -> None:
+        """Bound source reads below, or release the bound when given ``None``.
+
+        Without a floor every read starts at the oldest stored candle, so the cost of a
+        run grows with the whole retained history rather than with the window it covers.
+        Callers that know how much warm-up they need set the floor; caches keyed without
+        it are dropped so no previously widened series is served under the new bound.
+        """
+        bounded = None if floor is None else _utc(floor, name="floor")
+        if bounded == self._history_floor:
+            return
+        self._history_floor = bounded
+        self._source_cache.clear()
+        self._candle_cache.clear()
 
     @property
     def dropped_bucket_count(self) -> int:
@@ -163,17 +198,24 @@ class BacktestDataFeed(DataFeed):
         """Resample 1m source rows and expose only buckets closed by ``up_to``."""
         boundary = _utc(up_to, name="up_to")
         duration = _timeframe_duration(tf)
-        cache_key = (symbol, boundary)
-        rows = self._source_cache.get(cache_key)
+        floor = self._history_floor
+        resampled = self._candle_cache.get((symbol, tf, boundary, floor))
+        if resampled is not None:
+            return list(resampled)
+        source_key = (symbol, boundary, floor)
+        rows = self._source_cache.get(source_key)
         if rows is None:
             rows = tuple(
                 self._connection.execute(
-                    _CANDLES_SQL,
-                    (symbol, self._exchange, boundary),
+                    _CANDLES_SQL if floor is None else _CANDLES_SINCE_SQL,
+                    (symbol, self._exchange, boundary)
+                    if floor is None
+                    else (symbol, self._exchange, floor, boundary),
                 ).fetchall()
             )
-            self._source_cache[cache_key] = rows
+            self._source_cache[source_key] = rows
         if not rows:
+            self._candle_cache[(symbol, tf, boundary, floor)] = []
             return []
 
         grouped: dict[datetime, dict[datetime, Sequence[object]]] = {}
@@ -226,7 +268,10 @@ class BacktestDataFeed(DataFeed):
                 tf,
                 boundary.isoformat(),
             )
-        return result
+        # Keeping the resampled series also keeps the dropped-bucket tally honest: the
+        # same series is now counted once instead of once per repeated request.
+        self._candle_cache[(symbol, tf, boundary, floor)] = result
+        return list(result)
 
     def source_candles(
         self,
