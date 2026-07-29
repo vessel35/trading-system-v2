@@ -499,12 +499,7 @@ class StrategyRepository:
                 """
             ).fetchall()
             if rows:
-                return StrategyListResponse(
-                    data=[
-                        self._database_option(row)
-                        for row in rows
-                    ]
-                )
+                return StrategyListResponse(data=[self._database_option(row) for row in rows])
         return self._code_registry()
 
     @staticmethod
@@ -516,9 +511,7 @@ class StrategyRepository:
             strategy_id=strategy_id,
             display_name=str(row["display_name"]),
             strategy_version=(
-                VesselReference.VERSION
-                if metadata is not None
-                else str(row["strategy_version"])
+                VesselReference.VERSION if metadata is not None else str(row["strategy_version"])
             ),
             supported_timeframes=list(cast(list[str], row["supported_timeframes"])),
             required_indicators=(
@@ -532,13 +525,9 @@ class StrategyRepository:
                 )
             ),
             min_history=(
-                metadata.min_history
-                if metadata is not None
-                else int(cast(int, row["min_history"]))
+                metadata.min_history if metadata is not None else int(cast(int, row["min_history"]))
             ),
-            default_params=dict(
-                cast(dict[str, object], row["default_params_json"])
-            ),
+            default_params=dict(cast(dict[str, object], row["default_params_json"])),
             supported_money_management=(
                 []
                 if support is None

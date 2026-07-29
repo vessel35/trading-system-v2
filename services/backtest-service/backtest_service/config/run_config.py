@@ -73,9 +73,7 @@ class RunConfig(BaseModel):
     trigger_feed: Literal["tf_candle", "m1_subcandle"] = "tf_candle"
     fill_timing: Literal["immediate", "next_bar"] = "next_bar"
     profile_ref: str = Field(min_length=1)
-    money_management: MoneyManagementConfig = Field(
-        default_factory=ManualMoneyManagementConfig
-    )
+    money_management: MoneyManagementConfig = Field(default_factory=ManualMoneyManagementConfig)
     sweep: dict[str, object] | None = None
 
     @model_validator(mode="before")
@@ -174,10 +172,7 @@ class RunConfig(BaseModel):
                 raise ValueError("pct sizing requires risk_per_trade to be absent")
             if self.position_size_pct is None or not 0.0 < self.position_size_pct <= 1.0:
                 raise ValueError("position_size_pct must be in (0, 1] for pct sizing")
-        if (
-            self.money_management.mode == "turtle"
-            and self.sizing_method != "risk_based"
-        ):
+        if self.money_management.mode == "turtle" and self.sizing_method != "risk_based":
             raise ValueError("turtle money management requires risk_based sizing")
         BacktestCostModel(
             self.cost_values,

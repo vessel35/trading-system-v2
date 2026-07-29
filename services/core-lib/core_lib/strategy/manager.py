@@ -65,8 +65,7 @@ class AdapterManager:
         policy = MoneyManagementFactory.create(money_management_config)
         if policy.id not in support.supported:
             raise ValueError(
-                f"strategy {strategy_id!r} does not support money-management mode "
-                f"{policy.id!r}"
+                f"strategy {strategy_id!r} does not support money-management mode {policy.id!r}"
             )
         if policy.id == "turtle" and not support.supports_signal_exit:
             raise ValueError("turtle money management requires strategy signal exits")
