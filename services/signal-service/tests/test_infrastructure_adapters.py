@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import cast
 
 import pytest
 from core_lib.ports import DataFeed, StrategyRegistry
@@ -307,7 +308,8 @@ def test_main_wires_confirmed_crypto_rows_through_core_vessel_to_signal_db() -> 
     }
     assert persisted.signal.metadata["adaptee"] == "vessel-reference"
     assert persisted.signal.metadata["decision_action"] == "ENTER_LONG"
-    assert persisted.signal.metadata["money_management"]["policy_id"] == "manual"
+    money_management = cast(dict[str, object], persisted.signal.metadata["money_management"])
+    assert money_management["policy_id"] == "manual"
     assert persisted.signal.stop_loss is not None
     assert persisted.signal.take_profit is not None
     assert persisted.signal.stop_loss < persisted.signal.price < persisted.signal.take_profit

@@ -1020,8 +1020,8 @@ class Engine:
             )
         if policy is None:
             raise MoneyManagementError("strategy entry requires a money-management policy")
-        volatility, volatility_name, volatility_timestamp = (
-            self._money_management_volatility(candle, policy)
+        volatility, volatility_name, volatility_timestamp = self._money_management_volatility(
+            candle, policy
         )
         risk_per_trade = self._config().risk_per_trade or 0.01
         plan = policy.plan_entry(
@@ -1076,9 +1076,7 @@ class Engine:
                 raise MoneyManagementError("manual policy requires current ATR(14)")
             return float(value), "ATR(14)", candle.close_time
         if policy.id == "turtle":
-            available = [
-                item for item in self._turtle_n_values if item[0] <= candle.close_time
-            ]
+            available = [item for item in self._turtle_n_values if item[0] <= candle.close_time]
             if not available:
                 raise MoneyManagementError("turtle policy requires finalized daily N")
             timestamp, value = available[-1]
@@ -1702,13 +1700,8 @@ class Engine:
             key=lambda candle: candle.open_time,
         )
         self._turtle_n_values = turtle_n_series(daily, period=period)
-        if not any(
-            timestamp <= self._config().start
-            for timestamp, _ in self._turtle_n_values
-        ):
-            raise ValueError(
-                "insufficient finalized daily history for turtle N at run start"
-            )
+        if not any(timestamp <= self._config().start for timestamp, _ in self._turtle_n_values):
+            raise ValueError("insufficient finalized daily history for turtle N at run start")
 
     def _money_management_evidence(self) -> dict[str, object]:
         policy = self._money_management

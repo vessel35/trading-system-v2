@@ -36,9 +36,7 @@ class StrategyMetadata:
     min_history: int
     supported_timeframes: list[str]
     profile: StrategyProfile
-    money_management: MoneyManagementSupport = field(
-        default_factory=MoneyManagementSupport
-    )
+    money_management: MoneyManagementSupport = field(default_factory=MoneyManagementSupport)
 
     def __post_init__(self) -> None:
         if self.min_history <= 0:

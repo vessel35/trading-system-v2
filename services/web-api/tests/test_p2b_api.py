@@ -12,6 +12,7 @@ from typing import Any, cast
 import pytest
 import web_api.jobs as jobs
 import web_api.main as main_module
+from backtest_service.config.run_config import TurtleMoneyManagementConfig
 from fastapi.testclient import TestClient
 from web_api.main import app, market_repository, repository
 from web_api.models import (
@@ -111,9 +112,7 @@ def test_grid_sweep_expands_validated_configs_and_reports_completion(
     assert status["sweep_id"].startswith("S-")
     configs = cast(list[Any], received["configs"])
     assert [config.params["reward_risk"] for config in configs] == [1.5, 2.5]
-    assert [
-        config.money_management.reward_risk for config in configs
-    ] == [1.5, 2.5]
+    assert [config.money_management.reward_risk for config in configs] == [1.5, 2.5]
     assert {config.sweep["sweep_id"] for config in configs} == {status["sweep_id"]}
     assert [config.run_name for config in configs] == ["p2b-sweep-g1", "p2b-sweep-g2"]
 
@@ -145,10 +144,10 @@ def test_grid_sweep_assigns_explicit_money_management_axis(
     )
     plan = main_module._prepare_sweep(payload)
     assert plan.configs is not None
-    assert [
-        config.money_management.stop_n_multiple
-        for config in plan.configs
-    ] == [1.5, 2.5]
+    turtle_configs = [
+        cast(TurtleMoneyManagementConfig, config.money_management) for config in plan.configs
+    ]
+    assert [config.stop_n_multiple for config in turtle_configs] == [1.5, 2.5]
     assert [config.params for config in plan.configs] == [{}, {}]
 
 

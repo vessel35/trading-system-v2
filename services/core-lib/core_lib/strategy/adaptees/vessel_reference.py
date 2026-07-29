@@ -22,6 +22,7 @@ STRATEGY_ID = "vessel-reference"
 _FAST_EMA = "ema:period=9"
 _SLOW_EMA = "ema:period=21"
 
+
 class VesselReference:
     """Own only the EMA entry/exit edge; runtime policies own money management."""
 
