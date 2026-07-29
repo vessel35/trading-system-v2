@@ -84,6 +84,41 @@ function installEventSourceMock() {
   });
 }
 
+async function selectDateTime(
+  user: ReturnType<typeof userEvent.setup>,
+  label: string,
+  value: string,
+) {
+  const trigger = screen.getByRole("button", { name: label });
+  const currentMonth = /(\d{4})-(\d{2})/.exec(trigger.textContent ?? "");
+  const target = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}:\d{2})$/.exec(value);
+  if (!currentMonth || !target) {
+    throw new Error(`날짜 선택기 테스트 값을 해석할 수 없습니다: ${value}`);
+  }
+
+  await user.click(trigger);
+  const dialog = screen.getByRole("dialog", { name: `${label} 선택` });
+  const monthDifference =
+    (Number(target[1]) - Number(currentMonth[1])) * 12 +
+    Number(target[2]) -
+    Number(currentMonth[2]);
+  const direction = monthDifference < 0 ? "이전 달" : "다음 달";
+  for (let index = 0; index < Math.abs(monthDifference); index += 1) {
+    await user.click(within(dialog).getByRole("button", { name: direction }));
+  }
+  await user.click(
+    within(dialog).getByRole("button", {
+      name: `${Number(target[1])}년 ${Number(target[2])}월 ${Number(target[3])}일 선택`,
+    }),
+  );
+  fireEvent.change(within(dialog).getByLabelText("시간"), {
+    target: { value: target[4] },
+  });
+  await user.click(
+    within(dialog).getByRole("button", { name: "선택 완료" }),
+  );
+}
+
 beforeEach(() => {
   server.use(
     http.get(dataJobsEndpoint, () => HttpResponse.json([])),
@@ -183,14 +218,12 @@ describe("데이터 수집·backfill 실행", () => {
     expect(document.querySelector("datalist")).not.toBeInTheDocument();
     expect(screen.getByLabelText("거래소")).toBeDisabled();
     expect(screen.getByLabelText("작업")).toHaveValue("backfill");
-    expect(screen.getByLabelText("시작 (UTC)")).toHaveAttribute(
-      "type",
-      "datetime-local",
-    );
-    expect(screen.getByLabelText("종료 (UTC)")).toHaveAttribute(
-      "type",
-      "datetime-local",
-    );
+    expect(
+      screen.getByRole("button", { name: "시작 (UTC)" }),
+    ).toHaveTextContent(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/);
+    expect(
+      screen.getByRole("button", { name: "종료 (UTC)" }),
+    ).toHaveTextContent(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/);
     expect(screen.queryByRole("group", { name: "timeframes" })).not.toBeInTheDocument();
 
     await user.selectOptions(screen.getByLabelText("작업"), "refresh_aggregates");
@@ -217,12 +250,8 @@ describe("데이터 수집·backfill 실행", () => {
 
     const symbol = await screen.findByLabelText("심볼 (CCXT 형식)");
     await user.clear(symbol);
-    fireEvent.change(screen.getByLabelText("시작 (UTC)"), {
-      target: { value: "2026-01-02T00:00" },
-    });
-    fireEvent.change(screen.getByLabelText("종료 (UTC)"), {
-      target: { value: "2026-01-01T00:00" },
-    });
+    await selectDateTime(user, "시작 (UTC)", "2026-01-02T00:00");
+    await selectDateTime(user, "종료 (UTC)", "2026-01-01T00:00");
     await user.click(screen.getByRole("button", { name: "실행 내용 확인" }));
 
     expect(screen.getByText("심볼을 입력하세요.")).toBeInTheDocument();
@@ -246,12 +275,8 @@ describe("데이터 수집·backfill 실행", () => {
     renderWithQuery(<DataPage />);
 
     await screen.findByLabelText("심볼 (CCXT 형식)");
-    fireEvent.change(screen.getByLabelText("시작 (UTC)"), {
-      target: { value: "2026-01-01T00:00" },
-    });
-    fireEvent.change(screen.getByLabelText("종료 (UTC)"), {
-      target: { value: "2026-01-02T00:00" },
-    });
+    await selectDateTime(user, "시작 (UTC)", "2026-01-01T00:00");
+    await selectDateTime(user, "종료 (UTC)", "2026-01-02T00:00");
     await user.click(screen.getByRole("button", { name: "실행 내용 확인" }));
 
     const dialog = screen.getByRole("dialog", {
@@ -289,12 +314,8 @@ describe("데이터 수집·backfill 실행", () => {
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
 
     await screen.findByLabelText("심볼 (CCXT 형식)");
-    fireEvent.change(screen.getByLabelText("시작 (UTC)"), {
-      target: { value: "2026-01-01T00:00" },
-    });
-    fireEvent.change(screen.getByLabelText("종료 (UTC)"), {
-      target: { value: "2026-01-02T00:00" },
-    });
+    await selectDateTime(user, "시작 (UTC)", "2026-01-01T00:00");
+    await selectDateTime(user, "종료 (UTC)", "2026-01-02T00:00");
     await user.click(screen.getByRole("button", { name: "실행 내용 확인" }));
     expect(postBodies).toHaveLength(0);
     await user.click(

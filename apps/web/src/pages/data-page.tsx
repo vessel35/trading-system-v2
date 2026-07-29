@@ -31,6 +31,7 @@ import {
   DialogDescription,
   DialogTitle,
 } from "../components/ui/dialog";
+import { DateTimePickerField } from "../components/ui/date-time-picker";
 import { Input } from "../components/ui/input";
 import { Skeleton } from "../components/ui/skeleton";
 import {
@@ -601,12 +602,12 @@ export function DataPage() {
                     <label htmlFor="data-job-start" className="block font-medium">
                       시작 (UTC)
                     </label>
-                    <Input
+                    <DateTimePickerField
                       id="data-job-start"
-                      type="datetime-local"
                       aria-invalid={Boolean(errors.start)}
+                      aria-label="시작 (UTC)"
                       value={form.start}
-                      onChange={(event) => updateForm("start", event.target.value)}
+                      onChange={(value) => updateForm("start", value)}
                     />
                     {errors.start && (
                       <span className="block text-xs text-red-300">{errors.start}</span>
@@ -616,12 +617,12 @@ export function DataPage() {
                     <label htmlFor="data-job-end" className="block font-medium">
                       종료 (UTC)
                     </label>
-                    <Input
+                    <DateTimePickerField
                       id="data-job-end"
-                      type="datetime-local"
                       aria-invalid={Boolean(errors.end)}
+                      aria-label="종료 (UTC)"
                       value={form.end}
-                      onChange={(event) => updateForm("end", event.target.value)}
+                      onChange={(value) => updateForm("end", value)}
                     />
                     {errors.end && (
                       <span className="block text-xs text-red-300">{errors.end}</span>

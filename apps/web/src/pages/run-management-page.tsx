@@ -35,6 +35,7 @@ import {
   CardHeader,
   CardTitle,
 } from "../components/ui/card";
+import { DateTimePickerField } from "../components/ui/date-time-picker";
 import { Input } from "../components/ui/input";
 import {
   useRunJobs,
@@ -1257,20 +1258,18 @@ export function RunManagementPage() {
                   )}
                 <Label>
                   시작 (브라우저 로컬 시간)
-                  <Input
-                    type="datetime-local"
+                  <DateTimePickerField
                     value={form.start}
-                    onChange={(event) => update("start", event.target.value)}
-                    required
+                    onChange={(value) => update("start", value)}
+                    aria-label="시작 (브라우저 로컬 시간)"
                   />
                 </Label>
                 <Label>
                   종료 (브라우저 로컬 시간)
-                  <Input
-                    type="datetime-local"
+                  <DateTimePickerField
                     value={form.end}
-                    onChange={(event) => update("end", event.target.value)}
-                    required
+                    onChange={(value) => update("end", value)}
+                    aria-label="종료 (브라우저 로컬 시간)"
                   />
                 </Label>
                 <div
