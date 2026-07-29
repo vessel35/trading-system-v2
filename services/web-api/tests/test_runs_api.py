@@ -76,6 +76,12 @@ def test_run_config_validation_normalizes_decimals_and_utc(
     assert body["initial_capital"] == "10000.00"
     assert body["cost_values"]["futures_taker_fee_rate"] == "0.0004"
     assert body["start"] == "2025-06-30T15:00:00Z"
+    assert body["money_management"] == {
+        "mode": "manual",
+        "leverage": 1,
+        "reward_risk": 2.0,
+        "atr_stop_multiple": 2.0,
+    }
 
     invalid = dict(run_config_payload, position_size_pct=0.25)
     response = client.post("/api/v1/run-config:validate", json=invalid)
@@ -89,6 +95,31 @@ def test_run_config_validation_normalizes_decimals_and_utc(
     response = client.post("/api/v1/run-config:validate", json=reserved)
     assert response.status_code == 422
     assert response.json()["error"]["details"][0]["field"] == "trigger_feed"
+
+    turtle = {
+        **run_config_payload,
+        "money_management": {
+            "mode": "turtle",
+            "n_period": 20,
+            "n_timeframe": "1d",
+            "stop_n_multiple": 2.0,
+            "leverage_cap": 10,
+        },
+    }
+    response = client.post("/api/v1/run-config:validate", json=turtle)
+    assert response.status_code == 200
+    assert response.json()["money_management"]["mode"] == "turtle"
+
+    unknown_policy = {
+        **run_config_payload,
+        "money_management": {"mode": "kelly"},
+    }
+    response = client.post(
+        "/api/v1/run-config:validate",
+        json=unknown_policy,
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "invalid_run_config"
 
 
 @pytest.mark.parametrize(
@@ -307,4 +338,6 @@ def test_strategy_repository_falls_back_to_code_registry() -> None:
     assert strategy.strategy_id == "vessel-reference"
     assert strategy.supported_timeframes == ["1h"]
     assert strategy.default_params["reward_risk"] == 2.0
+    assert strategy.supported_money_management == ["manual", "turtle"]
+    assert strategy.default_money_management["mode"] == "manual"
     assert strategy.source == "code_registry"

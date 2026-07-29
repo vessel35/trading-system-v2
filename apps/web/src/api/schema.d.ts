@@ -90,6 +90,61 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/data-jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Data Jobs */
+        get: operations["list_data_jobs_api_v1_data_jobs_get"];
+        put?: never;
+        /**
+         * Queue a collector data job
+         * @description Launches a collector subprocess with external Binance network access and crypto_data write capability after validation. Half-open [start, end) ranges longer than 2000 days are rejected.
+         */
+        post: operations["trigger_data_job_api_v1_data_jobs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/data-jobs/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Data Job */
+        get: operations["get_data_job_api_v1_data_jobs__job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/data-jobs/{job_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Data Job Events */
+        get: operations["get_data_job_events_api_v1_data_jobs__job_id__events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/strategies": {
         parameters: {
             query?: never;
@@ -150,6 +205,23 @@ export interface paths {
         };
         /** Get Data Source Coverage */
         get: operations["get_data_source_coverage_api_v1_data_sources__data_source__coverage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/data-sources/{data_source}/inventory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Data Source Inventory */
+        get: operations["get_data_source_inventory_api_v1_data_sources__data_source__inventory_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -763,6 +835,89 @@ export interface components {
             /** Has More */
             has_more: boolean;
         };
+        /**
+         * DataJobRequest
+         * @description A deliberate request for collector network access and crypto_data writes.
+         */
+        DataJobRequest: {
+            /**
+             * Operation
+             * @description Collector operation. Execution can access Binance and write crypto_data.
+             * @enum {string}
+             */
+            operation: "backfill" | "funding_backfill" | "refresh_aggregates";
+            /**
+             * Symbol
+             * @description CCXT futures symbol, for example ETH/USDT:USDT.
+             */
+            symbol: string;
+            /** Exchange */
+            exchange: string;
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+            /**
+             * End
+             * Format: date-time
+             */
+            end: string;
+            /** Timeframes */
+            timeframes?: ("5m" | "15m" | "1h" | "4h" | "1d")[] | null;
+        };
+        /**
+         * DataJobStatus
+         * @description Public snapshot of one collector subprocess job.
+         */
+        DataJobStatus: {
+            /** Job Id */
+            job_id: string;
+            /**
+             * Operation
+             * @enum {string}
+             */
+            operation: "backfill" | "funding_backfill" | "refresh_aggregates";
+            /** Symbol */
+            symbol: string;
+            /**
+             * Exchange
+             * @constant
+             */
+            exchange: "binance";
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+            /**
+             * End
+             * Format: date-time
+             */
+            end: string;
+            /** Timeframes */
+            timeframes?: ("5m" | "15m" | "1h" | "4h" | "1d")[] | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED";
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Started At */
+            started_at?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+            error?: components["schemas"]["JobError"] | null;
+        };
         /** DataSourceCoverage */
         DataSourceCoverage: {
             /** Data Source */
@@ -787,6 +942,13 @@ export interface components {
             expected_1m_rows: number;
             /** Missing 1M Rows */
             missing_1m_rows: number;
+        };
+        /** DataSourceInventory */
+        DataSourceInventory: {
+            /** Data Source */
+            data_source: string;
+            /** Items */
+            items: components["schemas"]["InventoryItem"][];
         };
         /** Decision */
         Decision: {
@@ -1293,6 +1455,31 @@ export interface components {
              */
             checked_at: string;
         };
+        /** InventoryItem */
+        InventoryItem: {
+            /** Symbol */
+            symbol: string;
+            /** Exchange */
+            exchange: string;
+            /**
+             * Timeframe
+             * @default 1m
+             * @constant
+             */
+            timeframe: "1m";
+            /** Available From */
+            available_from: string | null;
+            /** Available To */
+            available_to: string | null;
+            /** Row Count */
+            row_count: number;
+            /** Expected 1M Rows */
+            expected_1m_rows: number;
+            /** Missing 1M Rows */
+            missing_1m_rows: number;
+            /** Coverage Ratio */
+            coverage_ratio: number;
+        };
         /** JobError */
         JobError: {
             /** Code */
@@ -1331,6 +1518,32 @@ export interface components {
             error?: components["schemas"]["JobError"] | null;
         };
         JsonValue: unknown;
+        /**
+         * ManualMoneyManagementConfig
+         * @description Legacy-compatible explicit ATR protection and leverage settings.
+         */
+        ManualMoneyManagementConfig: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            mode: "manual";
+            /**
+             * Leverage
+             * @default 1
+             */
+            leverage: number;
+            /**
+             * Reward Risk
+             * @default 2
+             */
+            reward_risk: number;
+            /**
+             * Atr Stop Multiple
+             * @default 2
+             */
+            atr_stop_multiple: number;
+        };
         /** MissedOpportunity */
         MissedOpportunity: {
             /** Miss Id */
@@ -1631,6 +1844,8 @@ export interface components {
             fill_timing: "immediate" | "next_bar";
             /** Profile Ref */
             profile_ref: string;
+            /** Money Management */
+            money_management?: components["schemas"]["ManualMoneyManagementConfig"] | components["schemas"]["TurtleMoneyManagementConfig"];
             /** Sweep */
             sweep?: {
                 [key: string]: unknown;
@@ -1912,6 +2127,8 @@ export interface components {
                 fill_timing: "immediate" | "next_bar";
                 /** Profile Ref */
                 profile_ref: string;
+                /** Money Management */
+                money_management?: components["schemas"]["ManualMoneyManagementConfig"] | components["schemas"]["TurtleMoneyManagementConfig"];
                 /** Sweep */
                 sweep?: {
                     [key: string]: unknown;
@@ -2130,6 +2347,12 @@ export interface components {
             default_params: {
                 [key: string]: unknown;
             };
+            /** Supported Money Management */
+            supported_money_management: ("manual" | "turtle")[];
+            /** Default Money Management */
+            default_money_management: {
+                [key: string]: unknown;
+            };
             /** Is Active */
             is_active: boolean;
             /** Is Deprecated */
@@ -2259,6 +2482,8 @@ export interface components {
                 fill_timing: "immediate" | "next_bar";
                 /** Profile Ref */
                 profile_ref: string;
+                /** Money Management */
+                money_management?: components["schemas"]["ManualMoneyManagementConfig"] | components["schemas"]["TurtleMoneyManagementConfig"];
                 /** Sweep */
                 sweep?: {
                     [key: string]: unknown;
@@ -2439,6 +2664,38 @@ export interface components {
             /** Excursion R */
             excursion_r: number | null;
         };
+        /**
+         * TurtleMoneyManagementConfig
+         * @description Turtle-derived daily-N money management under the global risk cap.
+         */
+        TurtleMoneyManagementConfig: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            mode: "turtle";
+            /**
+             * N Period
+             * @default 20
+             */
+            n_period: number;
+            /**
+             * N Timeframe
+             * @default 1d
+             * @constant
+             */
+            n_timeframe: "1d";
+            /**
+             * Stop N Multiple
+             * @default 2
+             */
+            stop_n_multiple: number;
+            /**
+             * Leverage Cap
+             * @default 10
+             */
+            leverage_cap: number;
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -2547,6 +2804,8 @@ export interface operations {
                     fill_timing?: "immediate" | "next_bar";
                     /** Profile Ref */
                     profile_ref: string;
+                    /** Money Management */
+                    money_management?: components["schemas"]["ManualMoneyManagementConfig"] | components["schemas"]["TurtleMoneyManagementConfig"];
                     /** Sweep */
                     sweep?: {
                         [key: string]: unknown;
@@ -2779,6 +3038,119 @@ export interface operations {
             };
         };
     };
+    list_data_jobs_api_v1_data_jobs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataJobStatus"][];
+                };
+            };
+        };
+    };
+    trigger_data_job_api_v1_data_jobs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DataJobRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataJobStatus"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_data_job_api_v1_data_jobs__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataJobStatus"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_data_job_events_api_v1_data_jobs__job_id__events_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     list_strategies_api_v1_strategies_get: {
         parameters: {
             query?: never;
@@ -2898,6 +3270,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DataSourceCoverage"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_data_source_inventory_api_v1_data_sources__data_source__inventory_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                data_source: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataSourceInventory"];
                 };
             };
             /** @description Bad Request */

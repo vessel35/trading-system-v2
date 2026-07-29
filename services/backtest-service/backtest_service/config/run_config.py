@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Literal
+from typing import Annotated, Any, Literal
 
 from core_lib.types import MarketType
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -15,6 +16,35 @@ from backtest_service.adapters.cost_model import BacktestCostModel
 _RUN_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _STRATEGY_ID_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _TIMEFRAME_PATTERN = re.compile(r"^[1-9]\d*[mhd]$")
+
+
+class ManualMoneyManagementConfig(BaseModel):
+    """Legacy-compatible explicit ATR protection and leverage settings."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["manual"] = "manual"
+    leverage: int = Field(default=1, ge=1, le=100)
+    reward_risk: float = Field(default=2.0, ge=0.1, le=10.0)
+    atr_stop_multiple: float = Field(default=2.0, ge=0.1, le=10.0)
+
+
+class TurtleMoneyManagementConfig(BaseModel):
+    """Turtle-derived daily-N money management under the global risk cap."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["turtle"] = "turtle"
+    n_period: int = Field(default=20, ge=2, le=200)
+    n_timeframe: Literal["1d"] = "1d"
+    stop_n_multiple: float = Field(default=2.0, ge=0.1, le=10.0)
+    leverage_cap: int = Field(default=10, ge=1, le=100)
+
+
+MoneyManagementConfig = Annotated[
+    ManualMoneyManagementConfig | TurtleMoneyManagementConfig,
+    Field(discriminator="mode"),
+]
 
 
 class RunConfig(BaseModel):
@@ -43,7 +73,29 @@ class RunConfig(BaseModel):
     trigger_feed: Literal["tf_candle", "m1_subcandle"] = "tf_candle"
     fill_timing: Literal["immediate", "next_bar"] = "next_bar"
     profile_ref: str = Field(min_length=1)
+    money_management: MoneyManagementConfig = Field(
+        default_factory=ManualMoneyManagementConfig
+    )
     sweep: dict[str, object] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_legacy_money_management(cls, value: Any) -> Any:
+        """Map stored Vessel money fields to the explicit manual policy."""
+        if not isinstance(value, Mapping) or "money_management" in value:
+            return value
+        normalized = dict(value)
+        if normalized.get("strategy_id") != "vessel-reference":
+            return normalized
+        params = normalized.get("params")
+        legacy = dict(params) if isinstance(params, Mapping) else {}
+        normalized["money_management"] = {
+            "mode": "manual",
+            "leverage": legacy.get("leverage", 1),
+            "reward_risk": legacy.get("reward_risk", 2.0),
+            "atr_stop_multiple": legacy.get("atr_stop_multiple", 2.0),
+        }
+        return normalized
 
     @field_validator("run_name")
     @classmethod
@@ -122,6 +174,11 @@ class RunConfig(BaseModel):
                 raise ValueError("pct sizing requires risk_per_trade to be absent")
             if self.position_size_pct is None or not 0.0 < self.position_size_pct <= 1.0:
                 raise ValueError("position_size_pct must be in (0, 1] for pct sizing")
+        if (
+            self.money_management.mode == "turtle"
+            and self.sizing_method != "risk_based"
+        ):
+            raise ValueError("turtle money management requires risk_based sizing")
         BacktestCostModel(
             self.cost_values,
             market_type=MarketType(self.market_type),

@@ -1,0 +1,4 @@
+interface:
+  display_name: "전략 개발 계약"
+  short_description: "전략과 자금관리의 책임 경계를 지키는 개발 지침"
+  default_prompt: "Use $develop-trading-strategies to implement or review a trading strategy against the repository contract."

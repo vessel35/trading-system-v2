@@ -9,6 +9,7 @@ description = "Research BFF with read-only queries and one isolated dry-run trig
 requires-python = ">=3.12"
 dependencies = [
     "backtest-service==1.5.0",
+    "collector-service==0.1.0",
     "core-lib==0.2.0",
     "fastapi>=0.115",
     "psycopg[binary]>=3.2",
@@ -33,6 +34,7 @@ web_api = ["py.typed"]
 
 [tool.uv.sources]
 backtest-service = { path = "../backtest-service", editable = true }
+collector-service = { path = "../collector", editable = true }
 core-lib = { path = "../core-lib", editable = true }
 
 [tool.pytest.ini_options]

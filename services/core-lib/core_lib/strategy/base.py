@@ -1,12 +1,31 @@
 """Define the StrategyAdapter decision protocol."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
-from core_lib.types import Position, TradingSignal
+from core_lib.money_management import MoneyManagementPolicy
+from core_lib.types import DecisionIntent, Position, TradingSignal
 
 from .config import ParameterSchema
 from .profile import StrategyProfile
+
+
+@dataclass(frozen=True, slots=True)
+class MoneyManagementSupport:
+    """Declare the policies and capabilities accepted by a strategy."""
+
+    supported: tuple[str, ...] = ()
+    default: str | None = None
+    supports_external_stop: bool = False
+    supports_external_take_profit: bool = False
+    supports_signal_exit: bool = False
+    supports_pyramiding: bool = False
+
+    def __post_init__(self) -> None:
+        if len(set(self.supported)) != len(self.supported):
+            raise ValueError("money-management modes must be unique")
+        if self.default is not None and self.default not in self.supported:
+            raise ValueError("default money-management mode must be supported")
 
 
 @dataclass(slots=True)
@@ -17,6 +36,9 @@ class StrategyMetadata:
     min_history: int
     supported_timeframes: list[str]
     profile: StrategyProfile
+    money_management: MoneyManagementSupport = field(
+        default_factory=MoneyManagementSupport
+    )
 
     def __post_init__(self) -> None:
         if self.min_history <= 0:
@@ -45,6 +67,14 @@ class StrategyAdapter(Protocol):
         self,
         market_data: dict[str, object],
         current_position: Position | None,
-    ) -> TradingSignal | None:
+    ) -> DecisionIntent | TradingSignal | None:
         """Return a decision signal, or None for HOLD."""
         ...
+
+
+@dataclass(frozen=True, slots=True)
+class StrategyRuntime:
+    """Compose a decision strategy with an optional common money policy."""
+
+    strategy: StrategyAdapter
+    money_management: MoneyManagementPolicy | None

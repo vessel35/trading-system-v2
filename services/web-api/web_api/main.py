@@ -26,6 +26,15 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import SkipValidation, ValidationError
 
 from web_api import __version__ as web_api_version
+from web_api.data_jobs import (
+    DATA_JOB_MAX_RANGE_DAYS,
+    TERMINAL_DATA_JOB_STATES,
+    shutdown_data_jobs,
+    submit_data_job,
+)
+from web_api.data_jobs import (
+    registry as data_job_registry,
+)
 from web_api.database import (
     CatalogConfigurationError,
     CatalogConnection,
@@ -57,7 +66,10 @@ from web_api.models import (
     CandleCollection,
     ChartSummary,
     ConditionalExpectancy,
+    DataJobRequest,
+    DataJobStatus,
     DataSourceCoverage,
+    DataSourceInventory,
     Decision,
     DrawdownEpisode,
     EquityPoint,
@@ -123,6 +135,7 @@ async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        await shutdown_data_jobs()
         await shutdown_executor()
 
 
@@ -130,8 +143,9 @@ app = FastAPI(
     title="Backtest Research Web API",
     version=web_api_version,
     description=(
-        "Research backend-for-frontend. Reads remain physically read-only; writes are "
-        "limited to dry-run catalog/Evidence execution and short-lived tag mutations."
+        "Research backend-for-frontend. Read endpoints remain physically read-only. "
+        "Data-job endpoints deliberately launch collector subprocesses with Binance "
+        "network access and crypto_data write capability."
     ),
     lifespan=lifespan,
 )
@@ -196,14 +210,23 @@ async def request_validation_error_handler(
         "/api/v1/runs",
         "/api/v1/sweeps",
     }
+    data_job_request = request.method == "POST" and request.url.path == "/api/v1/data-jobs"
     return JSONResponse(
         status_code=422 if run_request else 400,
         content={
             "error": {
-                "code": "invalid_run_config" if run_request else "invalid_query",
+                "code": (
+                    "invalid_run_config"
+                    if run_request
+                    else "invalid_data_job"
+                    if data_job_request
+                    else "invalid_query"
+                ),
                 "message": (
                     "The run request is invalid."
                     if run_request
+                    else "The data job request is invalid."
+                    if data_job_request
                     else "The request query is invalid."
                 ),
                 "details": _validation_details(exc),
@@ -380,6 +403,31 @@ def _assign_axis(params: dict[str, object], parameter: str, value: object) -> No
     current[path[-1]] = value
 
 
+def _assign_sweep_axis(
+    cell: dict[str, object],
+    parameter: str,
+    value: object,
+) -> None:
+    if parameter.startswith("money_management."):
+        money_management = cast(dict[str, object], cell["money_management"])
+        _assign_axis(
+            money_management,
+            parameter.removeprefix("money_management."),
+            value,
+        )
+        return
+    params = cast(dict[str, object], cell["params"])
+    _assign_axis(params, parameter, value)
+    legacy_name = parameter.removeprefix("params.")
+    money_management = cast(dict[str, object], cell["money_management"])
+    if (
+        cell.get("strategy_id") == "vessel-reference"
+        and money_management.get("mode") == "manual"
+        and legacy_name in {"leverage", "reward_risk", "atr_stop_multiple"}
+    ):
+        money_management[legacy_name] = value
+
+
 def _validate_sweep_boundaries(config: RunConfig, payload: SweepSubmission) -> None:
     if payload.type == "grid":
         return
@@ -444,9 +492,8 @@ def _prepare_sweep(payload: SweepSubmission) -> SweepPlan:
     value_sets = [axis.values for axis in payload.axes]
     for index, combination in enumerate(product(*value_sets)):
         cell = deepcopy(base_payload)
-        params = cast(dict[str, object], cell["params"])
         for axis, value in zip(payload.axes, combination, strict=True):
-            _assign_axis(params, axis.parameter, value)
+            _assign_sweep_axis(cell, axis.parameter, value)
         cell["run_name"] = _sweep_run_name(base.run_name, index)
         cell["sweep"] = {
             **sweep_meta,
@@ -604,6 +651,108 @@ async def get_job_events(job_id: str) -> StreamingResponse:
     )
 
 
+def _data_job_not_found(job_id: str) -> NoReturn:
+    raise ApiError(
+        status_code=404,
+        code="data_job_not_found",
+        message=f"Data job '{job_id}' does not exist.",
+        details={"job_id": job_id},
+    )
+
+
+@app.post(
+    "/api/v1/data-jobs",
+    response_model=DataJobStatus,
+    status_code=202,
+    responses={400: {"model": ErrorResponse}},
+    summary="Queue a collector data job",
+    description=(
+        "Launches a collector subprocess with external Binance network access and "
+        "crypto_data write capability after validation. Half-open [start, end) ranges "
+        f"longer than {DATA_JOB_MAX_RANGE_DAYS} days are rejected."
+    ),
+)
+async def trigger_data_job(payload: DataJobRequest) -> DataJobStatus:
+    if payload.exchange != "binance":
+        raise ApiError(
+            status_code=400,
+            code="unsupported_exchange",
+            message=f"Exchange '{payload.exchange}' is not supported for data jobs.",
+            details={"exchange": payload.exchange},
+        )
+    if payload.end - payload.start > timedelta(days=DATA_JOB_MAX_RANGE_DAYS):
+        raise ApiError(
+            status_code=400,
+            code="range_too_large",
+            message=(
+                f"The data job range exceeds the allowed maximum of {DATA_JOB_MAX_RANGE_DAYS} days."
+            ),
+            details={
+                "max_range_days": DATA_JOB_MAX_RANGE_DAYS,
+                "range_semantics": "[start, end)",
+            },
+        )
+    state = submit_data_job(payload)
+    return state.public_status()
+
+
+@app.get(
+    "/api/v1/data-jobs",
+    response_model=list[DataJobStatus],
+)
+def list_data_jobs() -> list[DataJobStatus]:
+    return [state.public_status() for state in data_job_registry.list()]
+
+
+@app.get(
+    "/api/v1/data-jobs/{job_id}",
+    response_model=DataJobStatus,
+    responses={404: {"model": ErrorResponse}},
+)
+def get_data_job(job_id: str) -> DataJobStatus:
+    state = data_job_registry.get(job_id)
+    if state is None:
+        _data_job_not_found(job_id)
+    return state.public_status()
+
+
+@app.get(
+    "/api/v1/data-jobs/{job_id}/events",
+    response_class=StreamingResponse,
+    responses={404: {"model": ErrorResponse}},
+)
+async def get_data_job_events(job_id: str) -> StreamingResponse:
+    if data_job_registry.get(job_id) is None:
+        _data_job_not_found(job_id)
+
+    async def stream() -> AsyncIterator[str]:
+        revision = -1
+        while True:
+            state = data_job_registry.get(job_id)
+            if state is None:
+                return
+            if state.revision != revision:
+                revision = state.revision
+                payload = state.public_status().model_dump_json(exclude_none=True)
+                yield f"event: status\ndata: {payload}\n\n"
+                if state.status in TERMINAL_DATA_JOB_STATES:
+                    return
+            try:
+                await data_job_registry.wait_for_change(job_id, revision, timeout=15.0)
+            except TimeoutError:
+                yield ": keepalive\n\n"
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @app.get(
     "/api/v1/strategies",
     response_model=StrategyListResponse,
@@ -663,6 +812,26 @@ def get_data_source_coverage(
             symbol=symbol,
             exchange=exchange,
         )
+    except ValueError as exc:
+        raise ApiError(
+            status_code=400,
+            code="unsupported_data_source",
+            message=str(exc),
+            details={"data_source": data_source},
+        ) from exc
+
+
+@app.get(
+    "/api/v1/data-sources/{data_source}/inventory",
+    response_model=DataSourceInventory,
+    responses={400: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+)
+def get_data_source_inventory(
+    data_source: str,
+    market: Annotated[MarketDataRepository, Depends(market_repository)],
+) -> DataSourceInventory:
+    try:
+        return market.inventory(data_source=data_source)
     except ValueError as exc:
         raise ApiError(
             status_code=400,

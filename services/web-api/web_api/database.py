@@ -29,6 +29,7 @@ class DatabaseSettings:
     user: str
     password: str
     database: str
+    config_database: str
     crypto_database: str
     signal_database: str
     evidence_root: Path
@@ -69,6 +70,7 @@ def get_settings() -> DatabaseSettings:
         user=values["PGUSER"],
         password=values["PGPASSWORD"],
         database=values.get("BACKTEST_DB_NAME", "backtest_db"),
+        config_database=values.get("CONFIG_DB_NAME", "config_db"),
         crypto_database=values.get("CRYPTO_DB_NAME", "crypto_data"),
         signal_database=values.get("SIGNAL_DB_NAME", "signal_db"),
         evidence_root=Path(

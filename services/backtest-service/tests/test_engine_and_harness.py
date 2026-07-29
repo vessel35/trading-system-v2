@@ -136,6 +136,23 @@ class _Feed(DataFeed):
         return Decimal("100")
 
 
+class _VesselTurtleFeed(_Feed):
+    """Expose separate finalized daily candles for Turtle N."""
+
+    def __init__(self, candles: list[Candle], daily: list[Candle]) -> None:
+        super().__init__(candles)
+        self._daily = daily
+
+    def candles(self, symbol: str, tf: str, up_to: datetime) -> list[Candle]:
+        if tf == "1d":
+            assert symbol == "BTCUSDT"
+            self.candle_calls += 1
+            return [
+                candle for candle in self._daily if candle.close_time <= up_to
+            ]
+        return super().candles(symbol, tf, up_to)
+
+
 class _OriginMismatchFeed(_Feed):
     def source_candles(
         self,
@@ -503,6 +520,44 @@ def _vessel_config(*, run_name: str = "vessel-dry-run") -> RunConfig:
         profile_ref="vessel-reference-v1",
         seed=17,
     )
+
+
+def _turtle_daily_candles() -> list[Candle]:
+    first = datetime(2025, 12, 11, tzinfo=UTC)
+    candles = [
+        Candle(
+            symbol="BTCUSDT",
+            exchange="binance",
+            timeframe="1d",
+            open_time=first + timedelta(days=index),
+            close_time=first + timedelta(days=index + 1),
+            open=100.0,
+            high=101.0,
+            low=99.0,
+            close=100.0,
+            volume=100.0,
+            quote_volume=None,
+            trade_count=None,
+        )
+        for index in range(21)
+    ]
+    candles.append(
+        Candle(
+            symbol="BTCUSDT",
+            exchange="binance",
+            timeframe="1d",
+            open_time=datetime(2026, 1, 1, tzinfo=UTC),
+            close_time=datetime(2026, 1, 2, tzinfo=UTC),
+            open=100.0,
+            high=1_000.0,
+            low=1.0,
+            close=500.0,
+            volume=100.0,
+            quote_volume=None,
+            trade_count=None,
+        )
+    )
+    return candles
 
 
 def _vessel_engine(
@@ -1292,6 +1347,136 @@ def test_vessel_reference_end_to_end_dry_run_is_complete_and_deterministic(
         )
         assert detail["status"] == "matched"
         assert detail["comparison_run_id"] == first.run_id
+
+
+def test_vessel_turtle_uses_only_prior_finalized_daily_n_and_records_plan(
+    tmp_path: Path,
+) -> None:
+    """Keep the current incomplete daily candle out of Turtle sizing Evidence."""
+    config = RunConfig.model_validate(
+        {
+            **_vessel_config(run_name="vessel-turtle").model_dump(),
+            "money_management": {
+                "mode": "turtle",
+                "n_period": 20,
+                "n_timeframe": "1d",
+                "stop_n_multiple": 2.0,
+                "leverage_cap": 10,
+            },
+        }
+    )
+    candles = _vessel_candles()
+    costs = BacktestCostModel(config.cost_values)
+    result = Engine(
+        _VesselTurtleFeed(candles, _turtle_daily_candles()),
+        BacktestBroker(costs),
+        BacktestClock.from_candles(candles),
+        costs,
+        BacktestEvidenceSink(tmp_path),
+        _Catalog(),
+        _vessel_manager(),
+        prereg=_prereg(),
+    ).run(config)
+
+    with sqlite3.connect(result.evidence_path) as connection:
+        (
+            params_json,
+            submitted_money_management_json,
+            money_management_json,
+            indicators_json,
+        ) = connection.execute(
+            """
+            SELECT params_json, submitted_money_management_json,
+                   money_management_json, resolved_indicators_json
+            FROM BACKTEST_RUN_LOCAL
+            """
+        ).fetchone()
+        params = json.loads(params_json)
+        assert params["_money_management"]["policy_id"] == "turtle"
+        assert params["_money_management"]["policy_version"] == "1.0.0"
+        assert json.loads(submitted_money_management_json)["mode"] == "turtle"
+        assert json.loads(money_management_json) == params["_money_management"]
+        assert '"TURTLE_N"' in indicators_json
+        assert '"ATR"' not in indicators_json
+        signal = connection.execute(
+            """
+            SELECT decision_ts, stop_loss, take_profit, leverage, metadata_json
+            FROM SIGNAL
+            WHERE derived_intent = 'enter'
+            """
+        ).fetchone()
+        assert signal is not None
+        decision_ts, stop_loss, take_profit, leverage, metadata_json = signal
+        metadata = json.loads(metadata_json)["money_management"]
+        assert stop_loss == pytest.approx(117.5)
+        assert take_profit is None
+        assert leverage == 1
+        assert metadata["volatility"] == 2.0
+        assert metadata["stop_distance"] == 4.0
+        assert metadata["requested_quantity"] == 25.0
+        assert metadata["initial_risk_amount"] == 100.0
+        assert (
+            datetime.fromisoformat(metadata["volatility_timestamp"]).timestamp()
+            * 1_000
+            <= decision_ts
+        )
+        assert connection.execute(
+            "SELECT COUNT(*) FROM INDICATOR_SNAPSHOT"
+        ).fetchone() == (12,)
+
+
+def test_resolved_manual_policy_has_stable_config_and_evidence_hash(
+    tmp_path: Path,
+) -> None:
+    """Keep omitted defaults and explicit defaults reproducibly equivalent."""
+    base = _vessel_config().model_dump()
+    compact = RunConfig.model_validate(
+        {
+            **base,
+            "run_name": "manual-compact",
+            "money_management": {"mode": "manual"},
+        }
+    )
+    explicit = RunConfig.model_validate(
+        {
+            **base,
+            "run_name": "manual-explicit",
+            "money_management": {
+                "mode": "manual",
+                "leverage": 1,
+                "reward_risk": 2.0,
+                "atr_stop_multiple": 2.0,
+            },
+        }
+    )
+    catalog = _Catalog()
+    first = _vessel_engine(tmp_path / "compact", catalog).run(compact)
+    second = _vessel_engine(tmp_path / "explicit", catalog).run(explicit)
+
+    assert (
+        catalog.runs[first.run_id]["config_hash"]
+        == catalog.runs[second.run_id]["config_hash"]
+    )
+    assert first.evidence_hash == second.evidence_hash
+    with sqlite3.connect(first.evidence_path) as connection:
+        submitted = json.loads(
+            connection.execute(
+                "SELECT submitted_money_management_json FROM BACKTEST_RUN_LOCAL"
+            ).fetchone()[0]
+        )
+    with sqlite3.connect(second.evidence_path) as connection:
+        explicit_submitted = json.loads(
+            connection.execute(
+                "SELECT submitted_money_management_json FROM BACKTEST_RUN_LOCAL"
+            ).fetchone()[0]
+        )
+    assert submitted == {"mode": "manual"}
+    assert explicit_submitted == {
+        "mode": "manual",
+        "leverage": 1,
+        "reward_risk": 2.0,
+        "atr_stop_multiple": 2.0,
+    }
 
 
 def test_deterministic_check_fails_on_catalog_config_or_previous_hash_mismatch(

@@ -73,7 +73,7 @@ def _registry_row(strategy_id: str) -> tuple[object, ...]:
         "strategies.probe",
         "Probe",
         None,
-        "1.0.0",
+        "2.0.0",
         ["1h"],
         [{"name": "EMA", "params": {"period": 9}}],
         9,
@@ -97,7 +97,6 @@ def _vessel_registry_row() -> tuple[object, ...]:
         [
             {"name": "EMA", "params": {"period": 9}},
             {"name": "EMA", "params": {"period": 21}},
-            {"name": "ATR", "params": {"period": 14}},
         ],
         21,
         {},
@@ -307,6 +306,12 @@ def test_main_wires_confirmed_crypto_rows_through_core_vessel_to_signal_db() -> 
         "reward_risk": 2.0,
     }
     assert persisted.signal.metadata["adaptee"] == "vessel-reference"
+    assert persisted.signal.metadata["decision_action"] == "ENTER_LONG"
+    assert persisted.signal.metadata["money_management"]["policy_id"] == "manual"
+    assert persisted.signal.stop_loss is not None
+    assert persisted.signal.take_profit is not None
+    assert persisted.signal.stop_loss < persisted.signal.price < persisted.signal.take_profit
+    assert persisted.signal.leverage == 1
     assert persisted.signal_type is SignalType.BUY
     assert crypto.calls[0][0].lstrip().startswith("SELECT")
     assert registry.calls[0][0].lstrip().startswith("SELECT")
