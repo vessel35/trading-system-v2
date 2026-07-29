@@ -246,6 +246,8 @@ SELECT add_retention_policy(
     if_not_exists => TRUE
 );
 
+\ir crypto-data/20260729/01-create-ohlcv-inventory.sql
+
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 GRANT USAGE ON SCHEMA public TO data_writer, data_reader;
 GRANT SELECT, INSERT, UPDATE, DELETE

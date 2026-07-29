@@ -34,7 +34,6 @@ def test_inventory_groups_all_1m_symbols_and_calculates_coverage_ratio() -> None
                 "available_from": datetime(2025, 1, 1, tzinfo=UTC),
                 "available_to": datetime(2025, 1, 1, 0, 3, tzinfo=UTC),
                 "row_count": 3,
-                "expected_1m_rows": 4,
             },
             {
                 "symbol": "ETH/USDT:USDT",
@@ -42,7 +41,6 @@ def test_inventory_groups_all_1m_symbols_and_calculates_coverage_ratio() -> None
                 "available_from": None,
                 "available_to": None,
                 "row_count": 0,
-                "expected_1m_rows": 0,
             },
             {
                 "symbol": "SOL/USDT:USDT",
@@ -50,7 +48,6 @@ def test_inventory_groups_all_1m_symbols_and_calculates_coverage_ratio() -> None
                 "available_from": datetime(2025, 1, 1, tzinfo=UTC),
                 "available_to": datetime(2025, 1, 1, tzinfo=UTC),
                 "row_count": 2,
-                "expected_1m_rows": 1,
             },
         ]
     )
@@ -76,8 +73,10 @@ def test_inventory_groups_all_1m_symbols_and_calculates_coverage_ratio() -> None
 
     query, params = connection.queries[0]
     normalized_query = " ".join(query.split())
-    assert "FROM public.ohlcv_futures" in normalized_query
+    # Holdings come from the maintained summary, so the reader must not aggregate the
+    # base table: that cost grew with retained history rather than with what is shown.
+    assert "FROM public.ohlcv_futures_inventory" in normalized_query
     assert "WHERE timeframe = '1m'" in normalized_query
-    assert "GROUP BY symbol, exchange" in normalized_query
+    assert "GROUP BY" not in normalized_query
     assert "ORDER BY symbol, exchange" in normalized_query
     assert params is None
