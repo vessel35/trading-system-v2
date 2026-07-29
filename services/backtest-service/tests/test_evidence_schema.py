@@ -245,10 +245,10 @@ def test_schema_marks_deterministic_hash_boundaries() -> None:
     assert HASH_GLOBAL_EXCLUDED_COLUMNS == {"run_id", "backtest_run_id"}
     assert HASH_EXCLUDED_COLUMNS == {
         "BACKTEST_RUN_LOCAL": {
-                "run_seq",
-                "run_name",
-                "submitted_money_management_json",
-                "prereg_json",
+            "run_seq",
+            "run_name",
+            "submitted_money_management_json",
+            "prereg_json",
             "created_at",
         },
         "INTEGRITY_CHECK": {"checked_at"},
