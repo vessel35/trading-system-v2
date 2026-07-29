@@ -353,7 +353,11 @@ class BacktestCatalogStore(CatalogStore):
             raise
 
     def upsert_summary(self, summary: object) -> None:
-        """Upsert final metadata and move the corresponding run to EVALUATED."""
+        """Upsert final metadata and move the corresponding run to EVALUATED.
+
+        Finalizing clears error_message so a run that another run's orphan sweep stamped
+        while it was still in flight does not keep a failure message it disproved.
+        """
         values = _mapping(summary, name="run summary")
         required = {
             "run_id",
@@ -388,6 +392,7 @@ class BacktestCatalogStore(CatalogStore):
                 SET status = 'EVALUATED',
                     evidence_hash = %s,
                     finished_at = CURRENT_TIMESTAMP,
+                    error_message = NULL,
                     evidence_expires_at = CASE
                         WHEN %s = 'promote'
                           OR envelope_status_declared = 'established'
@@ -559,7 +564,15 @@ class BacktestCatalogStore(CatalogStore):
         )
 
     def reconcile_orphaned(self) -> int:
-        """Mark unfinished, unhashed RUNNING rows as ORPHANED without deleting them."""
+        """Mark unfinished, unhashed RUNNING rows as ORPHANED without deleting them.
+
+        The sweep skips rows registered at or after this transaction started. Those runs
+        cannot be orphans of an earlier crash, because they did not exist when the sweep
+        began; they belong to runs still in flight elsewhere. Stamping them would also
+        write a finished_at that precedes their started_at, because CURRENT_TIMESTAMP is
+        the transaction start time, which violates ck_backtest_run_timestamps and aborts
+        the sweeping run.
+        """
         try:
             result = self._connection.execute(
                 """
@@ -574,7 +587,9 @@ class BacktestCatalogStore(CatalogStore):
                         evidence_expires_at,
                         CURRENT_TIMESTAMP + INTERVAL '90 days'
                     )
-                WHERE status = 'RUNNING' AND evidence_hash IS NULL
+                WHERE status = 'RUNNING'
+                  AND evidence_hash IS NULL
+                  AND started_at < CURRENT_TIMESTAMP
                 RETURNING run_id
                 """
             )

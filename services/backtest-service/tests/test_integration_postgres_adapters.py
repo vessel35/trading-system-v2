@@ -501,6 +501,129 @@ def test_catalog_issues_run_id_then_records_prereg_and_evaluated_metadata() -> N
     assert integrity == "passed"
 
 
+def _orphan_sweep_run_meta() -> dict[str, object]:
+    """Build one minimal catalog run header for the orphan-sweep regression."""
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    run_meta: dict[str, object] = {
+        "run_name": "orphan-sweep-guard",
+        "strategy_id": "orphan-sweep-fixture",
+        "strategy_name": "OrphanSweepFixture",
+        "strategy_version": "1.0.0",
+        "params_json": {},
+        "resolved_indicators_json": [{"name": "EMA", "params": {"period": 9}, "version": "1.0.0"}],
+        "params_schema_version": "1.0.0",
+        "symbol": "BTCUSDT",
+        "exchange": "binance",
+        "timeframe": "1h",
+        "market_type": "FUTURES",
+        "period_start": start,
+        "period_end": start + timedelta(days=1),
+        "warmup_start": None,
+        "warmup_candles": 0,
+        "data_source": "integration-fixture",
+        "indicator_mode": "auto",
+        "trigger_feed": "tf_candle",
+        "fill_timing": "next_bar",
+        "initial_capital": Decimal("10000"),
+        "sizing_method": "risk_based",
+        "risk_per_trade": Decimal("0.01"),
+        "position_size_pct": None,
+        "framework_compliant": True,
+        "cost_values_json": {},
+        "seed": 0,
+        "engine_version": "1.0.0",
+        "core_lib_version": "0.1.0",
+        "config_hash": "",
+        "profile_ref": "orphan-sweep-profile",
+        "strategy_profile_json": {"family": "fixture"},
+        "envelope_status_declared": "provisional",
+        "sweep_id": None,
+        "fold_label": "integration",
+    }
+    run_meta["config_hash"] = normalized_config_hash(run_meta)
+    return run_meta
+
+
+def _finalize_orphan_sweep_run(catalog: BacktestCatalogStore, run_id: str, hash_seed: str) -> None:
+    """Finalize one orphan-sweep fixture run through the production summary path."""
+    catalog.upsert_summary(
+        {
+            "run_id": run_id,
+            "trade_count": 0,
+            "win_count": 0,
+            "loss_count": 0,
+            "r_excluded_count": 0,
+            "initial_capital": Decimal("10000"),
+            "integrity_passed": True,
+            "integrity_status": "passed",
+            "decision_route": "retest",
+            "evidence_hash": hashlib.sha256(f"{run_id}:{hash_seed}".encode()).hexdigest(),
+        }
+    )
+
+
+def test_orphan_sweep_spares_runs_registered_after_it_started() -> None:
+    """Keep a concurrently registered run out of another run's startup orphan sweep."""
+    with _connect_writer("backtest_db") as connection:
+        catalog = BacktestCatalogStore(cast(WriteConnection, connection))
+        crashed_run_id = catalog.register(_orphan_sweep_run_meta())
+        inflight_run_id = catalog.register(_orphan_sweep_run_meta())
+        # CURRENT_TIMESTAMP is the transaction start time, so a run that registers while a
+        # sweep transaction is already open carries a started_at ahead of that sweep clock.
+        connection.execute(
+            """
+            UPDATE public.backtest_run
+            SET started_at = CURRENT_TIMESTAMP + INTERVAL '30 seconds'
+            WHERE run_id = %s
+            """,
+            (inflight_run_id,),
+        )
+        connection.commit()
+
+        swept = catalog.reconcile_orphaned()
+
+        assert swept >= 1
+        rows = connection.execute(
+            """
+            SELECT run_id, status, started_at, finished_at, error_message
+            FROM public.backtest_run
+            WHERE run_id IN (%s, %s)
+            """,
+            (crashed_run_id, inflight_run_id),
+        ).fetchall()
+        observed = {str(row[0]): row for row in rows}
+
+        crashed = observed[crashed_run_id]
+        crashed_started, crashed_finished = crashed[2], crashed[3]
+        assert crashed[1] == "ORPHANED"
+        assert isinstance(crashed_started, datetime)
+        assert isinstance(crashed_finished, datetime)
+        assert crashed_finished >= crashed_started
+        assert crashed[4] == "registered run did not reach Evidence finalize"
+
+        inflight = observed[inflight_run_id]
+        assert inflight[1] == "RUNNING"
+        assert inflight[3] is None
+        assert inflight[4] is None
+
+        _finalize_orphan_sweep_run(catalog, crashed_run_id, "swept")
+        finalized = connection.execute(
+            "SELECT status, error_message FROM public.backtest_run WHERE run_id = %s",
+            (crashed_run_id,),
+        ).fetchone()
+        assert finalized is not None
+        assert finalized[0] == "EVALUATED"
+        assert finalized[1] is None
+
+        # Leave no RUNNING row behind in the shared development catalog.
+        connection.execute(
+            "UPDATE public.backtest_run SET started_at = CURRENT_TIMESTAMP WHERE run_id = %s",
+            (inflight_run_id,),
+        )
+        connection.commit()
+        _finalize_orphan_sweep_run(catalog, inflight_run_id, "inflight")
+
+
 _FUNDING_PROBE_ID = "funding-exhaustion-probe"
 _FUNDING_PROBE_DECISION_OPEN = datetime(2025, 6, 22, 14, tzinfo=UTC)
 _MATRIX_REVERSAL_ID = "real-data-reversal-probe"
