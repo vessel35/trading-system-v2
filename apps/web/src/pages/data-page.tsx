@@ -47,7 +47,7 @@ import {
   useDataJobs,
 } from "../hooks/use-data-jobs";
 import { useInventory } from "../hooks/use-inventory";
-import { formatTimestamp } from "../lib/utils";
+import { formatTimestamp, fromDisplayZoneInput, toDisplayZoneInput } from "../lib/utils";
 
 const DATA_SOURCE = "crypto_data.ohlcv_futures";
 // 백엔드 DATA_JOB_MAX_RANGE_DAYS(= crypto_data retention 2000일)과 일치.
@@ -85,8 +85,8 @@ function period(item: InventoryItem) {
   return `${formatTimestamp(item.available_from)} ~ ${formatTimestamp(item.available_to)}`;
 }
 
-function dateTimeLocalUtc(value: Date): string {
-  return value.toISOString().slice(0, 16);
+function dateTimeDisplayZone(value: Date): string {
+  return toDisplayZoneInput(value.toISOString());
 }
 
 function initialForm(): DataJobForm {
@@ -96,14 +96,16 @@ function initialForm(): DataJobForm {
   return {
     operation: "backfill",
     symbol: "BTC/USDT:USDT",
-    start: dateTimeLocalUtc(start),
-    end: dateTimeLocalUtc(end),
+    start: dateTimeDisplayZone(start),
+    end: dateTimeDisplayZone(end),
     timeframes: [...timeframeOptions],
   };
 }
 
-function utcMilliseconds(value: string): number {
-  return Date.parse(`${value}Z`);
+function displayZoneMilliseconds(value: string): number {
+  // The fields are KST wall clocks, so the range check compares the instants they name
+  // rather than treating the text as if it were already UTC.
+  return fromDisplayZoneInput(value).getTime();
 }
 
 function validateForm(form: DataJobForm): {
@@ -112,8 +114,8 @@ function validateForm(form: DataJobForm): {
 } {
   const errors: FormErrors = {};
   const symbol = form.symbol.trim();
-  const start = utcMilliseconds(form.start);
-  const end = utcMilliseconds(form.end);
+  const start = displayZoneMilliseconds(form.start);
+  const end = displayZoneMilliseconds(form.end);
 
   if (!symbol) {
     errors.symbol = "심볼을 입력하세요.";
@@ -121,10 +123,10 @@ function validateForm(form: DataJobForm): {
     errors.symbol = "BASE/QUOTE:SETTLE 형식의 CCXT 선물 심볼을 입력하세요.";
   }
   if (!form.start || Number.isNaN(start)) {
-    errors.start = "UTC 시작 시각을 입력하세요.";
+    errors.start = "KST 시작 시각을 입력하세요.";
   }
   if (!form.end || Number.isNaN(end)) {
-    errors.end = "UTC 종료 시각을 입력하세요.";
+    errors.end = "KST 종료 시각을 입력하세요.";
   }
   if (!errors.start && !errors.end && start >= end) {
     errors.end = "종료 시각은 시작 시각보다 뒤여야 합니다.";
@@ -600,12 +602,12 @@ export function DataPage() {
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-1.5 text-sm">
                     <label htmlFor="data-job-start" className="block font-medium">
-                      시작 (UTC)
+                      시작 (KST)
                     </label>
                     <DateTimePickerField
                       id="data-job-start"
                       aria-invalid={Boolean(errors.start)}
-                      aria-label="시작 (UTC)"
+                      aria-label="시작 (KST)"
                       value={form.start}
                       onChange={(value) => updateForm("start", value)}
                     />
@@ -615,12 +617,12 @@ export function DataPage() {
                   </div>
                   <div className="space-y-1.5 text-sm">
                     <label htmlFor="data-job-end" className="block font-medium">
-                      종료 (UTC)
+                      종료 (KST)
                     </label>
                     <DateTimePickerField
                       id="data-job-end"
                       aria-invalid={Boolean(errors.end)}
-                      aria-label="종료 (UTC)"
+                      aria-label="종료 (KST)"
                       value={form.end}
                       onChange={(value) => updateForm("end", value)}
                     />

@@ -43,7 +43,13 @@ import {
   type TrackedSweep,
 } from "../contexts/run-jobs";
 import { useCoverage } from "../hooks/use-p2b";
-import { cn, formatTimestamp, shortHash } from "../lib/utils";
+import {
+  cn,
+  formatTimestamp,
+  fromDisplayZoneInput,
+  shortHash,
+  toDisplayZoneInput,
+} from "../lib/utils";
 
 type PrimaryMetric = NonNullable<PreregistrationInput["primary_metric"]>;
 type SizingMethod = NonNullable<RunConfigInput["sizing_method"]>;
@@ -192,15 +198,16 @@ function parseAxisValues(value: string, label: string): SweepAxis["values"] {
 }
 
 function utcIso(value: string, label: string): string {
-  const date = new Date(value);
+  // The field is a KST wall clock, so it is read in KST rather than in whatever zone
+  // the viewer's machine happens to use. Otherwise the same entry would mean different
+  // instants on different machines, and would not match what the catalog displays.
+  const date = fromDisplayZoneInput(value);
   if (Number.isNaN(date.getTime())) throw new Error(`${label} 시간이 올바르지 않습니다.`);
   return date.toISOString();
 }
 
 function localDateTime(value: string): string {
-  const date = new Date(value);
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
-  return local.toISOString().slice(0, 16);
+  return toDisplayZoneInput(value);
 }
 
 function inferredMarketType(symbol: string): MarketType {
@@ -1257,19 +1264,19 @@ export function RunManagementPage() {
                     </Label>
                   )}
                 <Label>
-                  시작 (브라우저 로컬 시간)
+                  시작 (KST)
                   <DateTimePickerField
                     value={form.start}
                     onChange={(value) => update("start", value)}
-                    aria-label="시작 (브라우저 로컬 시간)"
+                    aria-label="시작 (KST)"
                   />
                 </Label>
                 <Label>
-                  종료 (브라우저 로컬 시간)
+                  종료 (KST)
                   <DateTimePickerField
                     value={form.end}
                     onChange={(value) => update("end", value)}
-                    aria-label="종료 (브라우저 로컬 시간)"
+                    aria-label="종료 (KST)"
                   />
                 </Label>
                 <div
