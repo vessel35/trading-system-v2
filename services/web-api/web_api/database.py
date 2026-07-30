@@ -94,6 +94,9 @@ def connect_catalog() -> Iterator[CatalogConnection]:
         password=settings.password,
         dbname=settings.database,
         options="-c default_transaction_read_only=on",
+        # Per-statement transactions release hypertable chunk locks immediately; a
+        # long-lived read transaction over a chunk-per-day table holds thousands.
+        autocommit=True,
         connect_timeout=5,
         application_name="web-api-p0-reader",
         row_factory=dict_row,
@@ -136,6 +139,9 @@ def connect_crypto() -> Iterator[CryptoConnection]:
         password=settings.password,
         dbname=settings.crypto_database,
         options="-c default_transaction_read_only=on",
+        # Per-statement transactions release hypertable chunk locks immediately; a
+        # long-lived read transaction over a chunk-per-day table holds thousands.
+        autocommit=True,
         connect_timeout=5,
         application_name="web-api-p1-crypto-reader",
         row_factory=dict_row,
@@ -160,6 +166,9 @@ def connect_signal() -> Iterator[SignalConnection]:
         password=settings.password,
         dbname=settings.signal_database,
         options="-c default_transaction_read_only=on",
+        # Per-statement transactions release hypertable chunk locks immediately; a
+        # long-lived read transaction over a chunk-per-day table holds thousands.
+        autocommit=True,
         connect_timeout=5,
         application_name="web-api-p2-strategy-reader",
         row_factory=dict_row,
