@@ -19,7 +19,7 @@ import type {
   Signal,
 } from "../../api/client";
 import { useChartEvidence } from "../../hooks/use-evidence";
-import { cn } from "../../lib/utils";
+import { cn, formatChartTime } from "../../lib/utils";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
@@ -88,6 +88,10 @@ function MarketChart({
       timeScale: {
         borderColor: "rgba(148,163,184,0.18)",
         timeVisible: true,
+        tickMarkFormatter: (time: number) => formatChartTime(time),
+      },
+      localization: {
+        timeFormatter: (time: number) => formatChartTime(time),
       },
       rightPriceScale: {
         borderColor: "rgba(148,163,184,0.18)",
