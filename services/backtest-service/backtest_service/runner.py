@@ -53,6 +53,12 @@ def _connection(
         password=env["PGPASSWORD"],
         dbname=database,
         options=options,
+        # A read holds one lock per hypertable chunk it touches, and a chunk-per-day
+        # table reaches four figures over a few years. Without autocommit those locks
+        # are kept for the life of the connection, which spans a whole run, and
+        # concurrent runs then exhaust the server's shared lock table. Historical
+        # candles are immutable, so per-statement transactions lose no consistency.
+        autocommit=read_only,
     )
 
 
