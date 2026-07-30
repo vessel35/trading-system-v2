@@ -386,6 +386,15 @@ def _protection_reference(
     if reason is ExitReason.LIQUIDATION:
         gap = open_price < level if position.side is PositionSide.LONG else open_price > level
         return level, gap
+    if reason is ExitReason.TAKE_PROFIT:
+        # A target sits on the favourable side, so a bar reaches it after opening away
+        # from it. Taking the open there would book less than the target on every
+        # ordinary bar; only a bar that opens past the target fills beyond it.
+        if position.side is PositionSide.LONG:
+            return max(level, open_price), open_price > level
+        return min(level, open_price), open_price < level
+    # A stop sits on the adverse side, so a bar that opens past it has already moved
+    # further against the position than the stop and fills at that worse open.
     if position.side is PositionSide.LONG:
         return min(level, open_price), open_price < level
     return max(level, open_price), open_price > level
