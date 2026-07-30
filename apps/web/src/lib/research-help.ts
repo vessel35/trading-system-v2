@@ -6,6 +6,11 @@ export interface ResearchHelpField {
   description: string;
 }
 
+export interface ResearchHelpExample {
+  label: string;
+  body: string;
+}
+
 export interface ResearchHelp {
   title: string;
   triggerAriaLabel: string;
@@ -13,6 +18,8 @@ export interface ResearchHelp {
   concepts: readonly string[];
   fields: readonly ResearchHelpField[];
   example?: string;
+  /** One worked example per choice, for settings where the choice is the hard part. */
+  examples?: readonly ResearchHelpExample[];
   note?: string;
   caution?: string;
 }
@@ -70,7 +77,8 @@ export const researchHelpById: Readonly<
     overview:
       "여러 파라미터 조합을 한 번에 자동으로 돌려 성적을 비교하는 기능입니다.",
     concepts: [
-      "grid는 모든 값의 조합을 격자로 실행하고, walk_forward는 시간 구간을 앞으로 밀며 검증하며, is_oos는 인샘플(IS)과 아웃오브샘플(OOS)로 나눠 검증합니다.",
+      "grid는 파라미터 값을 바꿔 가며 비교하고, walk_forward와 is_oos는 값을 바꾸지 않고 기간을 나눠 같은 설정이 다른 시기에도 통하는지 확인합니다.",
+      "그래서 순서를 두면 자연스럽습니다. grid로 후보를 좁히고, walk_forward나 is_oos로 그 후보가 처음 보는 구간에서도 버티는지 확인합니다.",
     ],
     fields: [
       {
@@ -92,8 +100,32 @@ export const researchHelpById: Readonly<
           "조합별 성적을 히트맵이나 표로 비교합니다. 대표 run에는 검증 방식에서 계산된 과최적화 집계인 oos_degradation과 PSR이 함께 표시됩니다.",
       },
     ],
-    example:
-      "예: reward_risk=[1.5, 2.0, 2.5], atr_stop_multiple=[1.5, 2.0]이면 3×2=6개 조합을 각각 백테스트합니다.",
+    examples: [
+      {
+        label: "grid — 어떤 값이 좋은지 비교한다",
+        body:
+          "reward_risk를 [1.5, 2.0, 2.5], atr_stop_multiple을 [1.5, 2.0]으로 두면 " +
+          "3×2=6가지 조합이 만들어지고, 같은 기간을 6번 각각 백테스트해 성적을 나란히 " +
+          "비교합니다. 조합 수는 100개까지만 실행되며, 같은 파라미터를 두 축에 넣을 수 " +
+          "없습니다.",
+      },
+      {
+        label: "walk_forward — 시간을 밀며 반복 검증한다",
+        body:
+          "2025년 1월부터 6월까지를 folds=3으로 두면 구간을 셋으로 나눠 앞에서부터 " +
+          "차례로 검증합니다. 1~2월로 확인하고, 3~4월로 다시 확인하고, 5~6월로 또 " +
+          "확인하는 식입니다. 한 시기에만 잘 맞는 설정인지, 시기가 바뀌어도 견디는지를 " +
+          "봅니다. 파라미터 조합을 만들지 않고 기준 설정 하나를 여러 구간에 적용합니다.",
+      },
+      {
+        label: "is_oos — 배운 구간과 처음 보는 구간을 가른다",
+        body:
+          "같은 기간을 split=0.7로 두면 앞 70%(1월 중순까지)를 인샘플, 뒤 30%를 " +
+          "아웃오브샘플로 나눕니다. 앞 구간에서 좋아 보이던 설정이 뒤 구간에서도 " +
+          "유지되는지 확인합니다. 뒤 구간은 설정을 고를 때 쓰지 않은 데이터라, " +
+          "성적이 크게 떨어지면 과적합 신호입니다.",
+      },
+    ],
     caution:
       '과거 데이터에 "가장 잘 맞는" 조합을 고르면 과적합(overfitting) 위험이 큽니다. 조합 수가 많을수록 우연히 좋아 보이는 결과가 나오기 쉬우며, 미래에도 좋다는 보장은 없습니다. 특히 grid는 집합 검증 증거가 없으므로 반드시 새 구간에서 OOS 재검증을 권장합니다.',
   },

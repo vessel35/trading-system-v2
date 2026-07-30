@@ -98,7 +98,7 @@ describe("실행 관리 보강", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("스윕 설정 도움말에서 격자 조합과 과적합 주의를 확인하고 닫기 버튼으로 닫는다", async () => {
+  it("스윕 설정 도움말이 세 유형을 각각 예로 설명하고 닫기 버튼으로 닫는다", async () => {
     const user = userEvent.setup();
     renderManagement();
 
@@ -110,8 +110,16 @@ describe("실행 관리 보강", () => {
     const dialog = screen.getByRole("dialog", {
       name: "스윕 설정 도움말",
     });
-    expect(within(dialog).getAllByText(/격자/).length).toBeGreaterThan(0);
-    expect(within(dialog).getByText(/6개 조합/)).toBeInTheDocument();
+    // 유형을 고르는 것이 어려운 부분이므로 세 유형에 각각 풀어 쓴 예가 있어야 한다.
+    const examples = within(dialog).getByLabelText("유형별 예시");
+    expect(within(examples).getByText(/^grid —/)).toBeInTheDocument();
+    expect(within(examples).getByText(/^walk_forward —/)).toBeInTheDocument();
+    expect(within(examples).getByText(/^is_oos —/)).toBeInTheDocument();
+    // 각 예는 숫자로 무슨 일이 일어나는지 말해야 한다.
+    expect(within(examples).getByText(/3×2=6가지 조합/)).toBeInTheDocument();
+    expect(within(examples).getByText(/folds=3/)).toBeInTheDocument();
+    expect(within(examples).getByText(/split=0\.7/)).toBeInTheDocument();
+
     expect(within(dialog).getByText(/과적합\(overfitting\)/)).toBeInTheDocument();
     expect(within(dialog).getByText(/OOS 재검증/)).toBeInTheDocument();
 
