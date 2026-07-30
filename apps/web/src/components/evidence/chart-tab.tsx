@@ -31,6 +31,45 @@ import {
 
 const INDICATOR_COLORS = ["#2dd4bf", "#38bdf8", "#fbbf24", "#c084fc", "#fb7185"];
 
+// Entries carry a direction and exits carry a reason, and both were previously flattened
+// to "진입"/"청산". The marker is the only place a reader sees an individual fill on the
+// price chart, so it states which side was opened and how the position actually ended.
+const ENTRY_STYLE = {
+  LONG: { color: "#34d399", label: "롱 진입" },
+  SHORT: { color: "#38bdf8", label: "숏 진입" },
+} as const;
+
+const EXIT_STYLE: Record<string, { color: string; label: string }> = {
+  TAKE_PROFIT: { color: "#2dd4bf", label: "익절" },
+  STOP_LOSS: { color: "#fb7185", label: "손절" },
+  TRAILING_STOP: { color: "#fb7185", label: "트레일링 손절" },
+  LIQUIDATION: { color: "#ef4444", label: "강제청산" },
+  SIGNAL_EXIT: { color: "#94a3b8", label: "신호 청산" },
+  REVERSAL: { color: "#c084fc", label: "반대신호 청산" },
+  DATA_GAP: { color: "#f59e0b", label: "데이터 공백 청산" },
+  END_OF_DATA: { color: "#64748b", label: "기간 종료 청산" },
+};
+
+const UNKNOWN_EXIT = { color: "#94a3b8", label: "청산" };
+
+export function entryStyle(positionSide: string): { color: string; label: string } {
+  return positionSide === "SHORT" ? ENTRY_STYLE.SHORT : ENTRY_STYLE.LONG;
+}
+
+export function exitStyle(exitReason: string | null): { color: string; label: string } {
+  if (exitReason === null) return UNKNOWN_EXIT;
+  return EXIT_STYLE[exitReason] ?? UNKNOWN_EXIT;
+}
+
+const MARKER_LEGEND = [
+  { label: "롱 진입", color: ENTRY_STYLE.LONG.color },
+  { label: "숏 진입", color: ENTRY_STYLE.SHORT.color },
+  { label: "익절", color: EXIT_STYLE.TAKE_PROFIT.color },
+  { label: "손절", color: EXIT_STYLE.STOP_LOSS.color },
+  { label: "강제청산", color: EXIT_STYLE.LIQUIDATION.color },
+  { label: "그 밖의 청산", color: UNKNOWN_EXIT.color },
+];
+
 function utcSeconds(value: string): UTCTimestamp {
   return Math.floor(new Date(value).getTime() / 1000) as UTCTimestamp;
 }
@@ -147,15 +186,18 @@ function MarketChart({
     if (markerVisibility.trades) {
       executions.forEach((execution) => {
         const isExit = execution.exit_reason !== null || execution.reduce_only;
+        const style = isExit
+          ? exitStyle(execution.exit_reason)
+          : entryStyle(execution.position_side);
         markers.push({
           id: execution.trade_id ? `trade:${execution.trade_id}` : undefined,
           time: markerTime(execution.execution_ts, candles, false),
           position: isExit ? "aboveBar" : "belowBar",
-          color: execution.exit_reason === "LIQUIDATION" ? "#ef4444" : isExit ? "#fb7185" : "#34d399",
+          color: style.color,
           shape: isExit ? "arrowDown" : "arrowUp",
           text: execution.trade_id
-            ? `${isExit ? "청산" : "진입"} #${execution.trade_id}`
-            : execution.side,
+            ? `${style.label} #${execution.trade_id}`
+            : `${style.label} ${execution.side}`,
         });
       });
     }
@@ -281,7 +323,24 @@ export function ChartTab({
                 {evidence.candles.data?.page.total.toLocaleString()}개 · 지표 재계산 없음
               </CardDescription>
             </div>
-            <Badge variant="outline">UTC · READ ONLY</Badge>
+            <Badge variant="outline">KST · READ ONLY</Badge>
+          </div>
+          <div
+            className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground"
+            aria-label="거래 마커 범례"
+          >
+            <span className="font-medium text-foreground">마커</span>
+            {MARKER_LEGEND.map((item) => (
+              <span key={item.label} className="flex items-center gap-1">
+                <span
+                  aria-hidden
+                  className="inline-block h-2 w-2 rounded-full"
+                  style={{ backgroundColor: item.color }}
+                />
+                {item.label}
+              </span>
+            ))}
+            <span>▲ 진입 · ▼ 청산</span>
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
             {indicatorKeys.map((key) => (
