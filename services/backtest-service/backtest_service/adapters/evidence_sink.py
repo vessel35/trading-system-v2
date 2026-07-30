@@ -689,12 +689,7 @@ class BacktestEvidenceSink(EvidenceSink):
         if not allowed_gaps <= set(full_grid):
             return ["strategy_ohlcv_gap_outside_evaluation_grid"]
         expected = [close_time for close_time in full_grid if close_time not in allowed_gaps]
-        actual = [
-            row[0]
-            for row in self.connection.execute(
-                "SELECT ts FROM PORTFOLIO_PNL ORDER BY ts, equity_seq"
-            ).fetchall()
-        ]
+        actual = self._portfolio_bar_grid()
         if actual != expected:
             failures.append(
                 "portfolio_grid_mismatch:"
@@ -702,6 +697,24 @@ class BacktestEvidenceSink(EvidenceSink):
                 f"declared_gaps={len(allowed_gaps)}"
             )
         return failures
+
+    def _portfolio_bar_grid(self) -> list[int]:
+        """Return the equity timestamps that correspond to evaluated bars.
+
+        The run appends one terminal equity row a millisecond after the last bar, to
+        carry the equity that remains once it closes what it still held. That row is
+        not part of the bar grid, so completeness checks that compare against bars drop
+        it rather than counting it as an extra bar.
+        """
+        rows = [
+            row[0]
+            for row in self.connection.execute(
+                "SELECT ts FROM PORTFOLIO_PNL ORDER BY ts, equity_seq"
+            ).fetchall()
+        ]
+        if len(rows) >= 2 and rows[-1] == rows[-2] + 1:
+            return rows[:-1]
+        return rows
 
     def _indicator_failures(self) -> list[str]:
         keys = [
@@ -712,12 +725,7 @@ class BacktestEvidenceSink(EvidenceSink):
         ]
         if not keys:
             return ["missing_indicator_definitions"]
-        grid = [
-            row[0]
-            for row in self.connection.execute(
-                "SELECT ts FROM PORTFOLIO_PNL ORDER BY ts, equity_seq"
-            ).fetchall()
-        ]
+        grid = self._portfolio_bar_grid()
         failures: list[str] = []
         for key in keys:
             rows = self.connection.execute(

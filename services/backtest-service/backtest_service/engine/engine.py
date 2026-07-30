@@ -640,6 +640,7 @@ class Engine:
         final_equity = recompute(self._cash, self._current_position())
         terminal_ts = last.close_time + timedelta(milliseconds=1)
         self._equity_curve.append((terminal_ts, final_equity))
+        self._record_terminal_equity(terminal_ts, final_equity)
         metrics = compute(self._trades, self._equity_curve)
         run_r_multiples = tuple(trade_r_multiples(self._trades))
         run_period_returns = tuple(daily_returns(self._equity_curve))
@@ -1461,6 +1462,40 @@ class Engine:
             )
         )
         self._equity_curve.append((candle.close_time, equity))
+
+    def _record_terminal_equity(self, terminal_ts: datetime, final_equity: Decimal) -> None:
+        """Persist the equity that remains after the run closes what it still held.
+
+        Bar-by-bar equity is recorded while a position is still open, so it carries that
+        position at its mark rather than at what closing it would return. The run then
+        closes the position, and the summary reports the equity that followed. Without
+        this row the stored curve stops one step short of that: its last value differs
+        from the reported final equity by the cost of the closing fill, and anyone
+        recomputing from Evidence disagrees with the summary by exactly that amount.
+        """
+        position = self._current_position()
+        self._sequence["equity"] += 1
+        peak = max((value for _, value in self._equity_curve), default=final_equity)
+        drawdown = float(final_equity / peak - Decimal("1")) if peak > ZERO else 0.0
+        self.evidence.record(
+            EvidenceRecord(
+                "PORTFOLIO_PNL",
+                {
+                    "equity_seq": self._sequence["equity"],
+                    "ts": terminal_ts,
+                    "cash_balance": self._cash,
+                    "position_value": position_value(position),
+                    "total_equity": final_equity,
+                    "unrealized_pnl": ZERO if position is None else position.unrealized_pnl,
+                    "fee_cum": sum((trade.total_fee for trade in self._trades), ZERO),
+                    "slippage_cum": sum((trade.slippage for trade in self._trades), ZERO),
+                    "funding_cum": sum((trade.funding_cost for trade in self._trades), ZERO),
+                    "peak_equity": peak,
+                    "drawdown_pct": drawdown,
+                    "open_positions": int(position is not None),
+                },
+            )
+        )
 
     def _position_record(
         self,

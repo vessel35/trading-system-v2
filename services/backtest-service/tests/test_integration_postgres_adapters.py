@@ -1258,7 +1258,9 @@ def test_vessel_engine_traverses_real_crypto_data_feed(
         assert evidence.execute("SELECT min(cash_balance) >= 0 FROM PORTFOLIO_PNL").fetchone() == (
             1,
         )
-        assert evidence.execute("SELECT COUNT(*) FROM PORTFOLIO_PNL").fetchone() == (72,)
+        # 72 evaluated bars plus the terminal row carrying the equity that remains after
+        # the run closes what it still held.
+        assert evidence.execute("SELECT COUNT(*) FROM PORTFOLIO_PNL").fetchone() == (73,)
         _assert_matrix_axes(evidence, case)
 
 
@@ -1766,7 +1768,8 @@ def test_real_missing_candles_complete_330_day_evidence(
         )
         _assert_matrix_axes(evidence, case)
 
-        assert evidence.execute("SELECT COUNT(*) FROM PORTFOLIO_PNL").fetchone() == (7_901,)
+        # 7_901 evaluated bars plus the terminal equity row.
+        assert evidence.execute("SELECT COUNT(*) FROM PORTFOLIO_PNL").fetchone() == (7_902,)
         assert evidence.execute("SELECT COUNT(*) FROM TRADE").fetchone() == (600,)
         assert evidence.execute(
             "SELECT COUNT(*) FROM EXECUTION WHERE exit_reason = 'DATA_GAP'"
