@@ -1092,7 +1092,9 @@ def test_declared_source_gap_passes_but_an_evidence_record_gap_fails(
     assert gap_count == 1
     assert gap_evidence["normal_gap_count"] == 1
     assert gap_evidence["evaluation_grid_gap_count"] == 1
-    assert sink.connection.execute("SELECT COUNT(*) FROM PORTFOLIO_PNL").fetchone() == (3,)
+    # Three evaluated bars plus the terminal row that carries the equity remaining
+    # after the run closes what it still held.
+    assert sink.connection.execute("SELECT COUNT(*) FROM PORTFOLIO_PNL").fetchone() == (4,)
     assert sink.connection.execute(
         "SELECT action, skip_reason FROM DECISION ORDER BY decision_id"
     ).fetchall() == [("skip", "next_candle_gap")]
@@ -1297,7 +1299,8 @@ def test_vessel_reference_end_to_end_dry_run_is_complete_and_deterministic(
         assert '"ATR"' in local[0]
         assert connection.execute("SELECT COUNT(*) FROM TRADE").fetchone() == (1,)
         assert connection.execute("SELECT COUNT(*) FROM INDICATOR_SNAPSHOT").fetchone() == (18,)
-        assert connection.execute("SELECT COUNT(*) FROM PORTFOLIO_PNL").fetchone() == (6,)
+        # Six evaluated bars plus the terminal equity row.
+        assert connection.execute("SELECT COUNT(*) FROM PORTFOLIO_PNL").fetchone() == (7,)
         snapshots = connection.execute(
             """
             SELECT indicator_key, value
@@ -1570,10 +1573,13 @@ def test_integrity_audit_is_fail_closed_for_grid_indicator_source_and_slippage(
         """
     )
     sink.connection.execute("DELETE FROM SOURCE_DATA_SNAPSHOT WHERE source_kind = 'funding'")
+    # Remove an evaluated bar's equity row rather than the terminal one: the terminal
+    # row sits outside the bar grid, so dropping it would leave the grid intact and the
+    # check would have nothing to catch.
     sink.connection.execute(
         """
         DELETE FROM PORTFOLIO_PNL
-        WHERE equity_seq = (SELECT max(equity_seq) FROM PORTFOLIO_PNL)
+        WHERE equity_seq = (SELECT max(equity_seq) - 1 FROM PORTFOLIO_PNL)
         """
     )
     sink.connection.commit()
