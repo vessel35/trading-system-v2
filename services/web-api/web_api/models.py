@@ -1,10 +1,18 @@
 """Typed HTTP contracts for the P0 catalog API."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated, Literal, Self
 
 from backtest_service.config import RunConfig
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, SkipValidation, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    SkipValidation,
+    field_validator,
+    model_validator,
+)
 
 DecimalString = Annotated[
     str,
@@ -640,6 +648,87 @@ class DataSourceCoverage(BaseModel):
     missing_1m_rows: int
 
 
+class InventoryItem(BaseModel):
+    symbol: str
+    exchange: str
+    timeframe: Literal["1m"] = "1m"
+    available_from: datetime | None
+    available_to: datetime | None
+    row_count: int
+    expected_1m_rows: int
+    missing_1m_rows: int
+    coverage_ratio: float = Field(ge=0, le=1)
+
+
+class DataSourceInventory(BaseModel):
+    data_source: str
+    items: list[InventoryItem]
+
+
+DataJobOperation = Literal["backfill", "funding_backfill", "refresh_aggregates"]
+AggregateTimeframe = Literal["5m", "15m", "1h", "4h", "1d"]
+DataJobStatusValue = Literal["QUEUED", "RUNNING", "SUCCEEDED", "FAILED"]
+
+
+class JobError(BaseModel):
+    code: str
+    message: str
+
+
+class DataJobRequest(BaseModel):
+    """A deliberate request for collector network access and crypto_data writes."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    operation: DataJobOperation = Field(
+        description=("Collector operation. Execution can access Binance and write crypto_data.")
+    )
+    symbol: str = Field(
+        min_length=1,
+        max_length=60,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*:"
+        r"[A-Za-z0-9][A-Za-z0-9._-]*$",
+        description="CCXT futures symbol, for example ETH/USDT:USDT.",
+    )
+    exchange: str = Field(min_length=1, max_length=20)
+    start: datetime
+    end: datetime
+    timeframes: list[AggregateTimeframe] | None = Field(default=None, min_length=1)
+
+    @field_validator("start", "end")
+    @classmethod
+    def _require_utc_aware(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("must include an explicit UTC offset")
+        return value.astimezone(UTC)
+
+    @model_validator(mode="after")
+    def _validate_range_and_timeframes(self) -> Self:
+        if self.start >= self.end:
+            raise ValueError("start must be earlier than end")
+        if self.operation != "refresh_aggregates" and self.timeframes is not None:
+            raise ValueError("timeframes are accepted only for refresh_aggregates")
+        return self
+
+
+class DataJobStatus(BaseModel):
+    """Public snapshot of one collector subprocess job."""
+
+    job_id: str
+    operation: DataJobOperation
+    symbol: str
+    exchange: Literal["binance"]
+    start: datetime
+    end: datetime
+    timeframes: list[AggregateTimeframe] | None = None
+    status: DataJobStatusValue
+    created_at: datetime
+    updated_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    error: JobError | None = None
+
+
 class CatalogHealth(BaseModel):
     status: Literal["connected"]
     database: str
@@ -756,11 +845,6 @@ class SweepSubmission(BaseModel):
 JobStatusValue = Literal["QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "ORPHANED"]
 
 
-class JobError(BaseModel):
-    code: str
-    message: str
-
-
 class JobStatus(BaseModel):
     job_id: str
     status: JobStatusValue
@@ -790,6 +874,8 @@ class StrategyOption(BaseModel):
     required_indicators: list[dict[str, object]]
     min_history: int
     default_params: dict[str, object]
+    supported_money_management: list[Literal["manual", "turtle"]]
+    default_money_management: dict[str, object]
     is_active: bool
     is_deprecated: bool
     source: Literal["strategy_registry", "code_registry"]

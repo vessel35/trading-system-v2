@@ -3,6 +3,7 @@ import { Redirect, Route, Switch } from "wouter";
 import { AppShell } from "./components/app-shell";
 import { CatalogPage } from "./pages/catalog-page";
 import { ComparisonPage } from "./pages/comparison-page";
+import { DataPage } from "./pages/data-page";
 import { RunManagementPage } from "./pages/run-management-page";
 import { RunSummaryPage } from "./pages/run-summary-page";
 
@@ -29,6 +30,11 @@ export function App() {
       <Route path="/manage">
         <AppShell>
           <RunManagementPage />
+        </AppShell>
+      </Route>
+      <Route path="/data">
+        <AppShell>
+          <DataPage />
         </AppShell>
       </Route>
       <Route>

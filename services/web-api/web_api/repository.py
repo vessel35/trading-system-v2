@@ -1,5 +1,6 @@
 """SQL repository for P0 catalog reads."""
 
+from collections.abc import Mapping
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, Literal, cast
@@ -17,7 +18,9 @@ from web_api.models import (
     CandlePage,
     CatalogHealth,
     DataSourceCoverage,
+    DataSourceInventory,
     HealthResponse,
+    InventoryItem,
     Page,
     Preregistration,
     PreregistrationResponse,
@@ -496,24 +499,57 @@ class StrategyRepository:
                 """
             ).fetchall()
             if rows:
-                return StrategyListResponse(
-                    data=[
-                        StrategyOption(
-                            strategy_id=str(row["strategy_id"]),
-                            display_name=str(row["display_name"]),
-                            strategy_version=str(row["strategy_version"]),
-                            supported_timeframes=list(row["supported_timeframes"]),
-                            required_indicators=list(row["required_indicators_json"]),
-                            min_history=int(row["min_history"]),
-                            default_params=dict(row["default_params_json"]),
-                            is_active=bool(row["is_active"]),
-                            is_deprecated=bool(row["is_deprecated"]),
-                            source="strategy_registry",
-                        )
-                        for row in rows
-                    ]
-                )
+                return StrategyListResponse(data=[self._database_option(row) for row in rows])
         return self._code_registry()
+
+    @staticmethod
+    def _database_option(row: Mapping[str, object]) -> StrategyOption:
+        strategy_id = str(row["strategy_id"])
+        metadata = VesselReference.get_metadata() if strategy_id == STRATEGY_ID else None
+        support = None if metadata is None else metadata.money_management
+        return StrategyOption(
+            strategy_id=strategy_id,
+            display_name=str(row["display_name"]),
+            strategy_version=(
+                VesselReference.VERSION if metadata is not None else str(row["strategy_version"])
+            ),
+            supported_timeframes=list(cast(list[str], row["supported_timeframes"])),
+            required_indicators=(
+                metadata.required_indicators
+                if metadata is not None
+                else list(
+                    cast(
+                        list[dict[str, object]],
+                        row["required_indicators_json"],
+                    )
+                )
+            ),
+            min_history=(
+                metadata.min_history if metadata is not None else int(cast(int, row["min_history"]))
+            ),
+            default_params=dict(cast(dict[str, object], row["default_params_json"])),
+            supported_money_management=(
+                []
+                if support is None
+                else cast(
+                    list[Literal["manual", "turtle"]],
+                    list(support.supported),
+                )
+            ),
+            default_money_management=(
+                {}
+                if support is None
+                else {
+                    "mode": support.default or "manual",
+                    "leverage": 1,
+                    "reward_risk": 2.0,
+                    "atr_stop_multiple": 2.0,
+                }
+            ),
+            is_active=bool(row["is_active"]),
+            is_deprecated=bool(row["is_deprecated"]),
+            source="strategy_registry",
+        )
 
     @staticmethod
     def _code_registry() -> StrategyListResponse:
@@ -532,6 +568,18 @@ class StrategyRepository:
                     required_indicators=metadata.required_indicators,
                     min_history=metadata.min_history,
                     default_params=dict(resolved.params),
+                    supported_money_management=list(
+                        cast(
+                            tuple[Literal["manual", "turtle"], ...],
+                            metadata.money_management.supported,
+                        )
+                    ),
+                    default_money_management={
+                        "mode": metadata.money_management.default or "manual",
+                        "leverage": 1,
+                        "reward_risk": 2.0,
+                        "atr_stop_multiple": 2.0,
+                    },
                     is_active=True,
                     is_deprecated=False,
                     source="code_registry",
@@ -694,6 +742,45 @@ class MarketDataRepository:
             expected_1m_rows=expected,
             missing_1m_rows=max(0, expected - row_count),
         )
+
+    def inventory(self, *, data_source: str) -> DataSourceInventory:
+        table = self._source_table(data_source)
+        rows = self._connection.execute(
+            f"""
+            SELECT
+                symbol,
+                exchange,
+                min(time) AS available_from,
+                max(time) AS available_to,
+                count(DISTINCT time) AS row_count,
+                CASE
+                    WHEN min(time) IS NULL THEN 0
+                    ELSE floor(extract(epoch FROM (max(time) - min(time))) / 60)::bigint + 1
+                END AS expected_1m_rows
+            FROM public.{table}
+            WHERE timeframe = '1m'
+            GROUP BY symbol, exchange
+            ORDER BY symbol, exchange
+            """
+        ).fetchall()
+        items = []
+        for row in rows:
+            row_count = int(row["row_count"])
+            expected = int(row["expected_1m_rows"])
+            coverage_ratio = min(1.0, max(0.0, row_count / expected)) if expected else 0.0
+            items.append(
+                InventoryItem(
+                    symbol=row["symbol"],
+                    exchange=row["exchange"],
+                    available_from=row["available_from"],
+                    available_to=row["available_to"],
+                    row_count=row_count,
+                    expected_1m_rows=expected,
+                    missing_1m_rows=max(0, expected - row_count),
+                    coverage_ratio=coverage_ratio,
+                )
+            )
+        return DataSourceInventory(data_source=data_source, items=items)
 
     @staticmethod
     def _source_table(data_source: str) -> str:

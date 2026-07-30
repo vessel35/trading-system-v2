@@ -1,6 +1,7 @@
 """Define shared domain value types and money precision."""
 
 from .candle import Candle
+from .decision import DecisionAction, DecisionIntent
 from .enums import (
     ExitReason,
     MarginType,
@@ -39,6 +40,8 @@ __all__ = [
     "Q_RATIO",
     "ZERO",
     "Candle",
+    "DecisionAction",
+    "DecisionIntent",
     "ExitReason",
     "Fill",
     "MarginType",

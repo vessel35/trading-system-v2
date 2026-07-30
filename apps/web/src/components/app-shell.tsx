@@ -3,6 +3,7 @@ import {
   BarChart3,
   BookOpenCheck,
   ChevronRight,
+  Database,
   FlaskConical,
   LayoutList,
   LockKeyhole,
@@ -27,6 +28,7 @@ const researchNav = [
   { label: "카탈로그", icon: LayoutList, path: "/runs", enabled: true },
   { label: "분석", icon: BarChart3, path: "/compare", enabled: true },
   { label: "실행 관리", icon: FlaskConical, path: "/manage", enabled: true },
+  { label: "데이터", icon: Database, path: "/data", enabled: true },
   { label: "전략", icon: BookOpenCheck, path: "/strategies", enabled: false },
 ] as const;
 

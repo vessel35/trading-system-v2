@@ -59,10 +59,11 @@ def test_core_lib_dependencies_follow_the_one_way_component_graph() -> None:
         "types": set(),
         "indicators": {"types"},
         "sizing": {"types"},
+        "money_management": {"types"},
         "costs": {"ports", "types"},
         "eval": {"types"},
         "ports": {"types"},
-        "strategy": {"indicators", "ports", "types"},
+        "strategy": {"indicators", "money_management", "ports", "types"},
         "execution": {"costs", "ports", "types"},
     }
     violations: list[str] = []

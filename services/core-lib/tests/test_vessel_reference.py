@@ -7,6 +7,8 @@ from core_lib.strategy import StrategyAdapter, StrategyConfig
 from core_lib.strategy.adaptees import STRATEGY_ID, VesselReference
 from core_lib.types import (
     Candle,
+    DecisionAction,
+    DecisionIntent,
     MarginType,
     MarketType,
     Position,
@@ -69,8 +71,9 @@ def test_vessel_declares_exact_pipeline_inputs_and_no_trailing() -> None:
     assert metadata.required_indicators == [
         {"name": "EMA", "params": {"period": 9}},
         {"name": "EMA", "params": {"period": 21}},
-        {"name": "ATR", "params": {"period": 14}},
     ]
+    assert metadata.money_management.supported == ("manual", "turtle")
+    assert metadata.money_management.default == "manual"
 
     signal = strategy.analyze(
         {
@@ -85,8 +88,10 @@ def test_vessel_declares_exact_pipeline_inputs_and_no_trailing() -> None:
         None,
     )
     assert signal is not None
-    assert signal.stop_loss == 97.0
-    assert signal.take_profit == 109.0
+    assert isinstance(signal, DecisionIntent)
+    assert signal.action is DecisionAction.ENTER_LONG
+    assert not hasattr(signal, "stop_loss")
+    assert not hasattr(signal, "leverage")
     assert signal.metadata == {"adaptee": STRATEGY_ID, "trailing": False}
 
 
@@ -105,6 +110,6 @@ def test_vessel_exits_only_when_ema_regime_reverses() -> None:
         _position(),
     )
     assert signal is not None
-    assert signal.stop_loss is None
-    assert signal.take_profit is None
+    assert isinstance(signal, DecisionIntent)
+    assert signal.action is DecisionAction.EXIT
     assert signal.reason == "vessel-ema-regime-exit"

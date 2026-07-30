@@ -37,6 +37,7 @@ Push the other ~80% to Sonnet + Haiku.
 | Skill | Preloaded into → used for |
 |---|---|
 | `genius-thinking` | strategy-architect: PR (problem reframe), MDA (multi-dim analysis), IS (solution eval w/ P4), TE (evolution loop); **CS** (node/edge/cycle/coupling decomposition) when the design introduces or restructures component boundaries or data-flow topology |
+| `develop-trading-strategies` | strategy-architect / quant-impl / review-agent: StrategyAdapter 작성 계약, 전략과 자금관리 정책의 책임 분리, manual 호환성, Turtle 정책, Evidence 및 계약 테스트 |
 | `quant-backtest` | quant-impl / backtest-runner: NautilusTrader strategies, lookahead guards, engine config, failure-symptom diagnosis |
 | `statistical-validation` | review-agent / backtest-runner / strategy-architect: bootstrap CI, walk-forward CV, multiple-testing, cointegration / GARCH / regression diagnostics |
 | `decimal-arithmetic-discipline` | quant-impl: any code touching money / position size / price / fees / slippage |

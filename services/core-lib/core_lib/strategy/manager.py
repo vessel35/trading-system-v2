@@ -2,9 +2,10 @@
 
 from collections.abc import Mapping
 
+from core_lib.money_management import MoneyManagementFactory
 from core_lib.ports import StrategyRegistry
 
-from .base import StrategyAdapter
+from .base import StrategyAdapter, StrategyRuntime
 from .config import StrategyConfig
 from .factory import AdapterFactory
 from .registry import InProcessStrategyRegistry
@@ -49,6 +50,26 @@ class AdapterManager:
         instance = self._factory.create(adaptee_class, resolved)
         self._instances[strategy_id] = instance
         return instance
+
+    def create_runtime(
+        self,
+        strategy_id: str,
+        raw_config: Mapping[str, object],
+        money_management_config: Mapping[str, object],
+    ) -> StrategyRuntime:
+        """Compose one strategy with a validated policy it explicitly supports."""
+        strategy = self.create(strategy_id, raw_config)
+        support = strategy.get_metadata().money_management
+        if not support.supported:
+            return StrategyRuntime(strategy=strategy, money_management=None)
+        policy = MoneyManagementFactory.create(money_management_config)
+        if policy.id not in support.supported:
+            raise ValueError(
+                f"strategy {strategy_id!r} does not support money-management mode {policy.id!r}"
+            )
+        if policy.id == "turtle" and not support.supports_signal_exit:
+            raise ValueError("turtle money management requires strategy signal exits")
+        return StrategyRuntime(strategy=strategy, money_management=policy)
 
     @staticmethod
     def _validate_catalog_entry(

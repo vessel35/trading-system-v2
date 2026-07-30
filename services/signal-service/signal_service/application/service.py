@@ -16,8 +16,24 @@ from core_lib.indicators import (
     IndicatorState,
     assert_finalized,
 )
+from core_lib.money_management import (
+    AccountRiskSnapshot,
+    ManualMoneyManagement,
+    MarketSnapshot,
+    MoneyManagementPolicy,
+    RiskLimits,
+)
 from core_lib.strategy import AdapterManager, StrategyAdapter, StrategyConfig
-from core_lib.types import Candle, Position, PositionSide, SignalType, TradingSignal
+from core_lib.types import (
+    Candle,
+    DecisionAction,
+    DecisionIntent,
+    MarketType,
+    Position,
+    PositionSide,
+    SignalType,
+    TradingSignal,
+)
 
 from signal_service.core import SignalGenerationConfig
 from signal_service.domain import DataGap, PersistedSignal, SignalIntent
@@ -58,6 +74,7 @@ class SignalGenerationService:
         self._queue = queue
         self._config: SignalGenerationConfig | None = None
         self._strategy: StrategyAdapter | None = None
+        self._money_management: MoneyManagementPolicy | None = None
         self._specs: list[IndicatorSpec] = []
         self._states: dict[str, IndicatorState] = {}
         self._confirmed: list[Candle] = []
@@ -82,17 +99,37 @@ class SignalGenerationService:
         if self._config is not None:
             raise RuntimeError("signal generation session is already started")
         boundary = self._utc(decision_time, name="decision_time")
-        strategy = self._manager.create(
+        manual_config = {
+            "mode": "manual",
+            "leverage": config.params.get("leverage", 1),
+            "reward_risk": config.params.get("reward_risk", 2.0),
+            "atr_stop_multiple": config.params.get("atr_stop_multiple", 2.0),
+        }
+        runtime = self._manager.create_runtime(
             config.strategy_id,
             {"strategy_id": config.strategy_id, "params": dict(config.params)},
+            manual_config,
         )
+        strategy = runtime.strategy
         self._manager.activate(config.strategy_id)
         metadata = strategy.get_metadata()
         if config.timeframe not in metadata.supported_timeframes:
             raise ValueError("strategy does not support the configured timeframe")
+        policy_indicators = (
+            []
+            if runtime.money_management is None
+            else [
+                {
+                    "name": requirement.name,
+                    "params": dict(requirement.params),
+                }
+                for requirement in runtime.money_management.required_indicators()
+                if requirement.timeframe == "strategy"
+            ]
+        )
         specs = self._indicators.resolve_specs(
             "auto",
-            metadata.required_indicators,
+            [*metadata.required_indicators, *policy_indicators],
             (),
         )
         required_warmup = max(
@@ -115,6 +152,7 @@ class SignalGenerationService:
 
         self._config = config
         self._strategy = strategy
+        self._money_management = runtime.money_management
         self._specs = specs
         self._states = {spec.identifier: spec.make_state() for spec in specs}
         self._resolved_params = dict(serialized_params)
@@ -139,6 +177,7 @@ class SignalGenerationService:
         config = self._require_config()
         self._config = None
         self._strategy = None
+        self._money_management = None
         self._specs = []
         self._states = {}
         self._confirmed = []
@@ -260,12 +299,93 @@ class SignalGenerationService:
         )
         if signal is None:
             return None
+        if isinstance(signal, DecisionIntent):
+            if signal.action is DecisionAction.HOLD:
+                return None
+            signal = self._materialize_decision(
+                signal,
+                candle,
+                indicator_values,
+            )
         if signal.timestamp > candle.close_time:
             raise ValueError("strategy signal cannot be later than the confirmed candle")
         persisted = self._persisted_signal(signal, candle, current_position)
         if self._sink.store(persisted) and self._queue is not None:
             self._queue.publish(persisted)
         return persisted
+
+    def _materialize_decision(
+        self,
+        decision: DecisionIntent,
+        candle: Candle,
+        indicators: Mapping[str, object],
+    ) -> TradingSignal:
+        config = self._require_config()
+        if decision.action is DecisionAction.EXIT:
+            return TradingSignal(
+                symbol=decision.symbol,
+                timestamp=decision.timestamp,
+                confidence=decision.confidence,
+                price=decision.reference_price,
+                stop_loss=None,
+                take_profit=None,
+                market_type=config.market_type,
+                leverage=1,
+                reason=decision.reason,
+                metadata={
+                    **dict(decision.metadata),
+                    "decision_action": decision.action.value,
+                },
+            )
+        policy = self._money_management
+        if not isinstance(policy, ManualMoneyManagement):
+            raise ValueError("signal generation currently requires manual money management")
+        atr = indicators.get("atr:period=14")
+        if isinstance(atr, bool) or not isinstance(atr, float | int):
+            raise ValueError("manual money management requires current ATR(14)")
+        plan = policy.plan_entry(
+            decision,
+            MarketSnapshot(
+                reference_price=decision.reference_price,
+                volatility=float(atr),
+                volatility_name="ATR(14)",
+                volatility_timestamp=candle.close_time,
+            ),
+            # Signal generation has no account or order authority. The manual
+            # policy's protection and fixed leverage do not depend on these
+            # placeholder sizing inputs, and requested quantity is not emitted.
+            AccountRiskSnapshot(
+                equity=1.0,
+                available_cash=1.0,
+                market_type=MarketType(config.market_type),
+            ),
+            RiskLimits(
+                risk_per_trade=0.01,
+                maintenance_margin_rate=0.004,
+            ),
+        )
+        return TradingSignal(
+            symbol=decision.symbol,
+            timestamp=decision.timestamp,
+            confidence=decision.confidence,
+            price=decision.reference_price,
+            stop_loss=plan.stop_loss,
+            take_profit=plan.take_profit,
+            market_type=config.market_type,
+            leverage=plan.requested_leverage,
+            reason=decision.reason,
+            metadata={
+                **dict(decision.metadata),
+                "decision_action": decision.action.value,
+                "money_management": {
+                    "policy_id": policy.id,
+                    "policy_version": policy.version,
+                    "resolved_config": dict(policy.resolved_config()),
+                    "volatility": float(atr),
+                    "volatility_timestamp": candle.close_time.isoformat(),
+                },
+            },
+        )
 
     def _persisted_signal(
         self,

@@ -12,11 +12,14 @@ from typing import Any, cast
 import pytest
 import web_api.jobs as jobs
 import web_api.main as main_module
+from backtest_service.config.run_config import TurtleMoneyManagementConfig
 from fastapi.testclient import TestClient
 from web_api.main import app, market_repository, repository
 from web_api.models import (
     BacktestTag,
     DataSourceCoverage,
+    DataSourceInventory,
+    InventoryItem,
     RunTagsResponse,
     SweepSubmission,
     TagFacetsResponse,
@@ -109,8 +112,43 @@ def test_grid_sweep_expands_validated_configs_and_reports_completion(
     assert status["sweep_id"].startswith("S-")
     configs = cast(list[Any], received["configs"])
     assert [config.params["reward_risk"] for config in configs] == [1.5, 2.5]
+    assert [config.money_management.reward_risk for config in configs] == [1.5, 2.5]
     assert {config.sweep["sweep_id"] for config in configs} == {status["sweep_id"]}
     assert [config.run_name for config in configs] == ["p2b-sweep-g1", "p2b-sweep-g2"]
+
+
+def test_grid_sweep_assigns_explicit_money_management_axis(
+    run_config_payload: dict[str, object],
+) -> None:
+    payload = SweepSubmission.model_validate(
+        {
+            "type": "grid",
+            "config": {
+                **run_config_payload,
+                "params": {},
+                "money_management": {
+                    "mode": "turtle",
+                    "n_period": 20,
+                    "n_timeframe": "1d",
+                    "stop_n_multiple": 2.0,
+                    "leverage_cap": 10,
+                },
+            },
+            "axes": [
+                {
+                    "parameter": "money_management.stop_n_multiple",
+                    "values": [1.5, 2.5],
+                }
+            ],
+        }
+    )
+    plan = main_module._prepare_sweep(payload)
+    assert plan.configs is not None
+    turtle_configs = [
+        cast(TurtleMoneyManagementConfig, config.money_management) for config in plan.configs
+    ]
+    assert [config.stop_n_multiple for config in turtle_configs] == [1.5, 2.5]
+    assert [config.params for config in plan.configs] == [{}, {}]
 
 
 @pytest.mark.parametrize(
@@ -296,7 +334,9 @@ def test_tag_crud_uses_idempotent_short_lived_writer(
         app.dependency_overrides.clear()
 
 
-def test_facets_and_coverage_are_read_only_dependency_queries(client: TestClient) -> None:
+def test_facets_coverage_and_inventory_are_read_only_dependency_queries(
+    client: TestClient,
+) -> None:
     class FakeCatalog:
         @staticmethod
         def tag_facets() -> TagFacetsResponse:
@@ -316,6 +356,24 @@ def test_facets_and_coverage_are_read_only_dependency_queries(client: TestClient
                 missing_1m_rows=1,
             )
 
+        @staticmethod
+        def inventory(**kwargs: str) -> DataSourceInventory:
+            return DataSourceInventory(
+                data_source=kwargs["data_source"],
+                items=[
+                    InventoryItem(
+                        symbol="BTC/USDT:USDT",
+                        exchange="binance",
+                        available_from=datetime(2025, 1, 1, tzinfo=UTC),
+                        available_to=datetime(2025, 1, 2, tzinfo=UTC),
+                        row_count=1440,
+                        expected_1m_rows=1441,
+                        missing_1m_rows=1,
+                        coverage_ratio=1440 / 1441,
+                    )
+                ],
+            )
+
     app.dependency_overrides[repository] = FakeCatalog
     app.dependency_overrides[market_repository] = FakeMarket
     try:
@@ -330,6 +388,26 @@ def test_facets_and_coverage_are_read_only_dependency_queries(client: TestClient
         assert coverage.status_code == 200
         assert coverage.json()["missing_1m_rows"] == 1
         assert coverage.json()["source_timeframe"] == "1m"
+
+        inventory = client.get("/api/v1/data-sources/crypto_data.ohlcv_futures/inventory")
+        assert inventory.status_code == 200
+        assert inventory.json()["items"][0]["timeframe"] == "1m"
+        assert inventory.json()["items"][0]["missing_1m_rows"] == 1
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_inventory_rejects_unsupported_data_source(client: TestClient) -> None:
+    class FakeMarket:
+        @staticmethod
+        def inventory(**_kwargs: str) -> DataSourceInventory:
+            raise ValueError("run data_source is not a supported OHLCV table")
+
+    app.dependency_overrides[market_repository] = FakeMarket
+    try:
+        response = client.get("/api/v1/data-sources/crypto_data.trades/inventory")
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "unsupported_data_source"
     finally:
         app.dependency_overrides.clear()
 

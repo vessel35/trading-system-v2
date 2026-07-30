@@ -38,6 +38,7 @@ HASH = "a" * 64
 EXPECTED_COLUMNS = {
     "BACKTEST_RUN_LOCAL": """
         run_id run_seq run_name strategy_id strategy_name strategy_version params_json
+        submitted_money_management_json money_management_json
         resolved_indicators_json params_schema_version symbol exchange timeframe market_type
         period_start period_end
         warmup_start warmup_candles indicator_mode trigger_feed fill_timing initial_capital
@@ -246,6 +247,7 @@ def test_schema_marks_deterministic_hash_boundaries() -> None:
         "BACKTEST_RUN_LOCAL": {
             "run_seq",
             "run_name",
+            "submitted_money_management_json",
             "prereg_json",
             "created_at",
         },
