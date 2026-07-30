@@ -710,77 +710,90 @@ class MarketDataRepository:
         symbol: str,
         exchange: str,
     ) -> DataSourceCoverage:
+        """Read one series' holdings from the same maintained summary."""
         table = self._source_table(data_source)
         row = self._connection.execute(
             f"""
-            SELECT
-                min(time) AS available_from,
-                max(time) AS available_to,
-                count(DISTINCT time) AS row_count,
-                CASE
-                    WHEN min(time) IS NULL THEN 0
-                    ELSE floor(extract(epoch FROM (max(time) - min(time))) / 60)::bigint + 1
-                END AS expected_1m_rows
-            FROM public.{table}
-            WHERE symbol = %s
-              AND exchange = %s
-              AND timeframe = '1m'
+            SELECT available_from, available_to, row_count
+            FROM public.{table}_inventory
+            WHERE symbol = %s AND exchange = %s AND timeframe = '1m'
             """,
             (symbol, exchange),
         ).fetchone()
-        if row is None:
-            raise RuntimeError("coverage query returned no row")
-        row_count = int(row["row_count"])
-        expected = int(row["expected_1m_rows"])
+        available_from = row["available_from"] if row else None
+        available_to = row["available_to"] if row else None
+        row_count = int(row["row_count"]) if row else 0
+        expected = self._expected_1m_rows(available_from, available_to)
         return DataSourceCoverage(
             data_source=data_source,
             symbol=symbol,
             exchange=exchange,
-            available_from=row["available_from"],
-            available_to=row["available_to"],
+            available_from=available_from,
+            available_to=available_to,
             row_count=row_count,
             expected_1m_rows=expected,
             missing_1m_rows=max(0, expected - row_count),
         )
 
     def inventory(self, *, data_source: str) -> DataSourceInventory:
+        """Read holdings from the maintained summary instead of aggregating the base.
+
+        Aggregating ohlcv_futures on every page load cost time proportional to the whole
+        retained history. The summary carries one row per series and is kept current by
+        statement triggers on the base table, so this read stays small as history grows.
+        """
         table = self._source_table(data_source)
         rows = self._connection.execute(
             f"""
-            SELECT
-                symbol,
-                exchange,
-                min(time) AS available_from,
-                max(time) AS available_to,
-                count(DISTINCT time) AS row_count,
-                CASE
-                    WHEN min(time) IS NULL THEN 0
-                    ELSE floor(extract(epoch FROM (max(time) - min(time))) / 60)::bigint + 1
-                END AS expected_1m_rows
-            FROM public.{table}
+            SELECT symbol, exchange, available_from, available_to, row_count
+            FROM public.{table}_inventory
             WHERE timeframe = '1m'
-            GROUP BY symbol, exchange
             ORDER BY symbol, exchange
             """
         ).fetchall()
-        items = []
-        for row in rows:
-            row_count = int(row["row_count"])
-            expected = int(row["expected_1m_rows"])
-            coverage_ratio = min(1.0, max(0.0, row_count / expected)) if expected else 0.0
-            items.append(
-                InventoryItem(
-                    symbol=row["symbol"],
-                    exchange=row["exchange"],
-                    available_from=row["available_from"],
-                    available_to=row["available_to"],
-                    row_count=row_count,
-                    expected_1m_rows=expected,
-                    missing_1m_rows=max(0, expected - row_count),
-                    coverage_ratio=coverage_ratio,
-                )
+        items = [
+            self._inventory_item(
+                symbol=row["symbol"],
+                exchange=row["exchange"],
+                available_from=row["available_from"],
+                available_to=row["available_to"],
+                row_count=int(row["row_count"]),
             )
+            for row in rows
+        ]
         return DataSourceInventory(data_source=data_source, items=items)
+
+    @staticmethod
+    def _expected_1m_rows(
+        available_from: datetime | None,
+        available_to: datetime | None,
+    ) -> int:
+        """Count the minutes the stored span covers, endpoints included."""
+        if available_from is None or available_to is None:
+            return 0
+        return int((available_to - available_from).total_seconds() // 60) + 1
+
+    @classmethod
+    def _inventory_item(
+        cls,
+        *,
+        symbol: str,
+        exchange: str,
+        available_from: datetime | None,
+        available_to: datetime | None,
+        row_count: int,
+    ) -> InventoryItem:
+        expected = cls._expected_1m_rows(available_from, available_to)
+        return InventoryItem(
+            symbol=symbol,
+            exchange=exchange,
+            available_from=available_from,
+            available_to=available_to,
+            row_count=row_count,
+            expected_1m_rows=expected,
+            missing_1m_rows=max(0, expected - row_count),
+            coverage_ratio=min(1.0, max(0.0, row_count / expected)) if expected else 0.0,
+        )
 
     @staticmethod
     def _source_table(data_source: str) -> str:
