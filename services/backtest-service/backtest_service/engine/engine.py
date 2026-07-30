@@ -1620,13 +1620,35 @@ class Engine:
         """
         bounded = self.feed if isinstance(self.feed, _BoundedHistory) else None
         if bounded is not None:
-            span = timeframe_milliseconds(config.timeframe) * required_warmup
-            bounded.limit_history(config.start - timedelta(milliseconds=span * _WARMUP_SPAN_FACTOR))
+            bounded.limit_history(config.start - self._warmup_span(config, required_warmup))
         history, preload = self._read_history(config)
         if bounded is not None and len(preload) < required_warmup:
             bounded.limit_history(None)
             history, preload = self._read_history(config)
         return history, preload
+
+    def _warmup_span(self, config: RunConfig, required_warmup: int) -> timedelta:
+        """Cover every declared history requirement, not just the strategy timeframe.
+
+        The money-management policy may derive its own values from a coarser timeframe:
+        a daily N over twenty days needs far more calendar history than the strategy's
+        own warm-up on an intraday bar. Reading only the strategy's span leaves that
+        series starved, and the shortfall surfaces later as a missing daily history
+        rather than as a short read.
+        """
+        spans = [timeframe_milliseconds(config.timeframe) * required_warmup]
+        policy = self._money_management
+        if policy is not None:
+            for requirement in policy.required_indicators():
+                timeframe = (
+                    config.timeframe
+                    if requirement.timeframe == "strategy"
+                    else requirement.timeframe
+                )
+                period = requirement.params.get("period")
+                bars = period if isinstance(period, int) and not isinstance(period, bool) else 0
+                spans.append(timeframe_milliseconds(timeframe) * max(bars, requirement.min_history))
+        return timedelta(milliseconds=max(spans) * _WARMUP_SPAN_FACTOR)
 
     def _read_history(self, config: RunConfig) -> tuple[list[Candle], list[Candle]]:
         history = sorted(
@@ -1687,6 +1709,18 @@ class Engine:
         period = requirements[0].params.get("period")
         if isinstance(period, bool) or not isinstance(period, int):
             raise TypeError("turtle N period must be an integer")
+        self._turtle_n_values = self._turtle_n_from_daily(period)
+        if not any(timestamp <= self._config().start for timestamp, _ in self._turtle_n_values):
+            # The bounded read is an optimization; releasing it and reading again keeps
+            # a short read from being reported as missing history.
+            bounded = self.feed if isinstance(self.feed, _BoundedHistory) else None
+            if bounded is not None:
+                bounded.limit_history(None)
+                self._turtle_n_values = self._turtle_n_from_daily(period)
+        if not any(timestamp <= self._config().start for timestamp, _ in self._turtle_n_values):
+            raise ValueError("insufficient finalized daily history for turtle N at run start")
+
+    def _turtle_n_from_daily(self, period: int) -> tuple[tuple[datetime, float], ...]:
         daily = sorted(
             (
                 candle
@@ -1699,9 +1733,7 @@ class Engine:
             ),
             key=lambda candle: candle.open_time,
         )
-        self._turtle_n_values = turtle_n_series(daily, period=period)
-        if not any(timestamp <= self._config().start for timestamp, _ in self._turtle_n_values):
-            raise ValueError("insufficient finalized daily history for turtle N at run start")
+        return turtle_n_series(daily, period=period)
 
     def _money_management_evidence(self) -> dict[str, object]:
         policy = self._money_management
