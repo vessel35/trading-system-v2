@@ -32,6 +32,11 @@ import {
   EvidenceTruncationNotice,
 } from "./evidence-state";
 
+// The bar colour is the only thing that separates losing from winning R bins, so the
+// two values are named and shown in a legend rather than left as literals in the chart.
+const LOSS_BIN_COLOR = "#fb7185";
+const PROFIT_BIN_COLOR = "#2dd4bf";
+
 const column = createColumnHelper<Trade>();
 
 type RBin = { label: string; min: number; max: number; count: number };
@@ -336,7 +341,31 @@ export function TradesTab({
         <Card>
           <CardHeader>
             <CardTitle>R-multiple 분포</CardTitle>
-            <CardDescription>막대를 누르면 표와 분포를 같은 R 구간으로 브러싱합니다.</CardDescription>
+            <CardDescription>
+              막대를 누르면 표와 분포를 같은 R 구간으로 브러싱합니다.
+            </CardDescription>
+            <div
+              className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground"
+              aria-label="R-multiple 분포 범례"
+            >
+              <span className="flex items-center gap-1">
+                <span
+                  aria-hidden
+                  className="inline-block h-2 w-2 rounded-full"
+                  style={{ backgroundColor: LOSS_BIN_COLOR }}
+                />
+                손실 구간 (R ≤ 0)
+              </span>
+              <span className="flex items-center gap-1">
+                <span
+                  aria-hidden
+                  className="inline-block h-2 w-2 rounded-full"
+                  style={{ backgroundColor: PROFIT_BIN_COLOR }}
+                />
+                이익 구간 (R &gt; 0)
+              </span>
+              <span>선택한 구간 외에는 흐리게 표시</span>
+            </div>
           </CardHeader>
           <CardContent className="h-64">
             <ResponsiveContainer width="100%" height="100%">
@@ -356,7 +385,7 @@ export function TradesTab({
                   {histogram.map((bin) => (
                     <Cell
                       key={bin.label}
-                      fill={bin.max <= 0 ? "#fb7185" : "#2dd4bf"}
+                      fill={bin.max <= 0 ? LOSS_BIN_COLOR : PROFIT_BIN_COLOR}
                       opacity={
                         rRange === null ||
                         (rRange.min === bin.min && rRange.max === bin.max)
