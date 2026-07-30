@@ -119,6 +119,17 @@ class DeclaredGapFeed(DataFeed):
             if candle.open_time not in self._withheld
         )
 
+    def limit_history(self, floor: datetime | None) -> None:
+        """Pass the warm-up bound through to the feed being decorated.
+
+        Without this the decorated run silently loses the bound and reads the whole
+        retained history, which is both slow and enough hypertable chunk locks to
+        exhaust the server when several runs overlap.
+        """
+        bounded = getattr(self._inner, "limit_history", None)
+        if bounded is not None:
+            bounded(floor)
+
     def funding(self, symbol: str, at: datetime) -> Decimal:
         """Delegate funding unchanged; declared gaps only remove candles."""
         return self._inner.funding(symbol, at)
