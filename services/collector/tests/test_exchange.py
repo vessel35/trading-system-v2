@@ -46,6 +46,11 @@ class FakeCcxt:
         self.closed = True
         return None
 
+    listed_symbols: tuple[str, ...] = ("BTC/USDT:USDT", "ETH/USDT:USDT")
+
+    def load_markets(self, reload: bool = False) -> dict[str, dict[str, object]]:
+        return {symbol: {"swap": True, "linear": True} for symbol in self.listed_symbols}
+
 
 def test_fetch_excludes_in_progress_row_and_converts_at_decimal_boundary() -> None:
     fake = FakeCcxt(

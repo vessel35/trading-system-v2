@@ -89,6 +89,7 @@ class MemorySymbolRepository:
     def __init__(self, configured: list[Symbol]) -> None:
         self.configured = configured
         self.calls: list[tuple[str, str | None]] = []
+        self.registered: list[tuple[str, str]] = []
 
     def active_symbols(
         self,
@@ -98,6 +99,10 @@ class MemorySymbolRepository:
     ) -> list[Symbol]:
         self.calls.append((exchange, symbol))
         return list(self.configured)
+
+    def register(self, *, exchange: str, symbol: str) -> None:
+        self.registered.append((exchange, symbol))
+        self.configured = [Symbol(value=symbol, exchange=exchange)]
 
 
 def make_collector(

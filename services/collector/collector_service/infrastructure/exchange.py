@@ -36,6 +36,9 @@ class _SyncCcxtClient(Protocol):
     ) -> list[dict[str, object]]:
         """Return normalized CCXT funding rows with their raw ``info`` payload."""
 
+    def load_markets(self, reload: bool = False) -> dict[str, dict[str, object]]:
+        """Return the exchange market catalogue keyed by CCXT symbol."""
+
     def close(self) -> object:
         """Close the synchronous CCXT client."""
 
@@ -151,6 +154,20 @@ class BinanceUsdMClient:
                 limit,
             )
         return [self._to_funding_rate(symbol, row) for row in history]
+
+    async def supports_symbol(self, symbol: str) -> bool:
+        """Report whether Binance lists ``symbol`` as a USD-margined perpetual swap.
+
+        Registering an unlisted symbol would put a target the collector can never fill
+        into the universe the live collector reads, so the catalogue is the gate.
+        """
+
+        async with self._rest_lock:
+            markets = await asyncio.to_thread(self._exchange.load_markets)
+        market = markets.get(symbol)
+        if not isinstance(market, dict):
+            return False
+        return bool(market.get("swap")) and bool(market.get("linear"))
 
     async def close(self) -> None:
         """Close the sync client without blocking the event loop."""

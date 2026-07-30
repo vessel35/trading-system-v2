@@ -552,3 +552,29 @@ def test_unknown_data_job_returns_standard_error(client: TestClient) -> None:
     response = client.get("/api/v1/data-jobs/unknown")
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "data_job_not_found"
+
+
+def test_data_job_rejection_reports_the_collector_reason_without_the_log_frame(
+    client: TestClient,
+    database_settings: DatabaseSettings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reason = (
+        "binance does not list NOPE/USDT:USDT as a USD-margined perpetual, so it was not registered"
+    )
+
+    async def fake_spawn(*_args: object, **_kwargs: object) -> FakeProcess:
+        output = (f"2026-07-29 21:40:53,122 ERROR __main__ collector_rejected {reason}").encode()
+        return FakeProcess(returncode=2, output=output)
+
+    monkeypatch.setattr(data_jobs, "get_settings", lambda: database_settings)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
+
+    accepted = client.post("/api/v1/data-jobs", json=_payload()).json()
+    status = _wait_for_terminal(client, accepted["job_id"])
+
+    assert status["status"] == "FAILED"
+    assert status["error"]["code"] == "request_rejected"
+    assert status["error"]["message"] == reason
+    assert "exited with code" not in status["error"]["message"]
+    assert "ERROR" not in status["error"]["message"]
