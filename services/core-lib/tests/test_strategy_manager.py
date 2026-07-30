@@ -154,7 +154,9 @@ def test_create_sequence_is_catalog_schema_resolve_then_constructor() -> None:
     assert isinstance(adapter, StrategyAdapter)
     assert isinstance(adapter, FakeAdaptee)
     assert adapter.config.params == {"fast": 10, "slow": 30}
-    assert FakeAdaptee.events == ["catalog_get", "schema", "cross", "init"]
+    # The Adaptee metadata is read right after the catalog lookup so a registration
+    # that disagrees with the class it names is refused before any work is done.
+    assert FakeAdaptee.events == ["catalog_get", "metadata", "schema", "cross", "init"]
     assert adapter.analyze({}, None) is None
 
 
@@ -224,3 +226,48 @@ def test_runtime_composes_only_a_strategy_supported_money_policy() -> None:
             {"strategy_id": "money-breakout", "params": {"fast": 10}},
             {"mode": "turtle"},
         )
+
+
+def test_registration_that_disagrees_with_the_adaptee_is_refused() -> None:
+    """How much history a run reads follows these declarations, so drift is refused.
+
+    The catalog carries the same facts as the Adaptee so operators and the console can
+    read them without importing code. Nothing reconciled the two, so a registration
+    could describe a run that never happens. Either side could be the stale one, so a
+    disagreement is refused rather than silently resolved.
+    """
+    for field, value, expected in (
+        ("min_history", 21, "min_history"),
+        ("supported_timeframes", ["4h"], "supported_timeframes"),
+        (
+            "required_indicators_json",
+            [{"name": "EMA", "params": {"period": 200}}],
+            "required_indicators",
+        ),
+    ):
+        manager, _, catalog = make_manager()
+        catalog.rows["fake-breakout"][field] = value
+        with pytest.raises(ValueError, match=expected):
+            manager.create(
+                "fake-breakout",
+                {"strategy_id": "fake-breakout", "params": {"fast": 10}},
+            )
+
+
+def test_a_registration_that_agrees_with_the_adaptee_is_accepted() -> None:
+    manager, _, catalog = make_manager()
+    catalog.rows["fake-breakout"].update(
+        {
+            "min_history": 55,
+            "supported_timeframes": ["1h"],
+            # Key order and list order must not matter; only the identities do.
+            "required_indicators_json": [{"params": {"period": 21}, "name": "EMA"}],
+        }
+    )
+
+    adapter = manager.create(
+        "fake-breakout",
+        {"strategy_id": "fake-breakout", "params": {"fast": 10}},
+    )
+
+    assert adapter.get_metadata().min_history == 55
