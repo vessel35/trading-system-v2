@@ -78,6 +78,7 @@ from backtest_service.adapters.evidence_sink import (
 from backtest_service.adapters.ohlcv_gaps import (
     OhlcvGapContract,
     build_ohlcv_gap_contract,
+    timeframe_milliseconds,
 )
 from backtest_service.config import RunConfig
 
@@ -161,6 +162,19 @@ class _OrphanReconciler(Protocol):
 class _FundingDiagnostics(Protocol):
     def funding_diagnostics(self) -> dict[str, int]:
         """Return cumulative funding and mark-price measurement counts."""
+
+
+# Warm-up needs `required_warmup` confirmed buckets before the evaluation start, but
+# missing candles mean a span of that many buckets can yield fewer. Reading a multiple
+# of the span absorbs ordinary gaps; a run that still falls short releases the bound and
+# re-reads, so the optimization can never cost warm-up coverage.
+_WARMUP_SPAN_FACTOR = 4
+
+
+@runtime_checkable
+class _BoundedHistory(Protocol):
+    def limit_history(self, floor: datetime | None) -> None:
+        """Bound source reads below, or release the bound when given ``None``."""
 
 
 @runtime_checkable
@@ -350,18 +364,7 @@ class Engine:
         longest_indicator_history = max(spec.min_history for spec in self._indicator_specs)
         required_warmup = max(metadata.min_history, longest_indicator_history)
 
-        self._history = sorted(
-            self.feed.candles(config.symbol, config.timeframe, config.end),
-            key=lambda candle: candle.open_time,
-        )
-        if any(
-            right.open_time <= left.open_time
-            for left, right in zip(self._history, self._history[1:], strict=False)
-        ):
-            raise ValueError("DataFeed candles must have strictly increasing open_time")
-        available_preload = [
-            candle for candle in self._history if candle.close_time <= config.start
-        ]
+        self._history, available_preload = self._load_history(config, required_warmup)
         if len(available_preload) < required_warmup:
             raise ValueError(
                 "insufficient warm-up history: "
@@ -1466,6 +1469,39 @@ class Engine:
         if not previous:
             raise LookupError(f"no settlement price at or before {boundary.isoformat()}")
         return to_decimal(previous[-1].close, quantizer=quantize_price), "prev_close"
+
+    def _load_history(
+        self,
+        config: RunConfig,
+        required_warmup: int,
+    ) -> tuple[list[Candle], list[Candle]]:
+        """Read the candle series, preferring a warm-up-sized read over the whole table.
+
+        The floor is an optimization only. When the bounded read cannot supply the warm-up
+        the strategy declared, the bound is released and the series is read again, so the
+        result is identical to an unbounded read in every case.
+        """
+        bounded = self.feed if isinstance(self.feed, _BoundedHistory) else None
+        if bounded is not None:
+            span = timeframe_milliseconds(config.timeframe) * required_warmup
+            bounded.limit_history(config.start - timedelta(milliseconds=span * _WARMUP_SPAN_FACTOR))
+        history, preload = self._read_history(config)
+        if bounded is not None and len(preload) < required_warmup:
+            bounded.limit_history(None)
+            history, preload = self._read_history(config)
+        return history, preload
+
+    def _read_history(self, config: RunConfig) -> tuple[list[Candle], list[Candle]]:
+        history = sorted(
+            self.feed.candles(config.symbol, config.timeframe, config.end),
+            key=lambda candle: candle.open_time,
+        )
+        if any(
+            right.open_time <= left.open_time
+            for left, right in zip(history, history[1:], strict=False)
+        ):
+            raise ValueError("DataFeed candles must have strictly increasing open_time")
+        return history, [candle for candle in history if candle.close_time <= config.start]
 
     def _prepare_indicator_states(self) -> None:
         self._indicator_states = {

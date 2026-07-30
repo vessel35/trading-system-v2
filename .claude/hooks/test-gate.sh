@@ -53,7 +53,17 @@ if [ -d tests ] || [ -f pytest.ini ] || grep -q "\[tool.pytest" pyproject.toml 2
   has_pytest=1
 fi
 [ "$has_pytest" -eq 1 ] || exit 0
-command -v pytest >/dev/null 2>&1 || exit 0
+
+# Prefer the project virtualenv. A bare `pytest` resolves to whatever is on PATH
+# (a pyenv shim here), which lacks this repository's editable service installs and
+# fails every collection with ModuleNotFoundError instead of reporting real failures.
+if [ -x .venv/bin/pytest ]; then
+  PYTEST=".venv/bin/pytest"
+elif command -v pytest >/dev/null 2>&1; then
+  PYTEST="pytest"
+else
+  exit 0
+fi
 
 # Optional timeout wrapper — GNU coreutils `timeout`, macOS `gtimeout`, else uncapped.
 TO=""
@@ -66,10 +76,15 @@ run_to() {  # run_to <secs> <cmd...>; returns the command's exit code (124 on ti
 
 # Fast path: if a previous failure cache exists, run only those.
 if [ -f .pytest_cache/v/cache/lastfailed ] && [ -s .pytest_cache/v/cache/lastfailed ]; then
-  run_to 120 pytest -q --no-header --lf -m "not slow" --tb=line >/tmp/_testgate.log 2>&1
+  run_to 120 "$PYTEST" -q --no-header --lf -m "not slow" --tb=line >/tmp/_testgate.log 2>&1
   rc=$?
   if [ "$rc" -eq 124 ]; then
     echo "[test-gate] --lf run exceeded 120s and was stopped; NOT blocking. Run the suite manually." >&2
+    exit 0
+  fi
+  # Exit 5 means pytest collected nothing to run (every last-failed test was
+  # deselected by the marker filter). That is not a failure.
+  if [ "$rc" -eq 5 ]; then
     exit 0
   fi
   if [ "$rc" -ne 0 ]; then
@@ -81,10 +96,13 @@ if [ -f .pytest_cache/v/cache/lastfailed ] && [ -s .pytest_cache/v/cache/lastfai
 fi
 
 # Full sweep, slow marker excluded, line tracebacks, stop on first failure.
-run_to 180 pytest -q --no-header -m "not slow" --tb=line -x >/tmp/_testgate.log 2>&1
+run_to 180 "$PYTEST" -q --no-header -m "not slow" --tb=line -x >/tmp/_testgate.log 2>&1
 rc=$?
 if [ "$rc" -eq 124 ]; then
   echo "[test-gate] full run exceeded 180s and was stopped; NOT blocking. Run the suite manually, or mark long tests 'slow'." >&2
+  exit 0
+fi
+if [ "$rc" -eq 5 ]; then
   exit 0
 fi
 if [ "$rc" -ne 0 ]; then
