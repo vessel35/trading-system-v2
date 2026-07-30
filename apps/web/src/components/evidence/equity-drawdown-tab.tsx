@@ -35,7 +35,12 @@ import {
   useEquityEvidence,
   useExecutions,
 } from "../../hooks/use-evidence";
-import { formatDecimalString, formatMetric, formatTimestamp } from "../../lib/utils";
+import {
+  formatChartTime,
+  formatDecimalString,
+  formatMetric,
+  formatTimestamp,
+} from "../../lib/utils";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
@@ -120,7 +125,13 @@ function EquityChart({
         vertLines: { color: "rgba(148,163,184,0.08)" },
         horzLines: { color: "rgba(148,163,184,0.08)" },
       },
-      timeScale: { borderColor: "rgba(148,163,184,0.18)" },
+      timeScale: {
+        borderColor: "rgba(148,163,184,0.18)",
+        tickMarkFormatter: (time: number) => formatChartTime(time),
+      },
+      localization: {
+        timeFormatter: (time: number) => formatChartTime(time),
+      },
       rightPriceScale: {
         borderColor: "rgba(148,163,184,0.18)",
         mode: logarithmic ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal,
@@ -362,7 +373,7 @@ export function EquityDrawdownTab({
       <Card>
         <CardHeader>
           <CardTitle>드로다운</CardTitle>
-          <CardDescription>자본곡선과 동일한 UTC 시간축입니다.</CardDescription>
+          <CardDescription>자본곡선과 동일한 KST 시간축입니다.</CardDescription>
         </CardHeader>
         <CardContent className="h-64">
           <ResponsiveContainer width="100%" height="100%">

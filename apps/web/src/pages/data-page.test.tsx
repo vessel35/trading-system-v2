@@ -219,10 +219,10 @@ describe("데이터 수집·backfill 실행", () => {
     expect(screen.getByLabelText("거래소")).toBeDisabled();
     expect(screen.getByLabelText("작업")).toHaveValue("backfill");
     expect(
-      screen.getByRole("button", { name: "시작 (UTC)" }),
+      screen.getByRole("button", { name: "시작 (KST)" }),
     ).toHaveTextContent(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/);
     expect(
-      screen.getByRole("button", { name: "종료 (UTC)" }),
+      screen.getByRole("button", { name: "종료 (KST)" }),
     ).toHaveTextContent(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/);
     expect(screen.queryByRole("group", { name: "timeframes" })).not.toBeInTheDocument();
 
@@ -250,8 +250,8 @@ describe("데이터 수집·backfill 실행", () => {
 
     const symbol = await screen.findByLabelText("심볼 (CCXT 형식)");
     await user.clear(symbol);
-    await selectDateTime(user, "시작 (UTC)", "2026-01-02T00:00");
-    await selectDateTime(user, "종료 (UTC)", "2026-01-01T00:00");
+    await selectDateTime(user, "시작 (KST)", "2026-01-02T00:00");
+    await selectDateTime(user, "종료 (KST)", "2026-01-01T00:00");
     await user.click(screen.getByRole("button", { name: "실행 내용 확인" }));
 
     expect(screen.getByText("심볼을 입력하세요.")).toBeInTheDocument();
@@ -275,8 +275,8 @@ describe("데이터 수집·backfill 실행", () => {
     renderWithQuery(<DataPage />);
 
     await screen.findByLabelText("심볼 (CCXT 형식)");
-    await selectDateTime(user, "시작 (UTC)", "2026-01-01T00:00");
-    await selectDateTime(user, "종료 (UTC)", "2026-01-02T00:00");
+    await selectDateTime(user, "시작 (KST)", "2026-01-01T00:00");
+    await selectDateTime(user, "종료 (KST)", "2026-01-02T00:00");
     await user.click(screen.getByRole("button", { name: "실행 내용 확인" }));
 
     const dialog = screen.getByRole("dialog", {
@@ -314,8 +314,8 @@ describe("데이터 수집·backfill 실행", () => {
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
 
     await screen.findByLabelText("심볼 (CCXT 형식)");
-    await selectDateTime(user, "시작 (UTC)", "2026-01-01T00:00");
-    await selectDateTime(user, "종료 (UTC)", "2026-01-02T00:00");
+    await selectDateTime(user, "시작 (KST)", "2026-01-01T00:00");
+    await selectDateTime(user, "종료 (KST)", "2026-01-02T00:00");
     await user.click(screen.getByRole("button", { name: "실행 내용 확인" }));
     expect(postBodies).toHaveLength(0);
     await user.click(
@@ -329,8 +329,10 @@ describe("데이터 수집·backfill 실행", () => {
         operation: "backfill",
         symbol: "BTC/USDT:USDT",
         exchange: "binance",
-        start: "2026-01-01T00:00:00.000Z",
-        end: "2026-01-02T00:00:00.000Z",
+        // The fields are KST wall clocks, so midnight KST is submitted as 15:00 UTC
+        // the previous day. Storage and exchange stay UTC; only the form is local.
+        start: "2025-12-31T15:00:00.000Z",
+        end: "2026-01-01T15:00:00.000Z",
       },
     ]);
     await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
