@@ -43,7 +43,7 @@ import sqlite3
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, cast
 
 import pytest
 from backtest_service.adapters.broker import BacktestBroker
@@ -54,6 +54,8 @@ from backtest_service.adapters.evidence_sink import BacktestEvidenceSink
 from backtest_service.config import RunConfig
 from backtest_service.engine import Engine
 from core_lib.execution.matcher import _protection_reference
+from core_lib.money_management.models import PolicyIndicatorRequirement
+from core_lib.money_management.policies import MoneyManagementPolicy
 from core_lib.ports import CatalogStore, DataFeed, StrategyRegistry
 from core_lib.strategy import (
     AdapterManager,
@@ -503,3 +505,35 @@ def test_a_bar_opening_past_the_stop_fills_at_that_worse_open() -> None:
     assert _protection_case(
         PositionSide.SHORT, Decimal("102"), Decimal("105"), ExitReason.STOP_LOSS
     ) == (Decimal("105"), True)
+
+
+def test_the_history_floor_covers_a_policy_declared_daily_requirement() -> None:
+    """A daily N over twenty days needs far more calendar history than a 1h warm-up.
+
+    The floor is derived from every declared requirement rather than the strategy
+    timeframe alone. Reading only the strategy's span starved the daily series, and
+    the shortfall surfaced as a missing daily history at run start rather than as a
+    short read.
+    """
+    config = _config()
+    engine = Engine.__new__(Engine)
+    engine._money_management = cast(MoneyManagementPolicy, _TurtlePolicyStub())
+
+    # Nine 1h bars of warm-up span barely over a day; twenty daily bars span twenty.
+    span = Engine._warmup_span(engine, config, required_warmup=9)
+
+    assert span >= timedelta(days=20), "the daily requirement must widen the floor"
+
+
+class _TurtlePolicyStub:
+    """Declare the daily requirement a turtle money-management policy carries."""
+
+    def required_indicators(self) -> list[PolicyIndicatorRequirement]:
+        return [
+            PolicyIndicatorRequirement(
+                name="TURTLE_N",
+                params={"period": 20},
+                timeframe="1d",
+                min_history=20,
+            )
+        ]
