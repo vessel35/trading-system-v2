@@ -487,3 +487,79 @@ describe("실행 관리 보강", () => {
     ).toBeInTheDocument();
   });
 });
+
+describe("스윕 축 값", () => {
+  it("축 파라미터가 정수 항목이면 값도 정수로 시작한다", async () => {
+    const user = userEvent.setup();
+    renderManagement();
+
+    await user.click(await screen.findByText("스윕 설정"));
+    // vessel-reference의 기본 파라미터는 모두 자금 관리 소관이라 첫 축은
+    // money_management.leverage가 된다. 이 축의 기본값이 소수였던 것이 스윕
+    // 실행을 실패시켰다.
+    expect(screen.getByLabelText("축 1 파라미터")).toHaveValue(
+      "money_management.leverage",
+    );
+    expect(screen.getByLabelText("축 1 값 JSON 배열")).toHaveValue("[1, 2, 3]");
+    expect(screen.getByText("JSON 배열 · 값 2–20개 · 자연수 1–100")).toBeInTheDocument();
+
+    // 두 번째 축은 기본으로 켜져 있으므로 기본 화면이 곧 2축 스윕이다.
+    expect(screen.getByLabelText(/두 번째 히트맵 축/)).toBeChecked();
+    expect(screen.getByLabelText("축 2 파라미터")).toHaveValue(
+      "money_management.reward_risk",
+    );
+    expect(screen.getByLabelText("축 2 값 JSON 배열")).toHaveValue("[1.5, 2, 2.5]");
+  });
+
+  it("기본 화면 그대로 두 축을 실행하면 스키마가 받는 값이 전송된다", async () => {
+    const user = userEvent.setup();
+    let body: { axes: { parameter: string; values: unknown[] }[] } | null = null;
+    server.use(
+      http.post("http://localhost/api/v1/sweeps", async ({ request }) => {
+        body = (await request.json()) as typeof body;
+        return HttpResponse.json({ job_id: "job", sweep_id: "sweep" });
+      }),
+    );
+    renderManagement();
+
+    await user.click(await screen.findByText("스윕 설정"));
+    await user.click(screen.getByLabelText(/스윕으로 실행/));
+    await user.click(screen.getByRole("button", { name: "스윕 실행" }));
+
+    await waitFor(() => expect(body).not.toBeNull());
+    const axes = body!.axes;
+    expect(axes[0]).toEqual({
+      parameter: "money_management.leverage",
+      values: [1, 2, 3],
+    });
+    expect(axes[0].values.every((value) => Number.isInteger(value))).toBe(true);
+    expect(axes[1].parameter).toBe("money_management.reward_risk");
+  });
+
+  it("정수 축에 소수를 직접 넣으면 보내기 전에 이유를 말한다", async () => {
+    const user = userEvent.setup();
+    const sweepPost = vi.fn();
+    server.use(
+      http.post("http://localhost/api/v1/sweeps", () => {
+        sweepPost();
+        return HttpResponse.json({ job_id: "job", sweep_id: "sweep" });
+      }),
+    );
+    renderManagement();
+
+    await user.click(await screen.findByText("스윕 설정"));
+    await user.click(screen.getByLabelText(/스윕으로 실행/));
+    const values = screen.getByLabelText("축 1 값 JSON 배열");
+    await user.clear(values);
+    // "[" starts user-event keyboard syntax, so the opening bracket is escaped.
+    await user.type(values, "[[1.5, 2, 2.5]");
+    await user.click(screen.getByRole("button", { name: "스윕 실행" }));
+
+    expect(
+      await screen.findByText(
+        "첫 번째 축의 money_management.leverage 값은 자연수만 가능합니다 (1–100).",
+      ),
+    ).toBeInTheDocument();
+    expect(sweepPost).not.toHaveBeenCalled();
+  });
+});
