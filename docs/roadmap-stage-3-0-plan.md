@@ -29,10 +29,13 @@
 
 | 결정 | 선택 |
 |---|---|
-| 구현 범위 | 40종. 별 다섯 전부와 널리 쓰이는 별 넷을 더한 집합 |
-| 중간 점검 | 웨이브 3이 끝나는 누적 27종 지점에서 멈추고 3-1을 시험한 뒤 계속할지 정한다 |
+| 구현 범위 | **구현 가능한 전부(74종)**. 2026-07-31 사용자 지시로 40종에서 넓혔다. 아래 7장 참고 |
+| 중간 점검 | **해제**. 27종 지점에서 3-1을 시험한 뒤 정하기로 했던 조건은 범위 재지정으로 무효가 되었다 |
 | 웨이브 0 | 포함한다. 지표를 늘리지 않는 계산 기반 정리를 먼저 한다 |
 | 값 검증 기준 | 외부 라이브러리 대조. 표준 §13이 교차대조 대상으로 명시한 TA-Lib, pandas-ta, Tulip Indicators, TradingView |
+
+> 2·3·4·5장은 40종 범위로 세운 원래 계획이며 웨이브 0부터 3까지의 실제 경과를 담고 있다.
+> 범위를 넓힌 뒤의 계획은 7장에 있다.
 
 값 검증 기준을 정해야 했던 이유는 **표준 문서에 수치 예시가 하나도 없기 때문**이다. "예:"로 나오는
 것은 파라미터 값 제안이지 계산된 기댓값이 아니다. 기준이 없으면 벡터 경로와 증분 경로가 서로 같다는
@@ -130,3 +133,77 @@ MAMA/FAMA, Roofing Filter, Sinewave와 Instantaneous Trendline, Special K)은 �
 이후 지표 값이 유한하지 않으면 실행을 중단시킨다. 가격이 완전히 평탄해 표준편차가 0이 되는 구간을
 만나면 볼린저를 쓰는 실행이 그 자리에서 실패한다. 3-0과 무관하게 이미 존재하는 문제이므로 별도
 changeset으로 다룬다. 웨이브 0의 "0으로 나눌 때의 공통 규약"이 이 문제의 해법을 포함하게 된다.
+
+## 7. 범위 재지정 — 구현 가능한 전부 (2026-07-31)
+
+사용자가 3-0의 목표를 "구현 가능한 모든 지표를 구현하는 것"으로 다시 정했다. 40종이라는
+숫자와 웨이브 3의 중간 점검은 이 지시로 폐기됐다.
+
+### 7.1 남은 것과 빠지는 것
+
+웨이브 3까지 끝난 시점의 등록 상태는 **36 조합 / 33 이름 / 표준 82종 기준 33종**이다.
+이름 33개 가운데 EMA와 Volume SMA는 §0 프리미티브라 82종 집계 밖이고, Bollinger Bands
+하나가 82종 집계에서는 밴드·%B·BandWidth 셋으로 세어진다. 그래서 남은 것은 49종이다.
+
+그 49종 가운데 **41종을 구현하고 8종을 남긴다.** 목표 등록 상태는 **82종 중 74종**이다.
+
+빠지는 여덟 종은 이유가 둘로 갈린다. **시장폭 3종**(McClellan Oscillator, McClellan
+Summation Index, TRIN/Arms)은 등락종목수와 상승·하락 거래량이 있어야 계산되는데 레지스트리에
+그 입력을 값으로 넘기는 경로가 없다. 만드는 일은 지표 구현이 아니라 데이터 경로 설계다.
+**원저서 상수가 없는 5종**(QQE, MAMA/FAMA, Roofing Filter, Sinewave/Instantaneous Trendline,
+Special K)은 §12가 "추측하지 않고 남긴다"고 적어 둔 항목이다. QQE의 트레일링 밴드 락 규칙,
+MAMA/FAMA의 Hilbert 6-tap 계수, Roofing Filter의 컷오프와 SuperSmoother 계수, Special K의
+항별 기간과 가중치표는 표준 본문에 아예 없고, Sinewave는 그 계수를 쓰는 §8.1에 종속된다.
+상수를 지어 넣으면 표준이 계산의 소유권을 잃으므로 구현하지 않는다.
+
+**§12의 나머지 4종은 구현한다.** VIDYA, Schaff Trend Cycle, Klinger Volume Oscillator,
+Keltner Channel은 §12 표에 올라 있지만 **표준 본문에 한쪽 수식이 완결되어 있다.** 본문에
+적힌 수식을 채택하고, 고른 갈래와 버린 갈래를 `pinned_impl`과 아래 7.4에 남긴다. 표준
+문서 자체는 고치지 않으므로 "코드가 표준보다 앞서지 않는다"는 원칙과 충돌하지 않는다.
+
+### 7.2 병렬 작업을 막고 있던 구조 (웨이브 0-B)
+
+지표를 계열별로 나눠 동시에 구현하려면 한 파일을 두 작업자가 건드리지 않아야 한다. 지금
+구조는 그 조건을 어긴다. `build_default_registry()` 하나가 818줄에 모든 등록을 담고,
+외부 대조 기준값도 `test_indicator_reference_values.py` 한 파일에 모여 있다. 계열이 달라도
+같은 파일의 같은 영역을 고치게 되므로 충돌이 확정적이다.
+
+그래서 지표를 늘리기 전에 등록과 기준값을 계열별 모듈로 나눈다. 지표 수도, 등록 목록도,
+계산 결과도 달라지지 않는 순수한 구조 변경이며, 달라지지 않았다는 것을 테스트로 확인한다.
+41종이 더해지면 등록 파일이 2000줄을 넘게 되므로 이 분리는 병렬화와 무관하게도 필요하다.
+
+### 7.3 계열별 분담 (동시 진행)
+
+| 담당 | 모듈 | 지표 | 수 |
+|---|---|---|---|
+| 추세 | `trend.py` | T3, HMA, ZLEMA, ALMA, VIDYA, McGinley Dynamic, Guppy GMMA | 7 |
+| 모멘텀 | `momentum.py` | Connors RSI, QStick, Chande Forecast Oscillator, DeMarker, DPO, Schaff Trend Cycle, Relative Vigor Index(Ehlers), Laguerre RSI, Pretty Good Oscillator, Center of Gravity Oscillator | 10 |
+| 변동성 | `volatility.py` | Keltner Channel, Donchian Channel, SuperTrend, Chandelier Exit, Ulcer Index, Relative Volatility Index(Dorsey), Chaikin Volatility, Mass Index | 8 |
+| 거래량·방향성 | `volume.py`, `strength.py` | MFI, EMV, Klinger Volume Oscillator, NVI, PVI, Vortex, Choppiness Index, Random Walk Index | 8 |
+| 시스템 | `systems.py` | Ichimoku Kinko Hyo, Alligator, Fractals, Gator Oscillator, Market Facilitation Index, Elder Impulse System, TD Sequential, Woodies CCI | 8 |
+
+Center of Gravity Oscillator는 표준에서 §8 Ehlers 계열에 있으나 계산이 순수한 오실레이터라
+모멘텀 담당이 가져간다. 다섯 담당은 서로 다른 모듈만 고치므로 동시에 진행할 수 있다.
+
+### 7.4 담당 사이에 공통으로 지켜야 하는 것
+
+**미래 봉을 쓰지 않는다.** 시프트를 쓰는 지표에서 t 시점 출력이 t 이후 데이터에 의존하면
+안 된다. Ichimoku의 선행 스팬은 t 시점에 t−26에서 계산한 값을 싣는 형태여야 하고, 후행
+스팬은 t 시점에 미래 종가를 알 수 없으므로 같은 방식으로 지연시켜 싣는다. Fractals는 중앙봉
+이후 두 봉이 지나야 확정되므로 t 시점에 t−2가 프랙탈이었는지를 낸다. 정렬 규약은 시스템
+담당이 하나로 정해 네 종에 같이 적용하고, 규약과 그 이유를 이 문서에 남긴다.
+
+**규칙형 지표의 출력 형태.** TD Sequential, Elder Impulse System, Fractals, Market
+Facilitation Index는 수치가 아니라 상태를 낸다. 상태를 숫자로 인코딩하고 그 대응을
+`pinned_impl`에 적는다. 인코딩을 지어내는 것이 아니라 표준이 정의한 상태 집합을 그대로
+숫자에 대응시키는 것이다.
+
+**정의가 갈리는 네 종의 채택 기록.** VIDYA는 CMO 기반과 표준편차 비율 기반이 갈리고,
+Keltner는 원형(단순이동평균과 고저범위)과 현대형(지수이동평균과 ATR)이 갈리며, Schaff Trend
+Cycle은 내부 평활 상수가, Klinger Volume Oscillator는 cm 초기화와 절댓값 처리가 갈린다.
+넷 다 표준 본문에 적힌 갈래를 채택하고, 버린 갈래가 무엇인지를 함께 적는다.
+
+**대조군은 계산식의 원천이 아니다.** 값이 외부 라이브러리와 어긋나면 표준 문서를 다시 읽어
+원인을 밝힌다. 라이브러리를 따라 구현을 바꾸거나 대조를 맞추려 상수를 끼워 넣지 않는다.
+대조 대상이 아예 없는 지표는 이유를 적어 미대조로 남긴다.
+
