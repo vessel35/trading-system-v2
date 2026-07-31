@@ -371,20 +371,35 @@ class SmaState:
 
 
 class _RecursiveAverageState:
-    """Shared SMA-seeded recursion behind EMA (§0.3) and Wilder RMA (§0.5)."""
+    """Shared SMA-seeded recursion behind EMA (§0.3) and Wilder RMA (§0.5).
+
+    The seed is summed with the same builtin `sum` the vectorized
+    `_recursive_average` uses, rather than accumulated one value at a time. From
+    Python 3.12 onwards `sum` adds floats with Neumaier compensation, so a loop
+    that adds them one at a time parts from it in the last bits, and the two
+    execution paths are required to produce the same number.
+
+    That gap went unnoticed for a long time because it is a last-bit gap and the
+    parity tolerance is relative. It first crossed the tolerance in the Klinger
+    oscillator of §4.8, whose value is the difference of two averages seeded over
+    34 and 55 Volume Force values of order 1e5: the subtraction cancels the large
+    part and leaves the last-bit difference standing alone, which turns a relative
+    1e-16 in the seed into a relative 1e-12 in the result. Registered EMAs of
+    period 55 and 200 never showed it because nothing subtracts one from another.
+    `test_indicator_primitives.py` states the property directly, so it no longer
+    depends on which indicator happens to subtract two long averages.
+    """
 
     def __init__(self, period: int, alpha: float) -> None:
         _validate_period(period)
         self.period = period
         self._alpha = alpha
-        self._seed_count = 0
-        self._seed_sum = 0.0
+        self._seed: list[float] = []
         self._value: float | None = None
 
     def reset(self) -> None:
         """Drop the seed and the recursive value."""
-        self._seed_count = 0
-        self._seed_sum = 0.0
+        self._seed = []
         self._value = None
 
     @property
@@ -396,14 +411,14 @@ class _RecursiveAverageState:
         """Advance one observation and return the current average."""
         if isnan(value):
             if self._value is None:
-                self._seed_count = 0
-                self._seed_sum = 0.0
+                self._seed = []
             return NAN
         if self._value is None:
-            self._seed_count += 1
-            self._seed_sum += value
-            if self._seed_count == self.period:
-                self._value = self._seed_sum / self.period
+            self._seed.append(value)
+            if len(self._seed) == self.period:
+                self._value = sum(self._seed) / self.period
+                # The window is only needed until the recursion takes over.
+                self._seed = []
         else:
             self._value += self._alpha * (value - self._value)
         return self.current()
