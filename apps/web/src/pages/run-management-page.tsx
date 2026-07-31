@@ -44,6 +44,11 @@ import {
 } from "../contexts/run-jobs";
 import { useCoverage } from "../hooks/use-p2b";
 import {
+  axisValuesError,
+  axisValuesHint,
+  defaultAxisValues,
+} from "../lib/sweep-axis";
+import {
   cn,
   formatTimestamp,
   fromDisplayZoneInput,
@@ -184,7 +189,11 @@ function parseIndicators(value: string): Record<string, unknown>[] {
   return parsed as Record<string, unknown>[];
 }
 
-function parseAxisValues(value: string, label: string): SweepAxis["values"] {
+function parseAxisValues(
+  value: string,
+  label: string,
+  parameter: string,
+): SweepAxis["values"] {
   const parsed: unknown = JSON.parse(value);
   if (
     !Array.isArray(parsed) ||
@@ -197,7 +206,10 @@ function parseAxisValues(value: string, label: string): SweepAxis["values"] {
   ) {
     throw new Error(`${label} 값은 스칼라 두 개 이상의 JSON 배열이어야 합니다.`);
   }
-  return parsed as SweepAxis["values"];
+  const values = parsed as SweepAxis["values"];
+  const ruleError = axisValuesError(parameter, values, label);
+  if (ruleError) throw new Error(ruleError);
+  return values;
 }
 
 function utcIso(value: string, label: string): string {
@@ -688,6 +700,16 @@ export function RunManagementPage() {
     if (!nextTwo) setAxisTwoEnabled(false);
   }, [axisCandidates, axisOneParameter, axisTwoParameter]);
 
+  // A parameter change carries its own valid starting values: sweeping leverage
+  // over [1.5, 2.0, 2.5] would produce runs the schema rejects one by one.
+  useEffect(() => {
+    setAxisOneValues((current) => defaultAxisValues(axisOneParameter, current));
+  }, [axisOneParameter]);
+
+  useEffect(() => {
+    setAxisTwoValues((current) => defaultAxisValues(axisTwoParameter, current));
+  }, [axisTwoParameter]);
+
   useEffect(() => {
     if (splitCustomized) return;
     setSplit(alignedDefaultSplit(form.start, form.end, form.timeframe));
@@ -788,13 +810,21 @@ export function RunManagementPage() {
               axes: [
                 {
                   parameter: axisOneParameter.trim(),
-                  values: parseAxisValues(axisOneValues, "첫 번째 축"),
+                  values: parseAxisValues(
+                    axisOneValues,
+                    "첫 번째 축",
+                    axisOneParameter,
+                  ),
                 },
                 ...(axisTwoEnabled
                   ? [
                       {
                         parameter: axisTwoParameter.trim(),
-                        values: parseAxisValues(axisTwoValues, "두 번째 축"),
+                        values: parseAxisValues(
+                          axisTwoValues,
+                          "두 번째 축",
+                          axisTwoParameter,
+                        ),
                       },
                     ]
                   : []),
@@ -1807,15 +1837,19 @@ export function RunManagementPage() {
                           축 1 값 JSON 배열
                           <GuidedInput
                             aria-label="축 1 값 JSON 배열"
-                            hint="JSON 배열 · 값 2–20개 (예: [1.5, 2.0, 2.5])"
+                            hint={axisValuesHint(axisOneParameter)}
                             value={axisOneValues}
                             onChange={(event) => setAxisOneValues(event.target.value)}
                             placeholder="[1.5, 2.0, 2.5]"
                           />
                         </Label>
                       </div>
-                      <label className="flex items-center gap-2 text-xs font-medium sm:col-span-2">
+                      <label
+                        className="flex items-center gap-2 text-xs font-medium sm:col-span-2"
+                        htmlFor="sweep-axis-two"
+                      >
                         <input
+                          id="sweep-axis-two"
                           type="checkbox"
                           checked={axisTwoEnabled}
                           onChange={(event) => setAxisTwoEnabled(event.target.checked)}
@@ -1862,7 +1896,7 @@ export function RunManagementPage() {
                             축 2 값 JSON 배열
                             <GuidedInput
                               aria-label="축 2 값 JSON 배열"
-                              hint="JSON 배열 · 값 2–20개 (예: [1.5, 2.0])"
+                              hint={axisValuesHint(axisTwoParameter)}
                               value={axisTwoValues}
                               onChange={(event) =>
                                 setAxisTwoValues(event.target.value)
