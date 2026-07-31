@@ -258,7 +258,11 @@ export interface paths {
         get: operations["get_run_api_v1_runs__run_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Soft Delete Run
+         * @description Hide one run from the default listing without deleting anything stored.
+         */
+        delete: operations["soft_delete_run_api_v1_runs__run_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -292,6 +296,51 @@ export interface paths {
         get: operations["get_run_prereg_api_v1_runs__run_id__prereg_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}:purge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Purge Run
+         * @description Remove one run, its cascaded rows, and its Evidence file for good.
+         *
+         *     This cannot be undone. The Evidence artifact goes first: if the catalog row
+         *     then fails to disappear, the run stays visible with its Evidence missing,
+         *     which the reader can see and retry, rather than leaving an orphaned file
+         *     nothing points at.
+         */
+        delete: operations["purge_run_api_v1_runs__run_id__purge_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}:restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore Run
+         * @description Clear the soft-delete marker so the run is listed again.
+         */
+        post: operations["restore_run_api_v1_runs__run_id__restore_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1852,6 +1901,20 @@ export interface components {
             } | null;
         };
         /**
+         * RunDeletionResponse
+         * @description Result of a soft delete or a restore; no stored row is ever removed.
+         */
+        RunDeletionResponse: {
+            /** Run Id */
+            run_id: string;
+            /** Deleted */
+            deleted: boolean;
+            /** Deleted At */
+            deleted_at: string | null;
+            /** Changed */
+            changed: boolean;
+        };
+        /**
          * RunHeader
          * @description Reproducibility header mirroring every backtest_run column.
          */
@@ -1960,6 +2023,8 @@ export interface components {
             resolved_indicators_json: components["schemas"]["JsonValue"];
             /** Source Data Hash */
             source_data_hash: string | null;
+            /** Deleted At */
+            deleted_at?: string | null;
         };
         /**
          * RunListItem
@@ -2031,6 +2096,8 @@ export interface components {
             data_coverage_ratio: number | null;
             /** Summary Present */
             summary_present: boolean;
+            /** Deleted At */
+            deleted_at?: string | null;
         };
         /**
          * RunListResponse
@@ -2040,6 +2107,20 @@ export interface components {
             /** Data */
             data: components["schemas"]["RunListItem"][];
             page: components["schemas"]["Page"];
+        };
+        /**
+         * RunPurgeResponse
+         * @description Result of an irreversible purge of one run and its Evidence artifact.
+         */
+        RunPurgeResponse: {
+            /** Run Id */
+            run_id: string;
+            /** Run Removed */
+            run_removed: boolean;
+            /** Evidence Removed */
+            evidence_removed: boolean;
+            /** Evidence Path */
+            evidence_path: string | null;
         };
         /**
          * RunSubmission
@@ -2855,6 +2936,8 @@ export interface operations {
                 period_start_to?: string | null;
                 period_end_from?: string | null;
                 period_end_to?: string | null;
+                /** @description Soft-deleted runs: exclude hides them (default), only lists just them, include lists both. */
+                deleted?: "exclude" | "only" | "include";
                 sort?: string;
                 limit?: number;
                 offset?: number;
@@ -3422,6 +3505,46 @@ export interface operations {
             };
         };
     };
+    soft_delete_run_api_v1_runs__run_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunDeletionResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     get_run_summary_api_v1_runs__run_id__summary_get: {
         parameters: {
             query?: never;
@@ -3480,6 +3603,86 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PreregistrationResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    purge_run_api_v1_runs__run_id__purge_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunPurgeResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    restore_run_api_v1_runs__run_id__restore_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunDeletionResponse"];
                 };
             };
             /** @description Not Found */

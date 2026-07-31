@@ -53,13 +53,13 @@ RUN_HEADER_COLUMNS = """
     envelope_status_declared, sweep_id, fold_label, evidence_path,
     evidence_hash, evidence_retained, evidence_expires_at, error_message,
     started_at, finished_at, created_at, resolved_indicators_json,
-    source_data_hash
+    source_data_hash, deleted_at
 """
 
 RUN_LIST_COLUMNS = """
     r.run_id, r.run_name, r.status, r.strategy_id, r.strategy_name,
     r.symbol, r.exchange, r.timeframe, r.market_type, r.period_start,
-    r.period_end, r.created_at, r.sweep_id, r.config_hash,
+    r.period_end, r.created_at, r.sweep_id, r.config_hash, r.deleted_at,
     s.trade_count, s.pf, s.sortino, s.calmar_or_mar, s.sqn, s.mdd, s.ror,
     s.win_rate, s.net_pnl_total, s.gate_verdict, s.decision_route,
     s.integrity_status, s.data_coverage_ratio,
@@ -81,6 +81,14 @@ RUN_SUMMARY_COLUMNS = """
     data_coverage_passed, unobservable_funding_boundary_count,
     data_gap_exit_count
 """
+
+DeletedFilter = Literal["exclude", "only", "include"]
+
+DELETED_FILTER_SQL: dict[DeletedFilter, str | None] = {
+    "exclude": "r.deleted_at IS NULL",
+    "only": "r.deleted_at IS NOT NULL",
+    "include": None,
+}
 
 SORT_COLUMNS = {
     "created_at": "r.created_at",
@@ -122,6 +130,7 @@ class RunListQuery(BaseModel):
     period_start_to: datetime | None = None
     period_end_from: datetime | None = None
     period_end_to: datetime | None = None
+    deleted: DeletedFilter = "exclude"
     sort: str = "-created_at"
     limit: int = 50
     offset: int = 0
@@ -157,6 +166,9 @@ class CatalogRepository:
     def list_runs(self, query: RunListQuery) -> RunListResponse:
         filters: list[str] = []
         params: list[object] = []
+        deleted_filter = DELETED_FILTER_SQL[query.deleted]
+        if deleted_filter is not None:
+            filters.append(deleted_filter)
         equality_filters = {
             "strategy_id": "r.strategy_id",
             "symbol": "r.symbol",

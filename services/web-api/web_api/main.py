@@ -49,6 +49,7 @@ from web_api.evidence import (
     EvidenceRepository,
     EvidenceUnavailableError,
     open_evidence,
+    remove_evidence_artifact,
 )
 from web_api.jobs import (
     TERMINAL_JOB_STATES,
@@ -88,8 +89,10 @@ from web_api.models import (
     PreregistrationResponse,
     RunAccepted,
     RunComparisonResponse,
+    RunDeletionResponse,
     RunHeader,
     RunListResponse,
+    RunPurgeResponse,
     RunSubmission,
     RunSummaryResponse,
     RunTagsResponse,
@@ -107,6 +110,7 @@ from web_api.models import (
 )
 from web_api.repository import (
     CatalogRepository,
+    DeletedFilter,
     MarketDataRepository,
     RunListQuery,
     StrategyRepository,
@@ -866,6 +870,15 @@ def list_runs(
     period_start_to: datetime | None = None,
     period_end_from: datetime | None = None,
     period_end_to: datetime | None = None,
+    deleted: Annotated[
+        DeletedFilter,
+        Query(
+            description=(
+                "Soft-deleted runs: exclude hides them (default), only lists just them, "
+                "include lists both."
+            )
+        ),
+    ] = "exclude",
     sort: str = "-created_at",
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
@@ -889,6 +902,7 @@ def list_runs(
         period_start_to=_utc_datetime(period_start_to),
         period_end_from=_utc_datetime(period_end_from),
         period_end_to=_utc_datetime(period_end_to),
+        deleted=deleted,
         sort=sort,
         limit=limit,
         offset=offset,
@@ -1002,6 +1016,87 @@ def get_run_prereg(
     if prereg is None:
         not_found(run_id)
     return prereg
+
+
+def _set_run_deleted(run_id: str, repo: CatalogRepository, *, deleted: bool) -> RunDeletionResponse:
+    """Move the soft-delete marker and report the state the catalog now holds."""
+
+    if repo.get_run(run_id) is None:
+        not_found(run_id)
+    with connect_catalog_writer() as connection:
+        store = BacktestCatalogStore(cast(WriteConnection, connection))
+        changed = store.set_run_deleted(run_id, deleted=deleted)
+    run = repo.get_run(run_id)
+    if run is None:
+        raise RuntimeError("run deletion committed without a readable run row")
+    return RunDeletionResponse(
+        run_id=run_id,
+        deleted=run.deleted_at is not None,
+        deleted_at=run.deleted_at,
+        changed=changed,
+    )
+
+
+# Registered before DELETE /api/v1/runs/{run_id} because that route's path
+# parameter would otherwise swallow the ":purge" suffix as part of the run_id.
+@app.delete(
+    "/api/v1/runs/{run_id}:purge",
+    response_model=RunPurgeResponse,
+    responses={404: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+)
+def purge_run(
+    run_id: str,
+    repo: Annotated[CatalogRepository, Depends(repository)],
+) -> RunPurgeResponse:
+    """Remove one run, its cascaded rows, and its Evidence file for good.
+
+    This cannot be undone. The Evidence artifact goes first: if the catalog row
+    then fails to disappear, the run stays visible with its Evidence missing,
+    which the reader can see and retry, rather than leaving an orphaned file
+    nothing points at.
+    """
+
+    run = repo.get_run(run_id)
+    if run is None:
+        not_found(run_id)
+    evidence_removed = remove_evidence_artifact(run.evidence_path)
+    with connect_catalog_writer() as connection:
+        store = BacktestCatalogStore(cast(WriteConnection, connection))
+        run_removed = store.purge_run(run_id)
+    return RunPurgeResponse(
+        run_id=run_id,
+        run_removed=run_removed,
+        evidence_removed=evidence_removed,
+        evidence_path=run.evidence_path,
+    )
+
+
+@app.delete(
+    "/api/v1/runs/{run_id}",
+    response_model=RunDeletionResponse,
+    responses={404: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+)
+def soft_delete_run(
+    run_id: str,
+    repo: Annotated[CatalogRepository, Depends(repository)],
+) -> RunDeletionResponse:
+    """Hide one run from the default listing without deleting anything stored."""
+
+    return _set_run_deleted(run_id, repo, deleted=True)
+
+
+@app.post(
+    "/api/v1/runs/{run_id}:restore",
+    response_model=RunDeletionResponse,
+    responses={404: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+)
+def restore_run(
+    run_id: str,
+    repo: Annotated[CatalogRepository, Depends(repository)],
+) -> RunDeletionResponse:
+    """Clear the soft-delete marker so the run is listed again."""
+
+    return _set_run_deleted(run_id, repo, deleted=False)
 
 
 @app.get(

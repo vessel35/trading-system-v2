@@ -483,6 +483,52 @@ class BacktestCatalogStore(CatalogStore):
             self._connection.rollback()
             raise
 
+    def set_run_deleted(self, run_id: str, *, deleted: bool) -> bool:
+        """Mark or unmark one run as deleted, keeping every stored row intact.
+
+        Nothing is removed: the catalog row, its summary, its tags, and the
+        Evidence artifact all survive, and only the ``deleted_at`` marker moves.
+        Returns whether the marker actually changed, so a repeated call is
+        idempotent rather than an error. An already-deleted run keeps its
+        original ``deleted_at`` instead of being re-stamped.
+        """
+
+        try:
+            row = self._connection.execute(
+                """
+                UPDATE public.backtest_run
+                SET deleted_at = CASE WHEN %s THEN CURRENT_TIMESTAMP END
+                WHERE run_id = %s
+                  AND (deleted_at IS NOT NULL) <> %s
+                RETURNING run_id
+                """,
+                (deleted, run_id, deleted),
+            ).fetchone()
+            self._connection.commit()
+            return row is not None
+        except Exception:
+            self._connection.rollback()
+            raise
+
+    def purge_run(self, run_id: str) -> bool:
+        """Delete one run row for good, returning false when it was already gone.
+
+        The summary, preregistration, and tag rows carry ON DELETE CASCADE, so
+        this one statement removes every catalog trace of the run. The Evidence
+        artifact lives outside PostgreSQL and is the caller's responsibility.
+        """
+
+        try:
+            row = self._connection.execute(
+                "DELETE FROM public.backtest_run WHERE run_id = %s RETURNING run_id",
+                (run_id,),
+            ).fetchone()
+            self._connection.commit()
+            return row is not None
+        except Exception:
+            self._connection.rollback()
+            raise
+
     def determinism_reference(
         self,
         run_id: str,

@@ -27,6 +27,9 @@ from web_api.models import (
 
 DataJobStateValue = Literal["QUEUED", "RUNNING", "SUCCEEDED", "FAILED"]
 TERMINAL_DATA_JOB_STATES = frozenset({"SUCCEEDED", "FAILED"})
+# The registry outlives every job it holds, so finished data jobs are capped the
+# same way backtest jobs are. The listing shows the retained ones, newest first.
+MAX_RETAINED_FINISHED_DATA_JOBS = 200
 # crypto_data retention 창(init-scripts 02: drop_after 2000 days)과 일치. 이보다 먼 과거를
 # backfill해도 retention이 곧 삭제하므로 무의미하다. 이 상한은 한 번에 거는 backfill 범위를
 # 보관 창 안으로 묶는 안전장치다.
@@ -136,10 +139,25 @@ class DataJobRegistry:
         with self._lock:
             if identifier in self._states:
                 raise ValueError(f"data job already exists: {identifier}")
+            self._drop_oldest_finished()
             self._states[identifier] = state
             self._events[identifier] = asyncio.Event()
             self._loop = asyncio.get_running_loop()
         return state
+
+    def _drop_oldest_finished(self) -> None:
+        """Forget finished data jobs past the retention cap. The caller holds the lock."""
+
+        finished = [
+            state for state in self._states.values() if state.status in TERMINAL_DATA_JOB_STATES
+        ]
+        excess = len(finished) - MAX_RETAINED_FINISHED_DATA_JOBS
+        if excess <= 0:
+            return
+        finished.sort(key=lambda state: (state.updated_at, state.created_at, state.job_id))
+        for state in finished[:excess]:
+            del self._states[state.job_id]
+            self._events.pop(state.job_id, None)
 
     def get(self, job_id: str) -> DataJobState | None:
         with self._lock:
@@ -465,6 +483,7 @@ async def shutdown_data_jobs() -> None:
 
 __all__ = [
     "DATA_JOB_MAX_RANGE_DAYS",
+    "MAX_RETAINED_FINISHED_DATA_JOBS",
     "DataJobRegistry",
     "DataJobState",
     "TERMINAL_DATA_JOB_STATES",

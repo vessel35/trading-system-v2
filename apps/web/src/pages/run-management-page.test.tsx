@@ -98,7 +98,7 @@ describe("실행 관리 보강", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("스윕 설정 도움말에서 격자 조합과 과적합 주의를 확인하고 닫기 버튼으로 닫는다", async () => {
+  it("스윕 설정 도움말이 세 유형을 각각 예로 설명하고 닫기 버튼으로 닫는다", async () => {
     const user = userEvent.setup();
     renderManagement();
 
@@ -110,8 +110,16 @@ describe("실행 관리 보강", () => {
     const dialog = screen.getByRole("dialog", {
       name: "스윕 설정 도움말",
     });
-    expect(within(dialog).getAllByText(/격자/).length).toBeGreaterThan(0);
-    expect(within(dialog).getByText(/6개 조합/)).toBeInTheDocument();
+    // 유형을 고르는 것이 어려운 부분이므로 세 유형에 각각 풀어 쓴 예가 있어야 한다.
+    const examples = within(dialog).getByLabelText("유형별 예시");
+    expect(within(examples).getByText(/^grid —/)).toBeInTheDocument();
+    expect(within(examples).getByText(/^walk_forward —/)).toBeInTheDocument();
+    expect(within(examples).getByText(/^is_oos —/)).toBeInTheDocument();
+    // 각 예는 숫자로 무슨 일이 일어나는지 말해야 한다.
+    expect(within(examples).getByText(/3×2=6가지 조합/)).toBeInTheDocument();
+    expect(within(examples).getByText(/folds=3/)).toBeInTheDocument();
+    expect(within(examples).getByText(/split=0\.7/)).toBeInTheDocument();
+
     expect(within(dialog).getByText(/과적합\(overfitting\)/)).toBeInTheDocument();
     expect(within(dialog).getByText(/OOS 재검증/)).toBeInTheDocument();
 
@@ -185,9 +193,47 @@ describe("실행 관리 보강", () => {
     expect(symbol).toBeInvalid();
 
     await user.click(screen.getByRole("button", { name: "백테스트 실행" }));
-    await user.click(screen.getByRole("button", { name: "스윕 실행" }));
     expect(runPost).not.toHaveBeenCalled();
+
+    // The same submit serves the sweep, so the invalid field must block it too.
+    await user.click(await screen.findByText("스윕 설정"));
+    await user.click(screen.getByLabelText(/스윕으로 실행/));
+    await user.click(screen.getByRole("button", { name: "스윕 실행" }));
     expect(sweepPost).not.toHaveBeenCalled();
+  });
+
+  it("스윕 체크가 실행 방식을 정하고 꺼져 있으면 단일 실행만 보낸다", async () => {
+    const user = userEvent.setup();
+    const runPost = vi.fn();
+    const sweepPost = vi.fn();
+    server.use(
+      http.post("http://localhost/api/v1/runs", () => {
+        runPost();
+        return HttpResponse.json({}, { status: 500 });
+      }),
+      http.post("http://localhost/api/v1/sweeps", () => {
+        sweepPost();
+        return HttpResponse.json({}, { status: 500 });
+      }),
+    );
+    renderManagement();
+
+    // Collapsed, the summary still says which way the run will go.
+    const section = await screen.findByText("스윕 설정");
+    expect(section.textContent).toMatch(/꺼짐/);
+
+    // Sweep off: the settings below are ignored and one backtest is submitted.
+    await user.click(screen.getByRole("button", { name: "백테스트 실행" }));
+    await waitFor(() => expect(runPost).toHaveBeenCalledTimes(1));
+    expect(sweepPost).not.toHaveBeenCalled();
+
+    // Sweep on: the one submit becomes the sweep, and the summary says so.
+    await user.click(section);
+    await user.click(screen.getByLabelText(/스윕으로 실행/));
+    expect(section.textContent).toMatch(/켜짐/);
+    await user.click(screen.getByRole("button", { name: "스윕 실행" }));
+    await waitFor(() => expect(sweepPost).toHaveBeenCalledTimes(1));
+    expect(runPost).toHaveBeenCalledTimes(1);
   });
 
   it("사이징 입력에 계약 범위의 min/max 제약을 둔다", async () => {

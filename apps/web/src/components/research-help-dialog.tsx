@@ -97,6 +97,28 @@ export function ResearchHelpDialog({ helpId }: ResearchHelpDialogProps) {
             </section>
           )}
 
+          {help.examples && help.examples.length > 0 && (
+            <section className="space-y-2" aria-label="유형별 예시">
+              {help.examples.map((example) => (
+                <div
+                  key={example.label}
+                  className="flex items-start gap-3 rounded-lg border border-teal-500/20 bg-teal-500/5 p-4"
+                >
+                  <Info
+                    className="mt-0.5 h-4 w-4 shrink-0 text-teal-300"
+                    aria-hidden="true"
+                  />
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium text-teal-200">
+                      {example.label}
+                    </p>
+                    <p className="text-xs leading-relaxed">{example.body}</p>
+                  </div>
+                </div>
+              ))}
+            </section>
+          )}
+
           {help.note && (
             <section
               className="flex items-start gap-3 rounded-lg border border-blue-500/20 bg-blue-500/5 p-4"

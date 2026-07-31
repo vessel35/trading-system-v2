@@ -19,6 +19,10 @@ from web_api.models import JobError, JobStatus, SweepType
 
 JobStateValue = Literal["QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "ORPHANED"]
 TERMINAL_JOB_STATES = frozenset({"SUCCEEDED", "FAILED", "ORPHANED"})
+# Finished jobs stay readable for status polls and late SSE reconnects, but the
+# registry lives for as long as the process does, so the finished ones are
+# capped. Only finished jobs are ever dropped, oldest first.
+MAX_RETAINED_FINISHED_JOBS = 200
 REPOSITORY_ROOT = Path(__file__).parents[3]
 
 
@@ -82,10 +86,29 @@ class JobRegistry:
         with self._lock:
             if job_id in self._states:
                 raise ValueError(f"job already exists: {job_id}")
+            self._drop_oldest_finished()
             self._states[job_id] = state
             self._events[job_id] = asyncio.Event()
             self._loop = asyncio.get_running_loop()
         return state
+
+    def _drop_oldest_finished(self) -> None:
+        """Forget finished jobs past the retention cap. The caller holds the lock.
+
+        Queued and running jobs are never dropped, so a job can only disappear
+        after it has finished and a further MAX_RETAINED_FINISHED_JOBS jobs have
+        finished behind it. Pruning happens on registration, which is exactly
+        when the registry would otherwise grow.
+        """
+
+        finished = [state for state in self._states.values() if state.status in TERMINAL_JOB_STATES]
+        excess = len(finished) - MAX_RETAINED_FINISHED_JOBS
+        if excess <= 0:
+            return
+        finished.sort(key=lambda state: (state.updated_at, state.created_at, state.job_id))
+        for state in finished[:excess]:
+            del self._states[state.job_id]
+            self._events.pop(state.job_id, None)
 
     def get(self, job_id: str) -> JobState | None:
         with self._lock:
@@ -322,6 +345,7 @@ def submit_sweep_job(plan: SweepPlan, prereg: dict[str, object]) -> JobState:
 
 
 __all__ = [
+    "MAX_RETAINED_FINISHED_JOBS",
     "JobRegistry",
     "JobState",
     "SweepPlan",
