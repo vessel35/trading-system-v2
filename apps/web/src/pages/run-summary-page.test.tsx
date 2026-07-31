@@ -53,6 +53,7 @@ function successfulQuery<T>(data: T) {
 vi.mock("../hooks/use-catalog", () => ({
   useRun: () => successfulQuery(runFixture),
   useRunSummary: () => successfulQuery(summaryFixture),
+  useSetRunDeleted: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 vi.mock("../hooks/use-evidence", () => ({

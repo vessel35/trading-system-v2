@@ -15,6 +15,8 @@ import {
   GitCompareArrows,
   LoaderCircle,
   RefreshCw,
+  RotateCcw,
+  Trash2,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
@@ -24,6 +26,12 @@ import { CatalogFilterBar } from "../components/catalog-filter-bar";
 import { Badge, type BadgeProps } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "../components/ui/dialog";
 import { Skeleton } from "../components/ui/skeleton";
 import {
   Table,
@@ -35,7 +43,7 @@ import {
 } from "../components/ui/table";
 import { useCatalogFilters } from "../contexts/catalog-filters";
 import { useComparisonBasket } from "../contexts/comparison-basket";
-import { useRuns } from "../hooks/use-catalog";
+import { useRuns, useSetRunDeleted } from "../hooks/use-catalog";
 import {
   catalogDecisionPresentation,
   cn,
@@ -86,8 +94,10 @@ export function CatalogPage() {
   const [, navigate] = useLocation();
   const { filters } = useCatalogFilters();
   const basket = useComparisonBasket();
+  const setRunDeleted = useSetRunDeleted();
   const [offset, setOffset] = useState(0);
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
+  const [pendingDeletion, setPendingDeletion] = useState<string[] | null>(null);
   const [sorting, setSorting] = useState<SortingState>([
     { id: "created_at", desc: true },
   ]);
@@ -149,6 +159,7 @@ export function CatalogPage() {
               <span className="max-w-48 truncate font-medium text-foreground">
                 {row.original.run_name}
               </span>
+              {row.original.deleted_at && <Badge variant="outline">삭제됨</Badge>}
             </div>
             <div className="mt-0.5 flex items-center gap-2 text-[10px] text-muted-foreground">
               <span className="font-mono">{shortHash(row.original.run_id, 18)}</span>
@@ -264,8 +275,45 @@ export function CatalogPage() {
         ),
         enableSorting: false,
       },
+      {
+        id: "deletion",
+        header: "삭제",
+        cell: ({ row }) => {
+          const run = row.original;
+          const deleted = run.deleted_at !== null && run.deleted_at !== undefined;
+          return (
+            <Button
+              variant="ghost"
+              size="sm"
+              className={cn(
+                "h-7 px-2",
+                deleted ? "text-teal-300" : "text-muted-foreground hover:text-red-300",
+              )}
+              disabled={setRunDeleted.isPending}
+              aria-label={
+                deleted ? `${run.run_name} 복원` : `${run.run_name} 삭제`
+              }
+              onClick={(event) => {
+                event.stopPropagation();
+                if (deleted) {
+                  setRunDeleted.mutate({ runId: run.run_id, deleted: false });
+                  return;
+                }
+                setPendingDeletion([run.run_id]);
+              }}
+            >
+              {deleted ? (
+                <RotateCcw className="h-3.5 w-3.5" />
+              ) : (
+                <Trash2 className="h-3.5 w-3.5" />
+              )}
+            </Button>
+          );
+        },
+        enableSorting: false,
+      },
     ],
-    [],
+    [setRunDeleted],
   );
 
   const table = useReactTable({
@@ -281,6 +329,26 @@ export function CatalogPage() {
   });
 
   const selected = table.getSelectedRowModel().rows.map((row) => row.original);
+  const selectedAlive = selected.filter((run) => !run.deleted_at);
+  const selectedDeleted = selected.filter((run) => run.deleted_at);
+
+  /**
+   * Apply the marker run by run so one failure does not stop the rest, and
+   * re-read the list only after the last one instead of once per run.
+   */
+  async function applyDeletion(runIds: string[], deleted: boolean) {
+    for (const [index, runId] of runIds.entries()) {
+      await setRunDeleted
+        .mutateAsync({ runId, deleted, refresh: index === runIds.length - 1 })
+        .catch(() => undefined);
+    }
+    setRowSelection({});
+  }
+
+  async function restoreRuns(runIds: string[]) {
+    await applyDeletion(runIds, false);
+  }
+
   const page = runsQuery.data?.page;
   const currentPage = page ? Math.floor(page.offset / page.limit) + 1 : 1;
   const pageCount = page ? Math.max(1, Math.ceil(page.total / page.limit)) : 1;
@@ -395,6 +463,7 @@ export function CatalogPage() {
                   className={cn(
                     "cursor-pointer",
                     row.original.status === "FAILED" && "opacity-70",
+                    row.original.deleted_at && "opacity-60",
                   )}
                   onClick={() => navigate(`/runs/${encodeURIComponent(row.original.run_id)}`)}
                 >
@@ -415,16 +484,44 @@ export function CatalogPage() {
               선택 <strong className="tabular text-foreground">{selected.length}</strong>개
             </span>
             {selected.length > 0 && (
-              <Button
-                size="sm"
-                onClick={() => {
-                  basket.add(selected);
-                  setRowSelection({});
-                }}
-              >
-                <GitCompareArrows className="mr-1.5 h-3.5 w-3.5" />
-                비교에 담기
-              </Button>
+              <>
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    basket.add(selected);
+                    setRowSelection({});
+                  }}
+                >
+                  <GitCompareArrows className="mr-1.5 h-3.5 w-3.5" />
+                  비교에 담기
+                </Button>
+                {selectedAlive.length > 0 && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={setRunDeleted.isPending}
+                    onClick={() =>
+                      setPendingDeletion(selectedAlive.map((run) => run.run_id))
+                    }
+                  >
+                    <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                    선택 삭제
+                  </Button>
+                )}
+                {selectedDeleted.length > 0 && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={setRunDeleted.isPending}
+                    onClick={() => {
+                      void restoreRuns(selectedDeleted.map((run) => run.run_id));
+                    }}
+                  >
+                    <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+                    선택 복원
+                  </Button>
+                )}
+              </>
             )}
           </div>
           <div className="ml-auto flex items-center gap-3">
@@ -454,6 +551,39 @@ export function CatalogPage() {
           </div>
         </div>
       </Card>
+
+      <Dialog
+        open={pendingDeletion !== null}
+        onOpenChange={(next) => {
+          if (!next) setPendingDeletion(null);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogTitle>
+            {`실행 ${pendingDeletion?.length ?? 0}개를 삭제할까요?`}
+          </DialogTitle>
+          <DialogDescription className="leading-relaxed">
+            목록에서만 감춥니다. 저장된 실행 기록과 요약, 증거 파일은 그대로 남으며,
+            필터를 "삭제만 보기"로 바꾸면 다시 찾아 복원할 수 있습니다.
+          </DialogDescription>
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setPendingDeletion(null)}>
+              취소
+            </Button>
+            <Button
+              disabled={setRunDeleted.isPending}
+              onClick={() => {
+                const runIds = pendingDeletion ?? [];
+                setPendingDeletion(null);
+                void applyDeletion(runIds, true);
+              }}
+            >
+              <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+              삭제
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

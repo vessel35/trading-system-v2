@@ -427,6 +427,7 @@ class RunListItem(BaseModel):
     integrity_status: str | None
     data_coverage_ratio: float | None
     summary_present: bool
+    deleted_at: datetime | None = None
 
 
 class RunListResponse(BaseModel):
@@ -485,6 +486,16 @@ class RunHeader(BaseModel):
     created_at: datetime
     resolved_indicators_json: JsonValue
     source_data_hash: str | None
+    deleted_at: datetime | None = None
+
+
+class RunDeletionResponse(BaseModel):
+    """Result of a soft delete or a restore; no stored row is ever removed."""
+
+    run_id: str
+    deleted: bool
+    deleted_at: datetime | None
+    changed: bool
 
 
 class RunSummary(BaseModel):
