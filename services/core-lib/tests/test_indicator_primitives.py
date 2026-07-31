@@ -1,7 +1,7 @@
 """Verify the calculation authority's complete shared primitive layer."""
 
 from datetime import UTC, datetime, timedelta
-from math import isnan
+from math import cos, isnan, sin
 
 import pytest
 from core_lib.indicators.primitives import (
@@ -189,3 +189,35 @@ def test_incremental_momentum_state_can_drop_the_percentage() -> None:
     values = [10.0, 11.0, 12.0, 15.0]
     state = RocState(2, percentage=False)
     assert _feed(state, values)[3] == pytest.approx(4.0)
+
+
+def test_recursive_seeds_are_bit_identical_between_the_two_paths() -> None:
+    """The EMA and RMA seed must be the same number in both execution paths.
+
+    §0.3 and §0.5 seed the recursion with the simple average of the first `n`
+    observations, which fixes the value but not how the sum reaching it is added
+    up. From Python 3.12 onwards the builtin `sum` adds floats with Neumaier
+    compensation, so a state that accumulated them one at a time produced a seed
+    differing in the last bits, and every later value carried that difference.
+
+    Nothing caught it for a long time because the parity comparison is relative
+    and the gap is a last-bit one. It surfaced only through §4.8's Klinger
+    oscillator, which subtracts two averages seeded over 34 and 55 large values:
+    the subtraction cancels the shared magnitude and leaves the last-bit gap on
+    its own, so a relative 1e-16 in the seed becomes a relative 1e-12 in the
+    result. This assertion states the property itself, so it holds whether or not
+    a registered indicator happens to subtract two long averages.
+
+    The series below matters: values that sum exactly, such as a clean
+    alternating pattern, cannot tell the two summations apart at all.
+    """
+
+    values = [sin(index / 3.0) * 1e5 + cos(index / 7.0) * 1e4 for index in range(60)]
+    for period in (34, 55):
+        seeded = EmaState(period)
+        _feed(seeded, values[:period])
+        assert seeded.current() == ema(values, period)[period - 1]
+
+        wilder = RmaState(period)
+        _feed(wilder, values[:period])
+        assert wilder.current() == rma(values, period)[period - 1]
