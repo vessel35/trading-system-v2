@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 
 from core_lib.types import Candle
 
-from .primitives import NAN
+from .primitives import EmaState
 from .primitives import ema as ema_primitive
 
 FOLLOW_UP_INDICATORS = (
@@ -29,40 +29,34 @@ def ema(candles: Sequence[Candle], period: int) -> list[float]:
 
 @dataclass(slots=True)
 class EMAState:
-    """O(1)-per-candle incremental EMA state."""
+    """O(1)-per-candle incremental EMA state over close prices.
+
+    The recursion itself lives in the primitive layer so this class only decides
+    which price feeds it. Every indicator that smooths something reuses the same
+    implementation rather than restating the seed-and-alpha rule.
+    """
 
     period: int
     min_history: int = field(init=False)
-    _count: int = field(init=False, default=0)
-    _seed_sum: float = field(init=False, default=0.0)
-    _value: float | None = field(init=False, default=None)
+    _average: EmaState = field(init=False)
 
     def __post_init__(self) -> None:
         if self.period <= 0:
             raise ValueError("period must be positive")
         self.min_history = self.period
+        self._average = EmaState(self.period)
 
     @property
     def warmed_up(self) -> bool:
-        return self._value is not None
+        return self._average.warmed_up
 
     def seed(self, candles: Sequence[Candle]) -> None:
-        self._count = 0
-        self._seed_sum = 0.0
-        self._value = None
+        self._average.reset()
         for candle in candles:
             self.update(candle)
 
     def update(self, candle: Candle) -> float:
-        if self._value is None:
-            self._count += 1
-            self._seed_sum += candle.close
-            if self._count == self.period:
-                self._value = self._seed_sum / self.period
-        else:
-            alpha = 2.0 / (self.period + 1.0)
-            self._value += alpha * (candle.close - self._value)
-        return self.current()
+        return self._average.update(candle.close)
 
     def current(self) -> float:
-        return self._value if self._value is not None else NAN
+        return self._average.current()

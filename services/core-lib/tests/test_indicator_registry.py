@@ -55,9 +55,27 @@ def make_candles(count: int) -> list[Candle]:
     return candles
 
 
+# The registry is pinned by the exact set of registered identities rather than by
+# a count. A count says only that the number moved; this says which combination
+# appeared or disappeared, and it still refuses a silent addition or removal.
+REGISTERED_IDENTIFIERS = frozenset(
+    {
+        "ATR(period=14)",
+        "Bollinger Bands(multiplier=2.0,period=20)",
+        "EMA(period=9)",
+        "EMA(period=21)",
+        "EMA(period=55)",
+        "EMA(period=200)",
+        "RSI(period=14)",
+        "Stochastic(period=14,smooth_period=3)",
+        "Volume SMA(period=20)",
+    }
+)
+
+
 def test_registry_contains_required_coverage_and_pinned_authority() -> None:
     specs = DEFAULT_REGISTRY.list()
-    assert len(specs) == 9
+    assert {spec.identifier for spec in specs} == REGISTERED_IDENTIFIERS
     assert {spec.name for spec in specs} == {
         "EMA",
         "RSI",
@@ -86,8 +104,12 @@ def test_follow_up_catalog_preserves_all_76_not_yet_registered_items() -> None:
         + systems.FOLLOW_UP_INDICATORS
         + donchian.FOLLOW_UP_INDICATORS
     )
-    assert len(follow_up) == 76
-    assert len(set(follow_up)) == 76
+    # The standard carries 82 systems; the registered ones and this catalog must
+    # account for all of them, so the catalog length follows from the registry
+    # instead of being written down twice.
+    registered_systems = 6
+    assert len(follow_up) == 82 - registered_systems
+    assert len(set(follow_up)) == len(follow_up)
 
 
 def test_specs_are_immutable_and_parameterized_identity_is_exact() -> None:
@@ -108,7 +130,7 @@ def test_register_rejects_duplicate_identity() -> None:
 def test_resolve_enabled_supports_auto_explicit_and_all() -> None:
     assert DEFAULT_REGISTRY.resolve_enabled("auto", {"RSI"}, {"ATR"}) == {"RSI"}
     assert DEFAULT_REGISTRY.resolve_enabled("explicit", {"RSI"}, {"ATR"}) == {"ATR"}
-    assert len(DEFAULT_REGISTRY.resolve_enabled("all", set(), set())) == 9
+    assert DEFAULT_REGISTRY.resolve_enabled("all", set(), set()) == set(REGISTERED_IDENTIFIERS)
     with pytest.raises(ValueError, match="auto, explicit, or all"):
         DEFAULT_REGISTRY.resolve_enabled("unknown", set(), set())
 
@@ -123,7 +145,7 @@ def test_resolve_specs_is_the_single_descriptor_and_mode_interpreter() -> None:
 
     assert [spec.identifier for spec in auto] == ["EMA(period=9)"]
     assert [spec.identifier for spec in selected] == ["ATR(period=14)"]
-    assert len(all_specs) == 9
+    assert {spec.identifier for spec in all_specs} == REGISTERED_IDENTIFIERS
 
 
 def test_resolve_specs_rejects_invalid_or_empty_descriptor_selection() -> None:
@@ -190,3 +212,33 @@ def test_batch_skips_specs_without_their_declared_input_channels() -> None:
             available_inputs={"advances"},
         )
     ) == {"Conditional RSI(period=14)"}
+
+
+def test_every_spec_min_history_matches_its_state_min_history() -> None:
+    """The two declarations of minimum history must agree for every spec.
+
+    `IndicatorSpec.min_history` decides how much history a run fetches, while the
+    incremental state's own `min_history` decides when that state calls itself
+    warmed up. They are written in different files, so nothing but this check
+    stops them from drifting apart; a drift shows up much later as a warm-up that
+    is one candle short.
+    """
+
+    mismatched = [
+        (spec.identifier, spec.min_history, spec.make_state().min_history)
+        for spec in DEFAULT_REGISTRY.list()
+        if spec.make_state().min_history != spec.min_history
+    ]
+    assert mismatched == []
+
+
+def test_warmed_up_state_agrees_with_declared_min_history() -> None:
+    """A state must be warm exactly once it has seen its declared minimum."""
+
+    candles = make_candles(260)
+    for spec in DEFAULT_REGISTRY.list():
+        state = spec.make_state()
+        state.seed(candles[: spec.min_history - 1])
+        assert not state.warmed_up, f"{spec.identifier} warmed up early"
+        state.update(candles[spec.min_history - 1])
+        assert state.warmed_up, f"{spec.identifier} not warm at its declared minimum"

@@ -18,6 +18,44 @@ def _validate_period(period: int) -> None:
         raise ValueError("period must be positive")
 
 
+def safe_divide(numerator: float, denominator: float, *, on_zero: float) -> float:
+    """Divide, returning ``on_zero`` when the denominator is zero.
+
+    The standard (§0.11) does not fix one repository-wide answer for a zero
+    denominator: it lists zero, a saturated value, and the previous value as the
+    choices actual implementations make, and says each indicator's own section
+    states which one applies. So the substitute stays a required argument here.
+    A caller has to name the value its indicator's section prescribes, which
+    keeps that decision visible at the call site instead of hidden in a default.
+
+    The backtest engine rejects a non-finite indicator value once warm-up is
+    over, so ``on_zero`` must be finite. NaN belongs to warm-up alone.
+    """
+
+    if isnan(numerator) or isnan(denominator):
+        return NAN
+    if denominator == 0.0:
+        if isnan(on_zero):
+            raise ValueError("on_zero must be finite; NaN is reserved for warm-up")
+        return on_zero
+    return numerator / denominator
+
+
+def hl2(candles: Sequence[Candle]) -> Series:
+    """Return median price, ``(high + low) / 2`` (§0.1)."""
+    return [(candle.high + candle.low) / 2.0 for candle in candles]
+
+
+def hlcc4(candles: Sequence[Candle]) -> Series:
+    """Return weighted close, ``(high + low + 2 * close) / 4`` (§0.1)."""
+    return [(candle.high + candle.low + 2.0 * candle.close) / 4.0 for candle in candles]
+
+
+def ohlc4(candles: Sequence[Candle]) -> Series:
+    """Return the OHLC average, ``(open + high + low + close) / 4`` (§0.1)."""
+    return [(candle.open + candle.high + candle.low + candle.close) / 4.0 for candle in candles]
+
+
 class _RollingPopulationStdev:
     """Numerically stable rolling population deviation using Welford moments."""
 
@@ -72,9 +110,14 @@ class _RollingPopulationStdev:
                 self._remove(removed)
         return self.current()
 
+    @property
+    def warmed_up(self) -> bool:
+        """Return whether a full, valid window is present."""
+        return len(self._window) == self.period and not self._invalid and self._count == self.period
+
     def current(self) -> float:
         """Return sqrt(M2/n) for a complete valid window, otherwise NaN."""
-        if len(self._window) != self.period or self._invalid or self._count != self.period:
+        if not self.warmed_up:
             return NAN
         return sqrt(max(0.0, self._m2) / self.period)
 
@@ -232,6 +275,17 @@ def cumulative(values: Sequence[float]) -> Series:
     return result
 
 
+def mom(values: Sequence[float], period: int) -> Series:
+    """Return the raw momentum ``P_t - P_{t-n}`` (§0.10)."""
+    _validate_period(period)
+    result: Series = [NAN] * min(period, len(values))
+    for index in range(period, len(values)):
+        previous = values[index - period]
+        current = values[index]
+        result.append(NAN if isnan(previous) or isnan(current) else current - previous)
+    return result
+
+
 def roc(values: Sequence[float], period: int) -> Series:
     """Return percentage rate of change over ``period`` observations."""
     _validate_period(period)
@@ -267,3 +321,235 @@ def linreg(values: Sequence[float], period: int) -> Series:
         intercept = (sum_y - slope * sum_x) / period
         result.append(intercept + slope * (period - 1))
     return result
+
+
+class SmaState:
+    """O(1)-per-value rolling simple average (§0.2).
+
+    The vectorized ``sma`` above and this state must agree value for value; the
+    parity tests hold that. Keeping one algorithm here rather than inside each
+    indicator is what stops the same sliding window from being written again for
+    every indicator that averages something.
+    """
+
+    def __init__(self, period: int) -> None:
+        _validate_period(period)
+        self.period = period
+        self._window: deque[float] = deque()
+        self._total = 0.0
+        self._invalid = 0
+
+    def reset(self) -> None:
+        """Clear the window."""
+        self._window.clear()
+        self._total = 0.0
+        self._invalid = 0
+
+    @property
+    def warmed_up(self) -> bool:
+        """Return whether a full, valid window is present."""
+        return len(self._window) == self.period and self._invalid == 0
+
+    def update(self, value: float) -> float:
+        """Add one value, evict the oldest, and return the current average."""
+        self._window.append(value)
+        if isnan(value):
+            self._invalid += 1
+        else:
+            self._total += value
+        if len(self._window) > self.period:
+            removed = self._window.popleft()
+            if isnan(removed):
+                self._invalid -= 1
+            else:
+                self._total -= removed
+        return self.current()
+
+    def current(self) -> float:
+        """Return the average of a complete valid window, otherwise NaN."""
+        return self._total / self.period if self.warmed_up else NAN
+
+
+class _RecursiveAverageState:
+    """Shared SMA-seeded recursion behind EMA (§0.3) and Wilder RMA (§0.5)."""
+
+    def __init__(self, period: int, alpha: float) -> None:
+        _validate_period(period)
+        self.period = period
+        self._alpha = alpha
+        self._seed_count = 0
+        self._seed_sum = 0.0
+        self._value: float | None = None
+
+    def reset(self) -> None:
+        """Drop the seed and the recursive value."""
+        self._seed_count = 0
+        self._seed_sum = 0.0
+        self._value = None
+
+    @property
+    def warmed_up(self) -> bool:
+        """Return whether the seed completed and a value exists."""
+        return self._value is not None
+
+    def update(self, value: float) -> float:
+        """Advance one observation and return the current average."""
+        if isnan(value):
+            if self._value is None:
+                self._seed_count = 0
+                self._seed_sum = 0.0
+            return NAN
+        if self._value is None:
+            self._seed_count += 1
+            self._seed_sum += value
+            if self._seed_count == self.period:
+                self._value = self._seed_sum / self.period
+        else:
+            self._value += self._alpha * (value - self._value)
+        return self.current()
+
+    def current(self) -> float:
+        """Return the recursive average, or NaN before the seed completes."""
+        return self._value if self._value is not None else NAN
+
+
+class EmaState(_RecursiveAverageState):
+    """O(1)-per-value EMA with the standard's SMA seed (§0.3)."""
+
+    def __init__(self, period: int) -> None:
+        _validate_period(period)
+        super().__init__(period, 2.0 / (period + 1.0))
+
+
+class RmaState(_RecursiveAverageState):
+    """O(1)-per-value Wilder smoothing (§0.5); RMA(n) is not EMA(n)."""
+
+    def __init__(self, period: int) -> None:
+        _validate_period(period)
+        super().__init__(period, 1.0 / period)
+
+
+class RollingExtremeState:
+    """O(1)-amortized rolling highest or lowest over a window (§0.8)."""
+
+    def __init__(self, period: int, *, highest: bool) -> None:
+        _validate_period(period)
+        self.period = period
+        self._highest = highest
+        self._candidates: deque[tuple[int, float]] = deque()
+        self._window: deque[float] = deque()
+        self._index = -1
+        self._invalid = 0
+
+    def reset(self) -> None:
+        """Clear the window and the monotonic candidate queue."""
+        self._candidates.clear()
+        self._window.clear()
+        self._index = -1
+        self._invalid = 0
+
+    @property
+    def warmed_up(self) -> bool:
+        """Return whether a full, valid window is present."""
+        return len(self._window) == self.period and self._invalid == 0
+
+    def update(self, value: float) -> float:
+        """Add one value and return the extreme of the current window."""
+        self._index += 1
+        self._window.append(value)
+        if isnan(value):
+            self._invalid += 1
+            self._candidates.clear()
+        else:
+            while self._candidates and (
+                self._candidates[-1][1] <= value
+                if self._highest
+                else self._candidates[-1][1] >= value
+            ):
+                self._candidates.pop()
+            self._candidates.append((self._index, value))
+        if len(self._window) > self.period:
+            removed = self._window.popleft()
+            if isnan(removed):
+                self._invalid -= 1
+        oldest_index = self._index - self.period + 1
+        while self._candidates and self._candidates[0][0] < oldest_index:
+            self._candidates.popleft()
+        return self.current()
+
+    def current(self) -> float:
+        """Return the window extreme, or NaN while warming up."""
+        if not self.warmed_up or not self._candidates:
+            return NAN
+        return self._candidates[0][1]
+
+
+class CumulativeState:
+    """Running total that preserves NaN positions (§0.9)."""
+
+    def __init__(self) -> None:
+        self._total = 0.0
+        self._seen = False
+
+    def reset(self) -> None:
+        """Clear the running total."""
+        self._total = 0.0
+        self._seen = False
+
+    @property
+    def warmed_up(self) -> bool:
+        """Return whether at least one finite value was accumulated."""
+        return self._seen
+
+    def update(self, value: float) -> float:
+        """Add one value to the total and return it."""
+        if isnan(value):
+            return NAN
+        self._total += value
+        self._seen = True
+        return self._total
+
+    def current(self) -> float:
+        """Return the running total, or NaN before the first finite value."""
+        return self._total if self._seen else NAN
+
+
+class RocState:
+    """Rolling percentage rate of change over ``period`` observations (§0.10)."""
+
+    def __init__(self, period: int, *, percentage: bool = True) -> None:
+        _validate_period(period)
+        self.period = period
+        self._percentage = percentage
+        self._window: deque[float] = deque(maxlen=period + 1)
+
+    def reset(self) -> None:
+        """Clear the observation window."""
+        self._window.clear()
+
+    @property
+    def warmed_up(self) -> bool:
+        """Return whether the window spans the full lookback."""
+        return len(self._window) == self.period + 1
+
+    def update(self, value: float) -> float:
+        """Add one value and return the change against the lookback."""
+        self._window.append(value)
+        return self.current()
+
+    def current(self) -> float:
+        """Return the change, or NaN while warming up or on invalid input."""
+        if not self.warmed_up:
+            return NAN
+        previous = self._window[0]
+        current = self._window[-1]
+        if isnan(previous) or isnan(current):
+            return NAN
+        if not self._percentage:
+            return current - previous
+        # The standard leaves a zero base undefined for ROC; warm-up NaN is the
+        # only honest answer because no substitute value is prescribed (§0.10).
+        return NAN if previous == 0.0 else 100.0 * (current - previous) / previous
+
+
+StdevState = _RollingPopulationStdev

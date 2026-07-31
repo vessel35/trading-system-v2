@@ -1,13 +1,12 @@
 """Define required volatility indicators and the follow-up volatility catalog."""
 
-from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from math import isnan
 
 from core_lib.types import Candle
 
-from .primitives import NAN, _RollingPopulationStdev, rma, sma, stdev, tr
+from .primitives import NAN, RmaState, SmaState, StdevState, rma, sma, stdev, tr
 
 BollingerValue = dict[str, float]
 
@@ -29,29 +28,30 @@ def atr(candles: Sequence[Candle], period: int = 14) -> list[float]:
 
 @dataclass(slots=True)
 class ATRState:
-    """O(1)-per-candle Wilder ATR state."""
+    """O(1)-per-candle Wilder ATR state over True Range.
+
+    True Range needs the previous close, so that one step stays here; the
+    Wilder smoothing on top of it comes from the shared primitive.
+    """
 
     period: int = 14
     min_history: int = field(init=False)
     _previous_close: float | None = field(init=False, default=None)
-    _count: int = field(init=False, default=0)
-    _seed_sum: float = field(init=False, default=0.0)
-    _value: float | None = field(init=False, default=None)
+    _average: RmaState = field(init=False)
 
     def __post_init__(self) -> None:
         if self.period <= 0:
             raise ValueError("period must be positive")
         self.min_history = self.period
+        self._average = RmaState(self.period)
 
     @property
     def warmed_up(self) -> bool:
-        return self._value is not None
+        return self._average.warmed_up
 
     def seed(self, candles: Sequence[Candle]) -> None:
         self._previous_close = None
-        self._count = 0
-        self._seed_sum = 0.0
-        self._value = None
+        self._average.reset()
         for candle in candles:
             self.update(candle)
 
@@ -65,17 +65,10 @@ class ATRState:
                 abs(candle.low - self._previous_close),
             )
         self._previous_close = candle.close
-        if self._value is None:
-            self._count += 1
-            self._seed_sum += true_range
-            if self._count == self.period:
-                self._value = self._seed_sum / self.period
-        else:
-            self._value += (true_range - self._value) / self.period
-        return self.current()
+        return self._average.update(true_range)
 
     def current(self) -> float:
-        return self._value if self._value is not None else NAN
+        return self._average.current()
 
 
 def bollinger_bands(
@@ -124,9 +117,8 @@ class BollingerBandsState:
     period: int = 20
     multiplier: float = 2.0
     min_history: int = field(init=False)
-    _window: deque[float] = field(init=False, default_factory=deque)
-    _total: float = field(init=False, default=0.0)
-    _deviation: _RollingPopulationStdev = field(init=False)
+    _middle: SmaState = field(init=False)
+    _deviation: StdevState = field(init=False)
     _value: BollingerValue = field(
         init=False,
         default_factory=lambda: {
@@ -144,15 +136,15 @@ class BollingerBandsState:
         if self.multiplier <= 0.0:
             raise ValueError("multiplier must be positive")
         self.min_history = self.period
-        self._deviation = _RollingPopulationStdev(self.period)
+        self._middle = SmaState(self.period)
+        self._deviation = StdevState(self.period)
 
     @property
     def warmed_up(self) -> bool:
         return not isnan(self._value["middle"])
 
     def seed(self, candles: Sequence[Candle]) -> None:
-        self._window.clear()
-        self._total = 0.0
+        self._middle.reset()
         self._deviation.reset()
         self._value = {
             "middle": NAN,
@@ -166,16 +158,11 @@ class BollingerBandsState:
 
     def update(self, candle: Candle) -> BollingerValue:
         close = candle.close
-        self._window.append(close)
-        self._total += close
+        middle = self._middle.update(close)
         deviation = self._deviation.update(close)
-        if len(self._window) > self.period:
-            removed = self._window.popleft()
-            self._total -= removed
-        if len(self._window) < self.period:
+        if isnan(middle) or isnan(deviation):
             return self.current()
 
-        middle = self._total / self.period
         upper = middle + self.multiplier * deviation
         lower = middle - self.multiplier * deviation
         width = upper - lower

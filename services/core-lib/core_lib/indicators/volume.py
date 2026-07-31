@@ -1,12 +1,11 @@
 """Define required volume indicators and the follow-up volume catalog."""
 
-from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from core_lib.types import Candle
 
-from .primitives import NAN, sma
+from .primitives import SmaState, sma
 
 FOLLOW_UP_INDICATORS = (
     "OBV",
@@ -29,37 +28,29 @@ def volume_sma(candles: Sequence[Candle], period: int = 20) -> list[float]:
 
 @dataclass(slots=True)
 class VolumeSMAState:
-    """O(1)-per-candle volume SMA state."""
+    """O(1)-per-candle volume SMA state built on the shared rolling average."""
 
     period: int = 20
     min_history: int = field(init=False)
-    _window: deque[float] = field(init=False, default_factory=deque)
-    _total: float = field(init=False, default=0.0)
-    _value: float | None = field(init=False, default=None)
+    _average: SmaState = field(init=False)
 
     def __post_init__(self) -> None:
         if self.period <= 0:
             raise ValueError("period must be positive")
         self.min_history = self.period
+        self._average = SmaState(self.period)
 
     @property
     def warmed_up(self) -> bool:
-        return self._value is not None
+        return self._average.warmed_up
 
     def seed(self, candles: Sequence[Candle]) -> None:
-        self._window.clear()
-        self._total = 0.0
-        self._value = None
+        self._average.reset()
         for candle in candles:
             self.update(candle)
 
     def update(self, candle: Candle) -> float:
-        self._window.append(candle.volume)
-        self._total += candle.volume
-        if len(self._window) > self.period:
-            self._total -= self._window.popleft()
-        self._value = self._total / self.period if len(self._window) == self.period else None
-        return self.current()
+        return self._average.update(candle.volume)
 
     def current(self) -> float:
-        return self._value if self._value is not None else NAN
+        return self._average.current()

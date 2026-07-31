@@ -1,13 +1,22 @@
 """Define required momentum indicators and the follow-up momentum catalog."""
 
-from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from math import isnan
 
 from core_lib.types import Candle
 
-from .primitives import NAN, hh, ll, rma, sma
+from .primitives import (
+    NAN,
+    RmaState,
+    RollingExtremeState,
+    SmaState,
+    hh,
+    ll,
+    rma,
+    safe_divide,
+    sma,
+)
 
 StochasticValue = dict[str, float]
 
@@ -77,17 +86,16 @@ class RSIState:
     period: int = 14
     min_history: int = field(init=False)
     _previous_close: float | None = field(init=False, default=None)
-    _delta_count: int = field(init=False, default=0)
-    _gain_sum: float = field(init=False, default=0.0)
-    _loss_sum: float = field(init=False, default=0.0)
-    _average_gain: float | None = field(init=False, default=None)
-    _average_loss: float | None = field(init=False, default=None)
+    _gains: RmaState = field(init=False)
+    _losses: RmaState = field(init=False)
     _value: float | None = field(init=False, default=None)
 
     def __post_init__(self) -> None:
         if self.period <= 0:
             raise ValueError("period must be positive")
         self.min_history = self.period + 1
+        self._gains = RmaState(self.period)
+        self._losses = RmaState(self.period)
 
     @property
     def warmed_up(self) -> bool:
@@ -95,11 +103,8 @@ class RSIState:
 
     def seed(self, candles: Sequence[Candle]) -> None:
         self._previous_close = None
-        self._delta_count = 0
-        self._gain_sum = 0.0
-        self._loss_sum = 0.0
-        self._average_gain = None
-        self._average_loss = None
+        self._gains.reset()
+        self._losses.reset()
         self._value = None
         for candle in candles:
             self.update(candle)
@@ -111,21 +116,10 @@ class RSIState:
 
         change = candle.close - self._previous_close
         self._previous_close = candle.close
-        gain = max(change, 0.0)
-        loss = max(-change, 0.0)
-        if self._average_gain is None or self._average_loss is None:
-            self._delta_count += 1
-            self._gain_sum += gain
-            self._loss_sum += loss
-            if self._delta_count == self.period:
-                self._average_gain = self._gain_sum / self.period
-                self._average_loss = self._loss_sum / self.period
-        else:
-            self._average_gain += (gain - self._average_gain) / self.period
-            self._average_loss += (loss - self._average_loss) / self.period
-
-        if self._average_gain is not None and self._average_loss is not None:
-            self._value = _rsi_value(self._average_gain, self._average_loss)
+        average_gain = self._gains.update(max(change, 0.0))
+        average_loss = self._losses.update(max(-change, 0.0))
+        if not isnan(average_gain) and not isnan(average_loss):
+            self._value = _rsi_value(average_gain, average_loss)
         return self.current()
 
     def current(self) -> float:
@@ -148,8 +142,12 @@ def stochastic(
         if isnan(high) or isnan(low):
             percent_k.append(NAN)
             continue
-        price_range = high - low
-        current_k = previous_k if price_range == 0.0 else 100.0 * (candle.close - low) / price_range
+        # §2.2 keeps the previous %K when the window is flat, starting at 50.
+        current_k = safe_divide(
+            100.0 * (candle.close - low),
+            high - low,
+            on_zero=previous_k,
+        )
         percent_k.append(current_k)
         previous_k = current_k
     percent_d = sma(percent_k, smooth_period)
@@ -166,10 +164,9 @@ class StochasticState:
     period: int = 14
     smooth_period: int = 3
     min_history: int = field(init=False)
-    _index: int = field(init=False, default=-1)
-    _highs: deque[tuple[int, float]] = field(init=False, default_factory=deque)
-    _lows: deque[tuple[int, float]] = field(init=False, default_factory=deque)
-    _percent_k_window: deque[float] = field(init=False, default_factory=deque)
+    _highest: RollingExtremeState = field(init=False)
+    _lowest: RollingExtremeState = field(init=False)
+    _smoothed: SmaState = field(init=False)
     _previous_k: float = field(init=False, default=50.0)
     _value: StochasticValue = field(
         init=False,
@@ -180,57 +177,38 @@ class StochasticState:
         if self.period <= 0 or self.smooth_period <= 0:
             raise ValueError("periods must be positive")
         self.min_history = self.period + self.smooth_period - 1
+        self._highest = RollingExtremeState(self.period, highest=True)
+        self._lowest = RollingExtremeState(self.period, highest=False)
+        self._smoothed = SmaState(self.smooth_period)
 
     @property
     def warmed_up(self) -> bool:
         return not isnan(self._value["percent_d"])
 
     def seed(self, candles: Sequence[Candle]) -> None:
-        self._index = -1
-        self._highs.clear()
-        self._lows.clear()
-        self._percent_k_window.clear()
+        self._highest.reset()
+        self._lowest.reset()
+        self._smoothed.reset()
         self._previous_k = 50.0
         self._value = {"percent_k": NAN, "percent_d": NAN}
         for candle in candles:
             self.update(candle)
 
     def update(self, candle: Candle) -> StochasticValue:
-        self._index += 1
-        while self._highs and self._highs[-1][1] <= candle.high:
-            self._highs.pop()
-        self._highs.append((self._index, candle.high))
-        while self._lows and self._lows[-1][1] >= candle.low:
-            self._lows.pop()
-        self._lows.append((self._index, candle.low))
-
-        minimum_index = self._index - self.period + 1
-        while self._highs and self._highs[0][0] < minimum_index:
-            self._highs.popleft()
-        while self._lows and self._lows[0][0] < minimum_index:
-            self._lows.popleft()
-
-        if self._index + 1 < self.period:
+        highest = self._highest.update(candle.high)
+        lowest = self._lowest.update(candle.low)
+        if isnan(highest) or isnan(lowest):
             self._value = {"percent_k": NAN, "percent_d": NAN}
             return self.current()
 
-        highest = self._highs[0][1]
-        lowest = self._lows[0][1]
-        price_range = highest - lowest
-        current_k = (
-            self._previous_k
-            if price_range == 0.0
-            else 100.0 * (candle.close - lowest) / price_range
+        # §2.2 keeps the previous %K when the window is flat, starting at 50.
+        current_k = safe_divide(
+            100.0 * (candle.close - lowest),
+            highest - lowest,
+            on_zero=self._previous_k,
         )
         self._previous_k = current_k
-        self._percent_k_window.append(current_k)
-        if len(self._percent_k_window) > self.smooth_period:
-            self._percent_k_window.popleft()
-        current_d = (
-            sum(self._percent_k_window) / self.smooth_period
-            if len(self._percent_k_window) == self.smooth_period
-            else NAN
-        )
+        current_d = self._smoothed.update(current_k)
         self._value = {"percent_k": current_k, "percent_d": current_d}
         return self.current()
 
