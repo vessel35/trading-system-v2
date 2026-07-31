@@ -2,6 +2,7 @@ import {
   AlertTriangle,
   ArrowLeft,
   CheckCircle2,
+  CircleHelp,
   Clipboard,
   Database,
   GitCompareArrows,
@@ -24,6 +25,10 @@ import { SignalsDecisionsTab } from "../components/evidence/signals-decisions-ta
 import { TradeDrawer } from "../components/evidence/trade-drawer";
 import { TradesTab } from "../components/evidence/trades-tab";
 import { RunTags } from "../components/run-tags";
+import {
+  SummaryHelpDialog,
+  type SummaryHelpTarget,
+} from "../components/summary-help-dialog";
 import { Button } from "../components/ui/button";
 import {
   Card,
@@ -37,6 +42,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
 import { useComparisonBasket } from "../contexts/comparison-basket";
 import { useRun, useRunSummary } from "../hooks/use-catalog";
 import { useTrades } from "../hooks/use-evidence";
+import type { SummaryHelpSectionId } from "../lib/summary-help";
 import {
   cn,
   formatDecimalString,
@@ -47,20 +53,72 @@ import {
   shortHash,
 } from "../lib/utils";
 
+/** Opens the section help scrolled to one value's entry. */
+function ValueHelpButton({
+  label,
+  onClick,
+}: {
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={`${label} 설명 보기`}
+      className="-m-1 shrink-0 rounded p-1 text-muted-foreground/70 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      <CircleHelp className="h-3.5 w-3.5" aria-hidden="true" />
+    </button>
+  );
+}
+
+/** Opens the section help from a card header. */
+function SectionHelpButton({
+  label,
+  onClick,
+}: {
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      className="h-7 gap-1.5 px-2 text-muted-foreground"
+      aria-label={label}
+      onClick={onClick}
+    >
+      <CircleHelp className="h-4 w-4" aria-hidden="true" />
+      도움말
+    </Button>
+  );
+}
+
 function MetricTile({
   label,
   value,
   hint,
+  helpId,
+  onHelp,
 }: {
   label: string;
   value: string;
   hint?: string;
+  helpId?: string;
+  onHelp?: (itemId: string) => void;
 }) {
   return (
     <div className="rounded-lg border bg-background/45 p-3">
-      <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-        {label}
-      </p>
+      <div className="flex items-start justify-between gap-1">
+        <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+          {label}
+        </p>
+        {helpId && onHelp && (
+          <ValueHelpButton label={label} onClick={() => onHelp(helpId)} />
+        )}
+      </div>
       <p className="tabular mt-1 text-lg font-semibold tracking-tight">{value}</p>
       {hint && <p className="mt-0.5 text-[10px] text-muted-foreground">{hint}</p>}
     </div>
@@ -108,13 +166,31 @@ function decisionVariant(verdict: string | null): BadgeProps["variant"] {
 }
 
 function SummaryOverview({ summary }: { summary: RunSummary }) {
+  const [helpTarget, setHelpTarget] = useState<SummaryHelpTarget | null>(null);
+  const openHelp =
+    (sectionId: SummaryHelpSectionId) => (itemId: string | null) =>
+      setHelpTarget({ sectionId, itemId });
+  const openVerdictHelp = openHelp("verdict");
+  const openMetricHelp = openHelp("metrics");
+  const openHealthHelp = openHelp("health");
+  const openCostHelp = openHelp("cost");
   const costs = [
-    ["Gross PnL", summary.gross_pnl_total],
-    ["Fee", summary.total_fee],
-    ["Slippage", summary.total_slippage],
-    ["Funding", summary.total_funding],
-    ["Liquidation penalty", summary.total_liquidation_penalty],
-    ["Net PnL", summary.net_pnl_total],
+    { id: "gross-pnl", label: "Gross PnL", value: summary.gross_pnl_total },
+    { id: "fee", label: "Fee", value: summary.total_fee },
+    { id: "slippage", label: "Slippage", value: summary.total_slippage },
+    { id: "funding", label: "Funding", value: summary.total_funding },
+    {
+      id: "liquidation-penalty",
+      label: "Liquidation penalty",
+      value: summary.total_liquidation_penalty,
+    },
+    { id: "net-pnl", label: "Net PnL", value: summary.net_pnl_total },
+    {
+      id: "initial-capital",
+      label: "Initial capital",
+      value: summary.initial_capital,
+    },
+    { id: "final-equity", label: "Final equity", value: summary.final_equity },
   ] as const;
 
   return (
@@ -142,19 +218,43 @@ function SummaryOverview({ summary }: { summary: RunSummary }) {
                 <Badge variant={decisionVariant(summary.gate_verdict)}>
                   {summary.gate_verdict ?? "not evaluated"}
                 </Badge>
+                <ValueHelpButton
+                  label="GATE"
+                  onClick={() => openVerdictHelp("gate")}
+                />
                 <span className="text-xs font-medium text-muted-foreground">ROUTE</span>
                 <Badge variant="outline">{summary.decision_route ?? "—"}</Badge>
+                <ValueHelpButton
+                  label="ROUTE"
+                  onClick={() => openVerdictHelp("route")}
+                />
                 <span className="text-xs font-medium text-muted-foreground">ENVELOPE</span>
                 <Badge variant="secondary">{summary.envelope_result ?? "—"}</Badge>
+                <ValueHelpButton
+                  label="ENVELOPE"
+                  onClick={() => openVerdictHelp("envelope")}
+                />
+                <span className="ml-auto">
+                  <SectionHelpButton
+                    label="판정 도움말"
+                    onClick={() => openVerdictHelp(null)}
+                  />
+                </span>
               </div>
               <p className="mt-3 text-sm leading-relaxed">
                 {summary.decision_rationale ?? "저장된 판정 근거가 없습니다."}
               </p>
             </div>
             <div className="text-right">
-              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                OOS degradation
-              </p>
+              <div className="flex items-center justify-end gap-1">
+                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                  OOS degradation
+                </p>
+                <ValueHelpButton
+                  label="OOS degradation"
+                  onClick={() => openVerdictHelp("oos-degradation")}
+                />
+              </div>
               <p className="tabular mt-1 text-base font-semibold">
                 {formatMetric(summary.oos_degradation, {
                   style: "percent",
@@ -186,24 +286,64 @@ function SummaryOverview({ summary }: { summary: RunSummary }) {
 
       <Card>
         <CardHeader>
-          <CardTitle>핵심 지표</CardTitle>
-          <CardDescription>
-            backtest_summary에 저장된 통계량을 그대로 표시합니다.
-          </CardDescription>
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <CardTitle>핵심 지표</CardTitle>
+              <CardDescription>
+                backtest_summary에 저장된 통계량을 그대로 표시합니다.
+              </CardDescription>
+            </div>
+            <SectionHelpButton
+              label="핵심 지표 도움말"
+              onClick={() => openMetricHelp(null)}
+            />
+          </div>
         </CardHeader>
         <CardContent className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
-          <MetricTile label="PF" value={formatMetric(summary.pf)} />
-          <MetricTile label="Sortino" value={formatMetric(summary.sortino)} />
-          <MetricTile label="Calmar / MAR" value={formatMetric(summary.calmar_or_mar)} />
-          <MetricTile label="SQN" value={formatMetric(summary.sqn)} />
-          <MetricTile label="Sharpe" value={formatMetric(summary.sharpe)} />
-          <MetricTile label="PSR" value={formatMetric(summary.psr)} />
+          <MetricTile
+            label="PF"
+            value={formatMetric(summary.pf)}
+            helpId="pf"
+            onHelp={openMetricHelp}
+          />
+          <MetricTile
+            label="Sortino"
+            value={formatMetric(summary.sortino)}
+            helpId="sortino"
+            onHelp={openMetricHelp}
+          />
+          <MetricTile
+            label="Calmar / MAR"
+            value={formatMetric(summary.calmar_or_mar)}
+            helpId="calmar"
+            onHelp={openMetricHelp}
+          />
+          <MetricTile
+            label="SQN"
+            value={formatMetric(summary.sqn)}
+            helpId="sqn"
+            onHelp={openMetricHelp}
+          />
+          <MetricTile
+            label="Sharpe"
+            value={formatMetric(summary.sharpe)}
+            helpId="sharpe"
+            onHelp={openMetricHelp}
+          />
+          <MetricTile
+            label="PSR"
+            value={formatMetric(summary.psr)}
+            helpId="psr"
+            onHelp={openMetricHelp}
+          />
           <MetricTile
             label="MDD"
             value={formatMetric(summary.mdd, {
               style: "percent",
               maximumFractionDigits: 2,
             })}
+            helpId="mdd"
+            onHelp={openMetricHelp}
           />
           <MetricTile
             label="Risk of ruin"
@@ -211,20 +351,36 @@ function SummaryOverview({ summary }: { summary: RunSummary }) {
               style: "percent",
               maximumFractionDigits: 2,
             })}
+            helpId="ror"
+            onHelp={openMetricHelp}
           />
-          <MetricTile label="Ulcer" value={formatMetric(summary.ulcer)} />
-          <MetricTile label="Kelly" value={formatMetric(summary.kelly)} />
+          <MetricTile
+            label="Ulcer"
+            value={formatMetric(summary.ulcer)}
+            helpId="ulcer"
+            onHelp={openMetricHelp}
+          />
+          <MetricTile
+            label="Kelly"
+            value={formatMetric(summary.kelly)}
+            helpId="kelly"
+            onHelp={openMetricHelp}
+          />
           <MetricTile
             label="Win rate"
             value={formatMetric(summary.win_rate, {
               style: "percent",
               maximumFractionDigits: 1,
             })}
+            helpId="win-rate"
+            onHelp={openMetricHelp}
           />
           <MetricTile
             label="Trades"
             value={formatMetric(summary.trade_count)}
             hint={`W ${summary.win_count} · L ${summary.loss_count} · R 제외 ${summary.r_excluded_count}`}
+            helpId="trades"
+            onHelp={openMetricHelp}
           />
         </CardContent>
       </Card>
@@ -232,11 +388,19 @@ function SummaryOverview({ summary }: { summary: RunSummary }) {
       <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
         <Card>
           <CardHeader>
-            <div className="flex items-center gap-2">
-              <HeartPulse className="h-4 w-4 text-teal-400" />
-              <CardTitle>데이터 건강도</CardTitle>
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <div className="flex items-center gap-2">
+                  <HeartPulse className="h-4 w-4 text-teal-400" />
+                  <CardTitle>데이터 건강도</CardTitle>
+                </div>
+                <CardDescription>저장된 커버리지·무결성 진단입니다.</CardDescription>
+              </div>
+              <SectionHelpButton
+                label="데이터 건강도 도움말"
+                onClick={() => openHealthHelp(null)}
+              />
             </div>
-            <CardDescription>저장된 커버리지·무결성 진단입니다.</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 gap-2">
@@ -247,21 +411,29 @@ function SummaryOverview({ summary }: { summary: RunSummary }) {
                   maximumFractionDigits: 2,
                 })}
                 hint={`${summary.observed_candle_count.toLocaleString()} / ${summary.expected_candle_count.toLocaleString()} candles`}
+                helpId="coverage"
+                onHelp={openHealthHelp}
               />
               <MetricTile
                 label="Integrity"
                 value={summary.integrity_status}
                 hint={summary.integrity_passed ? "passed" : "diagnostic required"}
+                helpId="integrity"
+                onHelp={openHealthHelp}
               />
               <MetricTile
                 label="Max gap"
                 value={`${summary.max_consecutive_gap_bars} bars`}
                 hint={`${summary.max_consecutive_gap_seconds.toLocaleString()} seconds`}
+                helpId="max-gap"
+                onHelp={openHealthHelp}
               />
               <MetricTile
                 label="Gap exits"
                 value={summary.data_gap_exit_count.toLocaleString()}
                 hint={`source absent ${summary.source_absent_gap_count.toLocaleString()}`}
+                helpId="gap-exits"
+                onHelp={openHealthHelp}
               />
             </div>
             {summary.integrity_failed_json !== null && (
@@ -279,44 +451,44 @@ function SummaryOverview({ summary }: { summary: RunSummary }) {
 
         <Card>
           <CardHeader>
-            <div className="flex items-center gap-2">
-              <Database className="h-4 w-4 text-teal-400" />
-              <CardTitle>비용 분해</CardTitle>
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Database className="h-4 w-4 text-teal-400" />
+                  <CardTitle>비용 분해</CardTitle>
+                </div>
+                <CardDescription>
+                  Decimal 문자열을 변환·합산하지 않고 저장값 그대로 표시합니다.
+                </CardDescription>
+              </div>
+              <SectionHelpButton
+                label="비용 분해 도움말"
+                onClick={() => openCostHelp(null)}
+              />
             </div>
-            <CardDescription>
-              Decimal 문자열을 변환·합산하지 않고 저장값 그대로 표시합니다.
-            </CardDescription>
           </CardHeader>
           <CardContent className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">
-            {costs.map(([label, value]) => (
-              <div key={label} className="border-b pb-2">
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                  {label}
-                </p>
+            {costs.map((cost) => (
+              <div key={cost.id} className="border-b pb-2">
+                <div className="flex items-start justify-between gap-1">
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                    {cost.label}
+                  </p>
+                  <ValueHelpButton
+                    label={cost.label}
+                    onClick={() => openCostHelp(cost.id)}
+                  />
+                </div>
                 <p className="tabular mt-1 text-sm font-medium">
-                  {formatDecimalString(value)}
+                  {formatDecimalString(cost.value)}
                 </p>
               </div>
             ))}
-            <div className="border-b pb-2">
-              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                Initial capital
-              </p>
-              <p className="tabular mt-1 text-sm font-medium">
-                {formatDecimalString(summary.initial_capital)}
-              </p>
-            </div>
-            <div className="border-b pb-2">
-              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                Final equity
-              </p>
-              <p className="tabular mt-1 text-sm font-medium">
-                {formatDecimalString(summary.final_equity)}
-              </p>
-            </div>
           </CardContent>
         </Card>
       </div>
+
+      <SummaryHelpDialog target={helpTarget} onClose={() => setHelpTarget(null)} />
     </div>
   );
 }
