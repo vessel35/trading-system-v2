@@ -379,3 +379,164 @@ def test_cci_reads_a_deviation_free_window_as_zero() -> None:
         for candle in base
     ]
     assert momentum.cci(flat, 20)[-1] == 0.0
+
+
+MOMENTUM_FOLLOW_UP = (
+    "Connors RSI(rank_period=100,rsi_period=3,streak_period=2)",
+    "QStick(period=8)",
+    "Chande Forecast Oscillator(period=14)",
+    "DeMarker(period=14)",
+    "DPO(period=20)",
+    "Schaff Trend Cycle(cycle_period=10,fast_period=23,slow_period=50)",
+    "Relative Vigor Index(period=10)",
+    "Laguerre RSI(gamma=0.5)",
+    "Pretty Good Oscillator(period=89)",
+    "Center of Gravity(period=10)",
+)
+
+
+def assert_series_equal(expected: IndicatorSeries, actual: IndicatorSeries) -> None:
+    assert len(expected) == len(actual)
+    for expected_value, actual_value in zip(expected, actual, strict=True):
+        assert_value_equal(expected_value, actual_value)
+
+
+def rescale(candles: Sequence[Candle], factor: float) -> list[Candle]:
+    """Return the same bars with every price moved far away from the original."""
+    return [
+        Candle(
+            symbol=candle.symbol,
+            exchange=candle.exchange,
+            timeframe=candle.timeframe,
+            open_time=candle.open_time,
+            close_time=candle.close_time,
+            open=candle.open * factor,
+            high=candle.high * factor,
+            low=candle.low * factor,
+            close=candle.close * factor,
+            volume=candle.volume,
+            quote_volume=None,
+            trade_count=None,
+        )
+        for candle in candles
+    ]
+
+
+def test_dpo_reads_only_bars_at_or_before_the_one_it_reports() -> None:
+    """§2.19 displaces the close backwards, so no later bar may reach an output.
+
+    A chart that draws the moving average shifted forward is describing where the
+    line is drawn, not which bars it is computed from. Transcribing that shift into
+    the calculation is the mistake this indicator invites, and it would make every
+    backtest result on it worthless. Two things are checked: cutting the series
+    short leaves every surviving value untouched, and replacing every bar after a
+    boundary leaves every value up to that boundary untouched.
+    """
+
+    candles = make_candles(200)
+    spec = DEFAULT_REGISTRY.get("DPO", {"period": 20})
+    full = spec.compute_vectorized(candles)
+
+    for cut in (25, 60, 120, 199):
+        assert_series_equal(full[:cut], spec.compute_vectorized(candles[:cut]))
+
+    boundary = 120
+    disturbed = list(candles[:boundary]) + rescale(candles[boundary:], 5.0)
+    assert_series_equal(full[:boundary], spec.compute_vectorized(disturbed)[:boundary])
+
+    # The displacement is real rather than accidentally zero: the value is the close
+    # eleven bars back, not the current one, against the average of the last twenty.
+    closes = [candle.close for candle in candles]
+    index = 150
+    average = sum(closes[index - 19 : index + 1]) / 20.0
+    assert full[index] == pytest.approx(closes[index - 11] - average)
+    assert full[index] != pytest.approx(closes[index] - average)
+
+
+@pytest.mark.parametrize("identifier", MOMENTUM_FOLLOW_UP)
+def test_momentum_follow_up_outputs_never_depend_on_a_later_bar(identifier: str) -> None:
+    """Cutting the series short must not disturb any value that survives the cut."""
+
+    candles = make_candles(220)
+    spec = next(
+        candidate for candidate in DEFAULT_REGISTRY.list() if candidate.identifier == identifier
+    )
+    full = spec.compute_vectorized(candles)
+    for cut in (spec.min_history, spec.min_history + 30, 219):
+        assert_series_equal(full[:cut], spec.compute_vectorized(candles[:cut]))
+
+
+def test_demarker_and_laguerre_stay_inside_the_ranges_their_sections_state() -> None:
+    """§2.18 bounds DeMarker by 0 and 1, and §2.22's ratio cannot leave that range."""
+
+    candles = make_random_candles(11)
+    for identifier, params in (("DeMarker", {"period": 14}), ("Laguerre RSI", {"gamma": 0.5})):
+        series = DEFAULT_REGISTRY.get(identifier, params).compute_vectorized(candles)
+        values = [float(value) for value in series if not isnan(float(value))]  # type: ignore[arg-type]
+        assert values, identifier
+        assert min(values) >= 0.0, identifier
+        assert max(values) <= 1.0, identifier
+
+
+def test_schaff_and_connors_stay_inside_the_zero_to_hundred_scale() -> None:
+    """Both are built from ratios that §2.2 and §2.1 already hold to 0-100."""
+
+    candles = make_random_candles(23)
+    for identifier in (
+        "Schaff Trend Cycle(cycle_period=10,fast_period=23,slow_period=50)",
+        "Connors RSI(rank_period=100,rsi_period=3,streak_period=2)",
+    ):
+        spec = next(
+            candidate for candidate in DEFAULT_REGISTRY.list() if candidate.identifier == identifier
+        )
+        series = spec.compute_vectorized(candles)
+        values = [float(value) for value in series if not isnan(float(value))]  # type: ignore[arg-type]
+        assert values, identifier
+        assert min(values) >= 0.0, identifier
+        assert max(values) <= 100.0, identifier
+
+
+def test_follow_up_momentum_indicators_meet_their_closed_form_values() -> None:
+    """Each of these has a case its section settles without any outside reference."""
+
+    linear = make_linear_candles(60)
+
+    # A perfectly straight close series is fitted exactly by §14's regression, so
+    # §2.17's difference between the close and its own estimate collapses to zero.
+    forecast = momentum.chande_forecast_oscillator(linear, 14)
+    assert forecast[-1] == pytest.approx(0.0, abs=1e-9)
+
+    # `make_linear_candles` opens every bar at its close, so §2.16's body is zero.
+    assert momentum.qstick(linear, 8)[-1] == pytest.approx(0.0)
+
+    # Every difference in §2.22's cascade is a rise on a one-way series, so the
+    # falling sum stays empty and the ratio saturates at one.
+    assert momentum.laguerre_rsi(linear, 0.5)[-1] == pytest.approx(1.0)
+
+    # §8.2 on a flat series: the weighted centroid is exactly (n+1)/2, which the
+    # section's own offset then cancels to zero.
+    flat = make_flat_candles(40)
+    assert momentum.center_of_gravity(flat, 10)[-1] == pytest.approx(0.0)
+
+    # §2.21 measures body against range, so a bar closing at its high from an open
+    # at its low drives the ratio to one once the whole window looks that way.
+    marubozu = [
+        Candle(
+            symbol="BTCUSDT",
+            exchange="BINANCE",
+            timeframe="1h",
+            open_time=candle.open_time,
+            close_time=candle.close_time,
+            open=candle.low,
+            high=candle.high,
+            low=candle.low,
+            close=candle.high,
+            volume=candle.volume,
+            quote_volume=None,
+            trade_count=None,
+        )
+        for candle in make_candles(40)
+    ]
+    vigor = momentum.relative_vigor_index(marubozu, 10)[-1]
+    assert vigor["rvi"] == pytest.approx(1.0)
+    assert vigor["signal"] == pytest.approx(1.0)
