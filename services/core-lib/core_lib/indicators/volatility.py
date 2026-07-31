@@ -577,6 +577,21 @@ def _squared_drawdown(close: float, highest_close: float) -> float:
     return drawdown * drawdown
 
 
+def _root_of_mean_square(mean: float) -> float:
+    """Take the square root of a mean that is non-negative by definition.
+
+    §3.6 averages squared drawdowns, so the true mean can never be negative and
+    the root is always defined. The shared rolling mean carries a sum forward by
+    adding and subtracting terms, so a window that returns to all zeros after a
+    large drawdown has passed through leaves a residual near 1e-13 whose sign is
+    not fixed. A negative residual would make `sqrt` raise instead of returning
+    the zero the definition calls for, which would stop a backtest on an ordinary
+    price series. Clamping here is the same guard the population standard
+    deviation already applies to its own accumulated moment.
+    """
+    return sqrt(max(0.0, mean))
+
+
 def ulcer_index(candles: Sequence[Candle], period: int = 14) -> list[float]:
     """Compute the root mean square of percentage drawdowns (§3.6)."""
     if period <= 0:
@@ -589,7 +604,7 @@ def ulcer_index(candles: Sequence[Candle], period: int = 14) -> list[float]:
     ]
     # §3.6 divides the sum of squares by `n`, which is what the shared rolling
     # mean already computes; only the square root is left to this indicator.
-    return [NAN if isnan(mean) else sqrt(mean) for mean in sma(squared, period)]
+    return [NAN if isnan(mean) else _root_of_mean_square(mean) for mean in sma(squared, period)]
 
 
 @dataclass(slots=True)
@@ -625,7 +640,7 @@ class UlcerIndexState:
     def update(self, candle: Candle) -> float:
         highest_close = self._highest.update(candle.close)
         mean = self._mean.update(_squared_drawdown(candle.close, highest_close))
-        self._value = NAN if isnan(mean) else sqrt(mean)
+        self._value = NAN if isnan(mean) else _root_of_mean_square(mean)
         return self._value
 
     def current(self) -> float:

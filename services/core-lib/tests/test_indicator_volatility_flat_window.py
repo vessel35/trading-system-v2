@@ -16,8 +16,10 @@ lived in only one of them would be a parity failure waiting for a flat market.
 
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
+from math import isnan
 
 import pytest
+from core_lib.indicators import volatility
 from core_lib.indicators.registry import DEFAULT_REGISTRY, IndicatorValue
 from core_lib.types import Candle
 
@@ -118,3 +120,50 @@ def test_every_volatility_output_stays_finite_on_a_flat_stream() -> None:
                 continue
             assert item == item, f"{spec.identifier}{'' if key is None else '.' + key} is NaN"
             assert abs(item) != float("inf"), f"{spec.identifier} is infinite"
+
+
+def test_ulcer_index_survives_a_window_that_returns_to_no_drawdown() -> None:
+    """A recovery after a deep fall must not stop the run.
+
+    §3.6 averages squared drawdowns, so its mean is non-negative and the root is
+    always defined. The shared rolling mean carries its sum forward by addition
+    and subtraction, so once a large squared drawdown has passed out of the
+    window and every remaining term is zero, the sum lands near 1e-13 rather than
+    on zero, with either sign. A negative residual used to make `sqrt` raise
+    `math domain error` on an ordinary series: fall for a while, then set a new
+    high on each of the next `period` bars. Both execution paths are checked
+    because both take the root themselves.
+    """
+    closes = [
+        100.0, 97.1661, 92.8877, 88.282, 83.8917, 81.6856, 79.7346, 77.0403,
+        72.7985, 71.464, 70.6223, 69.9716, 69.0155, 68.2839, 67.6536, 68.813,
+        69.7046, 71.2205, 71.9126, 73.6907, 75.5909, 77.6365, 79.0739, 81.3349,
+        82.8178, 84.0282, 85.7497, 88.3132, 90.7572, 92.9547, 93.355, 95.1435,
+        96.6297, 98.5279, 101.0563,
+    ]  # fmt: skip
+    start = datetime(2025, 1, 1, tzinfo=UTC)
+    candles = [
+        Candle(
+            symbol="BTC/USDT:USDT",
+            exchange="binance",
+            timeframe="1h",
+            open_time=start + timedelta(hours=index),
+            close_time=start + timedelta(hours=index + 1),
+            open=close,
+            high=close * 1.002,
+            low=close * 0.998,
+            close=close,
+            volume=100.0,
+            quote_volume=None,
+            trade_count=None,
+        )
+        for index, close in enumerate(closes)
+    ]
+
+    batch = volatility.ulcer_index(candles, 14)
+    assert all(value >= 0.0 for value in batch if not isnan(value))
+    assert batch[-1] == pytest.approx(0.0, abs=1e-6)
+
+    state = volatility.UlcerIndexState(period=14)
+    incremental = [state.update(candle) for candle in candles]
+    assert incremental[-1] == pytest.approx(0.0, abs=1e-6)
