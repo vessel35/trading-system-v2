@@ -193,9 +193,47 @@ describe("실행 관리 보강", () => {
     expect(symbol).toBeInvalid();
 
     await user.click(screen.getByRole("button", { name: "백테스트 실행" }));
-    await user.click(screen.getByRole("button", { name: "스윕 실행" }));
     expect(runPost).not.toHaveBeenCalled();
+
+    // The same submit serves the sweep, so the invalid field must block it too.
+    await user.click(await screen.findByText("스윕 설정"));
+    await user.click(screen.getByLabelText(/스윕으로 실행/));
+    await user.click(screen.getByRole("button", { name: "스윕 실행" }));
     expect(sweepPost).not.toHaveBeenCalled();
+  });
+
+  it("스윕 체크가 실행 방식을 정하고 꺼져 있으면 단일 실행만 보낸다", async () => {
+    const user = userEvent.setup();
+    const runPost = vi.fn();
+    const sweepPost = vi.fn();
+    server.use(
+      http.post("http://localhost/api/v1/runs", () => {
+        runPost();
+        return HttpResponse.json({}, { status: 500 });
+      }),
+      http.post("http://localhost/api/v1/sweeps", () => {
+        sweepPost();
+        return HttpResponse.json({}, { status: 500 });
+      }),
+    );
+    renderManagement();
+
+    // Collapsed, the summary still says which way the run will go.
+    const section = await screen.findByText("스윕 설정");
+    expect(section.textContent).toMatch(/꺼짐/);
+
+    // Sweep off: the settings below are ignored and one backtest is submitted.
+    await user.click(screen.getByRole("button", { name: "백테스트 실행" }));
+    await waitFor(() => expect(runPost).toHaveBeenCalledTimes(1));
+    expect(sweepPost).not.toHaveBeenCalled();
+
+    // Sweep on: the one submit becomes the sweep, and the summary says so.
+    await user.click(section);
+    await user.click(screen.getByLabelText(/스윕으로 실행/));
+    expect(section.textContent).toMatch(/켜짐/);
+    await user.click(screen.getByRole("button", { name: "스윕 실행" }));
+    await waitFor(() => expect(sweepPost).toHaveBeenCalledTimes(1));
+    expect(runPost).toHaveBeenCalledTimes(1);
   });
 
   it("사이징 입력에 계약 범위의 min/max 제약을 둔다", async () => {

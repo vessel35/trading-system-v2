@@ -524,6 +524,10 @@ export function RunManagementPage() {
   const formRef = useRef<HTMLFormElement>(null);
   const [form, setForm] = useState<FormState>(initialForm);
   const [busy, setBusy] = useState<"trigger" | "sweep" | null>(null);
+  // The sweep is a mode the run is submitted in, not a separate action. Keeping it
+  // in form state means the choice is visible while the section is collapsed and
+  // one submit button can serve both.
+  const [sweepEnabled, setSweepEnabled] = useState(false);
   const [sweepType, setSweepType] = useState<SweepType>("grid");
   const [axisOneParameter, setAxisOneParameter] = useState("reward_risk");
   const [axisOneValues, setAxisOneValues] = useState("[1.5, 2.0, 2.5]");
@@ -932,6 +936,10 @@ export function RunManagementPage() {
           ref={formRef}
           onSubmit={(event: FormEvent) => {
             event.preventDefault();
+            if (sweepEnabled) {
+              void triggerSweep();
+              return;
+            }
             void triggerRun();
           }}
         >
@@ -1599,14 +1607,39 @@ export function RunManagementPage() {
                 </div>
               </div>
 
-              <details className="border-t pt-5">
+              <details className="border-t pt-5" open={sweepEnabled}>
                 <summary className="cursor-pointer text-sm font-semibold">
                   스윕 설정
                   <span className="ml-2 text-xs font-normal text-muted-foreground">
-                    여러 파라미터 조합을 비교할 때만 펼치세요.
+                    {sweepEnabled
+                      ? `켜짐 · ${sweepType}${
+                          sweepType === "grid"
+                            ? ` · 축 ${axisTwoEnabled ? 2 : 1}개`
+                            : ""
+                        }`
+                      : "꺼짐 · 단일 백테스트로 실행됩니다."}
                   </span>
                 </summary>
                 <section className="mt-4">
+                  <label
+                    className="mb-4 flex items-start gap-2 rounded-lg border bg-background/40 p-3 text-sm"
+                    htmlFor="sweep-enabled"
+                  >
+                    <input
+                      id="sweep-enabled"
+                      type="checkbox"
+                      className="mt-0.5 h-4 w-4"
+                      checked={sweepEnabled}
+                      onChange={(event) => setSweepEnabled(event.target.checked)}
+                    />
+                    <span>
+                      <span className="font-medium">스윕으로 실행</span>
+                      <span className="mt-0.5 block text-xs text-muted-foreground">
+                        켜면 아래 설정으로 여러 실행을 만들고, 끄면 아래 설정을 무시하고
+                        단일 백테스트 하나만 실행합니다.
+                      </span>
+                    </span>
+                  </label>
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
                       <div className="flex items-center gap-2">
@@ -1804,32 +1837,14 @@ export function RunManagementPage() {
                         : undefined
                     }
                   >
-                    {busy === "trigger" ? (
+                    {busy !== null ? (
                       <LoaderCircle className="mr-1.5 h-4 w-4 animate-spin" />
+                    ) : sweepEnabled ? (
+                      <FlaskConical className="mr-1.5 h-4 w-4" />
                     ) : (
                       <Play className="mr-1.5 h-4 w-4" />
                     )}
-                    백테스트 실행
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={() => {
-                      if (formRef.current?.reportValidity()) void triggerSweep();
-                    }}
-                    disabled={busy !== null || Boolean(coverageWarning)}
-                    title={
-                      coverageWarning
-                        ? "데이터 커버리지 경고를 해소한 뒤 실행하세요."
-                        : undefined
-                    }
-                  >
-                    {busy === "sweep" ? (
-                      <LoaderCircle className="mr-1.5 h-4 w-4 animate-spin" />
-                    ) : (
-                      <FlaskConical className="mr-1.5 h-4 w-4" />
-                    )}
-                    스윕 실행
+                    {sweepEnabled ? "스윕 실행" : "백테스트 실행"}
                   </Button>
                 </div>
               </div>
