@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from math import isclose, isnan, sin, sqrt
 
 import pytest
-from core_lib.indicators import momentum, primitives, trend, volatility, volume
+from core_lib.indicators import momentum, primitives, systems, trend, volatility, volume
 from core_lib.indicators.primitives import stdev
 from core_lib.indicators.registry import (
     DEFAULT_REGISTRY,
@@ -379,3 +379,302 @@ def test_cci_reads_a_deviation_free_window_as_zero() -> None:
         for candle in base
     ]
     assert momentum.cci(flat, 20)[-1] == 0.0
+
+
+def make_shaped_candles(
+    highs: Sequence[float],
+    lows: Sequence[float],
+    closes: Sequence[float] | None = None,
+    volumes: Sequence[float] | None = None,
+) -> list[Candle]:
+    """Build candles whose extremes are chosen by the test rather than generated."""
+    start = datetime(2025, 1, 1, tzinfo=UTC)
+    return [
+        Candle(
+            symbol="BTCUSDT",
+            exchange="BINANCE",
+            timeframe="1h",
+            open_time=start + timedelta(hours=index),
+            close_time=start + timedelta(hours=index + 1),
+            open=low,
+            high=high,
+            low=low,
+            close=(low + high) / 2.0 if closes is None else closes[index],
+            volume=1_000.0 if volumes is None else volumes[index],
+            quote_volume=None,
+            trade_count=None,
+        )
+        for index, (high, low) in enumerate(zip(highs, lows, strict=True))
+    ]
+
+
+SYSTEMS_SPECS = [spec for spec in DEFAULT_REGISTRY.list() if spec.category == "systems"]
+ALLIGATOR_PARAMS = {
+    "jaw_period": 13,
+    "jaw_shift": 8,
+    "teeth_period": 8,
+    "teeth_shift": 5,
+    "lips_period": 5,
+    "lips_shift": 3,
+}
+
+
+@pytest.mark.parametrize("spec", SYSTEMS_SPECS, ids=lambda spec: spec.identifier)
+def test_systems_values_never_depend_on_a_candle_after_the_one_they_sit_on(
+    spec: IndicatorSpec,
+) -> None:
+    """Cutting the future off the input must not change any value that remains.
+
+    Four of these indicators are described by where they are drawn rather than by
+    when they can be computed, and the danger in transcribing that description is
+    that a value ends up carrying a candle which had not happened yet. A run over
+    300 candles and a run over the first `cut` of the same candles have to agree on
+    every index they share; a value that read past its own index would move when the
+    input was truncated.
+    """
+
+    candles = make_candles(300)
+    complete = spec.compute_vectorized(candles)
+    for cut in (spec.min_history, spec.min_history + 7, 150, 240):
+        truncated = spec.compute_vectorized(candles[:cut])
+        assert len(truncated) == cut, spec.identifier
+        for index in range(cut):
+            assert_value_equal(complete[index], truncated[index])
+
+
+def test_the_ichimoku_spans_carry_the_midpoint_computed_a_displacement_earlier() -> None:
+    """§9.2's forward shift is published as a value the current candle already knew.
+
+    The section shifts both Senkou spans 26 candles forward for display, so the
+    value shown at a candle is the one computed 26 candles before it. Publishing it
+    at the candle that shows it is what makes the series usable without reading
+    ahead, and this states that alignment as an equality rather than as prose.
+    """
+
+    candles = make_candles(200)
+    displacement = 26
+    highs = [candle.high for candle in candles]
+    lows = [candle.low for candle in candles]
+    conversion_high = primitives.hh(highs, 9)
+    conversion_low = primitives.ll(lows, 9)
+    base_high = primitives.hh(highs, 26)
+    base_low = primitives.ll(lows, 26)
+    span_high = primitives.hh(highs, 52)
+    span_low = primitives.ll(lows, 52)
+
+    values = systems.ichimoku(candles, 9, 26, 52, displacement)
+    assert set(values[0]) == {"tenkan", "kijun", "senkou_a", "senkou_b"}, (
+        "the Chikou span is deliberately absent; see the module docstring"
+    )
+    for index, value in enumerate(values):
+        assert_scalar_equal(
+            (conversion_high[index] + conversion_low[index]) / 2.0,
+            value["tenkan"],
+        )
+        assert_scalar_equal((base_high[index] + base_low[index]) / 2.0, value["kijun"])
+        if index < displacement:
+            assert isnan(value["senkou_a"])
+            assert isnan(value["senkou_b"])
+            continue
+        source = index - displacement
+        tenkan_then = (conversion_high[source] + conversion_low[source]) / 2.0
+        kijun_then = (base_high[source] + base_low[source]) / 2.0
+        assert_scalar_equal((tenkan_then + kijun_then) / 2.0, value["senkou_a"])
+        assert_scalar_equal((span_high[source] + span_low[source]) / 2.0, value["senkou_b"])
+
+
+def test_the_alligator_lines_carry_the_smoothing_computed_their_shift_earlier() -> None:
+    """§6.1's three forward shifts follow the same rule as §9.2's spans."""
+
+    candles = make_candles(200)
+    median = primitives.hl2(candles)
+    smoothed = {period: primitives.rma(median, period) for period in (13, 8, 5)}
+    lines = systems.alligator(candles)
+    for key, period, shift in (("jaw", 13, 8), ("teeth", 8, 5), ("lips", 5, 3)):
+        for index, value in enumerate(lines):
+            if index < shift:
+                assert isnan(value[key])
+                continue
+            assert_scalar_equal(smoothed[period][index - shift], value[key])
+
+
+def test_the_gator_reads_the_registered_alligator_rather_than_its_own_lines() -> None:
+    """§6.3 is two differences of §6.1's lines, so it must equal them exactly."""
+
+    candles = make_candles(200)
+    lines = DEFAULT_REGISTRY.get("Alligator", ALLIGATOR_PARAMS).compute_vectorized(candles)
+    histogram = DEFAULT_REGISTRY.get("Gator Oscillator", ALLIGATOR_PARAMS).compute_vectorized(
+        candles
+    )
+    for line, bars in zip(lines, histogram, strict=True):
+        assert isinstance(line, dict)
+        assert isinstance(bars, dict)
+        if isnan(line["jaw"]) or isnan(line["teeth"]):
+            assert isnan(bars["upper"])
+        else:
+            assert_scalar_equal(abs(line["jaw"] - line["teeth"]), bars["upper"])
+        if isnan(line["teeth"]) or isnan(line["lips"]):
+            assert isnan(bars["lower"])
+        else:
+            assert_scalar_equal(-abs(line["teeth"] - line["lips"]), bars["lower"])
+
+
+def test_fractals_flag_the_middle_candle_two_candles_after_it() -> None:
+    """§6.2's pattern is worked by hand here, including its two-candle delay.
+
+    No outside library carries this rule, so the values come from the section's own
+    inequality applied to candles whose answer can be read off them. The third candle
+    below has the highest high of the first five and its low is not the lowest of
+    them, so it is an up fractal and not a down one, and its flag lands two candles
+    later. The fifth candle has the lowest low of the last five and not their highest
+    high, so it is a down fractal, and its flag lands two candles later again.
+    """
+
+    highs = [10.0, 11.0, 15.0, 11.5, 10.5, 10.0, 9.0]
+    lows = [5.0, 6.0, 7.0, 6.5, 4.0, 5.0, 6.0]
+    values = systems.fractals(make_shaped_candles(highs, lows), 5)
+
+    assert all(isnan(value["up"]) and isnan(value["down"]) for value in values[:4])
+    assert values[4] == {"up": 1.0, "down": 0.0}
+    assert values[5] == {"up": 0.0, "down": 0.0}
+    assert values[6] == {"up": 0.0, "down": 1.0}
+
+    # §6.2 asks the middle candle to stand above all four neighbours, so a tie with
+    # any one of them is not a fractal.
+    tied = systems.fractals(
+        make_shaped_candles([10.0, 11.0, 15.0, 15.0, 10.5], [5.0, 6.0, 7.0, 6.5, 5.5]),
+        5,
+    )
+    assert tied[4] == {"up": 0.0, "down": 0.0}
+
+
+def test_market_facilitation_index_is_the_candle_range_over_its_own_volume() -> None:
+    """§6.4 is one division, worked here by hand because no library carries it.
+
+    TA-Lib's `MFI` and ta's `money_flow_index` are §4.5's Money Flow Index, an
+    unrelated 0-to-100 oscillator that happens to share the abbreviation, so the
+    check is the section's own arithmetic on candles whose numbers divide exactly.
+    """
+
+    candles = make_shaped_candles(
+        [110.0, 104.0, 100.0],
+        [100.0, 100.0, 100.0],
+        volumes=[8.0, 4.0, 0.0],
+    )
+    values = systems.market_facilitation_index(candles)
+    assert values[0] == pytest.approx(1.25)
+    assert values[1] == pytest.approx(1.0)
+    # §6.4 names no substitute for a zero denominator and §0.11 leaves the choice to
+    # each section; a candle that traded nothing reads as zero here.
+    assert values[2] == 0.0
+
+    generated = make_candles(60)
+    for candle, value in zip(
+        generated,
+        systems.market_facilitation_index(generated),
+        strict=True,
+    ):
+        assert value * candle.volume == pytest.approx(candle.high - candle.low)
+
+
+def test_td_sequential_counts_nine_consecutive_closes_against_the_fourth_candle_back() -> None:
+    """§9.5's setup is worked by hand; no library implements DeMark's counting.
+
+    The closes below hold still for four candles and then fall one point per candle,
+    so every candle from the fifth onwards closes below the close four candles
+    earlier and the count runs down to nine. The next candle breaks the run upwards
+    and the count restarts at one in the other direction, which is what the section's
+    "consecutive" requires.
+    """
+
+    closes = [100.0] * 4 + [99.0 - index for index in range(9)] + [500.0]
+    candles = make_shaped_candles(
+        [close + 1.0 for close in closes],
+        [close - 1.0 for close in closes],
+        closes=closes,
+    )
+    values = systems.td_sequential(candles, 4)
+
+    assert all(isnan(value) for value in values[:4])
+    # A buy setup is a run of falling closes, so §9.5's direction is negative here.
+    assert values[4:13] == [-1.0, -2.0, -3.0, -4.0, -5.0, -6.0, -7.0, -8.0, -9.0]
+    assert values[13] == 1.0
+
+    # A close equal to the one four candles back satisfies neither direction.
+    flat = systems.td_sequential(make_flat_candles(10), 4)
+    assert flat[4:] == [0.0] * 6
+
+
+def test_woodies_zone_numbers_the_bands_the_section_draws() -> None:
+    """§9.6's ±100 and ±200 lines cut the oscillator into five numbered bands."""
+
+    assert systems.WOODIES_INNER_ZONE == 100.0
+    assert systems.WOODIES_OUTER_ZONE == 200.0
+
+    # A CCI landing exactly on a line is not reachable from constructed candles, so
+    # the rule that the inner band owns its boundary is stated against the mapping
+    # itself; every other value is covered by the series comparison below.
+    boundaries = [
+        (250.0, 2.0),
+        (200.0, 1.0),
+        (100.0, 0.0),
+        (0.0, 0.0),
+        (-100.0, 0.0),
+        (-200.0, -1.0),
+        (-250.0, -2.0),
+    ]
+    assert [systems.woodies_zone(value) for value, _ in boundaries] == [
+        expected for _, expected in boundaries
+    ]
+
+    candles = make_candles(300)
+    spec = DEFAULT_REGISTRY.get("Woodies CCI", {"period": 14, "turbo_period": 6})
+    registered_cci = momentum.cci(candles, 14)
+    for value, expected in zip(spec.compute_vectorized(candles), registered_cci, strict=True):
+        assert isinstance(value, dict)
+        assert_scalar_equal(expected, value["cci"])
+        if isnan(expected):
+            assert isnan(value["zone"])
+            continue
+        assert abs(value["zone"]) <= 2.0
+        assert (value["zone"] > 0.0) == (expected > systems.WOODIES_INNER_ZONE)
+        assert (value["zone"] < 0.0) == (expected < -systems.WOODIES_INNER_ZONE)
+        assert (abs(value["zone"]) == 2.0) == (abs(expected) > systems.WOODIES_OUTER_ZONE)
+
+
+def test_elder_impulse_colours_follow_the_two_slopes_the_section_names() -> None:
+    """§9.4 is a rule over the EMA slope and the registered MACD histogram slope.
+
+    The encoding is the contract a strategy will read, so it is stated here as a
+    property of the two slopes rather than left implicit: the rising colour appears
+    exactly where both rise, the falling colour exactly where both fall, and the
+    neutral colour covers everything else.
+    """
+
+    candles = make_candles(300)
+    values = DEFAULT_REGISTRY.get(
+        "Elder Impulse System",
+        {"ema_period": 13, "fast_period": 12, "slow_period": 26, "signal_period": 9},
+    ).compute_vectorized(candles)
+    averages = primitives.ema([candle.close for candle in candles], 13)
+    macd_series = DEFAULT_REGISTRY.get(
+        "MACD",
+        {"fast_period": 12, "slow_period": 26, "signal_period": 9},
+    ).compute_vectorized(candles)
+    histogram: list[float] = []
+    for entry in macd_series:
+        assert isinstance(entry, dict)
+        histogram.append(entry["histogram"])
+
+    seen: set[float] = set()
+    for index in range(1, len(candles)):
+        value = values[index]
+        assert isinstance(value, float)
+        if isnan(averages[index - 1]) or isnan(histogram[index - 1]):
+            assert isnan(value)
+            continue
+        rising = averages[index] > averages[index - 1] and histogram[index] > histogram[index - 1]
+        falling = averages[index] < averages[index - 1] and histogram[index] < histogram[index - 1]
+        assert value == (1.0 if rising else (-1.0 if falling else 0.0)), index
+        seen.add(value)
+    assert seen == {systems.IMPULSE_BULLISH, systems.IMPULSE_NEUTRAL, systems.IMPULSE_BEARISH}
