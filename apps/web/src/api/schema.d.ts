@@ -302,6 +302,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runs/{run_id}:purge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Purge Run
+         * @description Remove one run, its cascaded rows, and its Evidence file for good.
+         *
+         *     This cannot be undone. The Evidence artifact goes first: if the catalog row
+         *     then fails to disappear, the run stays visible with its Evidence missing,
+         *     which the reader can see and retry, rather than leaving an orphaned file
+         *     nothing points at.
+         */
+        delete: operations["purge_run_api_v1_runs__run_id__purge_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs/{run_id}:restore": {
         parameters: {
             query?: never;
@@ -2084,6 +2109,20 @@ export interface components {
             page: components["schemas"]["Page"];
         };
         /**
+         * RunPurgeResponse
+         * @description Result of an irreversible purge of one run and its Evidence artifact.
+         */
+        RunPurgeResponse: {
+            /** Run Id */
+            run_id: string;
+            /** Run Removed */
+            run_removed: boolean;
+            /** Evidence Removed */
+            evidence_removed: boolean;
+            /** Evidence Path */
+            evidence_path: string | null;
+        };
+        /**
          * RunSubmission
          * @description Raw submission envelope; RunConfig is revalidated explicitly by the endpoint.
          */
@@ -3564,6 +3603,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PreregistrationResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    purge_run_api_v1_runs__run_id__purge_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunPurgeResponse"];
                 };
             };
             /** @description Not Found */

@@ -102,3 +102,34 @@ export function useSetRunDeleted() {
     },
   });
 }
+
+/**
+ * Delete one run for good: the catalog row, its cascaded summary, prereg, and
+ * tag rows, and the Evidence SQLite file on disk. This cannot be undone.
+ */
+export function usePurgeRun() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      runId,
+    }: {
+      runId: string;
+      /** Set false while purging a batch so the list is re-read only once. */
+      refresh?: boolean;
+    }) => {
+      const { data, error } = await apiClient.DELETE("/api/v1/runs/{run_id}:purge", {
+        params: { path: { run_id: runId } },
+      });
+      if (error) throw new Error(requestErrorMessage(error));
+      if (!data) throw new Error("실행 완전 삭제 응답이 비어 있습니다.");
+      return data;
+    },
+    onSuccess: async (result, variables) => {
+      if (variables.refresh === false) return;
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["runs"] }),
+        queryClient.removeQueries({ queryKey: ["run", result.run_id] }),
+      ]);
+    },
+  });
+}

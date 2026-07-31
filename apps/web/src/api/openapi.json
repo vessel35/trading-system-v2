@@ -1446,6 +1446,56 @@
         }
       }
     },
+    "/api/v1/runs/{run_id}:purge": {
+      "delete": {
+        "summary": "Purge Run",
+        "description": "Remove one run, its cascaded rows, and its Evidence file for good.\n\nThis cannot be undone. The Evidence artifact goes first: if the catalog row\nthen fails to disappear, the run stays visible with its Evidence missing,\nwhich the reader can see and retry, rather than leaving an orphaned file\nnothing points at.",
+        "operationId": "purge_run_api_v1_runs__run_id__purge_delete",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunPurgeResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
     "/api/v1/runs/{run_id}:restore": {
       "post": {
         "summary": "Restore Run",
@@ -7674,6 +7724,42 @@
         ],
         "title": "RunListResponse",
         "description": "Catalog collection envelope."
+      },
+      "RunPurgeResponse": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "run_removed": {
+            "type": "boolean",
+            "title": "Run Removed"
+          },
+          "evidence_removed": {
+            "type": "boolean",
+            "title": "Evidence Removed"
+          },
+          "evidence_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence Path"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "run_removed",
+          "evidence_removed",
+          "evidence_path"
+        ],
+        "title": "RunPurgeResponse",
+        "description": "Result of an irreversible purge of one run and its Evidence artifact."
       },
       "RunSubmission": {
         "properties": {

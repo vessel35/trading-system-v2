@@ -70,6 +70,27 @@ def _boolean(value: int) -> bool:
     return bool(value)
 
 
+def remove_evidence_artifact(evidence_path: str | None) -> bool:
+    """Delete one run's Evidence artifact under EVIDENCE_ROOT, if it is still there.
+
+    Only the catalog basename is resolved, exactly as reads do, so a stored path
+    can never reach outside the configured root. Returns whether the artifact
+    itself existed; the write-ahead sidecars are removed with it when present.
+    """
+
+    if not evidence_path:
+        return False
+    filename = Path(evidence_path).name
+    if not filename:
+        return False
+    artifact = get_settings().evidence_root / filename
+    existed = artifact.is_file()
+    for candidate in (artifact, Path(f"{artifact}-wal"), Path(f"{artifact}-shm")):
+        if candidate.is_file():
+            candidate.unlink()
+    return existed
+
+
 @contextmanager
 def open_evidence(evidence_path: str | None) -> Iterator[sqlite3.Connection]:
     """Resolve only the catalog basename under EVIDENCE_ROOT and open it read-only."""

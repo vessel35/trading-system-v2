@@ -12,6 +12,7 @@ import {
   ArrowUpDown,
   ChevronLeft,
   ChevronRight,
+  FlameKindling,
   GitCompareArrows,
   LoaderCircle,
   RefreshCw,
@@ -43,7 +44,7 @@ import {
 } from "../components/ui/table";
 import { useCatalogFilters } from "../contexts/catalog-filters";
 import { useComparisonBasket } from "../contexts/comparison-basket";
-import { useRuns, useSetRunDeleted } from "../hooks/use-catalog";
+import { usePurgeRun, useRuns, useSetRunDeleted } from "../hooks/use-catalog";
 import {
   catalogDecisionPresentation,
   cn,
@@ -95,9 +96,11 @@ export function CatalogPage() {
   const { filters } = useCatalogFilters();
   const basket = useComparisonBasket();
   const setRunDeleted = useSetRunDeleted();
+  const purgeRun = usePurgeRun();
   const [offset, setOffset] = useState(0);
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
   const [pendingDeletion, setPendingDeletion] = useState<string[] | null>(null);
+  const [pendingPurge, setPendingPurge] = useState<string[] | null>(null);
   const [sorting, setSorting] = useState<SortingState>([
     { id: "created_at", desc: true },
   ]);
@@ -349,6 +352,16 @@ export function CatalogPage() {
     await applyDeletion(runIds, false);
   }
 
+  /** Purge run by run, for the same reason the delete marker is applied one by one. */
+  async function purgeRuns(runIds: string[]) {
+    for (const [index, runId] of runIds.entries()) {
+      await purgeRun
+        .mutateAsync({ runId, refresh: index === runIds.length - 1 })
+        .catch(() => undefined);
+    }
+    setRowSelection({});
+  }
+
   const page = runsQuery.data?.page;
   const currentPage = page ? Math.floor(page.offset / page.limit) + 1 : 1;
   const pageCount = page ? Math.max(1, Math.ceil(page.total / page.limit)) : 1;
@@ -521,6 +534,15 @@ export function CatalogPage() {
                     선택 복원
                   </Button>
                 )}
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  disabled={purgeRun.isPending}
+                  onClick={() => setPendingPurge(selected.map((run) => run.run_id))}
+                >
+                  <FlameKindling className="mr-1.5 h-3.5 w-3.5" />
+                  선택 완전 삭제
+                </Button>
               </>
             )}
           </div>
@@ -580,6 +602,40 @@ export function CatalogPage() {
             >
               <Trash2 className="mr-1.5 h-3.5 w-3.5" />
               삭제
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={pendingPurge !== null}
+        onOpenChange={(next) => {
+          if (!next) setPendingPurge(null);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogTitle>
+            {`실행 ${pendingPurge?.length ?? 0}개를 완전히 삭제할까요?`}
+          </DialogTitle>
+          <DialogDescription className="leading-relaxed">
+            실행 기록과 요약, 태그, 그리고 증거 SQLite 파일까지 지웁니다. 되돌릴 수 없고
+            같은 결과를 보려면 백테스트를 다시 실행해야 합니다.
+          </DialogDescription>
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setPendingPurge(null)}>
+              취소
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={purgeRun.isPending}
+              onClick={() => {
+                const runIds = pendingPurge ?? [];
+                setPendingPurge(null);
+                void purgeRuns(runIds);
+              }}
+            >
+              <FlameKindling className="mr-1.5 h-3.5 w-3.5" />
+              완전 삭제
             </Button>
           </div>
         </DialogContent>

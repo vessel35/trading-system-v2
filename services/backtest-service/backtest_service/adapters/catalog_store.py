@@ -510,6 +510,25 @@ class BacktestCatalogStore(CatalogStore):
             self._connection.rollback()
             raise
 
+    def purge_run(self, run_id: str) -> bool:
+        """Delete one run row for good, returning false when it was already gone.
+
+        The summary, preregistration, and tag rows carry ON DELETE CASCADE, so
+        this one statement removes every catalog trace of the run. The Evidence
+        artifact lives outside PostgreSQL and is the caller's responsibility.
+        """
+
+        try:
+            row = self._connection.execute(
+                "DELETE FROM public.backtest_run WHERE run_id = %s RETURNING run_id",
+                (run_id,),
+            ).fetchone()
+            self._connection.commit()
+            return row is not None
+        except Exception:
+            self._connection.rollback()
+            raise
+
     def determinism_reference(
         self,
         run_id: str,
