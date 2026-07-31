@@ -483,6 +483,33 @@ class BacktestCatalogStore(CatalogStore):
             self._connection.rollback()
             raise
 
+    def set_run_deleted(self, run_id: str, *, deleted: bool) -> bool:
+        """Mark or unmark one run as deleted, keeping every stored row intact.
+
+        Nothing is removed: the catalog row, its summary, its tags, and the
+        Evidence artifact all survive, and only the ``deleted_at`` marker moves.
+        Returns whether the marker actually changed, so a repeated call is
+        idempotent rather than an error. An already-deleted run keeps its
+        original ``deleted_at`` instead of being re-stamped.
+        """
+
+        try:
+            row = self._connection.execute(
+                """
+                UPDATE public.backtest_run
+                SET deleted_at = CASE WHEN %s THEN CURRENT_TIMESTAMP END
+                WHERE run_id = %s
+                  AND (deleted_at IS NOT NULL) <> %s
+                RETURNING run_id
+                """,
+                (deleted, run_id, deleted),
+            ).fetchone()
+            self._connection.commit()
+            return row is not None
+        except Exception:
+            self._connection.rollback()
+            raise
+
     def determinism_reference(
         self,
         run_id: str,

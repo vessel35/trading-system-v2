@@ -22,9 +22,11 @@ export type CatalogFilters = Pick<
   | "tag_value"
   | "period_start_from"
   | "period_end_to"
+  | "deleted"
 >;
 
-const initialFilters: CatalogFilters = {};
+/** The catalog hides soft-deleted runs unless the reader asks for them. */
+const initialFilters: CatalogFilters = { deleted: "exclude" };
 
 interface CatalogFilterContextValue {
   filters: CatalogFilters;
@@ -47,9 +49,11 @@ export function CatalogFilterProvider({ children }: PropsWithChildren) {
           ...patch,
         })),
       resetFilters: () => setFilters(initialFilters),
-      activeCount: Object.values(filters).filter(
-        (value) => value !== undefined && value !== null && value !== "",
-      ).length,
+      activeCount: Object.entries(filters).filter(([key, value]) => {
+        // The default "hide deleted runs" state is not a filter the reader set.
+        if (key === "deleted" && value === "exclude") return false;
+        return value !== undefined && value !== null && value !== "";
+      }).length,
     }),
     [filters],
   );

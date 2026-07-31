@@ -1,6 +1,9 @@
 import { RotateCcw, SlidersHorizontal } from "lucide-react";
 
-import { useCatalogFilters } from "../contexts/catalog-filters";
+import {
+  useCatalogFilters,
+  type CatalogFilters,
+} from "../contexts/catalog-filters";
 import { useTagFacets } from "../hooks/use-p2b";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -34,7 +37,7 @@ export function CatalogFilterBar() {
           초기화
         </Button>
       </div>
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-9">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
         <Input
           value={filters.strategy_id ?? ""}
           onChange={(event) =>
@@ -104,6 +107,20 @@ export function CatalogFilterBar() {
           <option value="">모든 gate</option>
           <option value="true">통과</option>
           <option value="false">미통과</option>
+        </select>
+        <select
+          value={filters.deleted ?? "exclude"}
+          onChange={(event) =>
+            updateFilters({
+              deleted: event.target.value as CatalogFilters["deleted"],
+            })
+          }
+          className="h-9 rounded-md border border-input bg-background/70 px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+          aria-label="삭제 표시 필터"
+        >
+          <option value="exclude">삭제 감춤</option>
+          <option value="only">삭제만 보기</option>
+          <option value="include">삭제 포함</option>
         </select>
         <select
           value={filters.tag_type ?? ""}

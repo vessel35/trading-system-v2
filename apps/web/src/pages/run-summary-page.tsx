@@ -8,7 +8,9 @@ import {
   GitCompareArrows,
   HeartPulse,
   LockKeyhole,
+  RotateCcw,
   ShieldCheck,
+  Trash2,
   XCircle,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
@@ -40,7 +42,7 @@ import {
 import { Skeleton } from "../components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { useComparisonBasket } from "../contexts/comparison-basket";
-import { useRun, useRunSummary } from "../hooks/use-catalog";
+import { useRun, useRunSummary, useSetRunDeleted } from "../hooks/use-catalog";
 import { useTrades } from "../hooks/use-evidence";
 import type { SummaryHelpSectionId } from "../lib/summary-help";
 import {
@@ -499,6 +501,7 @@ export function RunSummaryPage({ runId }: { runId: string }) {
   const summaryQuery = useRunSummary(runId);
   const tradesQuery = useTrades(runId);
   const basket = useComparisonBasket();
+  const setRunDeleted = useSetRunDeleted();
   const [selectedTradeId, setSelectedTradeId] = useState<number | null>(null);
 
   if (runQuery.isLoading || summaryQuery.isLoading) {
@@ -560,6 +563,11 @@ export function RunSummaryPage({ runId }: { runId: string }) {
                 </Badge>
               <Badge variant="outline">READ ONLY</Badge>
               <Badge variant="outline">TAG EDITABLE</Badge>
+                {run.deleted_at && (
+                  <Badge variant="warning">
+                    삭제됨 · {formatTimestamp(run.deleted_at)}
+                  </Badge>
+                )}
                 <span className="text-xs text-muted-foreground">
                   {formatTimestamp(run.created_at)}
                 </span>
@@ -573,27 +581,46 @@ export function RunSummaryPage({ runId }: { runId: string }) {
                 {formatPeriod(run.period_start, run.period_end)}
               </p>
             </div>
-            <Button
-              variant={inBasket ? "secondary" : "default"}
-              onClick={() => {
-                if (inBasket) {
-                  basket.remove(run.run_id);
-                } else {
-                  basket.add([
-                    {
-                      run_id: run.run_id,
-                      run_name: run.run_name,
-                      strategy_name: run.strategy_name,
-                      symbol: run.symbol,
-                      timeframe: run.timeframe,
-                    },
-                  ]);
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant={inBasket ? "secondary" : "default"}
+                onClick={() => {
+                  if (inBasket) {
+                    basket.remove(run.run_id);
+                  } else {
+                    basket.add([
+                      {
+                        run_id: run.run_id,
+                        run_name: run.run_name,
+                        strategy_name: run.strategy_name,
+                        symbol: run.symbol,
+                        timeframe: run.timeframe,
+                      },
+                    ]);
+                  }
+                }}
+              >
+                <GitCompareArrows className="mr-2 h-4 w-4" />
+                {inBasket ? "비교에서 빼기" : "비교에 담기"}
+              </Button>
+              <Button
+                variant="outline"
+                disabled={setRunDeleted.isPending}
+                onClick={() =>
+                  setRunDeleted.mutate({
+                    runId: run.run_id,
+                    deleted: run.deleted_at === null,
+                  })
                 }
-              }}
-            >
-              <GitCompareArrows className="mr-2 h-4 w-4" />
-              {inBasket ? "비교에서 빼기" : "비교에 담기"}
-            </Button>
+              >
+                {run.deleted_at ? (
+                  <RotateCcw className="mr-2 h-4 w-4" />
+                ) : (
+                  <Trash2 className="mr-2 h-4 w-4" />
+                )}
+                {run.deleted_at ? "복원" : "목록에서 삭제"}
+              </Button>
+            </div>
           </div>
         </div>
         <CardContent className="p-5">
