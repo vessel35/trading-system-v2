@@ -1855,9 +1855,10 @@ class Engine:
         for spec in self._indicator_specs:
             state = self._indicator_states[spec.identifier]
             value = state.update(candle)
-            self._assert_finite_indicator(value, spec.identifier)
+            self._assert_finite_indicator(value, spec.identifier, spec.undefined_outputs)
             key = self._indicator_key(spec)
             values[key] = value
+            recordable = self._recordable_indicator_value(value)
             self._sequence["indicator_snapshot"] += 1
             self.evidence.record(
                 EvidenceRecord(
@@ -1869,7 +1870,7 @@ class Engine:
                         "candle_open_time": candle.open_time,
                         "candle_close_time": candle.close_time,
                         "value": value if isinstance(value, float | int) else None,
-                        "value_json": value if isinstance(value, Mapping) else None,
+                        "value_json": recordable if isinstance(recordable, Mapping) else None,
                         "is_warmup": False,
                     },
                 )
@@ -1877,15 +1878,50 @@ class Engine:
         self._indicator_values = values
 
     @staticmethod
-    def _assert_finite_indicator(value: object, identifier: str) -> None:
-        scalars = value.values() if isinstance(value, Mapping) else (value,)
-        if any(
-            isinstance(item, bool)
-            or not isinstance(item, float | int)
-            or not math.isfinite(float(item))
-            for item in scalars
-        ):
+    def _assert_finite_indicator(
+        value: object,
+        identifier: str,
+        undefined_outputs: tuple[str, ...] = (),
+    ) -> None:
+        """Reject a non-finite indicator value the standard does not leave undefined.
+
+        Most outputs must be finite once warm-up is over; a NaN there means a
+        calculation went wrong and the run should stop rather than trade on it.
+        A few outputs are undefined by the standard itself for degenerate windows
+        (Bollinger %B when the band collapses, §3.10), and the registry names
+        those. Forcing a number into them would put an invented value where the
+        standard refuses to define one, so they are allowed through as NaN.
+        """
+
+        named = value.items() if isinstance(value, Mapping) else ((None, value),)
+        for key, item in named:
+            if isinstance(item, bool) or not isinstance(item, float | int):
+                raise ValueError(f"indicator {identifier} emitted a non-numeric value")
+            if math.isfinite(float(item)):
+                continue
+            if key is not None and key in undefined_outputs:
+                continue
             raise ValueError(f"indicator {identifier} emitted a non-finite value")
+
+    @staticmethod
+    def _recordable_indicator_value(value: object) -> object:
+        """Replace an undefined output with JSON null for the Evidence record.
+
+        Canonical JSON has no representation for NaN, and null is what "no value
+        here" means in JSON. The in-memory value handed to the strategy keeps its
+        NaN so the strategy can see the same thing the indicator produced.
+        """
+
+        if not isinstance(value, Mapping):
+            return value
+        return {
+            key: None
+            if isinstance(item, float | int)
+            and not isinstance(item, bool)
+            and not math.isfinite(float(item))
+            else item
+            for key, item in value.items()
+        }
 
     @staticmethod
     def _indicator_key(spec: IndicatorSpec) -> str:

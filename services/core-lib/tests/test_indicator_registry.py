@@ -1,7 +1,7 @@
 """Verify spec identity, selection, validation, and implementation pinning."""
 
 from datetime import UTC, datetime, timedelta
-from math import sin
+from math import isnan, sin
 from typing import cast
 
 import pytest
@@ -242,3 +242,53 @@ def test_warmed_up_state_agrees_with_declared_min_history() -> None:
         assert not state.warmed_up, f"{spec.identifier} warmed up early"
         state.update(candles[spec.min_history - 1])
         assert state.warmed_up, f"{spec.identifier} not warm at its declared minimum"
+
+
+def test_only_the_standard_undefined_outputs_are_declared() -> None:
+    """A spec may excuse a NaN only where the standard leaves the value undefined.
+
+    §3.10 writes "분모 0 → 미정의" for Bollinger %B, so a collapsed band has no
+    relative position to report. Nothing else in the registered set has such a
+    clause, and this test is what keeps the excuse from spreading to indicators
+    whose sections do define a substitute.
+    """
+
+    declared = {
+        spec.identifier: spec.undefined_outputs
+        for spec in DEFAULT_REGISTRY.list()
+        if spec.undefined_outputs
+    }
+    assert declared == {"Bollinger Bands(multiplier=2.0,period=20)": ("percent_b",)}
+
+
+def test_bollinger_leaves_percent_b_undefined_on_a_flat_window() -> None:
+    """A perfectly flat window collapses the band, and %B stays NaN there."""
+
+    spec = DEFAULT_REGISTRY.get("Bollinger Bands", {"period": 20, "multiplier": 2.0})
+    base = make_candles(20)
+    flat = [
+        Candle(
+            symbol=candle.symbol,
+            exchange=candle.exchange,
+            timeframe=candle.timeframe,
+            open_time=candle.open_time,
+            close_time=candle.close_time,
+            open=100.0,
+            high=100.0,
+            low=100.0,
+            close=100.0,
+            volume=candle.volume,
+            quote_volume=None,
+            trade_count=None,
+        )
+        for candle in base
+    ]
+    state = spec.make_state()
+    value = state.update(flat[0])
+    for candle in flat[1:]:
+        value = state.update(candle)
+
+    assert isinstance(value, dict)
+    assert value["middle"] == pytest.approx(100.0)
+    assert isnan(value["percent_b"])
+    assert "percent_b" in spec.undefined_outputs

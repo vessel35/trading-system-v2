@@ -17,6 +17,7 @@ from backtest_service.adapters.broker import BacktestBroker
 from backtest_service.adapters.catalog_store import DeterminismReference
 from backtest_service.adapters.clock import BacktestClock
 from backtest_service.adapters.cost_model import BacktestCostModel
+from backtest_service.adapters.evidence_schema import canonical_json
 from backtest_service.adapters.evidence_sink import BacktestEvidenceSink
 from backtest_service.config import RunConfig
 from backtest_service.engine import Engine, RunResult
@@ -1981,3 +1982,35 @@ def test_harness_reads_every_overfit_limit_from_shared_eval_thresholds(
         "ruin_drawdown",
         "risk_fraction",
     } <= limits.accessed
+
+
+def test_engine_accepts_a_standard_undefined_indicator_output_and_records_null() -> None:
+    """A NaN is refused unless the registry says the standard leaves it undefined.
+
+    The engine stops a run when an indicator turns non-finite after warm-up,
+    because a NaN there usually means the calculation broke. Bollinger %B is the
+    exception the standard itself creates (§3.10, "분모 0 → 미정의"): a flat window
+    collapses the band and there is no relative position to report. The value
+    reaches the strategy as NaN and reaches Evidence as JSON null, since canonical
+    JSON has no NaN.
+    """
+
+    Engine._assert_finite_indicator(
+        {"middle": 100.0, "percent_b": float("nan")},
+        "Bollinger Bands(multiplier=2.0,period=20)",
+        ("percent_b",),
+    )
+
+    with pytest.raises(ValueError, match="non-finite"):
+        Engine._assert_finite_indicator(
+            {"middle": float("nan"), "percent_b": 0.5},
+            "Bollinger Bands(multiplier=2.0,period=20)",
+            ("percent_b",),
+        )
+
+    with pytest.raises(ValueError, match="non-finite"):
+        Engine._assert_finite_indicator(float("nan"), "EMA(period=9)", ())
+
+    recordable = Engine._recordable_indicator_value({"middle": 100.0, "percent_b": float("nan")})
+    assert recordable == {"middle": 100.0, "percent_b": None}
+    assert canonical_json(recordable) == '{"middle":100,"percent_b":null}'

@@ -58,6 +58,15 @@ class IndicatorSpec:
         compare=False,
     )
     _state_factory: Callable[[], IndicatorState] = field(repr=False, compare=False)
+    undefined_outputs: tuple[str, ...] = ()
+    """Output keys the standard itself leaves undefined for degenerate windows.
+
+    Bollinger %B is the first case: §3.10 writes "분모 0 → 미정의" because a
+    collapsed band has no relative position to report. An indicator must not
+    invent a number where the standard declines to define one, so those keys may
+    carry NaN after warm-up and every other key may not. Consumers read this list
+    rather than guessing which NaN is legitimate.
+    """
 
     def __post_init__(self) -> None:
         if not self.name:
@@ -66,6 +75,9 @@ class IndicatorSpec:
             raise ValueError("min_history must be positive")
         object.__setattr__(self, "params", MappingProxyType(dict(self.params)))
         object.__setattr__(self, "required_inputs", tuple(self.required_inputs))
+        object.__setattr__(self, "undefined_outputs", tuple(self.undefined_outputs))
+        if any(not isinstance(name, str) or not name for name in self.undefined_outputs):
+            raise ValueError("undefined_outputs must name output keys")
 
     @property
     def identifier(self) -> str:
@@ -319,6 +331,10 @@ def build_default_registry() -> IndicatorRegistry:
                 period=20,
                 multiplier=2.0,
             ),
+            # §3.10: "%B ... 분모 0 → 미정의". A flat window collapses the band,
+            # and the standard declines to name a substitute, so %B stays NaN
+            # there instead of being given an invented number.
+            undefined_outputs=("percent_b",),
         )
     )
     registry.register(
