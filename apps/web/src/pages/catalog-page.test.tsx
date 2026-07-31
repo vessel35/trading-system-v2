@@ -53,6 +53,7 @@ function runRow(stored: StoredRun) {
 function catalogServer(initial: StoredRun[]) {
   const runs = new Map(initial.map((run) => [run.run_id, { ...run }]));
   const requestedFilters: string[] = [];
+  const purged: string[] = [];
 
   server.use(
     http.get("*/api/v1/tags/facets", () => HttpResponse.json({ data: [] })),
@@ -69,9 +70,22 @@ function catalogServer(initial: StoredRun[]) {
         page: { limit: 50, offset: 0, total: visible.length, has_more: false },
       });
     }),
-    http.delete("*/api/v1/runs/:runId", ({ params }) => {
-      const run = runs.get(String(params.runId));
+    http.delete("*/api/v1/runs/:runIdWithVerb", ({ params }) => {
+      const raw = String(params.runIdWithVerb);
+      const purging = raw.endsWith(":purge");
+      const runId = raw.replace(/:purge$/, "");
+      const run = runs.get(runId);
       if (!run) return new HttpResponse(null, { status: 404 });
+      if (purging) {
+        runs.delete(runId);
+        purged.push(runId);
+        return HttpResponse.json({
+          run_id: runId,
+          run_removed: true,
+          evidence_removed: true,
+          evidence_path: `${runId}.sqlite`,
+        });
+      }
       run.deleted_at = "2026-07-31T00:00:00Z";
       return HttpResponse.json({
         run_id: run.run_id,
@@ -93,7 +107,7 @@ function catalogServer(initial: StoredRun[]) {
       });
     }),
   );
-  return { runs, requestedFilters };
+  return { runs, requestedFilters, purged };
 }
 
 function renderCatalog() {
@@ -198,5 +212,78 @@ describe("카탈로그 실행 삭제 표시", () => {
       expect(catalog.runs.get("BT_2")?.deleted_at).not.toBeNull();
     });
     expect(await screen.findByText("조건에 맞는 실행이 없습니다.")).toBeInTheDocument();
+  });
+});
+
+describe("카탈로그 실행 완전 삭제", () => {
+  it("증거 파일까지 지운다고 알린 뒤 목록에서 영구히 없앤다", async () => {
+    const user = userEvent.setup();
+    const catalog = catalogServer([
+      { run_id: "BT_1", run_name: "alpha", deleted_at: null },
+      { run_id: "BT_2", run_name: "beta", deleted_at: null },
+    ]);
+    renderCatalog();
+
+    await listed("alpha");
+    await user.click(screen.getByLabelText("alpha 선택"));
+    await user.click(screen.getByRole("button", { name: /선택 완전 삭제/ }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).getByText("실행 1개를 완전히 삭제할까요?"),
+    ).toBeInTheDocument();
+    expect(within(dialog).getByText(/증거 SQLite 파일까지 지웁니다/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/되돌릴 수 없고/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "완전 삭제" }));
+
+    await waitFor(() => expect(catalog.purged).toEqual(["BT_1"]));
+    expect(catalog.runs.has("BT_1")).toBe(false);
+    await waitFor(() => expect(screen.queryByText("alpha")).not.toBeInTheDocument());
+    expect(screen.getByText("beta")).toBeInTheDocument();
+  });
+
+  it("이미 삭제 표시된 실행도 골라 완전 삭제할 수 있다", async () => {
+    const user = userEvent.setup();
+    const catalog = catalogServer([
+      { run_id: "BT_1", run_name: "alpha", deleted_at: "2026-07-30T00:00:00Z" },
+      { run_id: "BT_2", run_name: "beta", deleted_at: "2026-07-30T00:00:00Z" },
+    ]);
+    renderCatalog();
+
+    await user.selectOptions(screen.getByLabelText("삭제 표시 필터"), "only");
+    await listed("alpha");
+    await user.click(screen.getByLabelText("alpha 선택"));
+    await user.click(screen.getByLabelText("beta 선택"));
+    await user.click(screen.getByRole("button", { name: /선택 완전 삭제/ }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).getByText("실행 2개를 완전히 삭제할까요?"),
+    ).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "완전 삭제" }));
+
+    await waitFor(() => expect(catalog.purged).toEqual(["BT_1", "BT_2"]));
+    expect(catalog.runs.size).toBe(0);
+    expect(await screen.findByText("조건에 맞는 실행이 없습니다.")).toBeInTheDocument();
+  });
+
+  it("취소하면 아무 것도 지우지 않는다", async () => {
+    const user = userEvent.setup();
+    const catalog = catalogServer([
+      { run_id: "BT_1", run_name: "alpha", deleted_at: null },
+    ]);
+    renderCatalog();
+
+    await listed("alpha");
+    await user.click(screen.getByLabelText("alpha 선택"));
+    await user.click(screen.getByRole("button", { name: /선택 완전 삭제/ }));
+    await screen.findByRole("dialog");
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "취소" }),
+    );
+
+    expect(catalog.purged).toEqual([]);
+    expect(catalog.runs.has("BT_1")).toBe(true);
+    expect(screen.getByText("alpha")).toBeInTheDocument();
   });
 });

@@ -7,6 +7,7 @@ import {
   Database,
   GitCompareArrows,
   HeartPulse,
+  FlameKindling,
   LockKeyhole,
   RotateCcw,
   ShieldCheck,
@@ -33,6 +34,12 @@ import {
 } from "../components/summary-help-dialog";
 import { Button } from "../components/ui/button";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "../components/ui/dialog";
+import {
   Card,
   CardContent,
   CardDescription,
@@ -42,7 +49,12 @@ import {
 import { Skeleton } from "../components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { useComparisonBasket } from "../contexts/comparison-basket";
-import { useRun, useRunSummary, useSetRunDeleted } from "../hooks/use-catalog";
+import {
+  usePurgeRun,
+  useRun,
+  useRunSummary,
+  useSetRunDeleted,
+} from "../hooks/use-catalog";
 import { useTrades } from "../hooks/use-evidence";
 import type { SummaryHelpSectionId } from "../lib/summary-help";
 import {
@@ -502,7 +514,9 @@ export function RunSummaryPage({ runId }: { runId: string }) {
   const tradesQuery = useTrades(runId);
   const basket = useComparisonBasket();
   const setRunDeleted = useSetRunDeleted();
+  const purgeRun = usePurgeRun();
   const [selectedTradeId, setSelectedTradeId] = useState<number | null>(null);
+  const [purgeOpen, setPurgeOpen] = useState(false);
 
   if (runQuery.isLoading || summaryQuery.isLoading) {
     return (
@@ -619,6 +633,14 @@ export function RunSummaryPage({ runId }: { runId: string }) {
                   <Trash2 className="mr-2 h-4 w-4" />
                 )}
                 {run.deleted_at ? "복원" : "목록에서 삭제"}
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={purgeRun.isPending}
+                onClick={() => setPurgeOpen(true)}
+              >
+                <FlameKindling className="mr-2 h-4 w-4" />
+                완전 삭제
               </Button>
             </div>
           </div>
@@ -751,6 +773,35 @@ export function RunSummaryPage({ runId }: { runId: string }) {
         onSelect={setSelectedTradeId}
         onClose={() => setSelectedTradeId(null)}
       />
+
+      <Dialog open={purgeOpen} onOpenChange={setPurgeOpen}>
+        <DialogContent className="max-w-md">
+          <DialogTitle>이 실행을 완전히 삭제할까요?</DialogTitle>
+          <DialogDescription className="leading-relaxed">
+            실행 기록과 요약, 태그, 그리고 증거 SQLite 파일까지 지웁니다. 되돌릴 수 없고
+            같은 결과를 보려면 백테스트를 다시 실행해야 합니다.
+          </DialogDescription>
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setPurgeOpen(false)}>
+              취소
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={purgeRun.isPending}
+              onClick={() => {
+                setPurgeOpen(false);
+                purgeRun.mutate(
+                  { runId: run.run_id },
+                  { onSuccess: () => navigate("/runs") },
+                );
+              }}
+            >
+              <FlameKindling className="mr-2 h-4 w-4" />
+              완전 삭제
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <div className="flex items-center justify-center gap-2 py-2 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
         <ShieldCheck className="h-3.5 w-3.5 text-teal-500" />

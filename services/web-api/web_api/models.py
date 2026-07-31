@@ -498,6 +498,15 @@ class RunDeletionResponse(BaseModel):
     changed: bool
 
 
+class RunPurgeResponse(BaseModel):
+    """Result of an irreversible purge of one run and its Evidence artifact."""
+
+    run_id: str
+    run_removed: bool
+    evidence_removed: bool
+    evidence_path: str | None
+
+
 class RunSummary(BaseModel):
     """Stored backtest_summary row; values are never recomputed here."""
 

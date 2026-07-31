@@ -49,6 +49,7 @@ from web_api.evidence import (
     EvidenceRepository,
     EvidenceUnavailableError,
     open_evidence,
+    remove_evidence_artifact,
 )
 from web_api.jobs import (
     TERMINAL_JOB_STATES,
@@ -91,6 +92,7 @@ from web_api.models import (
     RunDeletionResponse,
     RunHeader,
     RunListResponse,
+    RunPurgeResponse,
     RunSubmission,
     RunSummaryResponse,
     RunTagsResponse,
@@ -1032,6 +1034,40 @@ def _set_run_deleted(run_id: str, repo: CatalogRepository, *, deleted: bool) -> 
         deleted=run.deleted_at is not None,
         deleted_at=run.deleted_at,
         changed=changed,
+    )
+
+
+# Registered before DELETE /api/v1/runs/{run_id} because that route's path
+# parameter would otherwise swallow the ":purge" suffix as part of the run_id.
+@app.delete(
+    "/api/v1/runs/{run_id}:purge",
+    response_model=RunPurgeResponse,
+    responses={404: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+)
+def purge_run(
+    run_id: str,
+    repo: Annotated[CatalogRepository, Depends(repository)],
+) -> RunPurgeResponse:
+    """Remove one run, its cascaded rows, and its Evidence file for good.
+
+    This cannot be undone. The Evidence artifact goes first: if the catalog row
+    then fails to disappear, the run stays visible with its Evidence missing,
+    which the reader can see and retry, rather than leaving an orphaned file
+    nothing points at.
+    """
+
+    run = repo.get_run(run_id)
+    if run is None:
+        not_found(run_id)
+    evidence_removed = remove_evidence_artifact(run.evidence_path)
+    with connect_catalog_writer() as connection:
+        store = BacktestCatalogStore(cast(WriteConnection, connection))
+        run_removed = store.purge_run(run_id)
+    return RunPurgeResponse(
+        run_id=run_id,
+        run_removed=run_removed,
+        evidence_removed=evidence_removed,
+        evidence_path=run.evidence_path,
     )
 
 
