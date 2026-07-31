@@ -339,6 +339,98 @@ def build_default_registry() -> IndicatorRegistry:
     )
     registry.register(
         IndicatorSpec(
+            name="DEMA",
+            params={"period": 21},
+            version="1.0.0",
+            pinned_impl="technical_indicators_calc_spec.md §1.1 (2*EMA1 - EMA2)",
+            min_history=41,
+            category="trend",
+            required_inputs=(),
+            _vectorized=partial(trend.dema, period=21),
+            _state_factory=partial(trend.DEMAState, period=21),
+        )
+    )
+    registry.register(
+        IndicatorSpec(
+            name="MACD",
+            params={"fast_period": 12, "slow_period": 26, "signal_period": 9},
+            version="1.0.0",
+            pinned_impl="technical_indicators_calc_spec.md §2.4 (12/26/9, EMA of MACD)",
+            min_history=34,
+            category="momentum",
+            required_inputs=(),
+            _vectorized=partial(
+                momentum.macd,
+                fast_period=12,
+                slow_period=26,
+                signal_period=9,
+            ),
+            _state_factory=partial(
+                momentum.MACDState,
+                fast_period=12,
+                slow_period=26,
+                signal_period=9,
+            ),
+        )
+    )
+    registry.register(
+        IndicatorSpec(
+            name="TSI",
+            params={"long_period": 25, "short_period": 13},
+            version="1.0.0",
+            pinned_impl="technical_indicators_calc_spec.md §2.7 (double-smoothed momentum)",
+            min_history=38,
+            category="momentum",
+            required_inputs=(),
+            _vectorized=partial(momentum.tsi, long_period=25, short_period=13),
+            _state_factory=partial(momentum.TSIState, long_period=25, short_period=13),
+        )
+    )
+    registry.register(
+        IndicatorSpec(
+            name="CCI",
+            params={"period": 20},
+            version="1.0.0",
+            pinned_impl="technical_indicators_calc_spec.md §2.10 (0.015 * mean deviation)",
+            min_history=20,
+            category="momentum",
+            required_inputs=(),
+            _vectorized=partial(momentum.cci, period=20),
+            _state_factory=partial(momentum.CCIState, period=20),
+        )
+    )
+    registry.register(
+        IndicatorSpec(
+            name="Awesome Oscillator",
+            params={"fast_period": 5, "slow_period": 34},
+            version="1.0.0",
+            pinned_impl="technical_indicators_calc_spec.md §2.12 (SMA of HL2, 5 and 34)",
+            min_history=34,
+            category="momentum",
+            required_inputs=(),
+            _vectorized=partial(momentum.awesome_oscillator, fast_period=5, slow_period=34),
+            _state_factory=partial(
+                momentum.AwesomeOscillatorState,
+                fast_period=5,
+                slow_period=34,
+            ),
+        )
+    )
+    registry.register(
+        IndicatorSpec(
+            name="A/D Line",
+            params={},
+            version="1.0.0",
+            pinned_impl="technical_indicators_calc_spec.md §4.2 (H=L keeps the multiplier at 0)",
+            min_history=1,
+            category="volume",
+            required_inputs=(),
+            _vectorized=volume.ad_line,
+            _state_factory=volume.ADLineState,
+        )
+    )
+    registry.register(
+        IndicatorSpec(
             name="Volume SMA",
             params={"period": 20},
             version="1.0.0",

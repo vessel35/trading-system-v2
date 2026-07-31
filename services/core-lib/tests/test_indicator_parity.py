@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from math import isclose, isnan, sin, sqrt
 
 import pytest
-from core_lib.indicators import momentum, volatility, volume
+from core_lib.indicators import momentum, primitives, trend, volatility, volume
 from core_lib.indicators.primitives import stdev
 from core_lib.indicators.registry import (
     DEFAULT_REGISTRY,
@@ -270,24 +270,19 @@ def test_required_indicators_match_authority_reference_values() -> None:
 
 
 @pytest.mark.parametrize(
-    ("name", "params"),
-    [
-        ("EMA", {"period": 9}),
-        ("EMA", {"period": 21}),
-        ("EMA", {"period": 55}),
-        ("EMA", {"period": 200}),
-        ("RSI", {"period": 14}),
-        ("Stochastic", {"period": 14, "smooth_period": 3}),
-        ("ATR", {"period": 14}),
-        ("Bollinger Bands", {"period": 20, "multiplier": 2.0}),
-        ("Volume SMA", {"period": 20}),
-    ],
+    "identifier",
+    [spec.identifier for spec in DEFAULT_REGISTRY.list()],
 )
-def test_min_history_and_seed_warmup(
-    name: str,
-    params: dict[str, int | float],
-) -> None:
-    spec = DEFAULT_REGISTRY.get(name, params)
+def test_min_history_and_seed_warmup(identifier: str) -> None:
+    """Every registered combination warms up exactly at its declared minimum.
+
+    The list comes from the registry itself, so registering an indicator without
+    a working warm-up cannot slip through by being left off a hand-written list.
+    """
+
+    spec = next(
+        candidate for candidate in DEFAULT_REGISTRY.list() if candidate.identifier == identifier
+    )
     candles = make_candles(spec.min_history + 1)
     state = spec.make_state()
     state.seed(candles[: spec.min_history - 1])
@@ -296,3 +291,91 @@ def test_min_history_and_seed_warmup(
     assert bool(state.warmed_up)
     expected = spec.compute_vectorized(candles[: spec.min_history])[-1]
     assert_value_equal(expected, state.current())
+
+
+def test_wave_one_indicators_satisfy_their_standard_relations() -> None:
+    """Check each new indicator against a relation its own section states.
+
+    These are not a second implementation of the same formula; each assertion is
+    a property the standard writes down separately from the calculation, so a
+    transcription error shows up as a broken relation rather than as two wrong
+    numbers agreeing with each other.
+    """
+
+    candles = make_candles(120)
+
+    # §2.4: the histogram is defined as the distance between line and signal.
+    for macd_value in momentum.macd(candles, 12, 26, 9):
+        if isnan(macd_value["macd"]) or isnan(macd_value["signal"]):
+            continue
+        assert macd_value["histogram"] == pytest.approx(macd_value["macd"] - macd_value["signal"])
+
+    # §1.1: DEMA is 2*EMA1 - EMA2 over the same period.
+    closes = [candle.close for candle in candles]
+    first = primitives.ema(closes, 21)
+    second = primitives.ema(first, 21)
+    for index, dema_value in enumerate(trend.dema(candles, 21)):
+        if isnan(dema_value):
+            continue
+        assert dema_value == pytest.approx(2.0 * first[index] - second[index])
+
+    # §2.12: the oscillator is the gap between two median-price averages.
+    median = primitives.hl2(candles)
+    fast = primitives.sma(median, 5)
+    slow = primitives.sma(median, 34)
+    for index, oscillator_value in enumerate(momentum.awesome_oscillator(candles, 5, 34)):
+        if isnan(oscillator_value):
+            continue
+        assert oscillator_value == pytest.approx(fast[index] - slow[index])
+
+    # §2.7: the index is a ratio of two smoothings of the same series, so it
+    # cannot leave the range the ratio allows.
+    for tsi_value in momentum.tsi(candles, 25, 13):
+        if not isnan(tsi_value):
+            assert -100.0 <= tsi_value <= 100.0
+
+
+def test_accumulation_distribution_follows_the_stated_degenerate_rule() -> None:
+    """§4.2 states H = L keeps the multiplier at zero, so the line holds still."""
+
+    candles = make_candles(10)
+    flat = Candle(
+        symbol=candles[-1].symbol,
+        exchange=candles[-1].exchange,
+        timeframe=candles[-1].timeframe,
+        open_time=candles[-1].open_time,
+        close_time=candles[-1].close_time,
+        open=100.0,
+        high=100.0,
+        low=100.0,
+        close=100.0,
+        volume=1_000.0,
+        quote_volume=None,
+        trade_count=None,
+    )
+    series = volume.ad_line([*candles, flat])
+    assert series[-1] == pytest.approx(series[-2])
+
+
+def test_cci_reads_a_deviation_free_window_as_zero() -> None:
+    """§2.10 gives no substitute for a zero mean deviation; this repo reads it as 0."""
+
+    base = make_candles(25)
+    flat = [
+        Candle(
+            symbol=candle.symbol,
+            exchange=candle.exchange,
+            timeframe=candle.timeframe,
+            open_time=candle.open_time,
+            close_time=candle.close_time,
+            open=50.0,
+            high=50.0,
+            low=50.0,
+            close=50.0,
+            volume=candle.volume,
+            quote_volume=None,
+            trade_count=None,
+        )
+        for candle in base
+    ]
+    assert momentum.cci(flat, 20)[-1] == 0.0

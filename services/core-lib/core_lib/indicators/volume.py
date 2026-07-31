@@ -5,11 +5,10 @@ from dataclasses import dataclass, field
 
 from core_lib.types import Candle
 
-from .primitives import SmaState, sma
+from .primitives import CumulativeState, SmaState, safe_divide, sma
 
 FOLLOW_UP_INDICATORS = (
     "OBV",
-    "A/D Line",
     "Chaikin Oscillator",
     "CMF",
     "MFI",
@@ -54,3 +53,50 @@ class VolumeSMAState:
 
     def current(self) -> float:
         return self._average.current()
+
+
+def ad_line(candles: Sequence[Candle]) -> list[float]:
+    """Compute the Accumulation/Distribution Line (§4.2).
+
+    The standard states the degenerate case for this one: when high equals low
+    the money flow multiplier is zero, so a candle with no range contributes
+    nothing rather than being undefined.
+    """
+    total = CumulativeState()
+    result: list[float] = []
+    for candle in candles:
+        multiplier = safe_divide(
+            (candle.close - candle.low) - (candle.high - candle.close),
+            candle.high - candle.low,
+            on_zero=0.0,
+        )
+        result.append(total.update(multiplier * candle.volume))
+    return result
+
+
+@dataclass(slots=True)
+class ADLineState:
+    """O(1)-per-candle Accumulation/Distribution Line state."""
+
+    min_history: int = field(init=False, default=1)
+    _total: CumulativeState = field(init=False, default_factory=CumulativeState)
+
+    @property
+    def warmed_up(self) -> bool:
+        return self._total.warmed_up
+
+    def seed(self, candles: Sequence[Candle]) -> None:
+        self._total.reset()
+        for candle in candles:
+            self.update(candle)
+
+    def update(self, candle: Candle) -> float:
+        multiplier = safe_divide(
+            (candle.close - candle.low) - (candle.high - candle.close),
+            candle.high - candle.low,
+            on_zero=0.0,
+        )
+        return self._total.update(multiplier * candle.volume)
+
+    def current(self) -> float:
+        return self._total.current()
