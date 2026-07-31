@@ -25,7 +25,17 @@ from core_lib.indicators.registry import (
     IndicatorSpec,
     build_default_registry,
 )
+from core_lib.indicators.specs import CATEGORIES, CATEGORY_SPECS
 from core_lib.types import Candle
+
+from indicator_reference import (
+    CATEGORY_DATA,
+    COVERED_CATEGORIES,
+    REGISTERED_IDENTIFIERS,
+    REGISTERED_NAMES,
+    REGISTERED_STANDARD_SYSTEMS,
+    UNDEFINED_OUTPUTS,
+)
 
 
 def make_candles(count: int) -> list[Candle]:
@@ -55,94 +65,74 @@ def make_candles(count: int) -> list[Candle]:
     return candles
 
 
-# The registry is pinned by the exact set of registered identities rather than by
-# a count. A count says only that the number moved; this says which combination
+# The registry is pinned by the exact set of registered identities rather than by a
+# count. A count says only that the number moved; a set says which combination
 # appeared or disappeared, and it still refuses a silent addition or removal.
-REGISTERED_IDENTIFIERS = frozenset(
-    {
-        "A/D Line",
-        "ATR(period=14)",
-        "Accelerator Oscillator(fast_period=5,slow_period=34,smooth_period=5)",
-        "Aroon(period=25)",
-        "Awesome Oscillator(fast_period=5,slow_period=34)",
-        "Bollinger Bands(multiplier=2.0,period=20)",
-        "CCI(period=20)",
-        "CMF(period=20)",
-        "CMO(period=14)",
-        "Chaikin Oscillator(fast_period=3,slow_period=10)",
-        "Coppock Curve(long_period=14,short_period=11,smooth_period=10)",
-        "DEMA(period=21)",
-        "DMI(period=14)",
-        "EMA(period=200)",
-        "EMA(period=21)",
-        "EMA(period=55)",
-        "EMA(period=9)",
-        "Elder Ray(period=13)",
-        "Fisher Transform(period=9)",
-        "Force Index(period=13)",
-        "KAMA(period=10)",
-        "KST",
-        "MACD(fast_period=12,signal_period=9,slow_period=26)",
-        "OBV",
-        "PPO(fast_period=12,signal_period=9,slow_period=26)",
-        "Parabolic SAR(maximum=0.2,step=0.02)",
-        "RSI(period=14)",
-        "SMI(long_period=25,period=13,short_period=13,signal_period=3)",
-        "Stochastic RSI(rsi_period=14,smooth_d=3,smooth_k=3,stochastic_period=14)",
-        "Stochastic(period=14,smooth_period=3)",
-        "TEMA(period=21)",
-        "TRIX(period=15)",
-        "TSI(long_period=25,short_period=13)",
-        "Ultimate Oscillator(long_period=28,medium_period=14,short_period=7)",
-        "Volume SMA(period=20)",
-        "Williams %R(period=14)",
-    }
-)
+#
+# The set itself lives one category per module under `tests/indicator_reference/`,
+# written out by hand there, so five people adding indicators at once never edit the
+# same file. This module only merges what they wrote and compares it with the live
+# registry; nothing here derives an expectation from the code it is checking.
 
 
 def test_registry_contains_required_coverage_and_pinned_authority() -> None:
     specs = DEFAULT_REGISTRY.list()
     assert {spec.identifier for spec in specs} == REGISTERED_IDENTIFIERS
-    assert {spec.name for spec in specs} == {
-        "A/D Line",
-        "ATR",
-        "Accelerator Oscillator",
-        "Aroon",
-        "Awesome Oscillator",
-        "Bollinger Bands",
-        "CCI",
-        "CMF",
-        "CMO",
-        "Chaikin Oscillator",
-        "Coppock Curve",
-        "DEMA",
-        "DMI",
-        "EMA",
-        "Elder Ray",
-        "Fisher Transform",
-        "Force Index",
-        "KAMA",
-        "KST",
-        "MACD",
-        "OBV",
-        "PPO",
-        "Parabolic SAR",
-        "RSI",
-        "SMI",
-        "Stochastic",
-        "Stochastic RSI",
-        "TEMA",
-        "TRIX",
-        "TSI",
-        "Ultimate Oscillator",
-        "Volume SMA",
-        "Williams %R",
-    }
+    assert {spec.name for spec in specs} == REGISTERED_NAMES
     for spec in specs:
         expected_version = "1.0.1" if spec.name == "Bollinger Bands" else "1.0.0"
         assert spec.version == expected_version
         assert "technical_indicators_calc_spec.md §" in spec.pinned_impl
         assert spec.min_history > 0
+
+
+def test_each_category_registers_exactly_what_its_own_module_expects() -> None:
+    """Compare category by category, so a mismatch names the owner it belongs to.
+
+    The merged comparison above already refuses a silent addition or removal. This
+    one fails with the category attached, which is what turns "one combination is
+    unexpected" into "the volume module and the volume registrations disagree".
+    """
+
+    registered_identifiers: dict[str, set[str]] = {category: set() for category in CATEGORIES}
+    registered_names: dict[str, set[str]] = {category: set() for category in CATEGORIES}
+    for spec in DEFAULT_REGISTRY.list():
+        registered_identifiers.setdefault(spec.category, set()).add(spec.identifier)
+        registered_names.setdefault(spec.category, set()).add(spec.name)
+
+    assert registered_identifiers == {
+        category: set(data.identifiers) for category, data in CATEGORY_DATA.items()
+    }
+    assert registered_names == {
+        category: set(data.names) for category, data in CATEGORY_DATA.items()
+    }
+
+
+def test_the_registry_is_exactly_the_six_category_modules_gathered() -> None:
+    """The registry must hold the category lists and nothing besides them.
+
+    Registration is split so that one person's indicator never lands in another
+    person's file. Three things can break that quietly: a module dropping out of the
+    registration gathering, a module dropping out of the expectation merge, and a
+    spec sitting in a module that does not own its category. The first two are caught
+    by pinning the six category names here and requiring both packages to cover
+    exactly them, and the third by comparing each spec's declared category with the
+    module holding it.
+    """
+
+    assert CATEGORIES == ("trend", "momentum", "volatility", "volume", "strength", "systems")
+    assert COVERED_CATEGORIES == set(CATEGORIES)
+    gathered = [spec.identifier for specs in CATEGORY_SPECS.values() for spec in specs]
+    assert len(gathered) == len(set(gathered)), "a spec is gathered from two modules"
+    assert set(gathered) == REGISTERED_IDENTIFIERS
+    misfiled = [
+        (spec.identifier, spec.category, category)
+        for category, specs in CATEGORY_SPECS.items()
+        for spec in specs
+        if spec.category != category
+    ]
+    assert misfiled == []
+    assert {spec.category for spec in DEFAULT_REGISTRY.list()} <= set(CATEGORIES)
 
 
 def test_follow_up_catalog_preserves_all_76_not_yet_registered_items() -> None:
@@ -158,11 +148,14 @@ def test_follow_up_catalog_preserves_all_76_not_yet_registered_items() -> None:
         + systems.FOLLOW_UP_INDICATORS
         + donchian.FOLLOW_UP_INDICATORS
     )
-    # The standard carries 82 systems; the registered ones and this catalog must
-    # account for all of them, so the catalog length follows from the registry
-    # instead of being written down twice.
-    registered_systems = 33
-    assert len(follow_up) == 82 - registered_systems
+    # The standard carries 82 systems, and the registered ones plus this catalog must
+    # account for all of them. How many of the 82 a category has taken is stated in
+    # that category's own module, so implementing an indicator moves one number in one
+    # owner's file instead of a shared constant here. The counts differ from the
+    # number of registered names where the standard says they should: EMA and Volume
+    # SMA are §0 primitives outside the 82, and Bollinger Bands is counted there as
+    # three systems rather than one.
+    assert len(follow_up) == 82 - REGISTERED_STANDARD_SYSTEMS
     assert len(set(follow_up)) == len(follow_up)
 
 
@@ -305,6 +298,10 @@ def test_only_the_standard_undefined_outputs_are_declared() -> None:
     relative position to report. Nothing else in the registered set has such a
     clause, and this test is what keeps the excuse from spreading to indicators
     whose sections do define a substitute.
+
+    The expected excuses are stated by each category in its own module, beside the
+    section quotation that grants them, so claiming one is an edit inside the owner's
+    file rather than in this shared assertion.
     """
 
     declared = {
@@ -312,7 +309,7 @@ def test_only_the_standard_undefined_outputs_are_declared() -> None:
         for spec in DEFAULT_REGISTRY.list()
         if spec.undefined_outputs
     }
-    assert declared == {"Bollinger Bands(multiplier=2.0,period=20)": ("percent_b",)}
+    assert declared == UNDEFINED_OUTPUTS
 
 
 def test_bollinger_leaves_percent_b_undefined_on_a_flat_window() -> None:

@@ -172,6 +172,67 @@ Keltner Channel은 §12 표에 올라 있지만 **표준 본문에 한쪽 수식
 계산 결과도 달라지지 않는 순수한 구조 변경이며, 달라지지 않았다는 것을 테스트로 확인한다.
 41종이 더해지면 등록 파일이 2000줄을 넘게 되므로 이 분리는 병렬화와 무관하게도 필요하다.
 
+**분리 결과.** 등록은 `core_lib/indicators/specs/` 아래 계열별 모듈로 옮겼고, 각 모듈이
+자기 계열의 `SPECS` 튜플 하나를 소유한다. `registry.py`는 여섯 계열을 고정된 목록으로
+모아 등록만 하므로 지표가 늘어도 바뀌지 않는다. 테스트가 계열에 대해 기대하는 것도 모두
+`tests/indicator_reference/` 아래 계열별 모듈로 옮겼다. 한 모듈이 자기 계열에 대해 일곱
+가지를 손으로 적는다. 등록 조합 목록(`IDENTIFIERS`), 지표 이름 목록(`NAMES`), 그 등록이
+표준 82종 가운데 몇 종을 차지하는지(`STANDARD_SYSTEMS`), 표준이 미정의로 남긴 출력
+(`UNDEFINED_OUTPUTS`), 그리고 외부 대조의 세 표(`REFERENCE`·`CONVERGING`·`UNCOMPARED`)다.
+패키지의 `__init__.py`가 여섯 모듈을 합쳐 지금까지와 같은 합본을 만들고, 테스트는 합본과
+살아 있는 레지스트리를 비교만 한다.
+
+기대 목록은 어느 것도 레지스트리에서 유도하지 않는다. 자기가 검사할 대상에서 값을 읽어
+오는 목록은 어떤 레지스트리와도 일치하므로 아무것도 잡아내지 못한다. 손으로 적혀 있기
+때문에 지표를 소리 없이 늘리거나 줄이면 합본과 레지스트리가 어긋나 실패한다.
+
+**담당별 소유 파일.** 아래 표의 세 열이 한 담당이 지표를 더할 때 고치는 파일 전부다.
+계산 모듈에 함수와 증분 상태 클래스를 쓰고, 등록 모듈에 `IndicatorSpec`을 더하고, 기대
+모듈에 위의 일곱 가지 가운데 해당하는 것을 적는다. 담당끼리 파일이 겹치지 않는다.
+
+| 담당 | 계산 모듈 | 등록 모듈 | 기대·기준값 모듈 |
+|---|---|---|---|
+| 추세 | `core_lib/indicators/trend.py` | `core_lib/indicators/specs/trend.py` | `tests/indicator_reference/trend.py` |
+| 모멘텀 | `core_lib/indicators/momentum.py` | `core_lib/indicators/specs/momentum.py` | `tests/indicator_reference/momentum.py` |
+| 변동성 | `core_lib/indicators/volatility.py` | `core_lib/indicators/specs/volatility.py` | `tests/indicator_reference/volatility.py` |
+| 거래량·방향성 | `core_lib/indicators/volume.py`, `core_lib/indicators/strength.py` | `core_lib/indicators/specs/volume.py`, `core_lib/indicators/specs/strength.py` | `tests/indicator_reference/volume.py`, `tests/indicator_reference/strength.py` |
+| 시스템 | `core_lib/indicators/systems.py` | `core_lib/indicators/specs/systems.py` | `tests/indicator_reference/systems.py` |
+
+경로는 모두 `services/core-lib/` 기준이다. 거래량·방향성 담당만 두 계열을 함께 맡으므로
+파일이 두 벌이다. **지표를 등록하는 경로에는 이제 여러 담당이 함께 고치는 파일이 없다.**
+
+**아무도 고치지 않는 파일.** `core_lib/indicators/registry.py`(`IndicatorSpec`과
+`IndicatorRegistry` 정의, 그리고 여섯 계열을 모으는 `build_default_registry()`),
+`core_lib/indicators/specs/__init__.py`(계열 이름 여섯 개를 적은 곳),
+`core_lib/indicators/primitives.py`, `tests/indicator_reference/__init__.py`(합치는 곳이며,
+계열 모듈이 무엇을 선언해야 하는지를 `CategoryModule` 프로토콜로 적어 둔 곳),
+`tests/indicator_reference/series.py`(대조용 300봉 생성기와 표본 지점 100·200·299,
+수렴 판정의 잡음 바닥값), `tests/test_indicator_registry.py`(합본과 레지스트리를 비교하는
+곳), `tests/conftest.py`가 여기에 해당한다. 특히 `series.py`를 고치면 여섯 모듈의 기준값이
+한꺼번에 무효가 되므로 손대지 않는다.
+
+**계열을 빠뜨리거나 목록을 어긋나게 두면 조용히 통과하지 않는다.** 네 가지 경우를 실제로
+만들어 확인했다.
+
+첫째, 담당이 지표를 등록하고 자기 기대 목록을 고치지 않으면
+`test_registry_contains_required_coverage_and_pinned_authority`와
+`test_each_category_registers_exactly_what_its_own_module_expects`를 포함해 여섯 개가
+실패한다. 둘째, 반대로 기대 목록에서 한 줄을 지우면 같은 방식으로 다섯 개가 실패한다.
+셋째, 기대값 패키지의 합치기에서 계열 하나를 빠뜨리면 그 계열의 등록이 기대 목록에서
+사라지고, 표준 82종 집계도 어긋나며, 그 계열의 출력이 외부 대조에서 미대조로 남아 여덟
+개가 실패한다. 넷째, 등록 패키지의 모으기에서 계열 하나를 빠뜨리면 레지스트리 자체가
+작아져 일곱 개가 실패한다.
+
+여섯 계열 이름은 `test_the_registry_is_exactly_the_six_category_modules_gathered`가
+문자열 그대로 못 박아 두고, 등록 패키지와 기대값 패키지가 정확히 그 여섯을 덮는지 확인한다.
+`specs/__init__.py`는 그와 별개로 import 시점에 각 spec의 `category`가 그 spec을 담은
+모듈과 일치하는지 확인하고 어긋나면 예외를 낸다.
+
+**등록 경로 밖에 남은 것 하나.** 지표마다 표준이 따로 진술하는 성질을 확인하는 관계
+테스트는 아직 `tests/test_indicator_parity.py`에 함수 단위로 들어간다. 다섯 담당이 각자
+함수를 덧붙이게 되므로 파일은 겹치지만, 서로 다른 함수를 파일 끝에 더하는 형태라 충돌은
+함수 단위로 정리된다. 등록 목록처럼 한 집합을 여럿이 나눠 고치는 것과는 성질이 다르다.
+
 ### 7.3 계열별 분담 (동시 진행)
 
 | 담당 | 모듈 | 지표 | 수 |
