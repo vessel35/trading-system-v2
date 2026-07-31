@@ -81,7 +81,10 @@ def test_purge_leaves_other_runs_and_their_artifacts_alone(
         neighbour.unlink(missing_ok=True)
 
 
-def test_purging_an_unknown_run_is_not_found(client: TestClient) -> None:
+def test_purging_an_unknown_run_is_not_found(
+    client: TestClient,
+    catalog_available: None,
+) -> None:
     response = client.delete("/api/v1/runs/BT_20990101_000001_absent:purge")
     assert response.status_code == 404
     assert response.json()["error"]["details"]["run_id"] == "BT_20990101_000001_absent"

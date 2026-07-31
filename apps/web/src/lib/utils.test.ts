@@ -10,8 +10,13 @@ import {
 
 describe("표시 시간대", () => {
   it("UTC로 저장된 시각을 KST로 보여 준다", () => {
-    // 2026-01-01T00:00Z is 09:00 on the same day in Seoul.
-    expect(formatTimestamp("2026-01-01T00:00:00Z")).toBe("2026. 1. 1. 오전 9:00");
+    // 2026-01-01T00:00Z is 09:00 on the same day in Seoul. The day-period word
+    // comes from the runtime's locale data — a Node build without full ICU says
+    // "AM" where a complete one says "오전" — so the assertion pins the converted
+    // instant instead of the wording.
+    expect(formatTimestamp("2026-01-01T00:00:00Z")).toMatch(
+      /^2026\. 1\. 1\. (오전|AM) 9:00$/,
+    );
     // 2026-01-01T15:00Z has already crossed midnight in Seoul.
     expect(formatPeriod("2026-01-01T15:00:00Z", "2026-01-02T15:00:00Z")).toBe(
       "26. 01. 02. → 26. 01. 03.",

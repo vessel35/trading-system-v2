@@ -72,20 +72,29 @@ def test_repeated_delete_and_restore_are_idempotent(
     assert repeated["deleted"] is False
 
 
-def test_unknown_run_is_not_found_for_both_directions(client: TestClient) -> None:
+def test_unknown_run_is_not_found_for_both_directions(
+    client: TestClient,
+    catalog_available: None,
+) -> None:
     missing = "BT_20990101_000001_absent"
     assert client.delete(f"/api/v1/runs/{missing}").status_code == 404
     assert client.post(f"/api/v1/runs/{missing}:restore").status_code == 404
 
 
-def test_default_listing_matches_the_explicit_exclude_filter(client: TestClient) -> None:
+def test_default_listing_matches_the_explicit_exclude_filter(
+    client: TestClient,
+    catalog_available: None,
+) -> None:
     default = client.get("/api/v1/runs", params={"limit": 200})
     explicit = client.get("/api/v1/runs", params={"deleted": "exclude", "limit": 200})
     assert default.status_code == 200
     assert default.json()["page"]["total"] == explicit.json()["page"]["total"]
 
 
-def test_unknown_deleted_filter_is_rejected(client: TestClient) -> None:
+def test_unknown_deleted_filter_is_rejected(
+    client: TestClient,
+    catalog_available: None,
+) -> None:
     response = client.get("/api/v1/runs", params={"deleted": "sometimes"})
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "invalid_query"

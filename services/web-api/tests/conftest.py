@@ -12,7 +12,7 @@ from pathlib import Path
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
-from web_api.database import connect_catalog_writer, get_settings
+from web_api.database import connect_catalog, connect_catalog_writer, get_settings
 from web_api.main import app
 
 _INSERT_DISPOSABLE_RUN = """
@@ -50,6 +50,22 @@ RETURNING run_id
 def client() -> Iterator[TestClient]:
     with TestClient(app) as test_client:
         yield test_client
+
+
+@pytest.fixture
+def catalog_available() -> None:
+    """Skip when no catalog is reachable, for tests that need a real answer.
+
+    Without a database every catalog endpoint answers 503, so a test asserting
+    404 or 400 would fail for a reason that has nothing to do with the code.
+    Continuous integration deliberately runs without one.
+    """
+
+    try:
+        with connect_catalog() as connection:
+            connection.execute("SELECT 1").fetchone()
+    except (OSError, RuntimeError, psycopg.Error) as exc:
+        pytest.skip(f"development backtest_db is unavailable: {type(exc).__name__}")
 
 
 @pytest.fixture
