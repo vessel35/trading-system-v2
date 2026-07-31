@@ -25,16 +25,15 @@ from .primitives import (
 
 StochasticValue = dict[str, float]
 MacdValue = dict[str, float]
+PpoValue = dict[str, float]
+SmiValue = dict[str, float]
 
 FOLLOW_UP_INDICATORS = (
     "Stochastic RSI",
-    "PPO",
     "TRIX",
-    "SMI",
     "CMO",
     "Williams %R",
     "Ultimate Oscillator",
-    "Accelerator Oscillator",
     "Fisher Transform",
     "Connors RSI",
     "QStick",
@@ -503,3 +502,272 @@ class AwesomeOscillatorState:
         fast = self._fast.current()
         slow = self._slow.current()
         return NAN if isnan(fast) or isnan(slow) else fast - slow
+
+
+def ppo(
+    candles: Sequence[Candle],
+    fast_period: int = 12,
+    slow_period: int = 26,
+    signal_period: int = 9,
+) -> list[PpoValue]:
+    """Compute the percentage price oscillator, MACD scaled by the slow EMA (§2.5)."""
+    if fast_period <= 0 or slow_period <= 0 or signal_period <= 0:
+        raise ValueError("periods must be positive")
+    if fast_period >= slow_period:
+        raise ValueError("fast_period must be shorter than slow_period")
+    closes = [candle.close for candle in candles]
+    fast = ema(closes, fast_period)
+    slow = ema(closes, slow_period)
+    line = [
+        NAN
+        if isnan(quick) or isnan(base)
+        # A zero slow average would need a zero price, which the candle contract
+        # already rejects; the substitute exists so the helper stays total.
+        else 100.0 * safe_divide(quick - base, base, on_zero=0.0)
+        for quick, base in zip(fast, slow, strict=True)
+    ]
+    signal = ema(line, signal_period)
+    return [
+        {
+            "ppo": ppo_value,
+            "signal": signal_value,
+            "histogram": NAN
+            if isnan(ppo_value) or isnan(signal_value)
+            else ppo_value - signal_value,
+        }
+        for ppo_value, signal_value in zip(line, signal, strict=True)
+    ]
+
+
+@dataclass(slots=True)
+class PPOState:
+    """O(1)-per-candle percentage price oscillator state."""
+
+    fast_period: int = 12
+    slow_period: int = 26
+    signal_period: int = 9
+    min_history: int = field(init=False)
+    _fast: EmaState = field(init=False)
+    _slow: EmaState = field(init=False)
+    _signal: EmaState = field(init=False)
+    _value: PpoValue = field(
+        init=False,
+        default_factory=lambda: {"ppo": NAN, "signal": NAN, "histogram": NAN},
+    )
+
+    def __post_init__(self) -> None:
+        if self.fast_period <= 0 or self.slow_period <= 0 or self.signal_period <= 0:
+            raise ValueError("periods must be positive")
+        if self.fast_period >= self.slow_period:
+            raise ValueError("fast_period must be shorter than slow_period")
+        self.min_history = self.slow_period + self.signal_period - 1
+        self._fast = EmaState(self.fast_period)
+        self._slow = EmaState(self.slow_period)
+        self._signal = EmaState(self.signal_period)
+
+    @property
+    def warmed_up(self) -> bool:
+        return not isnan(self._value["signal"])
+
+    def seed(self, candles: Sequence[Candle]) -> None:
+        self._fast.reset()
+        self._slow.reset()
+        self._signal.reset()
+        self._value = {"ppo": NAN, "signal": NAN, "histogram": NAN}
+        for candle in candles:
+            self.update(candle)
+
+    def update(self, candle: Candle) -> PpoValue:
+        fast = self._fast.update(candle.close)
+        slow = self._slow.update(candle.close)
+        line = (
+            NAN
+            if isnan(fast) or isnan(slow)
+            else 100.0 * safe_divide(fast - slow, slow, on_zero=0.0)
+        )
+        signal = self._signal.update(line)
+        self._value = {
+            "ppo": line,
+            "signal": signal,
+            "histogram": NAN if isnan(line) or isnan(signal) else line - signal,
+        }
+        return self.current()
+
+    def current(self) -> PpoValue:
+        return dict(self._value)
+
+
+def accelerator_oscillator(
+    candles: Sequence[Candle],
+    fast_period: int = 5,
+    slow_period: int = 34,
+    smooth_period: int = 5,
+) -> list[float]:
+    """Compute the Accelerator Oscillator, ``AO - SMA(AO, 5)`` (§2.13)."""
+    if smooth_period <= 0:
+        raise ValueError("smooth_period must be positive")
+    oscillator = awesome_oscillator(candles, fast_period, slow_period)
+    smoothed = sma(oscillator, smooth_period)
+    return [
+        NAN if isnan(value) or isnan(average) else value - average
+        for value, average in zip(oscillator, smoothed, strict=True)
+    ]
+
+
+@dataclass(slots=True)
+class AcceleratorOscillatorState:
+    """O(1)-per-candle Accelerator Oscillator state over the Awesome Oscillator."""
+
+    fast_period: int = 5
+    slow_period: int = 34
+    smooth_period: int = 5
+    min_history: int = field(init=False)
+    _oscillator: AwesomeOscillatorState = field(init=False)
+    _smoothed: SmaState = field(init=False)
+    _value: float = field(init=False, default=NAN)
+
+    def __post_init__(self) -> None:
+        if self.smooth_period <= 0:
+            raise ValueError("smooth_period must be positive")
+        self._oscillator = AwesomeOscillatorState(
+            fast_period=self.fast_period,
+            slow_period=self.slow_period,
+        )
+        self._smoothed = SmaState(self.smooth_period)
+        self.min_history = self._oscillator.min_history + self.smooth_period - 1
+
+    @property
+    def warmed_up(self) -> bool:
+        return not isnan(self._value)
+
+    def seed(self, candles: Sequence[Candle]) -> None:
+        self._oscillator.seed(())
+        self._smoothed.reset()
+        self._value = NAN
+        for candle in candles:
+            self.update(candle)
+
+    def update(self, candle: Candle) -> float:
+        oscillator = self._oscillator.update(candle)
+        average = self._smoothed.update(oscillator)
+        self._value = NAN if isnan(oscillator) or isnan(average) else oscillator - average
+        return self.current()
+
+    def current(self) -> float:
+        return self._value
+
+
+def smi(
+    candles: Sequence[Candle],
+    period: int = 13,
+    long_period: int = 25,
+    short_period: int = 13,
+    signal_period: int = 3,
+) -> list[SmiValue]:
+    """Compute the Stochastic Momentum Index and its signal (§2.27).
+
+    The standard lists more than one parameter set and asks that the adopted one
+    be stated. This repository takes Blau's original 13/25/13 with a 3-period
+    signal, which also matches the double smoothing already used for TSI.
+    """
+    if min(period, long_period, short_period, signal_period) <= 0:
+        raise ValueError("periods must be positive")
+    highest = hh([candle.high for candle in candles], period)
+    lowest = ll([candle.low for candle in candles], period)
+    distances: list[float] = []
+    ranges: list[float] = []
+    for candle, high, low in zip(candles, highest, lowest, strict=True):
+        if isnan(high) or isnan(low):
+            distances.append(NAN)
+            ranges.append(NAN)
+            continue
+        distances.append(candle.close - (high + low) / 2.0)
+        ranges.append((high - low) / 2.0)
+    smoothed = ema(ema(distances, long_period), short_period)
+    smoothed_range = ema(ema(ranges, long_period), short_period)
+    line = [
+        NAN
+        if isnan(numerator) or isnan(denominator)
+        # §2.27 states the degenerate rule for this one: "분모 0 → 0".
+        else 100.0 * safe_divide(numerator, denominator, on_zero=0.0)
+        for numerator, denominator in zip(smoothed, smoothed_range, strict=True)
+    ]
+    signal = ema(line, signal_period)
+    return [
+        {"smi": smi_value, "signal": signal_value}
+        for smi_value, signal_value in zip(line, signal, strict=True)
+    ]
+
+
+@dataclass(slots=True)
+class SMIState:
+    """O(1)-per-candle Stochastic Momentum Index state."""
+
+    period: int = 13
+    long_period: int = 25
+    short_period: int = 13
+    signal_period: int = 3
+    min_history: int = field(init=False)
+    _highest: RollingExtremeState = field(init=False)
+    _lowest: RollingExtremeState = field(init=False)
+    _distance_long: EmaState = field(init=False)
+    _distance_short: EmaState = field(init=False)
+    _range_long: EmaState = field(init=False)
+    _range_short: EmaState = field(init=False)
+    _signal: EmaState = field(init=False)
+    _value: SmiValue = field(init=False, default_factory=lambda: {"smi": NAN, "signal": NAN})
+
+    def __post_init__(self) -> None:
+        if min(self.period, self.long_period, self.short_period, self.signal_period) <= 0:
+            raise ValueError("periods must be positive")
+        self.min_history = (
+            self.period + self.long_period + self.short_period + self.signal_period - 3
+        )
+        self._highest = RollingExtremeState(self.period, highest=True)
+        self._lowest = RollingExtremeState(self.period, highest=False)
+        self._distance_long = EmaState(self.long_period)
+        self._distance_short = EmaState(self.short_period)
+        self._range_long = EmaState(self.long_period)
+        self._range_short = EmaState(self.short_period)
+        self._signal = EmaState(self.signal_period)
+
+    @property
+    def warmed_up(self) -> bool:
+        return not isnan(self._value["signal"])
+
+    def seed(self, candles: Sequence[Candle]) -> None:
+        for state in (
+            self._highest,
+            self._lowest,
+            self._distance_long,
+            self._distance_short,
+            self._range_long,
+            self._range_short,
+            self._signal,
+        ):
+            state.reset()
+        self._value = {"smi": NAN, "signal": NAN}
+        for candle in candles:
+            self.update(candle)
+
+    def update(self, candle: Candle) -> SmiValue:
+        highest = self._highest.update(candle.high)
+        lowest = self._lowest.update(candle.low)
+        if isnan(highest) or isnan(lowest):
+            distance = NAN
+            price_range = NAN
+        else:
+            distance = candle.close - (highest + lowest) / 2.0
+            price_range = (highest - lowest) / 2.0
+        smoothed = self._distance_short.update(self._distance_long.update(distance))
+        smoothed_range = self._range_short.update(self._range_long.update(price_range))
+        line = (
+            NAN
+            if isnan(smoothed) or isnan(smoothed_range)
+            else 100.0 * safe_divide(smoothed, smoothed_range, on_zero=0.0)
+        )
+        self._value = {"smi": line, "signal": self._signal.update(line)}
+        return self.current()
+
+    def current(self) -> SmiValue:
+        return dict(self._value)

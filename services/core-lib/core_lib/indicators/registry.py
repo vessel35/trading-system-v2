@@ -431,6 +431,128 @@ def build_default_registry() -> IndicatorRegistry:
     )
     registry.register(
         IndicatorSpec(
+            name="TEMA",
+            params={"period": 21},
+            version="1.0.0",
+            pinned_impl="technical_indicators_calc_spec.md §1.2 (3*E1 - 3*E2 + E3)",
+            min_history=61,
+            category="trend",
+            required_inputs=(),
+            _vectorized=partial(trend.tema, period=21),
+            _state_factory=partial(trend.TEMAState, period=21),
+        )
+    )
+    registry.register(
+        IndicatorSpec(
+            name="PPO",
+            params={"fast_period": 12, "slow_period": 26, "signal_period": 9},
+            version="1.0.0",
+            pinned_impl="technical_indicators_calc_spec.md §2.5 (MACD scaled by the slow EMA)",
+            min_history=34,
+            category="momentum",
+            required_inputs=(),
+            _vectorized=partial(
+                momentum.ppo,
+                fast_period=12,
+                slow_period=26,
+                signal_period=9,
+            ),
+            _state_factory=partial(
+                momentum.PPOState,
+                fast_period=12,
+                slow_period=26,
+                signal_period=9,
+            ),
+        )
+    )
+    registry.register(
+        IndicatorSpec(
+            name="SMI",
+            params={
+                "period": 13,
+                "long_period": 25,
+                "short_period": 13,
+                "signal_period": 3,
+            },
+            version="1.0.0",
+            pinned_impl=(
+                "technical_indicators_calc_spec.md §2.27 "
+                "(Blau 13/25/13 with a 3-period signal; the section asks the set to be stated)"
+            ),
+            min_history=51,
+            category="momentum",
+            required_inputs=(),
+            _vectorized=partial(
+                momentum.smi,
+                period=13,
+                long_period=25,
+                short_period=13,
+                signal_period=3,
+            ),
+            _state_factory=partial(
+                momentum.SMIState,
+                period=13,
+                long_period=25,
+                short_period=13,
+                signal_period=3,
+            ),
+        )
+    )
+    registry.register(
+        IndicatorSpec(
+            name="Accelerator Oscillator",
+            params={"fast_period": 5, "slow_period": 34, "smooth_period": 5},
+            version="1.0.0",
+            pinned_impl="technical_indicators_calc_spec.md §2.13 (AO - SMA(AO, 5))",
+            min_history=38,
+            category="momentum",
+            required_inputs=(),
+            _vectorized=partial(
+                momentum.accelerator_oscillator,
+                fast_period=5,
+                slow_period=34,
+                smooth_period=5,
+            ),
+            _state_factory=partial(
+                momentum.AcceleratorOscillatorState,
+                fast_period=5,
+                slow_period=34,
+                smooth_period=5,
+            ),
+        )
+    )
+    registry.register(
+        IndicatorSpec(
+            name="Chaikin Oscillator",
+            params={"fast_period": 3, "slow_period": 10},
+            version="1.0.0",
+            pinned_impl="technical_indicators_calc_spec.md §4.3 (EMA(ADL,3) - EMA(ADL,10))",
+            min_history=10,
+            category="volume",
+            required_inputs=(),
+            _vectorized=partial(volume.chaikin_oscillator, fast_period=3, slow_period=10),
+            _state_factory=partial(
+                volume.ChaikinOscillatorState,
+                fast_period=3,
+                slow_period=10,
+            ),
+        )
+    )
+    registry.register(
+        IndicatorSpec(
+            name="CMF",
+            params={"period": 20},
+            version="1.0.0",
+            pinned_impl="technical_indicators_calc_spec.md §4.4 (money flow volume over volume)",
+            min_history=20,
+            category="volume",
+            required_inputs=(),
+            _vectorized=partial(volume.cmf, period=20),
+            _state_factory=partial(volume.CMFState, period=20),
+        )
+    )
+    registry.register(
+        IndicatorSpec(
             name="Volume SMA",
             params={"period": 20},
             version="1.0.0",

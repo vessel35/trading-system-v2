@@ -62,17 +62,23 @@ REGISTERED_IDENTIFIERS = frozenset(
     {
         "A/D Line",
         "ATR(period=14)",
+        "Accelerator Oscillator(fast_period=5,slow_period=34,smooth_period=5)",
         "Awesome Oscillator(fast_period=5,slow_period=34)",
         "Bollinger Bands(multiplier=2.0,period=20)",
         "CCI(period=20)",
+        "CMF(period=20)",
+        "Chaikin Oscillator(fast_period=3,slow_period=10)",
         "DEMA(period=21)",
         "EMA(period=9)",
         "EMA(period=21)",
         "EMA(period=55)",
         "EMA(period=200)",
         "MACD(fast_period=12,signal_period=9,slow_period=26)",
+        "PPO(fast_period=12,signal_period=9,slow_period=26)",
         "RSI(period=14)",
+        "SMI(long_period=25,period=13,short_period=13,signal_period=3)",
         "Stochastic(period=14,smooth_period=3)",
+        "TEMA(period=21)",
         "TSI(long_period=25,short_period=13)",
         "Volume SMA(period=20)",
     }
@@ -85,14 +91,20 @@ def test_registry_contains_required_coverage_and_pinned_authority() -> None:
     assert {spec.name for spec in specs} == {
         "A/D Line",
         "ATR",
+        "Accelerator Oscillator",
         "Awesome Oscillator",
         "Bollinger Bands",
         "CCI",
+        "CMF",
+        "Chaikin Oscillator",
         "DEMA",
         "EMA",
         "MACD",
+        "PPO",
         "RSI",
+        "SMI",
         "Stochastic",
+        "TEMA",
         "TSI",
         "Volume SMA",
     }
@@ -119,7 +131,7 @@ def test_follow_up_catalog_preserves_all_76_not_yet_registered_items() -> None:
     # The standard carries 82 systems; the registered ones and this catalog must
     # account for all of them, so the catalog length follows from the registry
     # instead of being written down twice.
-    registered_systems = 12
+    registered_systems = 18
     assert len(follow_up) == 82 - registered_systems
     assert len(set(follow_up)) == len(follow_up)
 

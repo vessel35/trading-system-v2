@@ -79,6 +79,51 @@ REFERENCE: dict[str, dict[int, float]] = {
         200: 0.5021993216117951,
         299: 22.51620241873372,
     },
+    "TEMA(period=21)": {
+        100: 110.5316275392987,
+        200: 103.44342539321069,
+        299: 147.90149272889016,
+    },
+    # TA-Lib's PPO takes a moving-average type; §2.5 uses EMA, so matype=1.
+    "PPO(fast_period=12,signal_period=9,slow_period=26).ppo": {
+        100: -2.5366845796303528,
+        200: -0.2650808063722667,
+        299: 7.017926029894158,
+    },
+    "PPO(fast_period=12,signal_period=9,slow_period=26).signal": {
+        100: -1.247947717943005,
+        200: -4.3558678969393965,
+        299: 5.97573734406127,
+    },
+    "PPO(fast_period=12,signal_period=9,slow_period=26).histogram": {
+        100: -1.2887368616873478,
+        200: 4.0907870905671295,
+        299: 1.0421886858328886,
+    },
+    # ta 0.11.0 ChaikinMoneyFlowIndicator.
+    "CMF(period=20)": {
+        100: -0.18378324771896384,
+        200: 0.1184521618242292,
+        299: 0.3089552759865531,
+    },
+}
+
+# Registered outputs that no available outside implementation covers. Listing them
+# keeps the gap visible instead of letting it hide inside a passing suite.
+UNCOMPARED: dict[str, str] = {
+    "Accelerator Oscillator(fast_period=5,slow_period=34,smooth_period=5)": (
+        "None of TA-Lib, Tulip, or ta implements it. Its inputs are covered: the "
+        "Awesome Oscillator it subtracts from is compared against Tulip, and the "
+        "rolling average it subtracts is a compared primitive."
+    ),
+    "SMI(long_period=25,period=13,short_period=13,signal_period=3).smi": (
+        "None of the three implements the Stochastic Momentum Index, and §2.27 "
+        "notes that platforms disagree on its parameters, so even a third-party "
+        "value would need its parameter set restated before it could be compared."
+    ),
+    "SMI(long_period=25,period=13,short_period=13,signal_period=3).signal": (
+        "Smoothing of an uncompared series; it inherits the gap above."
+    ),
 }
 
 # Two series start from a different seed window than TA-Lib uses, so they converge
@@ -120,7 +165,17 @@ CONVERGING: dict[str, tuple[dict[int, float], dict[int, float]]] = {
         {100: -20.993702022418233, 200: -2.993467178933585, 299: 67.24009457384477},
         {100: 4e-1, 200: 1e-4, 299: 1e-7},
     ),
+    # TA-Lib's ADOSC inherits its ATR-style seeding difference through the A/D
+    # averages, so this one converges as well.
+    "Chaikin Oscillator(fast_period=3,slow_period=10)": (
+        {100: 0.7392424925909609, 200: 167.5528602118775, 299: 135.60824398604382},
+        {100: 1e-5, 200: 1e-9, 299: 1e-9},
+    ),
 }
+
+# Below this the remaining gap is floating-point noise rather than a seed being
+# forgotten, so the test stops demanding that it keep shrinking.
+CONVERGENCE_NOISE_FLOOR = 1e-9
 
 
 def reference_candles(count: int = 300) -> list[Candle]:
@@ -200,7 +255,8 @@ def test_seed_window_differences_converge_to_the_outside_implementation(name: st
     for index in SAMPLE_INDICES:
         gap = abs(produced[index] - values[index])
         assert gap <= tolerance[index], f"{name} at index {index} gap {gap}"
-        assert gap <= previous_gap, f"{name} gap grew at index {index}"
+        if previous_gap > CONVERGENCE_NOISE_FLOOR:
+            assert gap <= previous_gap, f"{name} gap grew at index {index}"
         previous_gap = gap
 
 
@@ -211,6 +267,7 @@ def test_every_registered_output_is_covered_by_the_outside_comparison() -> None:
     alone, which is the exact gap this file exists to close.
     """
 
-    compared = set(REFERENCE) | set(CONVERGING)
+    compared = set(REFERENCE) | set(CONVERGING) | set(UNCOMPARED)
     produced = set(_computed_series())
     assert produced - compared == set()
+    assert set(UNCOMPARED) <= produced, "an uncompared entry no longer exists"

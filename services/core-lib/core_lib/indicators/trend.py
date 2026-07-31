@@ -10,7 +10,6 @@ from .primitives import NAN, EmaState
 from .primitives import ema as ema_primitive
 
 FOLLOW_UP_INDICATORS = (
-    "TEMA",
     "T3",
     "HMA",
     "ZLEMA",
@@ -115,3 +114,66 @@ class DEMAState:
         first = self._first.current()
         second = self._second.current()
         return NAN if isnan(first) or isnan(second) else 2.0 * first - second
+
+
+def tema(candles: Sequence[Candle], period: int) -> list[float]:
+    """Compute the triple EMA, ``3*E1 - 3*E2 + E3`` (§1.2)."""
+    closes = [candle.close for candle in candles]
+    first = ema_primitive(closes, period)
+    second = ema_primitive(first, period)
+    third = ema_primitive(second, period)
+    return [
+        NAN if isnan(one) or isnan(two) or isnan(three) else 3.0 * one - 3.0 * two + three
+        for one, two, three in zip(first, second, third, strict=True)
+    ]
+
+
+@dataclass(slots=True)
+class TEMAState:
+    """O(1)-per-candle triple EMA state over three chained averages."""
+
+    period: int
+    min_history: int = field(init=False)
+    _first: EmaState = field(init=False)
+    _second: EmaState = field(init=False)
+    _third: EmaState = field(init=False)
+
+    def __post_init__(self) -> None:
+        if self.period <= 0:
+            raise ValueError("period must be positive")
+        # Each average waits for its input to exist, and the first value of each
+        # arrives on the same candle its predecessor completes its period.
+        self.min_history = 3 * self.period - 2
+        self._first = EmaState(self.period)
+        self._second = EmaState(self.period)
+        self._third = EmaState(self.period)
+
+    @property
+    def warmed_up(self) -> bool:
+        return self._third.warmed_up
+
+    def seed(self, candles: Sequence[Candle]) -> None:
+        self._first.reset()
+        self._second.reset()
+        self._third.reset()
+        for candle in candles:
+            self.update(candle)
+
+    def update(self, candle: Candle) -> float:
+        first = self._first.update(candle.close)
+        second = self._second.update(first)
+        third = self._third.update(second)
+        return self._combine(first, second, third)
+
+    def current(self) -> float:
+        return self._combine(
+            self._first.current(),
+            self._second.current(),
+            self._third.current(),
+        )
+
+    @staticmethod
+    def _combine(first: float, second: float, third: float) -> float:
+        if isnan(first) or isnan(second) or isnan(third):
+            return NAN
+        return 3.0 * first - 3.0 * second + third
