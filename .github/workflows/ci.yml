@@ -64,7 +64,19 @@ jobs:
 
       # Integration/acceptance tiers intentionally remain opt-in until a
       # disposable PostgreSQL service-container job is added.
+      #
+      # The placeholders below are not credentials: no database runs here, and
+      # nothing in this job reaches one. They exist because settings parsing
+      # refuses to produce a configuration object without connection values, so
+      # without them even the unit tests that only need the Evidence root fail
+      # to construct settings. Tests that do open a connection get a refused
+      # connection and skip themselves, which is the intended tiering.
       - name: Pytest without integration databases
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: "5432"
+          PGUSER: ci-placeholder
+          PGPASSWORD: ci-placeholder
         run: .venv/bin/pytest services -m "not integration"
 
       - name: Install frontend generator dependencies
