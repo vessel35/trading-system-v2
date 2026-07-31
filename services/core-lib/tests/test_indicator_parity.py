@@ -357,6 +357,188 @@ def test_accumulation_distribution_follows_the_stated_degenerate_rule() -> None:
     assert series[-1] == pytest.approx(series[-2])
 
 
+def test_trend_values_do_not_change_when_the_candles_after_them_are_removed() -> None:
+    """A value at bar t must be the same whether or not bar t+1 exists yet.
+
+    None of the trend indicators shifts a value onto another bar, so the way a
+    look-ahead would appear here is a window or a chain reaching past its own bar.
+    Cutting the series at a bar and recomputing answers that directly: if anything
+    later fed the value, the truncated series produces a different one. The
+    incremental path is structurally causal already, so this covers the batch path
+    that the parity tests compare it against.
+    """
+
+    candles = make_candles(260)
+    for spec in DEFAULT_REGISTRY.list():
+        if spec.category != "trend":
+            continue
+        full = spec.compute_vectorized(candles)
+        for cut in (spec.min_history, spec.min_history + 7, len(candles)):
+            if cut > len(candles):
+                continue
+            truncated = spec.compute_vectorized(candles[:cut])
+            assert len(truncated) == cut
+            assert_value_equal(full[cut - 1], truncated[cut - 1])
+
+
+def test_t3_with_a_zero_volume_factor_is_the_third_link_of_its_own_chain() -> None:
+    """§1.3's expanded coefficients collapse to ``c4 = 1`` when the factor is zero.
+
+    Written out, ``c1``, ``c2`` and ``c3`` all carry a factor of the volume factor
+    while ``c4`` reduces to one, so T3 must become the third EMA of its chain and
+    nothing else. What that pins is the constant term of ``c4`` and which link of
+    the chain the sum is anchored on; the three factor-carrying constants vanish
+    here and are covered instead by the comparison against TA-Lib's T3.
+    """
+
+    candles = make_candles(120)
+    period = 12
+    chain = [candle.close for candle in candles]
+    for _ in range(3):
+        chain = primitives.ema(chain, period)
+
+    for index, value in enumerate(trend.t3(candles, period, 0.0)):
+        if isnan(value):
+            continue
+        assert value == pytest.approx(chain[index])
+
+
+def test_hma_smooths_over_the_rounded_square_root_of_its_period() -> None:
+    """§1.4 rounds the square root of the period, and nothing else pins that.
+
+    The registered combination uses a period of 9, whose square root is exactly 3,
+    so rounding, flooring and ceiling all agree there and the convention is never
+    exercised by it. The periods below are chosen because they disagree, and they
+    disagree in both directions: at 21, 32 and 45 the rounded window is one wider
+    than a floored one, while at 20 and 50 it is one narrower than a ceiling. A
+    later change to either neighbour therefore fails here.
+
+    The direction matters in practice. Tulip Indicators truncates this window,
+    which is why our HMA at period 21 sits 1.50e-01, 1.65e+00 and 4.54e-01 away
+    from Tulip's at bars 100, 200 and 299 of the reference series, with the gap
+    holding rather than closing. That is the standard and that library genuinely
+    disagreeing, and §1.4 is the one this repository follows. It is also why the
+    registered period is compared against Tulip in `indicator_reference/trend.py`
+    while this test carries the convention that comparison cannot reach.
+    """
+
+    candles = make_candles(200)
+    closes = [candle.close for candle in candles]
+
+    for period, expected_window in ((20, 4), (21, 5), (32, 6), (45, 7), (50, 7)):
+        assert expected_window == round(sqrt(period))
+        fast = primitives.wma(closes, period // 2)
+        slow = primitives.wma(closes, period)
+        lead = [
+            primitives.NAN if isnan(quick) or isnan(steady) else 2.0 * quick - steady
+            for quick, steady in zip(fast, slow, strict=True)
+        ]
+
+        produced = trend.hma(candles, period)
+        for expected, actual in zip(primitives.wma(lead, expected_window), produced, strict=True):
+            assert_scalar_equal(expected, actual)
+
+        # The warm-up is stated a second time, on the incremental state, and has to
+        # round the same way the calculation does.
+        assert trend.HMAState(period=period).min_history == period + expected_window - 1
+
+        # Without this the assertion above could hold for a window the standard did
+        # not ask for, if the neighbouring windows happened to produce the same
+        # series. They do not, and the failure names which neighbour collided.
+        for neighbour in (expected_window - 1, expected_window + 1):
+            other = primitives.wma(lead, neighbour)
+            assert any(
+                not isnan(one) and not isnan(two) and not isclose(one, two, rel_tol=1e-12)
+                for one, two in zip(produced, other, strict=True)
+            ), f"period {period}: window {neighbour} is indistinguishable from {expected_window}"
+
+
+def test_zlema_removes_the_whole_lag_of_a_straight_line() -> None:
+    """§1.5 exists to cancel the delay, and on a straight line it cancels all of it.
+
+    An EMA of a line settles exactly ``(n - 1) / 2`` bars behind it, which is the
+    lag §1.5 subtracts. For an odd period the correction is that number exactly, so
+    the average has to converge onto the current price rather than trail it.
+    """
+
+    candles = make_linear_candles(300)
+    values = trend.zlema(candles, 21)
+    assert values[-1] == pytest.approx(candles[-1].close, abs=1e-6)
+
+
+def test_alma_leans_on_the_recent_side_of_its_window() -> None:
+    """§1.6's weights are positive and its offset of 0.85 sits past the middle.
+
+    Two things follow without recomputing the kernel. Positive weights normalized
+    by their own sum cannot leave the window's range, and a peak at ``0.85 * (n-1)``
+    puts more mass on the newer bars than a flat window does, so on a rising line
+    the result has to sit above the simple average of the same bars. The second
+    part is what fails if the weights are laid against the window backwards.
+    """
+
+    candles = make_linear_candles(60)
+    closes = [candle.close for candle in candles]
+    averages = primitives.sma(closes, 9)
+
+    for index, value in enumerate(trend.alma(candles, 9, 0.85, 6.0)):
+        if isnan(value):
+            continue
+        window = closes[index - 8 : index + 1]
+        assert min(window) <= value <= max(window)
+        assert value > averages[index]
+
+
+def test_vidya_becomes_a_plain_ema_when_momentum_is_saturated() -> None:
+    """§1.8's ``k`` reaches one exactly when §2.8's CMO reaches 100.
+
+    A series that only rises has no losses, so CMO is 100 at every bar past its
+    window and ``k`` is one. The recursion is then ``alpha * P + (1 - alpha) *
+    previous``, which is §0.3's EMA over the same period and the same seed. Tying
+    the two together checks the division by 100 and the alpha at once: an unscaled
+    ``k`` would overshoot instead of matching.
+    """
+
+    candles = make_linear_candles(120)
+    expected = trend.ema(candles, 21)
+
+    for index, value in enumerate(trend.vidya(candles, 21, 9)):
+        if isnan(value):
+            continue
+        assert value == pytest.approx(expected[index])
+
+
+def test_mcginley_divisor_slows_the_average_when_price_runs_ahead() -> None:
+    """§1.9 puts the price-to-average ratio in the divisor, which is its whole point.
+
+    Above the average the ratio exceeds one, so the divisor exceeds the period and
+    the step is smaller than a plain ``1 / N`` step; below it the divisor shrinks
+    and the step is larger. Checking the direction on both sides is what an
+    exponent of the wrong sign would break.
+    """
+
+    candles = make_candles(120)
+    closes = [candle.close for candle in candles]
+    period = 21
+    values = trend.mcginley_dynamic(candles, period)
+
+    compared = 0
+    for index in range(1, len(values)):
+        previous, current = values[index - 1], values[index]
+        if isnan(previous) or isnan(current):
+            continue
+        price = closes[index]
+        step = abs(current - previous)
+        plain = abs(price - previous) / period
+        if price > previous:
+            assert step < plain
+        elif price < previous:
+            assert step > plain
+        else:
+            assert current == previous
+        compared += 1
+    assert compared > 0
+
+
 def test_cci_reads_a_deviation_free_window_as_zero() -> None:
     """§2.10 gives no substitute for a zero mean deviation; this repo reads it as 0."""
 
