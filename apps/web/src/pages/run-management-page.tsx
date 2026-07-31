@@ -36,7 +36,7 @@ import {
   CardTitle,
 } from "../components/ui/card";
 import { DateTimePickerField } from "../components/ui/date-time-picker";
-import { Input } from "../components/ui/input";
+import { GuidedInput } from "../components/ui/guided-input";
 import {
   useRunJobs,
   type TrackedJob,
@@ -142,6 +142,9 @@ const textareaClass =
   "min-h-24 w-full rounded-md border border-input bg-background/70 px-3 py-2 font-mono text-xs shadow-sm outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring";
 // HTML min은 배타적 하한을 표현할 수 없어, 0 초과를 강제할 명시적인 최소 양수를 둔다.
 const POSITIVE_NUMBER_INPUT_MIN = "0.000000000001";
+// HTML bounds are inclusive, so "less than one" is expressed as the largest value
+// the server still accepts rather than as one.
+const SPLIT_INPUT_MAX = "0.999999999999";
 const MONEY_MANAGEMENT_PARAM_NAMES = new Set([
   "leverage",
   "reward_risk",
@@ -1020,8 +1023,13 @@ export function RunManagementPage() {
                           typeof exampleValue === "string" ? (
                           <Label key={parameter}>
                             {parameter}
-                            <Input
+                            <GuidedInput
                               aria-label={`전략 파라미터 ${parameter}`}
+                              hint={
+                                typeof exampleValue === "number"
+                                  ? "숫자 · 소수 가능"
+                                  : "문자열"
+                              }
                               type={
                                 typeof exampleValue === "number" ? "number" : "text"
                               }
@@ -1122,8 +1130,9 @@ export function RunManagementPage() {
                     <div className="grid gap-3 sm:grid-cols-3">
                       <Label>
                         레버리지
-                        <Input
+                        <GuidedInput
                           aria-label="수동 레버리지"
+                          hint="자연수 · 1–100"
                           type="number"
                           min={1}
                           max={100}
@@ -1137,8 +1146,9 @@ export function RunManagementPage() {
                       </Label>
                       <Label>
                         손익비
-                        <Input
+                        <GuidedInput
                           aria-label="수동 reward_risk"
+                          hint="소수 가능 · 0.1–10 (2 = 손절폭의 2배를 목표)"
                           type="number"
                           min={0.1}
                           max={10}
@@ -1152,8 +1162,9 @@ export function RunManagementPage() {
                       </Label>
                       <Label>
                         ATR 손절 배수
-                        <Input
+                        <GuidedInput
                           aria-label="수동 atr_stop_multiple"
+                          hint="소수 가능 · 0.1–10 (2 = ATR의 2배를 손절폭)"
                           type="number"
                           min={0.1}
                           max={10}
@@ -1185,8 +1196,9 @@ export function RunManagementPage() {
                         <div className="mt-3 grid gap-3 sm:grid-cols-3">
                           <Label>
                             N 기간 (1d)
-                            <Input
+                            <GuidedInput
                               aria-label="Turtle N 기간"
+                              hint="자연수 · 2–200 (일봉 개수)"
                               type="number"
                               min={2}
                               max={200}
@@ -1200,8 +1212,9 @@ export function RunManagementPage() {
                           </Label>
                           <Label>
                             손절 N 배수
-                            <Input
+                            <GuidedInput
                               aria-label="Turtle 손절 N 배수"
+                              hint="소수 가능 · 0.1–10 (2 = N의 2배를 손절폭)"
                               type="number"
                               min={0.1}
                               max={10}
@@ -1218,8 +1231,9 @@ export function RunManagementPage() {
                           </Label>
                           <Label>
                             레버리지 상한
-                            <Input
+                            <GuidedInput
                               aria-label="Turtle 레버리지 상한"
+                              hint="자연수 · 1–100"
                               type="number"
                               min={1}
                               max={100}
@@ -1244,10 +1258,12 @@ export function RunManagementPage() {
               <section className="grid gap-4 border-t pt-5 sm:grid-cols-2">
                 <Label className="sm:col-span-2">
                   심볼
-                  <Input
+                  <GuidedInput
+                    aria-label="심볼"
                     value={form.symbol}
+                    hint="BASE/QUOTE 또는 BASE/QUOTE:SETTLE 형식 (예: BTC/USDT:USDT)"
                     pattern="^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*(?::[A-Za-z0-9][A-Za-z0-9._-]*)?$"
-                    title="BASE/QUOTE 또는 BASE/QUOTE:SETTLE 형식으로 입력하세요."
+                    title="BASE/QUOTE 또는 BASE/QUOTE:SETTLE 형식으로 입력 가능합니다."
                     onChange={(event) => update("symbol", event.target.value)}
                     required
                   />
@@ -1278,6 +1294,9 @@ export function RunManagementPage() {
                     onChange={(value) => update("start", value)}
                     aria-label="시작 (KST)"
                   />
+                  <span className="mt-1 block text-[10px] font-normal leading-relaxed text-muted-foreground">
+                    달력에서 선택 · 한국 시간 · 분 단위
+                  </span>
                 </Label>
                 <Label>
                   종료 (KST)
@@ -1286,6 +1305,9 @@ export function RunManagementPage() {
                     onChange={(value) => update("end", value)}
                     aria-label="종료 (KST)"
                   />
+                  <span className="mt-1 block text-[10px] font-normal leading-relaxed text-muted-foreground">
+                    시작보다 뒤여야 하며, 아래 보유 구간 안이어야 합니다
+                  </span>
                 </Label>
                 <div
                   className={cn(
@@ -1376,8 +1398,12 @@ export function RunManagementPage() {
                 <div className="mt-4 grid gap-4 rounded-lg border bg-muted/10 p-4 sm:grid-cols-2">
                   <Label>
                     초기 자본
-                    <Input
-                      inputMode="decimal"
+                    <GuidedInput
+                      aria-label="초기 자본"
+                      hint="0보다 큰 금액 · 소수 가능"
+                      type="number"
+                      min={POSITIVE_NUMBER_INPUT_MIN}
+                      step="any"
                       value={form.initialCapital}
                       onChange={(event) =>
                         update("initialCapital", event.target.value)
@@ -1413,8 +1439,9 @@ export function RunManagementPage() {
                   {form.sizingMethod === "risk_based" ? (
                     <Label>
                       거래당 리스크 (0 &lt; x ≤ 0.01)
-                      <Input
+                      <GuidedInput
                         aria-label="risk_per_trade"
+                        hint="0 초과 0.01 이하 · 소수 (0.01 = 자본의 1%)"
                         type="number"
                         inputMode="decimal"
                         min={POSITIVE_NUMBER_INPUT_MIN}
@@ -1430,8 +1457,9 @@ export function RunManagementPage() {
                   ) : (
                     <Label>
                       포지션 자본 비율 (0 &lt; x ≤ 1)
-                      <Input
+                      <GuidedInput
                         aria-label="position_size_pct"
+                        hint="0 초과 1 이하 · 소수 (0.5 = 자본의 50%)"
                         type="number"
                         inputMode="decimal"
                         min={POSITIVE_NUMBER_INPUT_MIN}
@@ -1448,8 +1476,12 @@ export function RunManagementPage() {
                   <div className="hidden sm:block" aria-hidden="true" />
                   <Label>
                     선물 taker 수수료율
-                    <Input
-                      inputMode="decimal"
+                    <GuidedInput
+                      aria-label="선물 taker 수수료율"
+                      hint="0 이상 소수 · 비율 (0.0004 = 0.04%)"
+                      type="number"
+                      min={0}
+                      step="any"
                       value={form.futuresTakerFeeRate}
                       onChange={(event) =>
                         update("futuresTakerFeeRate", event.target.value)
@@ -1458,8 +1490,12 @@ export function RunManagementPage() {
                   </Label>
                   <Label>
                     진입 슬리피지율
-                    <Input
-                      inputMode="decimal"
+                    <GuidedInput
+                      aria-label="진입 슬리피지율"
+                      hint="0 이상 소수 · 비율 (0.0005 = 0.05%)"
+                      type="number"
+                      min={0}
+                      step="any"
                       value={form.futuresEntrySlippageRate}
                       onChange={(event) =>
                         update("futuresEntrySlippageRate", event.target.value)
@@ -1468,8 +1504,12 @@ export function RunManagementPage() {
                   </Label>
                   <Label>
                     청산 슬리피지율
-                    <Input
-                      inputMode="decimal"
+                    <GuidedInput
+                      aria-label="청산 슬리피지율"
+                      hint="0 이상 소수 · 비율 (0.0001 = 0.01%)"
+                      type="number"
+                      min={0}
+                      step="any"
                       value={form.exitSlippageRate}
                       onChange={(event) =>
                         update("exitSlippageRate", event.target.value)
@@ -1478,8 +1518,12 @@ export function RunManagementPage() {
                   </Label>
                   <Label>
                     펀딩비 대체율
-                    <Input
-                      inputMode="decimal"
+                    <GuidedInput
+                      aria-label="펀딩비 대체율"
+                      hint="0 이상 소수 · 8시간당 비율 (0.0001 = 0.01%)"
+                      type="number"
+                      min={0}
+                      step="any"
                       value={form.fundingFallbackRate}
                       onChange={(event) =>
                         update("fundingFallbackRate", event.target.value)
@@ -1525,7 +1569,9 @@ export function RunManagementPage() {
                     <div className="mt-4 grid gap-4 rounded-lg border bg-muted/20 p-4 sm:grid-cols-2">
                     <Label className="sm:col-span-2">
                       가설
-                      <Input
+                      <GuidedInput
+                        aria-label="가설"
+                        hint="문장으로 자유롭게 입력"
                         value={form.hypothesis}
                         onChange={(event) => update("hypothesis", event.target.value)}
                       />
@@ -1562,15 +1608,20 @@ export function RunManagementPage() {
                     </Label>
                     <Label>
                       선언자
-                      <Input
+                      <GuidedInput
+                        aria-label="선언자"
+                        hint="이름 또는 팀 이름"
                         value={form.declaredBy}
                         onChange={(event) => update("declaredBy", event.target.value)}
                       />
                     </Label>
                     <Label>
                       성공 기준
-                      <Input
-                        inputMode="decimal"
+                      <GuidedInput
+                        aria-label="성공 기준"
+                        hint="숫자 · 소수 가능 (주지표와 같은 단위)"
+                        type="number"
+                        step="any"
                         value={form.successThreshold}
                         onChange={(event) =>
                           update("successThreshold", event.target.value)
@@ -1579,8 +1630,11 @@ export function RunManagementPage() {
                     </Label>
                     <Label>
                       실패 기준
-                      <Input
-                        inputMode="decimal"
+                      <GuidedInput
+                        aria-label="실패 기준"
+                        hint="숫자 · 소수 가능 (주지표와 같은 단위)"
+                        type="number"
+                        step="any"
                         value={form.failureThreshold}
                         onChange={(event) =>
                           update("failureThreshold", event.target.value)
@@ -1670,10 +1724,13 @@ export function RunManagementPage() {
                   {sweepType === "walk_forward" && (
                     <Label>
                       folds (2–20)
-                      <Input
+                      <GuidedInput
+                        aria-label="folds"
+                        hint="자연수 · 2–20"
                         type="number"
                         min={2}
                         max={20}
+                        step={1}
                         value={folds}
                         onChange={(event) => setFolds(event.target.value)}
                       />
@@ -1700,8 +1757,13 @@ export function RunManagementPage() {
                           timeframe 자동정렬
                         </button>
                       </span>
-                      <Input
-                        inputMode="decimal"
+                      <GuidedInput
+                        aria-label="split"
+                        hint="0 초과 1 미만 소수 (0.7 = 앞 70%를 인샘플)"
+                        type="number"
+                        min={POSITIVE_NUMBER_INPUT_MIN}
+                        max={SPLIT_INPUT_MAX}
+                        step="any"
                         value={split}
                         onChange={(event) => {
                           setSplitCustomized(true);
@@ -1730,7 +1792,9 @@ export function RunManagementPage() {
                               ))}
                             </select>
                           ) : (
-                            <Input
+                            <GuidedInput
+                              aria-label="축 1 파라미터"
+                              hint="파라미터 이름 (자금 관리는 money_management. 접두어)"
                               value={axisOneParameter}
                               onChange={(event) =>
                                 setAxisOneParameter(event.target.value)
@@ -1741,7 +1805,9 @@ export function RunManagementPage() {
                         </Label>
                         <Label>
                           축 1 값 JSON 배열
-                          <Input
+                          <GuidedInput
+                            aria-label="축 1 값 JSON 배열"
+                            hint="JSON 배열 · 값 2–20개 (예: [1.5, 2.0, 2.5])"
                             value={axisOneValues}
                             onChange={(event) => setAxisOneValues(event.target.value)}
                             placeholder="[1.5, 2.0, 2.5]"
@@ -1781,7 +1847,9 @@ export function RunManagementPage() {
                                   ))}
                               </select>
                             ) : (
-                              <Input
+                              <GuidedInput
+                                aria-label="축 2 파라미터"
+                                hint="축 1과 다른 파라미터 이름"
                                 value={axisTwoParameter}
                                 onChange={(event) =>
                                   setAxisTwoParameter(event.target.value)
@@ -1792,7 +1860,9 @@ export function RunManagementPage() {
                           </Label>
                           <Label>
                             축 2 값 JSON 배열
-                            <Input
+                            <GuidedInput
+                              aria-label="축 2 값 JSON 배열"
+                              hint="JSON 배열 · 값 2–20개 (예: [1.5, 2.0])"
                               value={axisTwoValues}
                               onChange={(event) =>
                                 setAxisTwoValues(event.target.value)
@@ -1909,8 +1979,9 @@ export function RunManagementPage() {
               openSweepResult(sweepLookup);
             }}
           >
-            <Input
+            <GuidedInput
               aria-label="스윕 ID"
+              hint="조회할 스윕의 식별자"
               value={sweepLookup}
               onChange={(event) => setSweepLookup(event.target.value)}
               placeholder="sweep_id"
