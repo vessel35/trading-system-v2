@@ -379,3 +379,111 @@ def test_cci_reads_a_deviation_free_window_as_zero() -> None:
         for candle in base
     ]
     assert momentum.cci(flat, 20)[-1] == 0.0
+
+
+def test_volume_and_strength_indicators_satisfy_their_standard_relations() -> None:
+    """Check each new indicator against a relation its own section states.
+
+    None of these repeats the calculation being checked; each is a property the
+    standard writes separately from the formula, so a formula transcribed wrongly
+    in both execution paths shows up as a broken relation rather than as two
+    matching wrong numbers.
+
+    The strength module is imported here rather than beside the module imports at
+    the top so that five owners adding relations to this file at once never
+    contend for the same import line.
+    """
+
+    from core_lib.indicators import strength
+
+    candles = make_candles(120)
+
+    # §4.5: a window in which every typical price rose leaves the negative money
+    # flow empty, which §0.11 answers with 100 for the whole RSI family.
+    rising = make_linear_candles(20)
+    assert volume.money_flow_index(rising, 14)[-1] == 100.0
+
+    # §4.7: volume and range are both non-negative, so an unsmoothed ease of
+    # movement can only carry the sign of the median price's own move.
+    median = primitives.hl2(candles)
+    for index, raw in enumerate(volume.ease_of_movement(candles, 1)):
+        if index == 0 or isnan(raw):
+            continue
+        moved = median[index] - median[index - 1]
+        assert (raw > 0.0) == (moved > 0.0)
+        assert (raw < 0.0) == (moved < 0.0)
+
+    # §4.8: cm collects ranges that already include dm, so a candle with no range
+    # of its own exerts no force at all and the oscillator settles on zero.
+    flat = volume.klinger_volume_oscillator(make_flat_candles(200), 34, 55, 13)[-1]
+    assert flat["kvo"] == 0.0
+    assert flat["signal"] == 0.0
+
+    # §4.9 and §4.10: each index compounds only on its own side of the volume
+    # comparison and holds perfectly still on every other candle.
+    negative = volume.negative_volume_index(candles)
+    positive = volume.positive_volume_index(candles)
+    assert negative[0] == volume.VOLUME_INDEX_SEED
+    assert positive[0] == volume.VOLUME_INDEX_SEED
+    for index in range(1, len(candles)):
+        fell = candles[index].volume < candles[index - 1].volume
+        rose = candles[index].volume > candles[index - 1].volume
+        assert fell or negative[index] == negative[index - 1]
+        assert rose or positive[index] == positive[index - 1]
+
+    # §5.2: both rotational movements are absolute values over a summed True
+    # Range, so neither line can turn negative.
+    for rotation in strength.vortex(candles, 14):
+        if isnan(rotation["vi_plus"]):
+            continue
+        assert rotation["vi_plus"] >= 0.0
+        assert rotation["vi_minus"] >= 0.0
+
+    # §5.4: the summed True Range covers the path the window's span measures
+    # end to end, so the ratio the logarithm reads never falls below one.
+    for choppiness in strength.choppiness_index(candles, 14):
+        if not isnan(choppiness):
+            assert choppiness >= 0.0
+
+    # §5.6: the two lines divide different displacements by one shared yardstick,
+    # so their cross-products against those displacements agree.
+    for index, walk in enumerate(strength.random_walk_index(candles, 14)):
+        if isnan(walk["high"]):
+            continue
+        earlier = candles[index - 14]
+        upward = candles[index].high - earlier.low
+        downward = earlier.high - candles[index].low
+        assert walk["high"] * downward == pytest.approx(walk["low"] * upward)
+
+
+def test_volume_and_strength_outputs_never_depend_on_a_later_candle() -> None:
+    """No value at candle t may move when candles after t arrive.
+
+    Every indicator added here reaches backwards only, but that is a claim about
+    the code rather than about its output. Recomputing a prefix and comparing it
+    with the same stretch of the full series states it as a result: if any of
+    these read a later candle, the shorter run would disagree with the longer one
+    exactly where the two overlap.
+    """
+
+    identifiers = (
+        "Money Flow Index(period=14)",
+        "Ease of Movement(period=14,scale=100000000)",
+        "Klinger Volume Oscillator(long_period=55,short_period=34,signal_period=13)",
+        "Negative Volume Index",
+        "Positive Volume Index",
+        "Vortex Indicator(period=14)",
+        "Choppiness Index(period=14)",
+        "Random Walk Index(period=14)",
+    )
+    candles = make_candles(240)
+    prefix_length = 150
+    for identifier in identifiers:
+        spec = next(
+            candidate for candidate in DEFAULT_REGISTRY.list() if candidate.identifier == identifier
+        )
+        full = spec.compute_vectorized(candles)
+        prefix = spec.compute_vectorized(candles[:prefix_length])
+        assert len(prefix) == prefix_length
+        for expected, actual in zip(full[:prefix_length], prefix, strict=True):
+            assert_value_equal(expected, actual)
