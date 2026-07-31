@@ -106,6 +106,56 @@ REFERENCE: dict[str, dict[int, float]] = {
         200: 0.1184521618242292,
         299: 0.3089552759865531,
     },
+    "KAMA(period=10)": {
+        100: 112.70229470734732,
+        200: 110.77951322216872,
+        299: 143.8303533700434,
+    },
+    "TRIX(period=15)": {
+        100: -0.13458503111154485,
+        200: -0.7196595662381178,
+        299: 0.9286485247771648,
+    },
+    "Williams %R(period=14)": {
+        100: -77.07756772942739,
+        200: -5.589787283750039,
+        299: -7.596300200437285,
+    },
+    "Ultimate Oscillator(long_period=28,medium_period=14,short_period=7)": {
+        100: 50.227904778901134,
+        200: 70.38564770040983,
+        299: 64.86926324831096,
+    },
+    "Aroon(period=25).down": {100: 76.0, 200: 56.0, 299: 32.0},
+    "Aroon(period=25).up": {100: 20.0, 200: 0.0, 299: 100.0},
+    "Aroon(period=25).oscillator": {100: -56.0, 200: -56.0, 299: 68.0},
+    "Parabolic SAR(maximum=0.2,step=0.02)": {
+        100: 108.96711637478809,
+        200: 95.11455805836829,
+        299: 139.52708817671194,
+    },
+    # Tulip 0.4.0. TA-Lib smooths this one the way it smooths RSI, while §2.8
+    # says explicitly that the sums stay unsmoothed, which is what Tulip does.
+    "CMO(period=14)": {
+        100: -72.26488188636644,
+        200: 91.7609789744222,
+        299: 96.33366898993499,
+    },
+    # TA-Lib's OBV starts the accumulation at the first candle's volume; §4.1
+    # defines only the recursion, so the two differ by that constant. The
+    # reference below has the offset removed, which still checks every step.
+    "OBV": {100: 35.0, 200: 195.0, 299: 1740.0},
+    # ta 0.11.0 KSTIndicator with the §2.24 parameter set.
+    "KST.kst": {
+        100: -15.584451285377055,
+        200: -127.95894551008244,
+        299: 259.51840423440854,
+    },
+    "KST.signal": {
+        100: 75.413494699978,
+        200: -228.39291569173233,
+        299: 198.36969701978893,
+    },
 }
 
 # Registered outputs that no available outside implementation covers. Listing them
@@ -123,6 +173,23 @@ UNCOMPARED: dict[str, str] = {
     ),
     "SMI(long_period=25,period=13,short_period=13,signal_period=3).signal": (
         "Smoothing of an uncompared series; it inherits the gap above."
+    ),
+    "Fisher Transform(period=9).fisher": (
+        "Tulip has a Fisher Transform, but its values drift further from ours the "
+        "longer the series runs (2e-5, then 1e-3, then 7e-1), which is a different "
+        "recursion rather than a different seed. §2.14 writes the smoothing and the "
+        "clamp we implement, so the standard decides and the outside value is not "
+        "usable as a reference here."
+    ),
+    "Fisher Transform(period=9).signal": ("The delayed value of an uncompared series."),
+    "Elder Ray(period=13).bull_power": (
+        "No available implementation. §9.3 subtracts a smoothed close from each "
+        "extreme, and that smoothed close is the compared EMA."
+    ),
+    "Elder Ray(period=13).bear_power": ("As above, with the low instead of the high."),
+    "Coppock Curve(long_period=14,short_period=11,smooth_period=10)": (
+        "No available implementation. §2.25 is a weighted average of two rates of "
+        "change, and both parts are compared primitives."
     ),
 }
 
@@ -170,6 +237,36 @@ CONVERGING: dict[str, tuple[dict[int, float], dict[int, float]]] = {
     "Chaikin Oscillator(fast_period=3,slow_period=10)": (
         {100: 0.7392424925909609, 200: 167.5528602118775, 299: 135.60824398604382},
         {100: 1e-5, 200: 1e-9, 299: 1e-9},
+    ),
+    "DMI(period=14).plus_di": (
+        {100: 13.156990718429295, 200: 30.157413246696365, 299: 28.562937269215965},
+        {100: 1e-2, 200: 1e-5, 299: 1e-8},
+    ),
+    "DMI(period=14).minus_di": (
+        {100: 20.812833752708965, 200: 13.786118423716923, 299: 5.048650216175285},
+        {100: 1e-2, 200: 1e-5, 299: 1e-8},
+    ),
+    "DMI(period=14).adx": (
+        {100: 34.80316386849876, 200: 39.48336090910632, 299: 50.09187506981947},
+        {100: 1e-1, 200: 1e-3, 299: 1e-6},
+    ),
+    # ADXR averages today's ADX with one from a period ago, so it carries the
+    # seed difference twice and settles the slowest of the four.
+    "DMI(period=14).adxr": (
+        {100: 39.71081558037664, 200: 43.08908778158345, 299: 35.80714657054307},
+        {100: 2.0, 200: 1.5, 299: 1.0},
+    ),
+    "Force Index(period=13)": (
+        {100: -40.44860100473615, 200: 283.50551116115287, 299: 166.16610511712776},
+        {100: 1e-3, 200: 1e-9, 299: 1e-9},
+    ),
+    "Stochastic RSI(rsi_period=14,smooth_d=3,smooth_k=3,stochastic_period=14).percent_k": (
+        {100: 23.584229569176472, 200: 100.0, 299: 96.49913220407035},
+        {100: 1e-1, 200: 1e-6, 299: 1e-6},
+    ),
+    "Stochastic RSI(rsi_period=14,smooth_d=3,smooth_k=3,stochastic_period=14).percent_d": (
+        {100: 14.84804215780516, 200: 100.0, 299: 98.76676684819944},
+        {100: 1e-1, 200: 1e-6, 299: 1e-6},
     ),
 }
 

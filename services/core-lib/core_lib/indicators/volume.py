@@ -10,9 +10,7 @@ from core_lib.types import Candle
 from .primitives import NAN, CumulativeState, EmaState, SmaState, ema, safe_divide, sma
 
 FOLLOW_UP_INDICATORS = (
-    "OBV",
     "MFI",
-    "Force Index",
     "EMV",
     "Klinger Volume Oscillator",
     "NVI",
@@ -235,3 +233,101 @@ class CMFState:
         if isnan(flow) or isnan(volume):
             return NAN
         return safe_divide(flow, volume, on_zero=0.0)
+
+
+def obv(candles: Sequence[Candle]) -> list[float]:
+    """Accumulate volume with the sign of each close-to-close move (§4.1)."""
+    total = CumulativeState()
+    result: list[float] = []
+    previous_close: float | None = None
+    for candle in candles:
+        if previous_close is None:
+            contribution = 0.0
+        elif candle.close > previous_close:
+            contribution = candle.volume
+        elif candle.close < previous_close:
+            contribution = -candle.volume
+        else:
+            contribution = 0.0
+        previous_close = candle.close
+        result.append(total.update(contribution))
+    return result
+
+
+@dataclass(slots=True)
+class OBVState:
+    """O(1)-per-candle On-Balance Volume state."""
+
+    min_history: int = field(init=False, default=1)
+    _total: CumulativeState = field(init=False, default_factory=CumulativeState)
+    _previous_close: float | None = field(init=False, default=None)
+
+    @property
+    def warmed_up(self) -> bool:
+        return self._total.warmed_up
+
+    def seed(self, candles: Sequence[Candle]) -> None:
+        self._total.reset()
+        self._previous_close = None
+        for candle in candles:
+            self.update(candle)
+
+    def update(self, candle: Candle) -> float:
+        if self._previous_close is None or candle.close == self._previous_close:
+            contribution = 0.0
+        elif candle.close > self._previous_close:
+            contribution = candle.volume
+        else:
+            contribution = -candle.volume
+        self._previous_close = candle.close
+        return self._total.update(contribution)
+
+    def current(self) -> float:
+        return self._total.current()
+
+
+def force_index(candles: Sequence[Candle], period: int = 13) -> list[float]:
+    """Smooth price change weighted by volume (§4.6)."""
+    if period <= 0:
+        raise ValueError("period must be positive")
+    raw = [NAN]
+    for previous, current in zip(candles, candles[1:], strict=False):
+        raw.append((current.close - previous.close) * current.volume)
+    return ema(raw, period)
+
+
+@dataclass(slots=True)
+class ForceIndexState:
+    """O(1)-per-candle Force Index state over one smoothed series."""
+
+    period: int = 13
+    min_history: int = field(init=False)
+    _previous_close: float | None = field(init=False, default=None)
+    _average: EmaState = field(init=False)
+
+    def __post_init__(self) -> None:
+        if self.period <= 0:
+            raise ValueError("period must be positive")
+        self.min_history = self.period + 1
+        self._average = EmaState(self.period)
+
+    @property
+    def warmed_up(self) -> bool:
+        return self._average.warmed_up
+
+    def seed(self, candles: Sequence[Candle]) -> None:
+        self._previous_close = None
+        self._average.reset()
+        for candle in candles:
+            self.update(candle)
+
+    def update(self, candle: Candle) -> float:
+        if self._previous_close is None:
+            self._previous_close = candle.close
+            return self._average.update(NAN)
+        raw = (candle.close - self._previous_close) * candle.volume
+        self._previous_close = candle.close
+        return self._average.update(raw)
+
+    def current(self) -> float:
+        return self._average.current()

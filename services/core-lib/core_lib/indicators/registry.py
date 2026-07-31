@@ -10,7 +10,7 @@ from typing import Protocol, runtime_checkable
 
 from core_lib.types import Candle
 
-from . import momentum, trend, volatility, volume
+from . import momentum, strength, systems, trend, volatility, volume
 from .contracts import assert_finalized
 
 IndicatorParam = bool | float | int | str
@@ -248,6 +248,9 @@ class IndicatorRegistry:
         if not specs:
             raise ValueError("an indicator selection must resolve at least one spec")
         return specs
+
+
+RSI_MIN_HISTORY = 15
 
 
 def build_default_registry() -> IndicatorRegistry:
@@ -549,6 +552,251 @@ def build_default_registry() -> IndicatorRegistry:
             required_inputs=(),
             _vectorized=partial(volume.cmf, period=20),
             _state_factory=partial(volume.CMFState, period=20),
+        )
+    )
+    registry.register(
+        IndicatorSpec(
+            name="KAMA",
+            params={"period": 10},
+            version="1.0.0",
+            pinned_impl=(
+                "technical_indicators_calc_spec.md §1.7 (efficiency ratio, 2/30 constants)"
+            ),
+            min_history=11,
+            category="trend",
+            required_inputs=(),
+            _vectorized=partial(trend.kama, period=10),
+            _state_factory=partial(trend.KAMAState, period=10),
+        )
+    )
+    registry.register(
+        IndicatorSpec(
+            name="Stochastic RSI",
+            params={
+                "rsi_period": 14,
+                "stochastic_period": 14,
+                "smooth_k": 3,
+                "smooth_d": 3,
+            },
+            version="1.0.0",
+            pinned_impl=(
+                "technical_indicators_calc_spec.md §2.3 (stochastic of RSI, 3/3 smoothing)"
+            ),
+            min_history=RSI_MIN_HISTORY + 14 + 3 + 3 - 3,
+            category="momentum",
+            required_inputs=(),
+            _vectorized=partial(
+                momentum.stochastic_rsi,
+                rsi_period=14,
+                stochastic_period=14,
+                smooth_k=3,
+                smooth_d=3,
+            ),
+            _state_factory=partial(
+                momentum.StochasticRSIState,
+                rsi_period=14,
+                stochastic_period=14,
+                smooth_k=3,
+                smooth_d=3,
+            ),
+        )
+    )
+    registry.register(
+        IndicatorSpec(
+            name="TRIX",
+            params={"period": 15},
+            version="1.0.0",
+            pinned_impl="technical_indicators_calc_spec.md §2.6 (triple EMA, TA-Lib 100x scale)",
+            min_history=44,
+            category="momentum",
+            required_inputs=(),
+            _vectorized=partial(momentum.trix, period=15),
+            _state_factory=partial(momentum.TRIXState, period=15),
+        )
+    )
+    registry.register(
+        IndicatorSpec(
+            name="CMO",
+            params={"period": 14},
+            version="1.0.0",
+            pinned_impl="technical_indicators_calc_spec.md §2.8 (unsmoothed sums)",
+            min_history=15,
+            category="momentum",
+            required_inputs=(),
+            _vectorized=partial(momentum.cmo, period=14),
+            _state_factory=partial(momentum.CMOState, period=14),
+        )
+    )
+    registry.register(
+        IndicatorSpec(
+            name="Williams %R",
+            params={"period": 14},
+            version="1.0.0",
+            pinned_impl="technical_indicators_calc_spec.md §2.9 (stochastic read from the high)",
+            min_history=14,
+            category="momentum",
+            required_inputs=(),
+            _vectorized=partial(momentum.williams_r, period=14),
+            _state_factory=partial(momentum.WilliamsRState, period=14),
+        )
+    )
+    registry.register(
+        IndicatorSpec(
+            name="Ultimate Oscillator",
+            params={"short_period": 7, "medium_period": 14, "long_period": 28},
+            version="1.0.0",
+            pinned_impl="technical_indicators_calc_spec.md §2.11 (7/14/28 weighted 4:2:1)",
+            min_history=29,
+            category="momentum",
+            required_inputs=(),
+            _vectorized=partial(
+                momentum.ultimate_oscillator,
+                short_period=7,
+                medium_period=14,
+                long_period=28,
+            ),
+            _state_factory=partial(
+                momentum.UltimateOscillatorState,
+                short_period=7,
+                medium_period=14,
+                long_period=28,
+            ),
+        )
+    )
+    registry.register(
+        IndicatorSpec(
+            name="Fisher Transform",
+            params={"period": 9},
+            version="1.0.0",
+            pinned_impl=(
+                "technical_indicators_calc_spec.md §2.14 "
+                "(n=9 of the 9-10 the section allows; clamped at 0.999)"
+            ),
+            min_history=10,
+            category="momentum",
+            required_inputs=(),
+            _vectorized=partial(momentum.fisher_transform, period=9),
+            _state_factory=partial(momentum.FisherTransformState, period=9),
+        )
+    )
+    registry.register(
+        IndicatorSpec(
+            name="KST",
+            params={},
+            version="1.0.0",
+            pinned_impl=(
+                "technical_indicators_calc_spec.md §2.24 (four weighted rate-of-change legs)"
+            ),
+            min_history=53,
+            category="momentum",
+            required_inputs=(),
+            _vectorized=momentum.kst,
+            _state_factory=momentum.KSTState,
+        )
+    )
+    registry.register(
+        IndicatorSpec(
+            name="Coppock Curve",
+            params={"long_period": 14, "short_period": 11, "smooth_period": 10},
+            version="1.0.0",
+            pinned_impl="technical_indicators_calc_spec.md §2.25 (WMA of two rates of change)",
+            min_history=24,
+            category="momentum",
+            required_inputs=(),
+            _vectorized=partial(
+                momentum.coppock_curve,
+                long_period=14,
+                short_period=11,
+                smooth_period=10,
+            ),
+            _state_factory=partial(
+                momentum.CoppockCurveState,
+                long_period=14,
+                short_period=11,
+                smooth_period=10,
+            ),
+        )
+    )
+    registry.register(
+        IndicatorSpec(
+            name="OBV",
+            params={},
+            version="1.0.0",
+            pinned_impl="technical_indicators_calc_spec.md §4.1 (signed volume accumulation)",
+            min_history=1,
+            category="volume",
+            required_inputs=(),
+            _vectorized=volume.obv,
+            _state_factory=volume.OBVState,
+        )
+    )
+    registry.register(
+        IndicatorSpec(
+            name="Force Index",
+            params={"period": 13},
+            version="1.0.0",
+            pinned_impl=(
+                "technical_indicators_calc_spec.md §4.6 (EMA of price change times volume)"
+            ),
+            min_history=14,
+            category="volume",
+            required_inputs=(),
+            _vectorized=partial(volume.force_index, period=13),
+            _state_factory=partial(volume.ForceIndexState, period=13),
+        )
+    )
+    registry.register(
+        IndicatorSpec(
+            name="DMI",
+            params={"period": 14},
+            version="1.0.0",
+            pinned_impl="technical_indicators_calc_spec.md §5.1 (+DI, -DI, ADX, ADXR)",
+            min_history=42,
+            category="strength",
+            required_inputs=(),
+            _vectorized=partial(strength.dmi, period=14),
+            _state_factory=partial(strength.DMIState, period=14),
+        )
+    )
+    registry.register(
+        IndicatorSpec(
+            name="Aroon",
+            params={"period": 25},
+            version="1.0.0",
+            pinned_impl="technical_indicators_calc_spec.md §5.3 (age of the window extremes)",
+            min_history=26,
+            category="strength",
+            required_inputs=(),
+            _vectorized=partial(strength.aroon, period=25),
+            _state_factory=partial(strength.AroonState, period=25),
+        )
+    )
+    registry.register(
+        IndicatorSpec(
+            name="Elder Ray",
+            params={"period": 13},
+            version="1.0.0",
+            pinned_impl=(
+                "technical_indicators_calc_spec.md §9.3 (extremes against a smoothed close)"
+            ),
+            min_history=13,
+            category="systems",
+            required_inputs=(),
+            _vectorized=partial(systems.elder_ray, period=13),
+            _state_factory=partial(systems.ElderRayState, period=13),
+        )
+    )
+    registry.register(
+        IndicatorSpec(
+            name="Parabolic SAR",
+            params={"step": 0.02, "maximum": 0.2},
+            version="1.0.0",
+            pinned_impl="technical_indicators_calc_spec.md §9.1 (0.02 step to a 0.20 cap)",
+            min_history=2,
+            category="systems",
+            required_inputs=(),
+            _vectorized=partial(systems.parabolic_sar, step=0.02, maximum=0.2),
+            _state_factory=partial(systems.ParabolicSARState, step=0.02, maximum=0.2),
         )
     )
     registry.register(

@@ -63,24 +63,39 @@ REGISTERED_IDENTIFIERS = frozenset(
         "A/D Line",
         "ATR(period=14)",
         "Accelerator Oscillator(fast_period=5,slow_period=34,smooth_period=5)",
+        "Aroon(period=25)",
         "Awesome Oscillator(fast_period=5,slow_period=34)",
         "Bollinger Bands(multiplier=2.0,period=20)",
         "CCI(period=20)",
         "CMF(period=20)",
+        "CMO(period=14)",
         "Chaikin Oscillator(fast_period=3,slow_period=10)",
+        "Coppock Curve(long_period=14,short_period=11,smooth_period=10)",
         "DEMA(period=21)",
-        "EMA(period=9)",
+        "DMI(period=14)",
+        "EMA(period=200)",
         "EMA(period=21)",
         "EMA(period=55)",
-        "EMA(period=200)",
+        "EMA(period=9)",
+        "Elder Ray(period=13)",
+        "Fisher Transform(period=9)",
+        "Force Index(period=13)",
+        "KAMA(period=10)",
+        "KST",
         "MACD(fast_period=12,signal_period=9,slow_period=26)",
+        "OBV",
         "PPO(fast_period=12,signal_period=9,slow_period=26)",
+        "Parabolic SAR(maximum=0.2,step=0.02)",
         "RSI(period=14)",
         "SMI(long_period=25,period=13,short_period=13,signal_period=3)",
+        "Stochastic RSI(rsi_period=14,smooth_d=3,smooth_k=3,stochastic_period=14)",
         "Stochastic(period=14,smooth_period=3)",
         "TEMA(period=21)",
+        "TRIX(period=15)",
         "TSI(long_period=25,short_period=13)",
+        "Ultimate Oscillator(long_period=28,medium_period=14,short_period=7)",
         "Volume SMA(period=20)",
+        "Williams %R(period=14)",
     }
 )
 
@@ -92,21 +107,36 @@ def test_registry_contains_required_coverage_and_pinned_authority() -> None:
         "A/D Line",
         "ATR",
         "Accelerator Oscillator",
+        "Aroon",
         "Awesome Oscillator",
         "Bollinger Bands",
         "CCI",
         "CMF",
+        "CMO",
         "Chaikin Oscillator",
+        "Coppock Curve",
         "DEMA",
+        "DMI",
         "EMA",
+        "Elder Ray",
+        "Fisher Transform",
+        "Force Index",
+        "KAMA",
+        "KST",
         "MACD",
+        "OBV",
         "PPO",
+        "Parabolic SAR",
         "RSI",
         "SMI",
         "Stochastic",
+        "Stochastic RSI",
         "TEMA",
+        "TRIX",
         "TSI",
+        "Ultimate Oscillator",
         "Volume SMA",
+        "Williams %R",
     }
     for spec in specs:
         expected_version = "1.0.1" if spec.name == "Bollinger Bands" else "1.0.0"
@@ -131,7 +161,7 @@ def test_follow_up_catalog_preserves_all_76_not_yet_registered_items() -> None:
     # The standard carries 82 systems; the registered ones and this catalog must
     # account for all of them, so the catalog length follows from the registry
     # instead of being written down twice.
-    registered_systems = 18
+    registered_systems = 33
     assert len(follow_up) == 82 - registered_systems
     assert len(set(follow_up)) == len(follow_up)
 

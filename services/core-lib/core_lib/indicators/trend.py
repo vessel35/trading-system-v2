@@ -1,12 +1,13 @@
 """Define required trend indicators and the follow-up trend catalog."""
 
+from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from math import isnan
 
 from core_lib.types import Candle
 
-from .primitives import NAN, EmaState
+from .primitives import NAN, EmaState, safe_divide
 from .primitives import ema as ema_primitive
 
 FOLLOW_UP_INDICATORS = (
@@ -14,7 +15,6 @@ FOLLOW_UP_INDICATORS = (
     "HMA",
     "ZLEMA",
     "ALMA",
-    "KAMA",
     "VIDYA",
     "McGinley Dynamic",
     "Guppy GMMA",
@@ -177,3 +177,80 @@ class TEMAState:
         if isnan(first) or isnan(second) or isnan(third):
             return NAN
         return 3.0 * first - 3.0 * second + third
+
+
+_KAMA_FAST = 2.0 / (2.0 + 1.0)
+_KAMA_SLOW = 2.0 / (30.0 + 1.0)
+
+
+def _kama_smoothing(efficiency: float) -> float:
+    return (efficiency * (_KAMA_FAST - _KAMA_SLOW) + _KAMA_SLOW) ** 2
+
+
+def kama(candles: Sequence[Candle], period: int = 10) -> list[float]:
+    """Adapt an average's speed to how directly price moved (§1.7)."""
+    if period <= 0:
+        raise ValueError("period must be positive")
+    closes = [candle.close for candle in candles]
+    result: list[float] = []
+    current: float | None = None
+    for index, close in enumerate(closes):
+        if index < period:
+            result.append(NAN)
+            continue
+        change = abs(close - closes[index - period])
+        volatility = sum(
+            abs(closes[step] - closes[step - 1]) for step in range(index - period + 1, index + 1)
+        )
+        # §1.7 states the degenerate rule: a window that never moved has an
+        # efficiency ratio of zero, which parks the average at its slow speed.
+        efficiency = safe_divide(change, volatility, on_zero=0.0)
+        if current is None:
+            current = closes[index - 1]
+        current += _kama_smoothing(efficiency) * (close - current)
+        result.append(current)
+    return result
+
+
+@dataclass(slots=True)
+class KAMAState:
+    """O(period)-per-candle KAMA state; the efficiency ratio needs its window."""
+
+    period: int = 10
+    min_history: int = field(init=False)
+    _closes: deque[float] = field(init=False)
+    _value: float | None = field(init=False, default=None)
+
+    def __post_init__(self) -> None:
+        if self.period <= 0:
+            raise ValueError("period must be positive")
+        self.min_history = self.period + 1
+        self._closes = deque(maxlen=self.period + 1)
+
+    @property
+    def warmed_up(self) -> bool:
+        return self._value is not None
+
+    def seed(self, candles: Sequence[Candle]) -> None:
+        self._closes.clear()
+        self._value = None
+        for candle in candles:
+            self.update(candle)
+
+    def update(self, candle: Candle) -> float:
+        self._closes.append(candle.close)
+        if len(self._closes) <= self.period:
+            return self.current()
+        change = abs(self._closes[-1] - self._closes[0])
+        volatility = sum(
+            abs(self._closes[index] - self._closes[index - 1])
+            for index in range(1, len(self._closes))
+        )
+        efficiency = safe_divide(change, volatility, on_zero=0.0)
+        if self._value is None:
+            self._value = self._closes[-2]
+        self._value += _kama_smoothing(efficiency) * (self._closes[-1] - self._value)
+        return self.current()
+
+    def current(self) -> float:
+        return self._value if self._value is not None else NAN
