@@ -722,6 +722,8 @@ def test_follow_up_momentum_indicators_meet_their_closed_form_values() -> None:
     vigor = momentum.relative_vigor_index(marubozu, 10)[-1]
     assert vigor["rvi"] == pytest.approx(1.0)
     assert vigor["signal"] == pytest.approx(1.0)
+
+
 def make_shaped_candles(
     highs: Sequence[float],
     lows: Sequence[float],
@@ -1019,6 +1021,8 @@ def test_elder_impulse_colours_follow_the_two_slopes_the_section_names() -> None
         assert value == (1.0 if rising else (-1.0 if falling else 0.0)), index
         seen.add(value)
     assert seen == {systems.IMPULSE_BULLISH, systems.IMPULSE_NEUTRAL, systems.IMPULSE_BEARISH}
+
+
 def test_volume_and_strength_indicators_satisfy_their_standard_relations() -> None:
     """Check each new indicator against a relation its own section states.
 
