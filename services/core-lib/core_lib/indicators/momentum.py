@@ -17,6 +17,7 @@ from .primitives import (
     ema,
     hh,
     hl2,
+    linreg,
     ll,
     rma,
     roc,
@@ -25,6 +26,7 @@ from .primitives import (
     tp,
     wma,
 )
+from .volatility import ATRState, atr
 
 StochasticValue = dict[str, float]
 MacdValue = dict[str, float]
@@ -33,19 +35,9 @@ SmiValue = dict[str, float]
 StochRsiValue = dict[str, float]
 KstValue = dict[str, float]
 FisherValue = dict[str, float]
+RviValue = dict[str, float]
 
-FOLLOW_UP_INDICATORS = (
-    "Connors RSI",
-    "QStick",
-    "Chande Forecast Oscillator",
-    "DeMarker",
-    "DPO",
-    "Schaff Trend Cycle",
-    "Relative Vigor Index",
-    "Laguerre RSI",
-    "Pretty Good Oscillator",
-    "Special K",
-)
+FOLLOW_UP_INDICATORS = ("Special K",)
 
 
 def _rsi_value(average_gain: float, average_loss: float) -> float:
@@ -57,14 +49,20 @@ def _rsi_value(average_gain: float, average_loss: float) -> float:
     return 100.0 - 100.0 / (1.0 + relative_strength)
 
 
-def rsi(candles: Sequence[Candle], period: int = 14) -> list[float]:
-    """Compute Wilder RSI from close-price deltas."""
+def _rsi_from_values(values: Sequence[float], period: int) -> list[float]:
+    """Compute Wilder RSI over any series, not only over closes (§2.1 + §0.5).
+
+    §2.15 applies RSI a second time to a series of streak lengths rather than to
+    prices, so the calculation has to be reachable without a candle. Keeping one
+    body here is what stops that second application from becoming a second RSI.
+    """
+
     if period <= 0:
         raise ValueError("period must be positive")
     gains = [NAN]
     losses = [NAN]
-    for previous, current in zip(candles, candles[1:], strict=False):
-        change = current.close - previous.close
+    for previous, current in zip(values, values[1:], strict=False):
+        change = current - previous
         gains.append(max(change, 0.0))
         losses.append(max(-change, 0.0))
     average_gains = rma(gains, period)
@@ -78,13 +76,17 @@ def rsi(candles: Sequence[Candle], period: int = 14) -> list[float]:
     return result
 
 
+def rsi(candles: Sequence[Candle], period: int = 14) -> list[float]:
+    """Compute Wilder RSI from close-price deltas."""
+    return _rsi_from_values([candle.close for candle in candles], period)
+
+
 @dataclass(slots=True)
-class RSIState:
-    """O(1)-per-candle Wilder RSI state."""
+class _RSIValueState:
+    """O(1)-per-value Wilder RSI over any series; the candle-facing state wraps it."""
 
     period: int = 14
-    min_history: int = field(init=False)
-    _previous_close: float | None = field(init=False, default=None)
+    _previous: float | None = field(init=False, default=None)
     _gains: RmaState = field(init=False)
     _losses: RmaState = field(init=False)
     _value: float | None = field(init=False, default=None)
@@ -92,29 +94,29 @@ class RSIState:
     def __post_init__(self) -> None:
         if self.period <= 0:
             raise ValueError("period must be positive")
-        self.min_history = self.period + 1
         self._gains = RmaState(self.period)
         self._losses = RmaState(self.period)
 
-    @property
-    def warmed_up(self) -> bool:
-        return self._value is not None
-
-    def seed(self, candles: Sequence[Candle]) -> None:
-        self._previous_close = None
+    def reset(self) -> None:
+        """Drop the previous observation and both Wilder averages."""
+        self._previous = None
         self._gains.reset()
         self._losses.reset()
         self._value = None
-        for candle in candles:
-            self.update(candle)
 
-    def update(self, candle: Candle) -> float:
-        if self._previous_close is None:
-            self._previous_close = candle.close
+    @property
+    def warmed_up(self) -> bool:
+        """Return whether both Wilder averages have produced a value."""
+        return self._value is not None
+
+    def update(self, value: float) -> float:
+        """Advance one observation and return the current RSI."""
+        if self._previous is None:
+            self._previous = value
             return NAN
 
-        change = candle.close - self._previous_close
-        self._previous_close = candle.close
+        change = value - self._previous
+        self._previous = value
         average_gain = self._gains.update(max(change, 0.0))
         average_loss = self._losses.update(max(-change, 0.0))
         if not isnan(average_gain) and not isnan(average_loss):
@@ -122,7 +124,38 @@ class RSIState:
         return self.current()
 
     def current(self) -> float:
+        """Return the latest RSI, or NaN while warming up."""
         return self._value if self._value is not None else NAN
+
+
+@dataclass(slots=True)
+class RSIState:
+    """O(1)-per-candle Wilder RSI state."""
+
+    period: int = 14
+    min_history: int = field(init=False)
+    _inner: _RSIValueState = field(init=False)
+
+    def __post_init__(self) -> None:
+        if self.period <= 0:
+            raise ValueError("period must be positive")
+        self.min_history = self.period + 1
+        self._inner = _RSIValueState(self.period)
+
+    @property
+    def warmed_up(self) -> bool:
+        return self._inner.warmed_up
+
+    def seed(self, candles: Sequence[Candle]) -> None:
+        self._inner.reset()
+        for candle in candles:
+            self.update(candle)
+
+    def update(self, candle: Candle) -> float:
+        return self._inner.update(candle.close)
+
+    def current(self) -> float:
+        return self._inner.current()
 
 
 def stochastic(
@@ -215,6 +248,54 @@ class StochasticState:
         return dict(self._value)
 
 
+def _macd_line(values: Sequence[float], fast_period: int, slow_period: int) -> list[float]:
+    """Return the MACD line alone: the fast EMA minus the slow one (§2.4).
+
+    §2.20 asks for `MACD(C, 23, 50)` with no signal line at all, so the line is
+    separated from the three-output indicator rather than recomputed there.
+    """
+
+    if fast_period <= 0 or slow_period <= 0:
+        raise ValueError("periods must be positive")
+    if fast_period >= slow_period:
+        raise ValueError("fast_period must be shorter than slow_period")
+    fast = ema(values, fast_period)
+    slow = ema(values, slow_period)
+    return [
+        NAN if isnan(quick) or isnan(slow_value) else quick - slow_value
+        for quick, slow_value in zip(fast, slow, strict=True)
+    ]
+
+
+@dataclass(slots=True)
+class _MacdLineState:
+    """O(1)-per-value MACD line over two EMAs of the same series."""
+
+    fast_period: int = 12
+    slow_period: int = 26
+    _fast: EmaState = field(init=False)
+    _slow: EmaState = field(init=False)
+
+    def __post_init__(self) -> None:
+        if self.fast_period <= 0 or self.slow_period <= 0:
+            raise ValueError("periods must be positive")
+        if self.fast_period >= self.slow_period:
+            raise ValueError("fast_period must be shorter than slow_period")
+        self._fast = EmaState(self.fast_period)
+        self._slow = EmaState(self.slow_period)
+
+    def reset(self) -> None:
+        """Drop both averages."""
+        self._fast.reset()
+        self._slow.reset()
+
+    def update(self, value: float) -> float:
+        """Advance one observation and return the current MACD line."""
+        fast = self._fast.update(value)
+        slow = self._slow.update(value)
+        return NAN if isnan(fast) or isnan(slow) else fast - slow
+
+
 def macd(
     candles: Sequence[Candle],
     fast_period: int = 12,
@@ -222,17 +303,10 @@ def macd(
     signal_period: int = 9,
 ) -> list[MacdValue]:
     """Compute MACD, its signal line, and the histogram (§2.4)."""
-    if fast_period <= 0 or slow_period <= 0 or signal_period <= 0:
+    if signal_period <= 0:
         raise ValueError("periods must be positive")
-    if fast_period >= slow_period:
-        raise ValueError("fast_period must be shorter than slow_period")
     closes = [candle.close for candle in candles]
-    fast = ema(closes, fast_period)
-    slow = ema(closes, slow_period)
-    line = [
-        NAN if isnan(quick) or isnan(slow_value) else quick - slow_value
-        for quick, slow_value in zip(fast, slow, strict=True)
-    ]
+    line = _macd_line(closes, fast_period, slow_period)
     signal = ema(line, signal_period)
     return [
         {
@@ -254,8 +328,7 @@ class MACDState:
     slow_period: int = 26
     signal_period: int = 9
     min_history: int = field(init=False)
-    _fast: EmaState = field(init=False)
-    _slow: EmaState = field(init=False)
+    _line: _MacdLineState = field(init=False)
     _signal: EmaState = field(init=False)
     _value: MacdValue = field(
         init=False,
@@ -263,15 +336,12 @@ class MACDState:
     )
 
     def __post_init__(self) -> None:
-        if self.fast_period <= 0 or self.slow_period <= 0 or self.signal_period <= 0:
+        if self.signal_period <= 0:
             raise ValueError("periods must be positive")
-        if self.fast_period >= self.slow_period:
-            raise ValueError("fast_period must be shorter than slow_period")
         # The MACD line starts with the slow average; the signal then needs its
         # own period of MACD values, the first of which lands on that candle.
         self.min_history = self.slow_period + self.signal_period - 1
-        self._fast = EmaState(self.fast_period)
-        self._slow = EmaState(self.slow_period)
+        self._line = _MacdLineState(self.fast_period, self.slow_period)
         self._signal = EmaState(self.signal_period)
 
     @property
@@ -279,17 +349,14 @@ class MACDState:
         return not isnan(self._value["signal"])
 
     def seed(self, candles: Sequence[Candle]) -> None:
-        self._fast.reset()
-        self._slow.reset()
+        self._line.reset()
         self._signal.reset()
         self._value = {"macd": NAN, "signal": NAN, "histogram": NAN}
         for candle in candles:
             self.update(candle)
 
     def update(self, candle: Candle) -> MacdValue:
-        fast = self._fast.update(candle.close)
-        slow = self._slow.update(candle.close)
-        line = NAN if isnan(fast) or isnan(slow) else fast - slow
+        line = self._line.update(candle.close)
         signal = self._signal.update(line)
         self._value = {
             "macd": line,
@@ -1413,6 +1480,830 @@ class CoppockCurveState:
             sum(weight * value for weight, value in enumerate(self._combined, start=1))
             / denominator
         )
+        return self.current()
+
+    def current(self) -> float:
+        return self._value
+
+
+def _streak_series(values: Sequence[float]) -> list[float]:
+    """Return §2.15's signed run length: how many bars the direction has held.
+
+    The first bar has no predecessor and therefore no direction, so it starts the
+    series at zero, and an unchanged value resets the run the same way.
+    """
+
+    result: list[float] = []
+    streak = 0.0
+    previous: float | None = None
+    for value in values:
+        if previous is None or value == previous:
+            streak = 0.0
+        elif value > previous:
+            streak = streak + 1.0 if streak > 0.0 else 1.0
+        else:
+            streak = streak - 1.0 if streak < 0.0 else -1.0
+        result.append(streak)
+        previous = value
+    return result
+
+
+def _percent_rank(window: Sequence[float], value: float, period: int) -> float:
+    """Return the percentage of a completed window that sits below ``value``.
+
+    §2.15 asks for "the percentile of ROC(C,1) within the most recent 100 bars"
+    and stops there, which leaves two boundaries open. Both are settled here and
+    stated rather than left to be read off the code:
+
+    - The ranked bar is **not** a member of the window it is ranked against. The
+      window passed in holds bars t-100 through t-1, following Connors' own
+      definition, which ranks the current change against the previous hundred. A
+      self-inclusive window would cap the result at 99 because a value is never
+      below itself; this one reaches the full 0-100 range.
+    - The comparison is **strict**. A change equal to one already in the window
+      does not count that bar as below it, so a run of identical changes ranks at
+      zero rather than climbing on ties.
+
+    Neither choice departs from §2.15, which fixes neither; picking the other side
+    of either boundary would also be within it.
+    """
+
+    if len(window) < period or isnan(value) or any(isnan(item) for item in window):
+        return NAN
+    below = sum(1 for item in window if item < value)
+    return 100.0 * below / period
+
+
+def connors_rsi(
+    candles: Sequence[Candle],
+    rsi_period: int = 3,
+    streak_period: int = 2,
+    rank_period: int = 100,
+) -> list[float]:
+    """Average a price RSI, a streak RSI, and a rate-of-change percentile (§2.15)."""
+    if min(rsi_period, streak_period, rank_period) <= 0:
+        raise ValueError("periods must be positive")
+    closes = [candle.close for candle in candles]
+    price_rsi = _rsi_from_values(closes, rsi_period)
+    streak_rsi = _rsi_from_values(_streak_series(closes), streak_period)
+    changes = roc(closes, 1)
+    result: list[float] = []
+    for index in range(len(closes)):
+        start = index - rank_period
+        rank = (
+            NAN if start < 0 else _percent_rank(changes[start:index], changes[index], rank_period)
+        )
+        parts = (price_rsi[index], streak_rsi[index], rank)
+        result.append(NAN if any(isnan(part) for part in parts) else sum(parts) / 3.0)
+    return result
+
+
+@dataclass(slots=True)
+class ConnorsRSIState:
+    """O(rank_period)-per-candle Connors RSI state; the percentile needs its window."""
+
+    rsi_period: int = 3
+    streak_period: int = 2
+    rank_period: int = 100
+    min_history: int = field(init=False)
+    _price: _RSIValueState = field(init=False)
+    _streak_rsi: _RSIValueState = field(init=False)
+    _previous_close: float | None = field(init=False, default=None)
+    _streak: float = field(init=False, default=0.0)
+    _changes: deque[float] = field(init=False)
+    _value: float = field(init=False, default=NAN)
+
+    def __post_init__(self) -> None:
+        if min(self.rsi_period, self.streak_period, self.rank_period) <= 0:
+            raise ValueError("periods must be positive")
+        # The percentile is the slowest leg: it ranks the current change against the
+        # `rank_period` changes before it, and the very first bar has no change at
+        # all, so the window is only complete one bar later than the count suggests.
+        self.min_history = max(self.rsi_period, self.streak_period, self.rank_period + 1) + 1
+        self._price = _RSIValueState(self.rsi_period)
+        self._streak_rsi = _RSIValueState(self.streak_period)
+        self._changes = deque(maxlen=self.rank_period)
+
+    @property
+    def warmed_up(self) -> bool:
+        return not isnan(self._value)
+
+    def seed(self, candles: Sequence[Candle]) -> None:
+        self._price.reset()
+        self._streak_rsi.reset()
+        self._previous_close = None
+        self._streak = 0.0
+        self._changes.clear()
+        self._value = NAN
+        for candle in candles:
+            self.update(candle)
+
+    def update(self, candle: Candle) -> float:
+        close = candle.close
+        previous = self._previous_close
+        if previous is None or close == previous:
+            self._streak = 0.0
+        elif close > previous:
+            self._streak = self._streak + 1.0 if self._streak > 0.0 else 1.0
+        else:
+            self._streak = self._streak - 1.0 if self._streak < 0.0 else -1.0
+        if previous is None or previous == 0.0:
+            change = NAN
+        else:
+            change = 100.0 * (close - previous) / previous
+
+        price_rsi = self._price.update(close)
+        streak_rsi = self._streak_rsi.update(self._streak)
+        # Ranked before the append, so the window holds the changes strictly
+        # before this bar, matching the batch path's `changes[start:index]`.
+        rank = _percent_rank(self._changes, change, self.rank_period)
+        self._changes.append(change)
+        self._previous_close = close
+
+        parts = (price_rsi, streak_rsi, rank)
+        self._value = NAN if any(isnan(part) for part in parts) else sum(parts) / 3.0
+        return self.current()
+
+    def current(self) -> float:
+        return self._value
+
+
+def qstick(candles: Sequence[Candle], period: int = 8) -> list[float]:
+    """Average the candle body, close minus open (§2.16)."""
+    return sma([candle.close - candle.open for candle in candles], period)
+
+
+@dataclass(slots=True)
+class QStickState:
+    """O(1)-per-candle QStick state over the rolling average of the body."""
+
+    period: int = 8
+    min_history: int = field(init=False)
+    _average: SmaState = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.min_history = self.period
+        self._average = SmaState(self.period)
+
+    @property
+    def warmed_up(self) -> bool:
+        return self._average.warmed_up
+
+    def seed(self, candles: Sequence[Candle]) -> None:
+        self._average.reset()
+        for candle in candles:
+            self.update(candle)
+
+    def update(self, candle: Candle) -> float:
+        return self._average.update(candle.close - candle.open)
+
+    def current(self) -> float:
+        return self._average.current()
+
+
+def chande_forecast_oscillator(candles: Sequence[Candle], period: int = 14) -> list[float]:
+    """Measure the close against its own regression estimate (§2.17 + §14)."""
+    closes = [candle.close for candle in candles]
+    forecasts = linreg(closes, period)
+    return [
+        NAN if isnan(forecast) else safe_divide(100.0 * (close - forecast), close, on_zero=0.0)
+        for close, forecast in zip(closes, forecasts, strict=True)
+    ]
+
+
+@dataclass(slots=True)
+class ChandeForecastOscillatorState:
+    """O(period)-per-candle Chande Forecast state; the regression needs its window."""
+
+    period: int = 14
+    min_history: int = field(init=False)
+    _closes: deque[float] = field(init=False)
+    _value: float = field(init=False, default=NAN)
+
+    def __post_init__(self) -> None:
+        if self.period <= 0:
+            raise ValueError("period must be positive")
+        self.min_history = self.period
+        self._closes = deque(maxlen=self.period)
+
+    @property
+    def warmed_up(self) -> bool:
+        return not isnan(self._value)
+
+    def seed(self, candles: Sequence[Candle]) -> None:
+        self._closes.clear()
+        self._value = NAN
+        for candle in candles:
+            self.update(candle)
+
+    def update(self, candle: Candle) -> float:
+        self._closes.append(candle.close)
+        if len(self._closes) < self.period:
+            self._value = NAN
+            return self.current()
+        # The regression itself comes from the primitive rather than from a second
+        # least-squares written out here, which is what keeps the two paths equal.
+        forecast = linreg(list(self._closes), self.period)[-1]
+        self._value = (
+            NAN
+            if isnan(forecast)
+            else safe_divide(100.0 * (candle.close - forecast), candle.close, on_zero=0.0)
+        )
+        return self.current()
+
+    def current(self) -> float:
+        return self._value
+
+
+def _demarker_value(high_average: float, low_average: float, previous: float) -> float:
+    """Return DeMax's share of the two averages, keeping the previous value when flat.
+
+    §2.18 gives no substitute for a window in which neither the high rose nor the low
+    fell. §0.11 offers the previous value as one of the three answers an indicator may
+    name, and §2.2 already sets that precedent in this document for a flat window, so
+    that is the branch taken here; the caller starts it at the neutral 0.5.
+    """
+
+    return safe_divide(high_average, high_average + low_average, on_zero=previous)
+
+
+DEMARKER_FLAT_START = 0.5
+
+
+def demarker(candles: Sequence[Candle], period: int = 14) -> list[float]:
+    """Compare rising highs with falling lows over a window (§2.18)."""
+    rising = [NAN]
+    falling = [NAN]
+    for previous, current in zip(candles, candles[1:], strict=False):
+        rising.append(max(current.high - previous.high, 0.0))
+        falling.append(max(previous.low - current.low, 0.0))
+    high_averages = sma(rising, period)
+    low_averages = sma(falling, period)
+    result: list[float] = []
+    previous_value = DEMARKER_FLAT_START
+    for high_average, low_average in zip(high_averages, low_averages, strict=True):
+        if isnan(high_average) or isnan(low_average):
+            result.append(NAN)
+            continue
+        value = _demarker_value(high_average, low_average, previous_value)
+        previous_value = value
+        result.append(value)
+    return result
+
+
+@dataclass(slots=True)
+class DeMarkerState:
+    """O(1)-per-candle DeMarker state over two rolling averages."""
+
+    period: int = 14
+    min_history: int = field(init=False)
+    _rising: SmaState = field(init=False)
+    _falling: SmaState = field(init=False)
+    _previous_high: float | None = field(init=False, default=None)
+    _previous_low: float | None = field(init=False, default=None)
+    _previous_value: float = field(init=False, default=DEMARKER_FLAT_START)
+    _value: float = field(init=False, default=NAN)
+
+    def __post_init__(self) -> None:
+        # Both differences need a preceding candle, so the averages start one bar
+        # later than their own period.
+        self.min_history = self.period + 1
+        self._rising = SmaState(self.period)
+        self._falling = SmaState(self.period)
+
+    @property
+    def warmed_up(self) -> bool:
+        return not isnan(self._value)
+
+    def seed(self, candles: Sequence[Candle]) -> None:
+        self._rising.reset()
+        self._falling.reset()
+        self._previous_high = None
+        self._previous_low = None
+        self._previous_value = DEMARKER_FLAT_START
+        self._value = NAN
+        for candle in candles:
+            self.update(candle)
+
+    def update(self, candle: Candle) -> float:
+        if self._previous_high is None or self._previous_low is None:
+            rising = NAN
+            falling = NAN
+        else:
+            rising = max(candle.high - self._previous_high, 0.0)
+            falling = max(self._previous_low - candle.low, 0.0)
+        self._previous_high = candle.high
+        self._previous_low = candle.low
+        high_average = self._rising.update(rising)
+        low_average = self._falling.update(falling)
+        if isnan(high_average) or isnan(low_average):
+            self._value = NAN
+            return self.current()
+        self._value = _demarker_value(high_average, low_average, self._previous_value)
+        self._previous_value = self._value
+        return self.current()
+
+    def current(self) -> float:
+        return self._value
+
+
+def dpo_shift(period: int) -> int:
+    """Return §2.19's displacement, ``floor(n/2) + 1`` bars into the past."""
+    if period <= 0:
+        raise ValueError("period must be positive")
+    return period // 2 + 1
+
+
+def dpo(candles: Sequence[Candle], period: int = 20) -> list[float]:
+    """Subtract a moving average from a past close to strip the trend (§2.19).
+
+    The displacement reaches backwards. A chart that draws the average shifted
+    forward is describing where the line is plotted, not which bars it is computed
+    from; taking that literally would put bars after `t` into the value at `t`.
+    Every term here is indexed at or before `t`.
+    """
+
+    shift = dpo_shift(period)
+    closes = [candle.close for candle in candles]
+    averages = sma(closes, period)
+    result: list[float] = []
+    for index, average in enumerate(averages):
+        if isnan(average) or index < shift:
+            result.append(NAN)
+        else:
+            result.append(closes[index - shift] - average)
+    return result
+
+
+@dataclass(slots=True)
+class DPOState:
+    """O(1)-per-candle Detrended Price Oscillator state."""
+
+    period: int = 20
+    min_history: int = field(init=False)
+    _shift: int = field(init=False)
+    _average: SmaState = field(init=False)
+    _closes: deque[float] = field(init=False)
+    _value: float = field(init=False, default=NAN)
+
+    def __post_init__(self) -> None:
+        self._shift = dpo_shift(self.period)
+        self.min_history = max(self.period, self._shift + 1)
+        self._average = SmaState(self.period)
+        self._closes = deque(maxlen=self._shift + 1)
+
+    @property
+    def warmed_up(self) -> bool:
+        return not isnan(self._value)
+
+    def seed(self, candles: Sequence[Candle]) -> None:
+        self._average.reset()
+        self._closes.clear()
+        self._value = NAN
+        for candle in candles:
+            self.update(candle)
+
+    def update(self, candle: Candle) -> float:
+        self._closes.append(candle.close)
+        average = self._average.update(candle.close)
+        if isnan(average) or len(self._closes) <= self._shift:
+            self._value = NAN
+            return self.current()
+        # The deque is exactly `shift + 1` long, so its oldest entry is the close
+        # `shift` bars back; nothing newer than the current candle is read.
+        self._value = self._closes[0] - average
+        return self.current()
+
+    def current(self) -> float:
+        return self._value
+
+
+SCHAFF_SMOOTHING_FACTOR = 0.5
+
+
+def _schaff_stage(values: Sequence[float], period: int) -> list[float]:
+    """Run one stochastic-then-smooth stage of §2.20 over a series.
+
+    §2.20 applies §2.2's ratio to a series rather than to candles, so the window's
+    high and low come from the series itself. The flat-window rule is §2.2's: keep
+    the previous ratio, starting at 50. The smoothing is the 0.5-factor recursion
+    §2.20 attributes to the original author, seeded with the first ratio because the
+    section fixes no seed of its own.
+    """
+
+    if period <= 0:
+        raise ValueError("period must be positive")
+    highest = hh(values, period)
+    lowest = ll(values, period)
+    result: list[float] = []
+    previous_ratio = 50.0
+    smoothed: float | None = None
+    for value, high, low in zip(values, highest, lowest, strict=True):
+        if isnan(value) or isnan(high) or isnan(low):
+            result.append(NAN)
+            continue
+        ratio = safe_divide(100.0 * (value - low), high - low, on_zero=previous_ratio)
+        previous_ratio = ratio
+        smoothed = (
+            ratio if smoothed is None else smoothed + SCHAFF_SMOOTHING_FACTOR * (ratio - smoothed)
+        )
+        result.append(smoothed)
+    return result
+
+
+@dataclass(slots=True)
+class _SchaffStageState:
+    """O(1)-per-value form of one §2.20 stage."""
+
+    period: int = 10
+    _highest: RollingExtremeState = field(init=False)
+    _lowest: RollingExtremeState = field(init=False)
+    _previous_ratio: float = field(init=False, default=50.0)
+    _smoothed: float | None = field(init=False, default=None)
+
+    def __post_init__(self) -> None:
+        if self.period <= 0:
+            raise ValueError("period must be positive")
+        self._highest = RollingExtremeState(self.period, highest=True)
+        self._lowest = RollingExtremeState(self.period, highest=False)
+
+    def reset(self) -> None:
+        """Clear both extremes and the smoothing recursion."""
+        self._highest.reset()
+        self._lowest.reset()
+        self._previous_ratio = 50.0
+        self._smoothed = None
+
+    def update(self, value: float) -> float:
+        """Advance one observation and return the smoothed ratio."""
+        high = self._highest.update(value)
+        low = self._lowest.update(value)
+        if isnan(value) or isnan(high) or isnan(low):
+            return NAN
+        ratio = safe_divide(100.0 * (value - low), high - low, on_zero=self._previous_ratio)
+        self._previous_ratio = ratio
+        self._smoothed = (
+            ratio
+            if self._smoothed is None
+            else self._smoothed + SCHAFF_SMOOTHING_FACTOR * (ratio - self._smoothed)
+        )
+        return self._smoothed
+
+
+def schaff_trend_cycle(
+    candles: Sequence[Candle],
+    fast_period: int = 23,
+    slow_period: int = 50,
+    cycle_period: int = 10,
+) -> list[float]:
+    """Run a MACD line through two smoothed stochastic stages (§2.20)."""
+    closes = [candle.close for candle in candles]
+    line = _macd_line(closes, fast_period, slow_period)
+    return _schaff_stage(_schaff_stage(line, cycle_period), cycle_period)
+
+
+@dataclass(slots=True)
+class SchaffTrendCycleState:
+    """O(1)-per-candle Schaff Trend Cycle state over the MACD line and two stages."""
+
+    fast_period: int = 23
+    slow_period: int = 50
+    cycle_period: int = 10
+    min_history: int = field(init=False)
+    _line: _MacdLineState = field(init=False)
+    _first: _SchaffStageState = field(init=False)
+    _second: _SchaffStageState = field(init=False)
+    _value: float = field(init=False, default=NAN)
+
+    def __post_init__(self) -> None:
+        if self.cycle_period <= 0:
+            raise ValueError("periods must be positive")
+        # The MACD line arrives with the slow average, and each stage then costs a
+        # further window of its own before its first ratio exists.
+        self.min_history = self.slow_period + 2 * (self.cycle_period - 1)
+        self._line = _MacdLineState(self.fast_period, self.slow_period)
+        self._first = _SchaffStageState(self.cycle_period)
+        self._second = _SchaffStageState(self.cycle_period)
+
+    @property
+    def warmed_up(self) -> bool:
+        return not isnan(self._value)
+
+    def seed(self, candles: Sequence[Candle]) -> None:
+        self._line.reset()
+        self._first.reset()
+        self._second.reset()
+        self._value = NAN
+        for candle in candles:
+            self.update(candle)
+
+    def update(self, candle: Candle) -> float:
+        self._value = self._second.update(self._first.update(self._line.update(candle.close)))
+        return self.current()
+
+    def current(self) -> float:
+        return self._value
+
+
+def _symmetric_weighted(window: Sequence[float]) -> float:
+    """Return §2.21's four-term symmetric average of a window ordered oldest first."""
+    return (window[3] + 2.0 * window[2] + 2.0 * window[1] + window[0]) / 6.0
+
+
+SWMA_LENGTH = 4
+
+
+def _swma(values: Sequence[float]) -> list[float]:
+    """Apply §2.21's symmetric four-term weighting across a series."""
+    result: list[float] = []
+    window: deque[float] = deque(maxlen=SWMA_LENGTH)
+    for value in values:
+        window.append(value)
+        if len(window) < SWMA_LENGTH or any(isnan(item) for item in window):
+            result.append(NAN)
+            continue
+        result.append(_symmetric_weighted(window))
+    return result
+
+
+def relative_vigor_index(candles: Sequence[Candle], period: int = 10) -> list[RviValue]:
+    """Weigh the body against the range with a symmetric filter (§2.21).
+
+    This is Ehlers' Relative Vigor Index. §3.7 carries Dorsey's Relative Volatility
+    Index under a colliding abbreviation and a completely different calculation.
+    """
+
+    numerators = sma(_swma([candle.close - candle.open for candle in candles]), period)
+    denominators = sma(_swma([candle.high - candle.low for candle in candles]), period)
+    line = [
+        NAN
+        if isnan(numerator) or isnan(denominator)
+        # A window whose bars all have zero range carries no vigor to report, and
+        # §0.11 lists zero as one of the substitutes a section may name.
+        else safe_divide(numerator, denominator, on_zero=0.0)
+        for numerator, denominator in zip(numerators, denominators, strict=True)
+    ]
+    signal = _swma(line)
+    return [
+        {"rvi": value, "signal": signal_value}
+        for value, signal_value in zip(line, signal, strict=True)
+    ]
+
+
+@dataclass(slots=True)
+class RelativeVigorIndexState:
+    """O(1)-per-candle Relative Vigor Index state over three symmetric filters."""
+
+    period: int = 10
+    min_history: int = field(init=False)
+    _bodies: deque[float] = field(init=False)
+    _ranges: deque[float] = field(init=False)
+    _line_window: deque[float] = field(init=False)
+    _numerator: SmaState = field(init=False)
+    _denominator: SmaState = field(init=False)
+    _value: RviValue = field(
+        init=False,
+        default_factory=lambda: {"rvi": NAN, "signal": NAN},
+    )
+
+    def __post_init__(self) -> None:
+        if self.period <= 0:
+            raise ValueError("period must be positive")
+        # Three filters stack: the body filter costs three bars, the rolling average
+        # its own period, and the signal filter three more.
+        self.min_history = self.period + 2 * (SWMA_LENGTH - 1)
+        self._bodies = deque(maxlen=SWMA_LENGTH)
+        self._ranges = deque(maxlen=SWMA_LENGTH)
+        self._line_window = deque(maxlen=SWMA_LENGTH)
+        self._numerator = SmaState(self.period)
+        self._denominator = SmaState(self.period)
+
+    @property
+    def warmed_up(self) -> bool:
+        return not isnan(self._value["signal"])
+
+    def seed(self, candles: Sequence[Candle]) -> None:
+        self._bodies.clear()
+        self._ranges.clear()
+        self._line_window.clear()
+        self._numerator.reset()
+        self._denominator.reset()
+        self._value = {"rvi": NAN, "signal": NAN}
+        for candle in candles:
+            self.update(candle)
+
+    def _filtered(self, window: deque[float]) -> float:
+        if len(window) < SWMA_LENGTH or any(isnan(item) for item in window):
+            return NAN
+        return _symmetric_weighted(window)
+
+    def update(self, candle: Candle) -> RviValue:
+        self._bodies.append(candle.close - candle.open)
+        self._ranges.append(candle.high - candle.low)
+        numerator = self._numerator.update(self._filtered(self._bodies))
+        denominator = self._denominator.update(self._filtered(self._ranges))
+        line = (
+            NAN
+            if isnan(numerator) or isnan(denominator)
+            else safe_divide(numerator, denominator, on_zero=0.0)
+        )
+        self._line_window.append(line)
+        self._value = {"rvi": line, "signal": self._filtered(self._line_window)}
+        return self.current()
+
+    def current(self) -> RviValue:
+        return dict(self._value)
+
+
+LAGUERRE_STAGES = 4
+
+
+def _laguerre_step(price: float, stages: list[float], gamma: float) -> tuple[list[float], float]:
+    """Advance §2.22's four-pole cascade one bar and return the new stages and value."""
+    previous_zero, previous_one, previous_two, previous_three = stages
+    zero = (1.0 - gamma) * price + gamma * previous_zero
+    one = -gamma * zero + previous_zero + gamma * previous_one
+    two = -gamma * one + previous_one + gamma * previous_two
+    three = -gamma * two + previous_two + gamma * previous_three
+    rising = 0.0
+    falling = 0.0
+    for upper, lower in ((zero, one), (one, two), (two, three)):
+        if upper > lower:
+            rising += upper - lower
+        else:
+            falling += lower - upper
+    # §2.22 states the substitute itself: a denominator of zero yields zero.
+    return [zero, one, two, three], safe_divide(rising, rising + falling, on_zero=0.0)
+
+
+def laguerre_rsi(candles: Sequence[Candle], gamma: float = 0.5) -> list[float]:
+    """Run price through a four-pole Laguerre filter and read it as an RSI (§2.22).
+
+    §2.22 writes the input as a bare `P` and fixes no starting state for the four
+    stages. Every stage starts at the first close, which puts the filter at rest
+    instead of letting an assumed zero decay through the early bars, and that first
+    bar is reported as warm-up because it carries no price difference for the
+    difference sums to see.
+    """
+
+    if not 0.0 <= gamma < 1.0:
+        raise ValueError("gamma must be in [0, 1)")
+    result: list[float] = []
+    stages: list[float] | None = None
+    for candle in candles:
+        price = candle.close
+        if stages is None:
+            stages = [price] * LAGUERRE_STAGES
+            result.append(NAN)
+            continue
+        stages, value = _laguerre_step(price, stages, gamma)
+        result.append(value)
+    return result
+
+
+@dataclass(slots=True)
+class LaguerreRSIState:
+    """O(1)-per-candle Laguerre RSI state over the four-pole cascade."""
+
+    gamma: float = 0.5
+    min_history: int = field(init=False, default=2)
+    _stages: list[float] | None = field(init=False, default=None)
+    _value: float = field(init=False, default=NAN)
+
+    def __post_init__(self) -> None:
+        if not 0.0 <= self.gamma < 1.0:
+            raise ValueError("gamma must be in [0, 1)")
+
+    @property
+    def warmed_up(self) -> bool:
+        return not isnan(self._value)
+
+    def seed(self, candles: Sequence[Candle]) -> None:
+        self._stages = None
+        self._value = NAN
+        for candle in candles:
+            self.update(candle)
+
+    def update(self, candle: Candle) -> float:
+        if self._stages is None:
+            self._stages = [candle.close] * LAGUERRE_STAGES
+            self._value = NAN
+            return self.current()
+        self._stages, self._value = _laguerre_step(candle.close, self._stages, self.gamma)
+        return self.current()
+
+    def current(self) -> float:
+        return self._value
+
+
+def pretty_good_oscillator(candles: Sequence[Candle], period: int = 89) -> list[float]:
+    """Scale the close's distance from its average by Average True Range (§2.23)."""
+    closes = [candle.close for candle in candles]
+    averages = sma(closes, period)
+    ranges = atr(candles, period)
+    return [
+        NAN
+        if isnan(average) or isnan(true_range)
+        # A stretch with no true range has no oscillation to scale; §0.11 lists
+        # zero as one of the substitutes a section may name, and §2.23 names none.
+        else safe_divide(close - average, true_range, on_zero=0.0)
+        for close, average, true_range in zip(closes, averages, ranges, strict=True)
+    ]
+
+
+@dataclass(slots=True)
+class PrettyGoodOscillatorState:
+    """O(1)-per-candle Pretty Good Oscillator state over an average and an ATR."""
+
+    period: int = 89
+    min_history: int = field(init=False)
+    _average: SmaState = field(init=False)
+    _range: ATRState = field(init=False)
+    _value: float = field(init=False, default=NAN)
+
+    def __post_init__(self) -> None:
+        self.min_history = self.period
+        self._average = SmaState(self.period)
+        self._range = ATRState(self.period)
+
+    @property
+    def warmed_up(self) -> bool:
+        return not isnan(self._value)
+
+    def seed(self, candles: Sequence[Candle]) -> None:
+        self._average.reset()
+        self._range.seed(())
+        self._value = NAN
+        for candle in candles:
+            self.update(candle)
+
+    def update(self, candle: Candle) -> float:
+        average = self._average.update(candle.close)
+        true_range = self._range.update(candle)
+        self._value = (
+            NAN
+            if isnan(average) or isnan(true_range)
+            else safe_divide(candle.close - average, true_range, on_zero=0.0)
+        )
+        return self.current()
+
+    def current(self) -> float:
+        return self._value
+
+
+def _center_of_gravity_value(window: Sequence[float], period: int) -> float:
+    """Return §8.2's weighted centroid of a window ordered oldest first."""
+    numerator = sum((1.0 + offset) * window[period - 1 - offset] for offset in range(period))
+    denominator = sum(window)
+    return -safe_divide(numerator, denominator, on_zero=0.0) + (period + 1) / 2.0
+
+
+def center_of_gravity(candles: Sequence[Candle], period: int = 10) -> list[float]:
+    """Locate the window's weighted centre of mass and centre it on zero (§8.2)."""
+    if period <= 0:
+        raise ValueError("period must be positive")
+    result: list[float] = []
+    window: deque[float] = deque(maxlen=period)
+    for candle in candles:
+        window.append(candle.close)
+        if len(window) < period:
+            result.append(NAN)
+            continue
+        result.append(_center_of_gravity_value(window, period))
+    return result
+
+
+@dataclass(slots=True)
+class CenterOfGravityState:
+    """O(period)-per-candle Center of Gravity state; every weight moves each bar."""
+
+    period: int = 10
+    min_history: int = field(init=False)
+    _window: deque[float] = field(init=False)
+    _value: float = field(init=False, default=NAN)
+
+    def __post_init__(self) -> None:
+        if self.period <= 0:
+            raise ValueError("period must be positive")
+        self.min_history = self.period
+        self._window = deque(maxlen=self.period)
+
+    @property
+    def warmed_up(self) -> bool:
+        return not isnan(self._value)
+
+    def seed(self, candles: Sequence[Candle]) -> None:
+        self._window.clear()
+        self._value = NAN
+        for candle in candles:
+            self.update(candle)
+
+    def update(self, candle: Candle) -> float:
+        self._window.append(candle.close)
+        if len(self._window) < self.period:
+            self._value = NAN
+            return self.current()
+        self._value = _center_of_gravity_value(self._window, self.period)
         return self.current()
 
     def current(self) -> float:
