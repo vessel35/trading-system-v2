@@ -137,9 +137,12 @@ def gap_down_open(previous: Candle, current: Candle) -> bool:
 # degenerate bar into a match.
 #
 # A `Body == 0` bar leaves the shadow multiples of §2.4 undefined instead, and
-# §1.4 answers that case differently: the comparison holds when the shadow is
-# positive. Without that rule a dragonfly doji would fail the shape requirement
-# of Takuri, and Morris defines Takuri as a kind of dragonfly doji.
+# §1.4 answers that case by the direction of the comparison. A lower bound holds
+# when the shadow is positive: without that a dragonfly doji would fail the shape
+# requirement of Takuri, and Morris defines Takuri as a kind of dragonfly doji.
+# An upper bound fails there instead: without that a gravestone doji would pass
+# Inverted Hammer's shape requirement and collide with its own pattern. The two
+# halves are `shadow_reaches_multiple` and `shadow_within_multiple`.
 #
 # Neither convention needs an actual division. The standard writes every scale
 # in multiplied form (`Body > 0.50 * Range`, not `Body / Range > 0.50`), so the
@@ -168,11 +171,29 @@ def shadow_reaches_multiple(shadow: float, body_size: float, multiple: float) ->
     the comparison holds when the shadow is positive and fails when the shadow is
     also zero, which is what this returns.
 
-    This covers the lower-bound form only, the one §2.4 defines. §1.4 states the
-    rule for `LS >= m * Body` and its stated reason is about lower bounds, so the
-    upper-bound comparisons §7 uses (Inverted Hammer's `US <= 2.0 * Body`) are
-    not folded in here.
+    This is the lower-bound half of §1.4's `ShadowRatio` extension, the half §2.4
+    defines. `shadow_within_multiple` is the upper-bound half and answers the
+    zero-body case the other way; §1.4 says in so many words that the two
+    directions must not be unified.
     """
     if body_size == 0.0:
         return shadow > 0.0
     return shadow >= multiple * body_size
+
+
+def shadow_within_multiple(shadow: float, body_size: float, multiple: float) -> bool:
+    """Return ``shadow <= multiple * body`` under §1.4's zero-body rule.
+
+    The upper-bound half of §1.4's `ShadowRatio` extension. A zero body sends the
+    ratio to infinity when the shadow is positive, so the comparison is **false**
+    there, and §1.4 makes it false for a zero shadow as well.
+
+    Carrying the lower bound's answer over to here would break the standard, and
+    §1.4 names the pattern it breaks. §7.1.9 Inverted Hammer asks for
+    `US <= 2.0 * Body`; if a zero body satisfied that, a gravestone doji with an
+    arbitrarily long upper shadow would pass Inverted Hammer's shape requirement,
+    which contradicts §7.1.5 Gravestone Doji existing as its own pattern.
+    """
+    if body_size == 0.0:
+        return False
+    return shadow <= multiple * body_size

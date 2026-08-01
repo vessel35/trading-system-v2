@@ -1,16 +1,31 @@
 """Provide the candlestick pattern layer defined by the pattern standard.
 
 `docs/references/candlestick_pattern_calc_spec.md` owns the rules. This package
-implements its foundation: the shared candle primitives of §1, the seven scales
-of §2, the prior-trend judgment of §3, the four-key output contract of §5, the
-warm-up formulas of §6, and the spec and registry the sixty-one patterns of §7
-register into.
+implements its foundation — the shared candle primitives of §1, the seven scales
+of §2, the prior-trend judgment of §3, the engulfment and containment relations
+of §4.1, the four-key output contract of §5, the warm-up formulas of §6 — and the
+patterns of §7 that are registered so far.
 
-The patterns themselves are not here yet. This layer is what they will be built
-out of, and it is deliberately a separate changeset from them so a regression can
-be traced to one or the other.
+Seventeen of the sixty-one are here: §7.1's doji family and umbrella lines and
+§7.2's body-and-shadow shapes, in `doji_umbrella.py` and `body_shadow.py`.
+`judgment.py` holds what every pattern shares, so a section module carries its
+numbered rules and nothing else. The remaining forty-four arrive as three more
+module pairs and change nothing in this one.
+
+Patterns keep their own registry and never enter `DEFAULT_REGISTRY`, so the
+indicator standard's count of 89 systems is not touched by anything here.
 """
 
+from .inequalities import contain, engulf
+from .judgment import (
+    STANDARD_VERSION,
+    Match,
+    PatternRule,
+    PatternRuleState,
+    confirms_by_close_direction,
+    judge_series,
+    spec_for,
+)
 from .outputs import (
     BEARISH,
     BOUNDARY_STRENGTH,
@@ -33,6 +48,7 @@ from .registry import (
     PatternState,
     PatternValue,
 )
+from .specs import DEFAULT_PATTERN_REGISTRY, build_default_pattern_registry
 from .trend import (
     DOWNTREND,
     NO_TREND,
@@ -48,6 +64,7 @@ __all__ = [
     "BEARISH",
     "BOUNDARY_STRENGTH",
     "BULLISH",
+    "DEFAULT_PATTERN_REGISTRY",
     "DIRECTIONLESS",
     "DOWNTREND",
     "FULL_STRENGTH",
@@ -55,20 +72,30 @@ __all__ = [
     "NAME_PREFIX",
     "NOT_MATCHED",
     "NO_TREND",
+    "STANDARD_VERSION",
     "TREND_EMA_PERIOD",
     "UPTREND",
+    "Match",
     "PatternRegistry",
+    "PatternRule",
+    "PatternRuleState",
     "PatternSeries",
     "PatternSpec",
     "PatternState",
     "PatternValue",
     "PriorTrendState",
     "assert_pattern_name",
+    "build_default_pattern_registry",
+    "confirms_by_close_direction",
+    "contain",
+    "engulf",
+    "judge_series",
     "match_outputs",
     "min_history_for",
     "no_match_outputs",
     "output_keys",
     "prior_trend",
+    "spec_for",
     "trend_ema",
     "undetermined_outputs",
 ]
