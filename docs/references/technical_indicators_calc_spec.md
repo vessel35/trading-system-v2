@@ -1,6 +1,6 @@
 # 기술적 분석 지표 계산 명세서 (★4 이상)
 
-> **범위**: 1차 마스터 목록에서 신뢰도 ★★★★ 이상으로 판정된 지표(원 저자 실명 + 문서화된 1차 출처)의 **계산 방법**을 플랫폼 독립적으로 기술한다.
+> **범위**: 1차 마스터 목록에서 신뢰도 ★★★★ 이상으로 판정된 지표(원 저자 실명 + 문서화된 1차 출처)의 **계산 방법**을 플랫폼 독립적으로 기술한다. 이 기준에는 예외가 하나 있다. APO(§2.28)는 원저자를 세울 수 있는 1차 출처가 없어, 이동평균 종류를 파라미터로 남긴 문서화된 정의를 출처로 삼아 수록했다(§13의 27번). 기준을 넓힌 것이 아니라 이 한 항목만 예외로 못박은 것이다.
 > **중복 제거 원칙**: 여러 지표가 공유하는 기초 연산(EMA, SMA, WMA, Wilder 평활, True Range, Typical Price, 표준편차, rolling 최고/최저 등)은 **§0 공유 프리미티브**에 단 한 번만 정의하고, 각 지표는 이를 **참조**한다. 지표 본문에는 그 지표 고유의 계산만 기술한다.
 > **표기 규약**: `C`=종가, `O`=시가, `H`=고가, `L`=저가, `V`=거래량, `P`=대상 시계열(문맥상 대개 종가), 아래첨자 `t`=현재 봉, `t-1`=직전 봉. `n`=기간(period).
 
@@ -181,6 +181,26 @@ MD_t = MD_{t-1} + (P_t − MD_{t-1}) / ( N · (P_t / MD_{t-1})^4 )
 장기군: EMA(30,35,40,45,50,60)
 ```
 
+### 1.11 TRIMA — Triangular Moving Average ★★★★
+중복 제거: SMA(§0.2)만 사용. 창 중앙의 가격에 가장 큰 가중을 주고 양 끝으로 갈수록 선형으로 줄여, 창 앞뒤의 잡음을 함께 눌러 준다.
+```
+n1 = n/2 ,      n2 = n/2 + 1          (n 짝수)
+n1 = n2 = (n + 1)/2                    (n 홀수)
+TRIMA(P, n) = SMA( SMA(P, n1), n2 )
+```
+동치인 가중합 표현(같은 값을 다른 형태로 쓴 것):
+```
+w_i = min(i + 1, n − i) ,   i = 0..n-1
+TRIMA(P, n)_t = Σ_i ( w_i · P_{t-(n-1)+i} ) / Σ_i w_i
+```
+- 1차 출처: Kaufman, *Trading Systems and Methods*의 "Triangular Weighting" 절과 그 절이 인용하는 J. J. Payne, "A Better Way to Smooth Data", *Technical Analysis of Stocks & Commodities*, 1989년 10월(§13의 5번과 24번). Kaufman은 창의 크기를 `n`으로 명시하고, 가중치가 창 중앙까지 선형으로 커졌다가 창 끝까지 다시 작아진다고 정의한다.
+- **짝수 `n`의 분할이 위와 같이 정해지는 근거.** 길이 `a`와 `b`인 두 단순이동평균을 겹치면 결과는 `a + b − 1`봉에 걸친다. 창이 정확히 `n`봉이어야 하므로 `a + b = n + 1`이다. 여기에 위 인용이 정의한 조건, 곧 가중치가 창 중앙까지 선형으로 커졌다가 창 끝까지 다시 작아지는 **삼각형**이어야 한다는 조건을 더한다. 두 단순이동평균을 겹친 가중치는 선형으로 올라간 뒤 `|a − b| + 1`봉 동안 최댓값에 머물다가 다시 선형으로 내려간다. 꼭짓점 바깥으로 평평한 구간이 뻗지 않으려면 그 길이가 두 봉을 넘지 않아야 하므로 `|a − b| ≤ 1`이어야 한다. 이 조건과 `a + b = n + 1`을 함께 풀면 짝수 `n`에서는 `n/2`와 `n/2 + 1`, 홀수 `n`에서는 `(n+1)/2`를 두 번 쓰는 것만 남는다. 이 분할은 명시된 두 조건에서 유도한 결과이며 관례를 임의로 고른 것이 아니다.
+  - 걸러 내는 조건이 **삼각형**이지 좌우 대칭이 아니라는 점을 분명히 해 둔다. 두 직사각 창의 합성곱은 `a`와 `b`가 무엇이든 항상 좌우 대칭이므로, 대칭만으로는 후보가 하나도 걸러지지 않는다. `n = 6`을 예로 들면 `a + b = 7`을 만족하는 분할이 셋인데, `(1,6)`의 가중치는 `[1,1,1,1,1,1]`, `(2,5)`는 `[1,2,2,2,2,1]`, `(3,4)`는 `[1,2,3,3,2,1]`로 셋 다 좌우 대칭이고 셋 다 창 길이가 정확히 6이다. 이 가운데 `(1,6)`은 평평하고 `(2,5)`는 사다리꼴이어서 삼각형 조건에서 탈락하고 `(3,4)`만 남는다.
+- 확인용 예: `n=4`의 가중치는 1, 2, 2, 1이고 `n=5`는 1, 2, 3, 2, 1, `n=6`은 1, 2, 3, 3, 2, 1이다. 짝수 `n`에서는 꼭짓점이 한 봉이 아니라 두 봉에 걸친 평평한 삼각형이 된다. 한 점 꼭짓점은 홀수 `n`에서만 나온다.
+- **갈라지는 다른 규약**: `n`의 홀짝과 무관하게 `SMA(SMA(P, floor(n/2)+1), floor(n/2)+1)`을 쓰는 구현이 있다. 이 방식은 짝수 `n`에서 실효 창이 `n+1`봉이 되어 기간 인자가 가리키는 봉 수와 어긋나므로 이 표준은 채택하지 않는다.
+- warm-up: 두 단순이동평균이 겹쳐 처음 `n1 + n2 − 2 = n − 1`봉이 정의되지 않는다. 결과적으로 `SMA(P, n)`과 같은 길이의 warm-up을 갖는다.
+- 재귀가 없으므로 §0.11의 확정 캔들 규약 외에 따로 유지할 상태가 없다.
+
 ## §2. Momentum / Oscillator 계열 (★4↑)
 
 ### 2.1 RSI — Relative Strength Index (Wilder, 1978) ★★★★★
@@ -201,6 +221,8 @@ Fast %K = %K_raw ;  Fast %D = SMA(%K_raw, 3)
 Slow %K = SMA(%K_raw, 3) ;  Slow %D = SMA(Slow %K, 3)
 ```
 - 분모 0(HH=LL) → 직전값 또는 50/100 대체(구현체별).
+- **Fast와 Slow는 별개 지표로 세고 별개로 등록한다.** 둘은 `%K_raw`라는 부품을 공유할 뿐 내놓는 두 선이 서로 다르다. Fast는 (`%K_raw`, `SMA(%K_raw,3)`) 쌍을, Slow는 (`SMA(%K_raw,3)`, `SMA(Slow %K,3)`) 쌍을 출력한다. Slow %K가 Fast %D와 같은 값이라는 사실은 계산을 공유하라는 뜻이지 한 항목으로 묶으라는 뜻이 아니다. Fast는 원시 %K의 반응 속도를, Slow는 한 단계 더 평활한 선을 쓰는 서로 다른 신호 체계다.
+- 위 규약에 따라 §11 커버리지 집계는 Stochastic Fast와 Stochastic Slow를 2행으로 센다. 등록도 두 조합으로 나눈다.
 
 ### 2.3 Stochastic RSI (Chande & Kroll, 1994) ★★★★★
 중복 제거: RSI(§2.1) 위에 Stochastic(§2.2) 정규화.
@@ -394,6 +416,52 @@ Signal = EMA(SMI, u)                                      (u=예: 3)
 ```
 - 파라미터(n, r, s)는 문서/플랫폼별 상이(Blau 원안 vs TradingView) → 채택 값 명시 권장.
 
+### 2.28 APO — Absolute Price Oscillator ★★★★
+중복 제거: 이동평균 프리미티브(§0.2~0.5) 가운데 파라미터로 지정한 하나만 사용. 길이가 다른 두 이동평균의 차를 가격 단위 그대로 내놓는다.
+```
+APO_t = MA(P, n_fast)_t − MA(P, n_slow)_t               (n_fast < n_slow)
+기본 조합: MA = SMA, n_fast = 12, n_slow = 26, P = C
+```
+- 출처: 이 지표를 처음 정의한 사람을 특정할 수 있는 1차 자료는 없다. 문서화된 정의 가운데 가장 확립된 것은 플랫폼 문서(Trading Technologies X_STUDY의 Absolute Price Oscillator 정의)이며, 거기서 APO는 "길이가 다른 두 이동평균의 차"로 정의되고 **이동평균 종류는 사용자 파라미터로 열려 있다**. 이 표준도 그에 맞춰 이동평균 종류를 파라미터로 두고 기본값만 고정한다. 원저자를 세울 수 없으므로 제목의 원저자 자리를 비웠고, 별점은 같은 사정인 §2.5 PPO와 같은 기준으로 매겼다.
+- **기본 이동평균을 SMA로 고정한 이유.** 종류를 EMA로 두고 기간을 12와 26으로 잡으면 `EMA(C,12) − EMA(C,26)`이 되어 §2.4 MACD 라인과 값이 완전히 같아진다. 같은 값을 두 이름으로 두 번 구현하지 않기 위해 이 표준은 기본 이동평균을 SMA로 고정한다. 사용자가 종류를 EMA로 바꾸면 MACD 라인과 같은 값이 나오는데, 이는 결함이 아니라 정의에서 따라 나오는 결과이며 그 조합이 필요하면 §2.4를 쓰면 된다.
+- **§2.5 PPO와 이동평균이 다른 이유.** PPO는 "MACD의 백분율판"이라는 정의 자체가 EMA를 전제하므로 EMA를 쓴다. APO는 이동평균 종류가 열린 일반형이고, 위 이유로 이 표준이 기본값을 SMA로 골랐다. 그래서 이 표준 안에서 APO와 PPO는 서로 다른 이동평균을 쓴다. 두 절을 나란히 읽으면 어긋나 보이지만 의도한 차이다.
+- 값의 단위가 가격과 같아 가격대가 다른 자산끼리 직접 비교할 수 없다. 자산 간 비교에는 스케일이 없는 §2.5 PPO를 쓴다.
+- 나눗셈이 없어 분모 0 예외가 없다. warm-up은 둘 중 느린 이동평균의 warm-up을 따른다.
+
+### 2.29 BOP — Balance of Power (Igor Livshin, 2001) ★★★★
+중복 제거: SMA(§0.2). 한 봉 안에서 매수 측과 매도 측이 가격을 각자의 방향으로 밀어낸 정도를 견줘, 그 봉의 주도권이 어느 쪽에 있었는지를 −1에서 +1 사이 값으로 나타낸다.
+```
+BOP_raw_t = (C_t − O_t) / (H_t − L_t)                   (범위 −1~+1)
+BOP_t     = SMA(BOP_raw, n)                             (n=14)
+```
+1차 출처는 Igor Livshin, "Balance Of Power", *Technical Analysis of Stocks & Commodities* V.19:8(2001년 8월), 18–32쪽이다. 원문은 봉마다 강세 측과 약세 측의 보상을 시가 기준, 종가 기준, 시가-종가 기준 셋으로 나눠 계산한 뒤 두 진영의 평균 보상의 차를 취한다.
+```
+BullsOnOpen      = (H − O)/(H − L) ;  BearsOnOpen      = (O − L)/(H − L)
+BullsOnClose     = (C − L)/(H − L) ;  BearsOnClose     = (H − C)/(H − L)
+BullsOnOpenClose = (C > O) ? (C − O)/(H − L) : 0
+BearsOnOpenClose = (C < O) ? (O − C)/(H − L) : 0
+BOP_raw = (BullsOnOpen + BullsOnClose + BullsOnOpenClose)/3
+        − (BearsOnOpen + BearsOnClose + BearsOnOpenClose)/3
+```
+이 여섯 항을 정리하면 분자가 `3(C − O)`로 모여 위의 `(C_t − O_t)/(H_t − L_t)`와 항등적으로 같아진다. 근사가 아니라 대수적으로 같은 식이다. 저자 본인이 같은 잡지 2001년 10월 독자란에서 두 식이 같음을 확인했으므로, 이 표준은 축약형을 채택하고 여섯 항 전개형은 그 뜻을 밝히는 용도로만 남긴다.
+
+- 평활: 원문은 14봉 단순이동평균으로 평활한 선을 그린다. 평활하지 않은 `BOP_raw`는 봉마다 튀어 읽기 어렵다.
+- 분모 0(`H_t = L_t`): §0.11에 따라 그 봉의 `BOP_raw`를 `0`으로 둔다. 고가와 저가가 같은 봉은 시가와 종가도 그 값과 같아 분자도 0이며, 어느 쪽도 가격을 밀어내지 못했다는 뜻이므로 0이 그 상황의 의미와 맞는다. 범위가 무너진 봉을 0으로 두는 것은 §4.2 A/D Line이 Money Flow Multiplier에 쓰는 규약과도 같다.
+- 값이 시가와 종가의 차이에만 좌우되므로, 같은 몸통 크기라면 그 몸통이 봉 범위의 위쪽에 있든 아래쪽에 있든 BOP는 같다. 저자도 독자란에서 이 성질을 인정했다.
+
+### 2.30 IMI — Intraday Momentum Index (Tushar Chande, 1994) ★★★★★
+중복 제거 없음(시가·종가만 사용). RSI(§2.1)의 구조를 봉과 봉 사이가 아니라 **한 봉 안의 시가에서 종가까지**에 적용한다.
+```
+Gain_t = max(C_t − O_t, 0)                              (종가가 시가보다 높은 봉의 몸통)
+Loss_t = max(O_t − C_t, 0)                              (종가가 시가보다 낮은 봉의 몸통)
+ISup   = Σ_{i=0}^{n-1} Gain_{t-i} ;  ISdown = Σ_{i=0}^{n-1} Loss_{t-i}      (n=14)
+IMI    = 100 · ISup / (ISup + ISdown)                   (범위 0~100)
+```
+- 1차 출처: Chande & Kroll, *The New Technical Trader*, 1994(§13의 4번). 원문 표기는 `IMI = [ISup / (ISup + ISdown)] × 100`이다.
+- RSI(§2.1)와의 차이는 두 가지다. 첫째, RSI는 직전 봉 종가 대비 변화를 쓰지만 IMI는 같은 봉의 시가 대비 변화를 쓰므로 봉과 봉 사이의 갭이 값에 들어가지 않는다. 둘째, RSI는 Wilder 평활(§0.5)로 상승분·하락분을 재귀 평활하지만 IMI는 n봉 원시 합을 쓴다. 이 점에서 IMI의 합산 구조는 CMO(§2.8)와 같고 정규화 방식만 다르다.
+- 분모 0: `ISdown = 0`이면 IMI = 100, `ISup = 0`이면 IMI = 0으로 두어 §2.1 RSI와 같은 규약을 쓴다. 창 안의 모든 봉이 `C = O`여서 두 합이 함께 0이 되면 분모 자체가 0이 되는데, 이때는 §0.11이 허용하는 대체값 중 중립값 `50`을 택한다. 매수 압력도 매도 압력도 없는 상태이므로 중앙값이 그 뜻과 맞는다.
+- 과매수·과매도 판단선은 원문 기준 70과 30이다.
+
 ## §3. Volatility 계열 (★4↑)
 
 ### 3.1 ATR — Average True Range (Wilder, 1978) ★★★★★
@@ -401,7 +469,7 @@ Signal = EMA(SMI, u)                                      (u=예: 3)
 ```
 ATR = RMA(TR, n)                                       (n=14, seed=첫 n개 TR 단순평균)
 ```
-- 변형: NATR = 100·ATR/C (정규화, 자산 간 비교).
+- 종가로 정규화해 자산 간 비교를 가능하게 한 NATR은 별개 지표로 승격해 §3.11에 따로 적었다. 여기서는 변형으로 취급하지 않는다.
 
 ### 3.2 Keltner Channel (Chester Keltner / Linda Raschke 현대판) ★★★★
 중복 제거: EMA(§0.3) + ATR(§3.1).
@@ -479,6 +547,30 @@ BandWidth = (Upper − Lower) / Middle                     (밴드 폭 정규화
 ```
 - 주의: σ는 관례상 **모표준편차(분모 n)**. 표본표준편차(n−1) 사용 시 밴드가 약간 넓어짐 → 플랫폼 간 미세 차이 원인.
 - %B > 1: 상단 돌파, %B < 0: 하단 돌파. BandWidth 국소 최저 = Bollinger Squeeze.
+
+### 3.11 NATR — Normalized Average True Range (John Forman, 2006) ★★★★
+중복 제거: ATR(§3.1). ATR을 종가로 나눠 백분율로 만들어, 가격대가 다른 자산의 변동성을 같은 자로 비교할 수 있게 한다.
+```
+NATR(n)_t = 100 · ATR(n)_t / C_t                        (n=14)
+```
+- 1차 출처: John Forman, "Cross-Market Evaluations With Normalized Average True Range", *Technical Analysis of Stocks & Commodities* V.24:5(2006년 5월), 60–63쪽.
+- **계산 순서를 지켜야 한다.** True Range를 먼저 n봉 평활해 ATR을 구한 뒤, 그 결과를 현재 종가로 나눈다. 봉마다 TR을 먼저 종가로 나눠 정규화한 다음 평활하는 방식은 Forman의 정의가 아니며 값도 다르다.
+- 분모 0(`C_t = 0`): §0.11에 따라 결과를 `0`으로 둔다. 종가가 0인 봉은 정상 시세에 나오지 않으므로 이 대체값은 계산을 멈추지 않기 위한 방어 규약이다. warm-up 구간이 NaN인 것은 ATR(§3.1)에서 그대로 물려받는다.
+- §3.1이 ATR의 변형으로 한 줄만 적어 두었던 항목을 독립 절로 올린 것이다. 계산 자체는 §3.1의 ATR을 그대로 쓰고 마지막 정규화 한 단계만 더한다. §11 집계는 ATR과 NATR을 별개 2행으로 센다.
+
+### 3.12 ACCBANDS — Acceleration Bands (Price Headley, 2002) ★★★★
+중복 제거: SMA(§0.2). 봉의 범위를 그 봉의 가격 수준에 대한 비율로 바꿔 밴드 폭을 정하므로, 변동성이 커지면 밴드가 넓어지고 조용해지면 좁아진다.
+```
+Ratio_t = (H_t − L_t) / (H_t + L_t)                     (봉 범위를 고가와 저가의 합으로 나눈 비율)
+Upper  = SMA( H · (1 + 4·Ratio), n )                    (n=20)
+Middle = SMA( C, n )
+Lower  = SMA( L · (1 − 4·Ratio), n )
+```
+- 1차 출처: Price Headley, *Big Trends in Trading: Strategies to Master Major Market Moves*, Wiley, 2002, 7장(EasyLanguage 원문은 92쪽). 원문 표기는 `high × (1 + 2 × (((high − low)/((high + low)/2)) × 1000) × 0.001)` 형태다. `((H−L)/((H+L)/2)) × 1000 × 0.001 = 2(H−L)/(H+L)` 이므로 위 계수 `4`는 원문을 약분해 정리한 것이고 값은 원문과 같다. 일부 플랫폼이 노출하는 `factor` 파라미터의 기본값 `0.001`은 이 약분 과정에 흡수된 상수이며, 그 기본값에서 계수는 정확히 `4`가 된다.
+- 평활 기간: 원저자는 20봉을 기본으로 쓰고, 더 긴 흐름을 볼 때 80봉을 함께 본다. 이 표준은 기본을 20으로 둔다.
+- 분모 0(`H_t + L_t = 0`): §0.11에 따라 `Ratio_t`를 `0`으로 둔다. 그러면 그 봉이 밴드에 넣는 값이 고가와 저가 자체가 되어, 폭을 벌리는 항 없이 `SMA(H, n)`과 `SMA(L, n)`에만 기여한다.
+- `Ratio_t`는 봉 범위를 고가와 저가의 합으로 나눈 값이므로 중간가 `HL2`(§0.1) 대비 범위 비율의 절반이다. 원문이 중간가로 나눈 뒤 2를 곱하는 형태를 쓴 것과 위 계수 `4`가 대응하는 지점이 여기다.
+- 밴드는 중간선과 정확히 등거리가 아니다. 원저자는 상·하단이 20봉 단순이동평균에서 같은 거리에 놓인다고 서술하지만, 위 식은 상단을 고가에서 위로, 하단을 저가에서 아래로 벌리므로 두 거리가 일반적으로 다르다. 이 표준은 서술이 아니라 원문 식을 채택한다.
 
 ## §4. Volume 계열 (★4↑)
 
@@ -792,7 +884,13 @@ graph LR
     RMA --> RVIvol["RVI(Dorsey)"]
     RMA --> DeMarker
 
+    SMA --> TRIMA
+    SMA --> APO
+    SMA --> BOP
+    SMA --> ACCBANDS["Acceleration Bands"]
+
     TR --> ATR
+    ATR --> NATR
     ATR --> Keltner
     ATR --> SuperTrend
     ATR --> Chandelier
@@ -842,20 +940,22 @@ graph LR
 
 | 카테고리 | 수록 지표 | 개수 |
 |---|---|---|
-| §1 Trend / MA | DEMA, TEMA, T3, HMA, ZLEMA, ALMA, KAMA, VIDYA, McGinley, Guppy | 10 |
-| §2 Momentum / Oscillator | RSI, Stochastic, StochRSI, MACD(+Hist), PPO, TRIX, TSI, SMI, CMO, Williams %R, CCI, Ultimate Osc, AO, AC, Fisher, ConnorsRSI, QStick, Chande Forecast, DeMarker, DPO, Schaff TC, RVI(Ehlers), Laguerre RSI, PGO, KST, Coppock, Special K | 27 |
-| §3 Volatility | ATR, Bollinger Bands, %B, BandWidth, Keltner, Donchian, SuperTrend, Chandelier, Ulcer, RVI(Dorsey), Chaikin Vol, Mass Index | 12 |
+| §1 Trend / MA | DEMA, TEMA, T3, HMA, ZLEMA, ALMA, KAMA, VIDYA, McGinley, Guppy, TRIMA | 11 |
+| §2 Momentum / Oscillator | RSI, Stochastic Fast, Stochastic Slow, StochRSI, MACD(+Hist), PPO, APO, TRIX, TSI, SMI, CMO, Williams %R, CCI, Ultimate Osc, AO, AC, Fisher, ConnorsRSI, QStick, Chande Forecast, DeMarker, DPO, Schaff TC, RVI(Ehlers), Laguerre RSI, PGO, KST, Coppock, Special K, BOP, IMI | 31 |
+| §3 Volatility | ATR, NATR, Bollinger Bands, %B, BandWidth, Keltner, Donchian, SuperTrend, Chandelier, Ulcer, RVI(Dorsey), Chaikin Vol, Mass Index, Acceleration Bands | 14 |
 | §4 Volume | OBV, A/D Line, Chaikin Osc, CMF, MFI, Force Index, EMV, Klinger, NVI, PVI | 10 |
 | §5 Trend Strength | DMI/ADX 시스템, Vortex, Aroon, Choppiness, QQE, RWI | 6 |
 | §6 Bill Williams | Alligator, Fractals, Gator, Market Facilitation Index | 4 |
 | §7 Market Breadth | McClellan Osc, McClellan Summation, TRIN | 3 |
 | §8 Cycle / Ehlers | MAMA/FAMA, Center of Gravity, Roofing Filter, Sinewave/ITrend | 4 |
 | §9 기타 시스템 | Parabolic SAR, Ichimoku, Elder Ray, Elder Impulse, TD Sequential, Woodies CCI | 6 |
-| **합계** | | **82** |
+| **합계** | | **89** |
 
-> 세는 규칙 명시: 위 표는 "시스템/지표 단위"로 **82개**(10+27+12+10+6+4+3+4+6=82)를 수록한다.
-> - DMI/ADX를 구성요소(+DI, −DI, ADX, ADXR) 4개로 펼치면 +3 → 85
-> - Bollinger를 밴드 1개로 묶고 %B·BandWidth를 파생으로 빼면 −2 → 80
+> 세는 규칙 명시: 위 표는 "시스템/지표 단위"로 **89개**(11+31+14+10+6+4+3+4+6=89)를 수록한다.
+> - DMI/ADX를 구성요소(+DI, −DI, ADX, ADXR) 4개로 펼치면 +3 → 92
+> - Bollinger를 밴드 1개로 묶고 %B·BandWidth를 파생으로 빼면 −2 → 87
+> - Stochastic의 Fast와 Slow를 한 시스템으로 묶으면 −1 → 88 (§2.2는 둘을 별개로 세고 별개로 등록한다)
+> - ATR과 NATR을 한 항목으로 묶으면 −1 → 88 (§3.11은 NATR을 독립 지표로 센다)
 > - MACD와 MACD Histogram을 분리하면 +1
 >
 > **crypto 미수록(의도적 제외)**: Wilder의 Swing Index / ASI / CSI / Volatility Stop은 ★5이나 암호화폐 적용성이 낮아 제외했다. Swing Index·ASI는 "limit move" 파라미터가 무기한 시장에 정의되지 않고, Volatility Stop은 §3.5 Chandelier Exit(ATR 스톱)로 사실상 대체된다. 필요 시 별도 추가 가능.
@@ -881,8 +981,8 @@ graph LR
 1. J. Welles Wilder Jr., *New Concepts in Technical Trading Systems*, 1978. — RSI, ATR, ADX/DMI, Parabolic SAR, Wilder 평활
 2. Gerald Appel, *Technical Analysis: Power Tools for Active Investors*, 2005. — MACD
 3. John Bollinger, *Bollinger on Bollinger Bands*, 2001. — Bollinger Bands, %B, BandWidth
-4. Tushar Chande & Stanley Kroll, *The New Technical Trader*, 1994. — CMO, StochRSI, VIDYA, Aroon
-5. Perry Kaufman, *Trading Systems and Methods*. — KAMA(Adaptive MA)
+4. Tushar Chande & Stanley Kroll, *The New Technical Trader*, 1994. — CMO, StochRSI, VIDYA, Aroon, IMI
+5. Perry Kaufman, *Trading Systems and Methods*. — KAMA(Adaptive MA), 삼각가중(Triangular Weighting)
 6. John F. Ehlers, *Rocket Science for Traders*, 2001 / *Cybernetic Analysis for Stocks and Futures*, 2004 / *Cycle Analytics for Traders*, 2013. — Fisher, MAMA/FAMA, Laguerre RSI, RVI, CG, Roofing/Sinewave
 7. William Blau, *Momentum, Direction, and Divergence*, 1995. — TSI, SMI
 8. Martin Pring, *Technical Analysis Explained*. — KST, Special K
@@ -900,6 +1000,11 @@ graph LR
 20. Tom DeMark, *The New Science of Technical Analysis*, 1994. — TD Sequential, DeMarker
 21. Goichi Hosoda(一目山人), 1969. — Ichimoku Kinko Hyo
 22. **라이브러리 교차대조**: TA-Lib(ta-lib.org), pandas-ta(github.com/twopirllc/pandas-ta), Tulip Indicators(tulipindicators.org), TradingView Pine 내장 함수 문서.
+23. Igor Livshin, "Balance Of Power", *Technical Analysis of Stocks & Commodities* V.19:8, 2001년 8월, 18–32쪽. — BOP(§2.29). 축약형이 원문 전개형과 같음을 저자가 확인한 서신은 같은 잡지 2001년 10월 독자란.
+24. J. J. Payne, "A Better Way to Smooth Data", *Technical Analysis of Stocks & Commodities*, 1989년 10월. — 삼각가중(TRIMA, §1.11). 위 5번 Kaufman의 "Triangular Weighting" 절이 이 글을 1차 출처로 인용한다.
+25. John Forman, "Cross-Market Evaluations With Normalized Average True Range", *Technical Analysis of Stocks & Commodities* V.24:5, 2006년 5월, 60–63쪽. — NATR(§3.11)
+26. Price Headley, *Big Trends in Trading: Strategies to Master Major Market Moves*, Wiley, 2002, 7장. — Acceleration Bands(§3.12)
+27. Trading Technologies, X_STUDY "Absolute Price Oscillator" 정의 문서. — APO(§2.28). 원저자를 세울 수 있는 1차 출처가 아니라, 이동평균 종류를 사용자 파라미터로 남긴 문서화된 정의로서 인용한다. APO는 이 명세서에서 1차 출처가 없는 유일한 항목이다.
 
 ## §14. 부록 A — 추가 참조 프리미티브
 
