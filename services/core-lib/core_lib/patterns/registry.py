@@ -174,11 +174,37 @@ class PatternRegistry:
             raise KeyError(f"pattern is not registered: {name} {dict(params)}") from error
 
     def register(self, spec: PatternSpec) -> None:
-        """Register one immutable spec, rejecting an identity collision."""
+        """Register one immutable spec, rejecting collisions and warm-up drift."""
         key = self._key(spec.name, spec.params)
         if key in self._specs:
             raise ValueError(f"pattern already registered: {spec.identifier}")
+        self._assert_warmup_agrees(spec)
         self._specs[key] = spec
+
+    @staticmethod
+    def _assert_warmup_agrees(spec: PatternSpec) -> None:
+        """Reject a spec whose state disagrees with it about warm-up length.
+
+        `PatternSpec.min_history` is derived from §6's formula and decides how
+        much history a run fetches; the incremental state carries its own
+        `min_history` and decides when it calls itself warmed up. The two are
+        written in different places, so nothing but this check stops them from
+        drifting apart, and a drift surfaces later as a first valid bar that is
+        off by exactly the difference — the one-bar class of error the whole
+        warm-up derivation exists to prevent.
+
+        Registration is the right moment because it is the last point where both
+        numbers are visible and no run has fetched history yet. The indicator
+        side enforces the same agreement, but only through a test that sweeps the
+        registry; asserting here fails at construction instead of waiting for a
+        suite to be run.
+        """
+        state_min_history = spec.make_state().min_history
+        if state_min_history != spec.min_history:
+            raise ValueError(
+                f"{spec.identifier} declares min_history={spec.min_history} "
+                f"but its state declares {state_min_history}"
+            )
 
     def list(self) -> builtins.list[PatternSpec]:
         """Return all specs in deterministic identifier order."""

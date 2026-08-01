@@ -506,10 +506,15 @@ def _example_state() -> PatternState:
 
 
 class _ExampleState:
-    """A stand-in state used to exercise the spec and registry wiring."""
+    """A stand-in state used to exercise the spec and registry wiring.
 
-    def __init__(self) -> None:
-        self.min_history = 10
+    `min_history` is a constructor argument rather than a constant because the
+    registry now refuses a spec whose state disagrees with it about warm-up, and
+    a fixture that hardcoded one number could only ever match one shape of spec.
+    """
+
+    def __init__(self, min_history: int = 10) -> None:
+        self.min_history = min_history
         self._seen = 0
 
     @property
@@ -547,6 +552,13 @@ def make_spec(name: str = "pat_example", **overrides: object) -> PatternSpec:
         "_state_factory": _example_state,
     }
     fields.update(overrides)
+    if "_state_factory" not in overrides:
+        # Keep the stand-in state agreeing with whatever shape the spec takes.
+        expected = warmup.min_history_for(
+            int(fields["bar_count"]),  # type: ignore[call-overload]
+            requires_trend=bool(fields["requires_trend"]),
+        )
+        fields["_state_factory"] = lambda: _ExampleState(expected)
     return PatternSpec(**fields)  # type: ignore[arg-type]
 
 
@@ -554,6 +566,35 @@ def test_the_spec_derives_min_history_instead_of_declaring_it() -> None:
     """Check that §6's formula cannot be contradicted by a registration."""
     assert make_spec(bar_count=3, requires_trend=True).min_history == 12
     assert make_spec(bar_count=3, requires_trend=False).min_history == 3
+
+
+def test_registration_rejects_a_state_that_disagrees_about_warm_up() -> None:
+    """Check that spec and state cannot declare different warm-up lengths.
+
+    The spec's number decides how much history a run fetches and the state's
+    number decides when it reports itself warmed up. They live in different
+    places, so a drift between them shows up much later as a first valid bar
+    that is off by exactly the difference. Registration is the last moment where
+    both are visible, so it is where the disagreement has to be refused.
+    """
+
+    class _DriftingState(_ExampleState):
+        def __init__(self) -> None:
+            super().__init__()
+            self.min_history = 11
+
+    spec = make_spec(bar_count=1, requires_trend=True, _state_factory=_DriftingState)
+    assert spec.min_history == 10
+
+    registry = PatternRegistry()
+    with pytest.raises(ValueError, match="min_history"):
+        registry.register(spec)
+
+
+def test_registration_accepts_a_state_that_agrees_about_warm_up() -> None:
+    registry = PatternRegistry()
+    registry.register(make_spec(bar_count=1, requires_trend=True))
+    assert registry.names() == {"pat_example"}
 
 
 def test_the_spec_identifier_folds_in_its_parameters() -> None:
