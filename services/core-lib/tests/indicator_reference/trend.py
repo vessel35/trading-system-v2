@@ -23,6 +23,7 @@ IDENTIFIERS: frozenset[str] = frozenset(
         "McGinley Dynamic(period=21)",
         "T3(period=21,volume_factor=0.7)",
         "TEMA(period=21)",
+        "TRIMA(period=21)",
         "VIDYA(period=21,volatility_period=9)",
         "ZLEMA(period=21)",
     }
@@ -39,16 +40,17 @@ NAMES: frozenset[str] = frozenset(
         "McGinley Dynamic",
         "T3",
         "TEMA",
+        "TRIMA",
         "VIDYA",
         "ZLEMA",
     }
 )
 
-# How many of the standard's 82 systems the registrations above account for. It is
+# How many of the standard's 89 systems the registrations above account for. It is
 # one fewer than the number of names because §0.3 classifies EMA as a primitive and
-# leaves it outside the 82. With §1 fully implemented the trend category now covers
-# §1.1 through §1.10, which is ten of the 82.
-STANDARD_SYSTEMS = 10
+# leaves it outside the 89. With §1 fully implemented the trend category now covers
+# §1.1 through §1.11, which is eleven of the 89.
+STANDARD_SYSTEMS = 11
 
 UNDEFINED_OUTPUTS: dict[str, tuple[str, ...]] = {}
 
@@ -74,6 +76,17 @@ REFERENCE: dict[str, dict[int, float]] = {
     "T3(period=21,volume_factor=0.7)": {
         200: 96.07300441322712,
         299: 121.33156148404757,
+    },
+    # TA-Lib 0.7.1 `talib.TRIMA(close, timeperiod=21)`. The comparison also settles
+    # the split §1.11 prescribes for an even period, which the registered odd period
+    # never exercises: over these same candles TA-Lib's TRIMA at periods 4, 6 and 20
+    # equals the section's triangular weights `w_i = min(i + 1, n - i)` to within
+    # 1e-12, so TA-Lib reads an even period as `n/2` and `n/2 + 1` exactly as §1.11
+    # does, and not as the rejected `floor(n/2) + 1` on both sides.
+    "TRIMA(period=21)": {
+        100: 121.62540424737955,
+        200: 90.40897399300152,
+        299: 126.59292565890615,
     },
     # Tulip Indicators 0.4.0; neither TA-Lib nor ta implements the Hull average. A
     # period of 9 also removes the one place the two could legitimately disagree:

@@ -186,4 +186,40 @@ SPECS: tuple[IndicatorSpec, ...] = (
         _vectorized=partial(volatility.mass_index, period=9, sum_period=25),
         _state_factory=partial(volatility.MassIndexState, period=9, sum_period=25),
     ),
+    IndicatorSpec(
+        name="NATR",
+        params={"period": 14},
+        version="1.0.0",
+        pinned_impl=(
+            "technical_indicators_calc_spec.md §3.11 + §3.1 + §0.11 "
+            "(the registered ATR is smoothed first and only then divided by the "
+            "close, which is the order §3.11 insists on; a close of zero yields "
+            "the substitute 0 that §3.11 names, since a single-number output "
+            "cannot be exempted through undefined_outputs)"
+        ),
+        min_history=14,
+        category="volatility",
+        required_inputs=(),
+        _vectorized=partial(volatility.natr, period=14),
+        _state_factory=partial(volatility.NATRState, period=14),
+    ),
+    IndicatorSpec(
+        name="Acceleration Bands",
+        params={"period": 20},
+        version="1.0.0",
+        pinned_impl=(
+            "technical_indicators_calc_spec.md §3.12 + §0.2 "
+            "(the widening factor 4 is §3.12's own reduction of Headley's "
+            "1000-and-0.001 form, not a constant chosen here; period 20 is the "
+            "default the section states, with the 80 it also mentions left "
+            "unregistered; a bar whose high and low sum to zero takes the "
+            "substitute ratio 0 that §3.12 names, so it contributes its own "
+            "high and low with no widening term)"
+        ),
+        min_history=20,
+        category="volatility",
+        required_inputs=(),
+        _vectorized=partial(volatility.acceleration_bands, period=20),
+        _state_factory=partial(volatility.AccelerationBandsState, period=20),
+    ),
 )

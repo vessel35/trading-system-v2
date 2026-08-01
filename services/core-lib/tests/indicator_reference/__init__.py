@@ -4,7 +4,7 @@ Two kinds of statement live here, and both are written by hand rather than read 
 from the code they check.
 
 The first is what a category registers: its combination identifiers, its indicator
-names, how many of the standard's 82 systems those registrations account for, and any
+names, how many of the standard's 89 systems those registrations account for, and any
 output the standard itself leaves undefined. A pin that derived those from the registry
 would agree with any registry, so `test_indicator_registry.py` compares the merged
 hand-written statement against the live registry and fails on a silent addition or

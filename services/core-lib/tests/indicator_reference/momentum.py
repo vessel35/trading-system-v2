@@ -6,8 +6,10 @@
 # `core_lib/indicators/specs/momentum.py`, and doing only one of the two fails.
 IDENTIFIERS: frozenset[str] = frozenset(
     {
+        "APO(fast_period=12,moving_average='sma',slow_period=26)",
         "Accelerator Oscillator(fast_period=5,slow_period=34,smooth_period=5)",
         "Awesome Oscillator(fast_period=5,slow_period=34)",
+        "BOP(period=14)",
         "CCI(period=20)",
         "CMO(period=14)",
         "Center of Gravity(period=10)",
@@ -17,6 +19,7 @@ IDENTIFIERS: frozenset[str] = frozenset(
         "DPO(period=20)",
         "DeMarker(period=14)",
         "Fisher Transform(period=9)",
+        "IMI(period=14)",
         "KST",
         "Laguerre RSI(gamma=0.5)",
         "MACD(fast_period=12,signal_period=9,slow_period=26)",
@@ -28,6 +31,7 @@ IDENTIFIERS: frozenset[str] = frozenset(
         "SMI(long_period=25,period=13,short_period=13,signal_period=3)",
         "Schaff Trend Cycle(cycle_period=10,fast_period=23,slow_period=50)",
         "Stochastic RSI(rsi_period=14,smooth_d=3,smooth_k=3,stochastic_period=14)",
+        "Stochastic Slow(period=14,smooth_period=3)",
         "Stochastic(period=14,smooth_period=3)",
         "TRIX(period=15)",
         "TSI(long_period=25,short_period=13)",
@@ -38,8 +42,10 @@ IDENTIFIERS: frozenset[str] = frozenset(
 
 NAMES: frozenset[str] = frozenset(
     {
+        "APO",
         "Accelerator Oscillator",
         "Awesome Oscillator",
+        "BOP",
         "CCI",
         "CMO",
         "Center of Gravity",
@@ -49,6 +55,7 @@ NAMES: frozenset[str] = frozenset(
         "DPO",
         "DeMarker",
         "Fisher Transform",
+        "IMI",
         "KST",
         "Laguerre RSI",
         "MACD",
@@ -61,6 +68,7 @@ NAMES: frozenset[str] = frozenset(
         "Schaff Trend Cycle",
         "Stochastic",
         "Stochastic RSI",
+        "Stochastic Slow",
         "TRIX",
         "TSI",
         "Ultimate Oscillator",
@@ -68,11 +76,15 @@ NAMES: frozenset[str] = frozenset(
     }
 )
 
-# How many of the standard's 82 systems the registrations above account for. Every
-# momentum name is one of the 82, so the count equals the number of names. Center of
+# How many of the standard's 89 systems the registrations above account for. Every
+# momentum name is one of the 89, so the count equals the number of names. Center of
 # Gravity is one of them even though §11 files it under §8 Cycle rather than under §2:
-# its calculation carries no phase pipeline, so it is registered here.
-STANDARD_SYSTEMS = 27
+# its calculation carries no phase pipeline, so it is registered here. Stochastic and
+# Stochastic Slow are two of them rather than one, which is why they carry separate
+# names: §2.2 counts the fast and the slow form as separate systems and §11 gives them
+# a row each, so a second parameter combination under the one name would have left the
+# count short by one.
+STANDARD_SYSTEMS = 31
 
 UNDEFINED_OUTPUTS: dict[str, tuple[str, ...]] = {}
 
@@ -90,6 +102,47 @@ REFERENCE: dict[str, dict[int, float]] = {
         100: 16.81693187062552,
         200: 94.98993171268778,
         299: 94.5198296360486,
+    },
+    # TA-Lib `STOCH` with both smoothing types left at 0, its simple average, which is
+    # what §2.2 writes for the slow form. Its `slowk` output repeating the fast form's
+    # `percent_d` above is the section's own statement that Slow %K is SMA(%K_raw, 3);
+    # the outside implementation reproduces the shared part rather than agreeing by
+    # coincidence.
+    "Stochastic Slow(period=14,smooth_period=3).percent_k": {
+        100: 16.81693187062552,
+        200: 94.98993171268778,
+        299: 94.5198296360486,
+    },
+    "Stochastic Slow(period=14,smooth_period=3).percent_d": {
+        100: 13.271154782317765,
+        200: 94.1920542618875,
+        299: 95.141646631846,
+    },
+    # TA-Lib `APO` with matype 0, its simple average, which is §2.28's default. Both
+    # averages here are simple, so no seed convention separates the two
+    # implementations and the values agree outright rather than converging.
+    "APO(fast_period=12,moving_average='sma',slow_period=26)": {
+        100: -12.233083550113264,
+        200: -1.655007703166163,
+        299: 14.38920123588639,
+    },
+    # TA-Lib `SMA` of TA-Lib `BOP` over 14. TA-Lib's own BOP publishes only the raw
+    # per-bar ratio, while §2.29's line is that ratio smoothed by a 14-bar simple
+    # average, so the smoothing is composed from a second TA-Lib call rather than
+    # taken from ours. The raw ratio was checked on its own at the same bars and
+    # agrees to floating point: 0.2698273424439349, 0.5260783445951543, and
+    # -0.1033960641356627.
+    "BOP(period=14)": {
+        100: -0.1794589278315722,
+        200: 0.321284890719359,
+        299: 0.33068976584693877,
+    },
+    # TA-Lib `IMI`. Tulip 0.4.0 has no Intraday Momentum Index and neither does
+    # ta 0.11.0, so TA-Lib is the only comparison, and it is a direct one.
+    "IMI(period=14)": {
+        100: 13.867559056816777,
+        200: 95.8804894872111,
+        299: 98.16683449496749,
     },
     # Tulip Indicators 0.4.0, also named by §13. TA-Lib has no Awesome Oscillator.
     "Awesome Oscillator(fast_period=5,slow_period=34)": {

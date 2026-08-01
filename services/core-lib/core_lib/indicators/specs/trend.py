@@ -152,4 +152,21 @@ SPECS: tuple[IndicatorSpec, ...] = (
         _vectorized=trend.guppy_gmma,
         _state_factory=trend.GuppyGMMAState,
     ),
+    IndicatorSpec(
+        name="TRIMA",
+        params={"period": 21},
+        version="1.0.0",
+        pinned_impl=(
+            "technical_indicators_calc_spec.md §1.11 (SMA(SMA(P, n1), n2); 21 is odd, "
+            "so the section's odd branch applies and n1 = n2 = 11 rather than the even "
+            "branch's n/2 and n/2 + 1. The section names no default period, so a single "
+            "combination is registered and 21 follows DEMA, TEMA, ZLEMA and VIDYA in "
+            "this category)"
+        ),
+        min_history=21,
+        category="trend",
+        required_inputs=(),
+        _vectorized=partial(trend.trima, period=21),
+        _state_factory=partial(trend.TRIMAState, period=21),
+    ),
 )

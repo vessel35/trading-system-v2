@@ -574,6 +574,10 @@ MOMENTUM_FOLLOW_UP = (
     "Laguerre RSI(gamma=0.5)",
     "Pretty Good Oscillator(period=89)",
     "Center of Gravity(period=10)",
+    "Stochastic Slow(period=14,smooth_period=3)",
+    "APO(fast_period=12,moving_average='sma',slow_period=26)",
+    "BOP(period=14)",
+    "IMI(period=14)",
 )
 
 
@@ -1129,3 +1133,314 @@ def test_volume_and_strength_outputs_never_depend_on_a_later_candle() -> None:
         assert len(prefix) == prefix_length
         for expected, actual in zip(full[:prefix_length], prefix, strict=True):
             assert_value_equal(expected, actual)
+
+
+def test_trima_matches_the_triangular_weights_the_standard_gives_as_equivalent() -> None:
+    """§1.11's two expressions must produce the same number.
+
+    The section writes the triangular average twice, once as two overlapping
+    simple averages and once as a weighted sum with weights
+    `w_i = min(i + 1, n - i)`, and calls them the same value. The implementation
+    only builds the first form, so this states the second one as a result rather
+    than as a comment. It also pins the split for an even period: the rejected
+    reading, which uses `floor(n/2) + 1` on both sides, stretches the window to
+    `n + 1` candles and would fail both the weight comparison and the warm-up
+    assertion below.
+    """
+
+    candles = make_candles(120)
+    closes = [candle.close for candle in candles]
+    for period in (4, 5, 6, 20, 21):
+        weights = [float(min(index + 1, period - index)) for index in range(period)]
+        total = sum(weights)
+        produced = trend.trima(candles, period)
+        assert len(produced) == len(candles)
+        # §1.11 gives the same warm-up as a simple average over the same window.
+        assert all(isnan(value) for value in produced[: period - 1])
+        assert not isnan(produced[period - 1])
+        for index in range(period - 1, len(candles)):
+            window = closes[index - period + 1 : index + 1]
+            expected = sum(weight * close for weight, close in zip(weights, window, strict=True))
+            assert produced[index] == pytest.approx(expected / total, rel=1e-12, abs=1e-12)
+
+
+def test_natr_smooths_the_true_range_before_it_divides_by_the_close() -> None:
+    """§3.11 fixes the order of its two steps and says the reverse order differs.
+
+    The section states the order as a warning that stands apart from the formula:
+    normalizing each bar's True Range against its close first and smoothing the
+    result afterwards "is not Forman's definition and the value differs too". Both
+    halves are checked here. The first is that our series is the registered ATR
+    divided by the close of the very bar it sits on, which also pins the warm-up
+    to ATR's own. The second is that the order-swapped quantity is a different
+    series, so the first assertion cannot be satisfied by accident.
+    """
+    candles = make_candles(240)
+    period = 14
+    ranges = DEFAULT_REGISTRY.get("ATR", {"period": period}).compute_vectorized(candles)
+    values = DEFAULT_REGISTRY.get("NATR", {"period": period}).compute_vectorized(candles)
+
+    for candle, average_range, value in zip(candles, ranges, values, strict=True):
+        assert isinstance(average_range, float)
+        assert isinstance(value, float)
+        if isnan(average_range):
+            assert isnan(value)
+            continue
+        assert value == pytest.approx(100.0 * average_range / candle.close)
+
+    normalized_first = primitives.rma(
+        [
+            100.0 * true_range / candle.close
+            for true_range, candle in zip(primitives.tr(candles), candles, strict=True)
+        ],
+        period,
+    )
+    assert any(
+        not isnan(swapped) and swapped != pytest.approx(value)
+        for swapped, value in zip(normalized_first, values, strict=True)
+    )
+
+
+def test_acceleration_band_ratio_is_half_the_range_taken_over_the_midpoint() -> None:
+    """§3.12 writes the same widening two ways, and both must build one band.
+
+    The formula block divides each bar's range by `H + L`. A separate sentence
+    says that ratio is half of the range taken over the midpoint `HL2`, which is
+    the shape Headley's original used before the standard reduced it. Rebuilding
+    the two outer bands through the registered `hl2` states that equivalence as a
+    result instead of leaving it as a remark, and it is what would fail first if
+    the widening factor drifted away from the one §3.12 derives.
+    """
+    candles = make_candles(240)
+    period = 20
+    widened_highs: list[float] = []
+    widened_lows: list[float] = []
+    for candle, midpoint in zip(candles, primitives.hl2(candles), strict=True):
+        share = (candle.high - candle.low) / midpoint
+        widened_highs.append(candle.high * (1.0 + 2.0 * share))
+        widened_lows.append(candle.low * (1.0 - 2.0 * share))
+    expected_upper = primitives.sma(widened_highs, period)
+    expected_lower = primitives.sma(widened_lows, period)
+
+    bands = DEFAULT_REGISTRY.get("Acceleration Bands", {"period": period}).compute_vectorized(
+        candles
+    )
+    for band, upper, lower in zip(bands, expected_upper, expected_lower, strict=True):
+        assert isinstance(band, dict)
+        if isnan(band["middle"]):
+            assert isnan(upper) and isnan(lower)
+            continue
+        assert band["upper"] == pytest.approx(upper)
+        assert band["lower"] == pytest.approx(lower)
+
+
+def test_acceleration_bands_push_outward_from_the_high_and_the_low_they_start_from() -> None:
+    """§3.12 says the two sides are generally not equidistant from the middle.
+
+    That is a consequence of where each side starts: the upper band widens a high
+    upward and the lower band widens a low downward, rather than both stepping the
+    same distance away from the average close. So each band sits outside the plain
+    average of the price it grew from, the three lines stay in order, and the two
+    distances to the middle disagree — which is the sentence the section closes on
+    and the reason it declines to follow Headley's own equidistant description.
+    """
+    candles = make_candles(240)
+    period = 20
+    average_highs = primitives.sma([candle.high for candle in candles], period)
+    average_lows = primitives.sma([candle.low for candle in candles], period)
+    bands = DEFAULT_REGISTRY.get("Acceleration Bands", {"period": period}).compute_vectorized(
+        candles
+    )
+
+    asymmetric = False
+    for band, average_high, average_low in zip(bands, average_highs, average_lows, strict=True):
+        assert isinstance(band, dict)
+        if isnan(band["middle"]):
+            continue
+        assert band["upper"] >= average_high
+        assert band["lower"] <= average_low
+        assert band["upper"] >= band["middle"] >= band["lower"]
+        if band["upper"] - band["middle"] != pytest.approx(band["middle"] - band["lower"]):
+            asymmetric = True
+    assert asymmetric
+
+
+def test_natr_and_acceleration_bands_hold_the_substitutes_their_sections_name() -> None:
+    """A zero divisor is unreachable through a `Candle`, so the two terms are called directly.
+
+    `Candle.validate` rejects a non-positive price, so no candle can close at zero
+    and none can have a high and a low that sum to zero. The substitutes §3.11 and
+    §3.12 write down are part of the contract even so: NATR reports a single number
+    and the engine's finiteness check can exempt only a named key, and the three
+    Acceleration Bands keys are all expected to be finite once warm-up is over, so
+    neither indicator may answer NaN there. Calling the two terms directly is the
+    only way to hold them, and it is what catches a substitute being dropped or
+    quietly replaced with a number the standard does not name.
+    """
+    zero_close = make_candles(1)[0]
+    zero_close.close = 0.0
+    with pytest.raises(ValueError, match="positive"):
+        zero_close.validate()
+
+    # §3.11: "분모 0(`C_t = 0`) ... 결과를 `0`으로 둔다". Warm-up still carries NaN,
+    # which the section says it inherits from ATR unchanged.
+    assert volatility._normalized_range(5.0, 0.0) == 0.0
+    assert isnan(volatility._normalized_range(float("nan"), 100.0))
+
+    # §3.12: "분모 0(`H_t + L_t = 0`) ... `Ratio_t`를 `0`으로 둔다", so that bar
+    # contributes its own high and its own low with no widening term at all.
+    assert volatility._acceleration_ratio(0.0, 0.0) == 0.0
+    assert volatility._acceleration_ratio(12.0, 8.0) == pytest.approx(4.0 / 20.0)
+
+
+def make_rising_body_candles(count: int = 40) -> list[Candle]:
+    """Build a stream that closes above its open on every bar."""
+    start = datetime(2025, 1, 1, tzinfo=UTC)
+    return [
+        Candle(
+            symbol="BTCUSDT",
+            exchange="BINANCE",
+            timeframe="1h",
+            open_time=start + timedelta(hours=index),
+            close_time=start + timedelta(hours=index + 1),
+            open=100.0 + index,
+            high=101.5 + index,
+            low=99.5 + index,
+            close=101.0 + index,
+            volume=1_000.0 + index,
+            quote_volume=None,
+            trade_count=None,
+        )
+        for index in range(count)
+    ]
+
+
+def test_momentum_wave_four_satisfy_their_standard_relations() -> None:
+    """Check the four §2 additions against relations their sections state apart.
+
+    Each assertion below is written in the standard separately from the formula,
+    so none of them re-derives the calculation it checks. The two degenerate cases
+    matter most: both indicators publish a plain number rather than named outputs,
+    so `IndicatorSpec.undefined_outputs` cannot excuse a NaN for either, and the
+    engine rejects a non-finite value once warm-up is over. Stating the substitute
+    here is what keeps that from being discovered during a run.
+    """
+
+    candles = make_candles(300)
+
+    # §2.2: the slow form's %K is the fast form's %D, which is why this
+    # registration consumes that value instead of smoothing %K_raw a second time.
+    fast = momentum.stochastic(candles, 14, 3)
+    slow = momentum.stochastic_slow(candles, 14, 3)
+    for fast_value, slow_value in zip(fast, slow, strict=True):
+        if isnan(fast_value["percent_d"]):
+            assert isnan(slow_value["percent_k"])
+            continue
+        assert slow_value["percent_k"] == fast_value["percent_d"]
+
+    # §2.28 states the consequence of choosing the exponential average at 12 and
+    # 26 outright: the result is the §2.4 MACD line value for value. Holding the
+    # standard to its own statement is also what shows the moving-average
+    # parameter reaches the primitives rather than being decorative.
+    exponential = momentum.apo(candles, 12, 26, "ema")
+    for line, expected in zip(exponential, momentum.macd(candles, 12, 26, 9), strict=True):
+        if isnan(line):
+            assert isnan(expected["macd"])
+            continue
+        assert line == pytest.approx(expected["macd"], rel=1e-12, abs=1e-12)
+
+    # §2.29 bounds the raw ratio by -1 and +1, so its 14-bar average is bounded
+    # the same way.
+    for balance in momentum.bop(candles, 14):
+        if not isnan(balance):
+            assert -1.0 <= balance <= 1.0
+
+    # §2.30 reads a share of one window's total movement, so it stays inside 0
+    # and 100, and reaches each end only when one side of the window is empty.
+    for intraday in momentum.imi(candles, 14):
+        if not isnan(intraday):
+            assert 0.0 <= intraday <= 100.0
+    assert momentum.imi(make_rising_body_candles(40), 14)[-1] == 100.0
+    assert momentum.imi(make_declining_candles(40), 14)[-1] == 0.0
+
+    # A bar whose high equals its low leaves §2.29 without a range to divide by,
+    # and a window whose bars all close at their open leaves §2.30 without either
+    # side of its ratio. Both sections name the substitute, and both paths have to
+    # produce it rather than a NaN the engine would reject.
+    flat = make_flat_candles(40)
+    assert momentum.bop(flat, 14)[-1] == 0.0
+    assert momentum.imi(flat, 14)[-1] == 50.0
+    balance_state = momentum.BOPState(period=14)
+    balance_state.seed(flat)
+    assert balance_state.current() == 0.0
+    intraday_state = momentum.IMIState(period=14)
+    intraday_state.seed(flat)
+    assert intraday_state.current() == 50.0
+
+
+# Fourteen bodies whose 14-bar average does not divide cleanly into its own
+# hundredfold. They were found by searching the same construction the helper
+# below builds, so the arithmetic they provoke is the arithmetic §2.30 runs.
+IMI_BODIES_ROUNDING_BELOW = (
+    28.469411, 1.60938, 37.337144, 17.459911, 3.239128, 14.763275, 12.76639,
+    47.703338, 18.259053, 15.106018, 18.600859, 47.398386, 32.053645, 31.432765,
+)  # fmt: skip
+IMI_BODIES_ROUNDING_ABOVE = (
+    42.425805, 17.773315, 13.28368, 30.242778, 22.673388, 9.566155, 24.109645,
+    21.085364, 28.886524, 25.921406, 16.260854, 18.500432, 42.045398, 13.295701,
+)  # fmt: skip
+
+
+def make_uneven_body_candles(bodies: Sequence[float]) -> list[Candle]:
+    """Build one bar per body, closing that far from its open and nowhere else."""
+    start = datetime(2025, 1, 1, tzinfo=UTC)
+    candles = []
+    for index, body in enumerate(bodies):
+        opening = 1_000.0 + index
+        closing = opening + body
+        candles.append(
+            Candle(
+                symbol="BTCUSDT",
+                exchange="BINANCE",
+                timeframe="1h",
+                open_time=start + timedelta(hours=index),
+                close_time=start + timedelta(hours=index + 1),
+                open=opening,
+                high=max(opening, closing) + 0.5,
+                low=min(opening, closing) - 0.5,
+                close=closing,
+                volume=1_000.0 + index,
+                quote_volume=None,
+                trade_count=None,
+            )
+        )
+    return candles
+
+
+@pytest.mark.parametrize("bodies", (IMI_BODIES_ROUNDING_BELOW, IMI_BODIES_ROUNDING_ABOVE))
+def test_imi_returns_the_substitutes_2_30_names_when_one_side_is_empty(
+    bodies: tuple[float, ...],
+) -> None:
+    """§2.30 names 100 for an empty loss side and 0 for an empty gain side.
+
+    What has to be checked is the substitute rather than the ratio, so the window
+    is built to empty one side of it: fourteen bars that never close below their
+    open, and then the same fourteen mirrored. Leaving the empty-loss end to
+    `100 * up / (up + 0)` does not reach 100, because the multiplication rounds
+    before the division; the two windows here are chosen so that it lands one unit
+    in the last place below 100 and one above, and the second of those also leaves
+    the 0-100 range §2.30 states. A stream of equal bodies hides this, which is why
+    the bodies are uneven. Both paths are asserted because they share `_imi_value`.
+    """
+
+    rising = make_uneven_body_candles(bodies)
+    assert momentum.imi(rising, 14)[-1] == 100.0
+    rising_state = momentum.IMIState(period=14)
+    rising_state.seed(rising)
+    assert rising_state.current() == 100.0
+
+    falling = make_uneven_body_candles([-body for body in bodies])
+    assert momentum.imi(falling, 14)[-1] == 0.0
+    falling_state = momentum.IMIState(period=14)
+    falling_state.seed(falling)
+    assert falling_state.current() == 0.0

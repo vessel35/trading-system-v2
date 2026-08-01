@@ -36,9 +36,9 @@ NAMES: frozenset[str] = frozenset(
     }
 )
 
-# How many of the standard's 82 systems the registrations above account for. It is
+# How many of the standard's 89 systems the registrations above account for. It is
 # one fewer than the number of names because §0.2 treats Volume SMA as a primitive
-# input and leaves it outside the 82. With §4.5, §4.7, §4.8, §4.9 and §4.10 added,
+# input and leaves it outside the 89. With §4.5, §4.7, §4.8, §4.9 and §4.10 added,
 # every volume indicator the standard specifies is now registered.
 STANDARD_SYSTEMS = 10
 

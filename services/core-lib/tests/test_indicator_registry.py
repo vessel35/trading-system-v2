@@ -135,7 +135,7 @@ def test_the_registry_is_exactly_the_six_category_modules_gathered() -> None:
     assert {spec.category for spec in DEFAULT_REGISTRY.list()} <= set(CATEGORIES)
 
 
-def test_follow_up_catalog_preserves_all_76_not_yet_registered_items() -> None:
+def test_follow_up_catalog_preserves_all_8_not_yet_registered_items() -> None:
     follow_up = (
         trend.FOLLOW_UP_INDICATORS
         + momentum.FOLLOW_UP_INDICATORS
@@ -148,14 +148,14 @@ def test_follow_up_catalog_preserves_all_76_not_yet_registered_items() -> None:
         + systems.FOLLOW_UP_INDICATORS
         + donchian.FOLLOW_UP_INDICATORS
     )
-    # The standard carries 82 systems, and the registered ones plus this catalog must
-    # account for all of them. How many of the 82 a category has taken is stated in
+    # The standard carries 89 systems, and the registered ones plus this catalog must
+    # account for all of them. How many of the 89 a category has taken is stated in
     # that category's own module, so implementing an indicator moves one number in one
     # owner's file instead of a shared constant here. The counts differ from the
     # number of registered names where the standard says they should: EMA and Volume
-    # SMA are §0 primitives outside the 82, and Bollinger Bands is counted there as
+    # SMA are §0 primitives outside the 89, and Bollinger Bands is counted there as
     # three systems rather than one.
-    assert len(follow_up) == 82 - REGISTERED_STANDARD_SYSTEMS
+    assert len(follow_up) == 89 - REGISTERED_STANDARD_SYSTEMS
     assert len(set(follow_up)) == len(follow_up)
 
 

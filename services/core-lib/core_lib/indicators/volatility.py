@@ -30,8 +30,16 @@ KeltnerValue = dict[str, float]
 DonchianValue = dict[str, float]
 SuperTrendValue = dict[str, float]
 ChandelierValue = dict[str, float]
+AccelerationBandsValue = dict[str, float]
 
 FOLLOW_UP_INDICATORS: tuple[str, ...] = ()
+
+# §3.12's widening factor. The section derives it from Headley's original
+# `high · (1 + 2·(((H − L)/((H + L)/2))·1000)·0.001)`: the thousand and the
+# `factor` default of 0.001 cancel, and dividing by the midpoint instead of by
+# the sum doubles the ratio once more, so a ratio taken over `H + L` carries a
+# factor of four. The number is the standard's, reduced there rather than here.
+ACCELERATION_BAND_FACTOR = 4.0
 
 # §3.4 names two trend states and no numbers for them, so the two states are
 # mapped onto the two signs of one output rather than onto invented labels: the
@@ -890,3 +898,163 @@ class MassIndexState:
 
     def current(self) -> float:
         return self._value
+
+
+def _normalized_range(average_range: float, close: float) -> float:
+    """Return one bar's ATR restated as a percentage of its close (§3.11)."""
+    # §3.11 fixes the substitute for a zero close at 0 and says why: a candle
+    # closing at zero does not occur in real quotes, so the value exists only to
+    # keep the series computable. NaN is not available as the answer here, since
+    # this indicator reports a single number and the engine's finiteness check
+    # can exempt only a named key of a dict output.
+    return 100.0 * safe_divide(average_range, close, on_zero=0.0)
+
+
+def natr(candles: Sequence[Candle], period: int = 14) -> list[float]:
+    """Compute ATR as a percentage of the close (§3.11).
+
+    §3.11 fixes the order of the two steps: True Range is smoothed over `period`
+    bars first and only the finished ATR is divided by the current close.
+    Normalizing each bar's True Range before smoothing is a different quantity
+    and is not what Forman defined, so `atr` above is consumed whole rather than
+    rebuilt from a pre-divided range.
+    """
+    if period <= 0:
+        raise ValueError("period must be positive")
+    return [
+        _normalized_range(average_range, candle.close)
+        for average_range, candle in zip(atr(candles, period), candles, strict=True)
+    ]
+
+
+@dataclass(slots=True)
+class NATRState:
+    """O(1)-per-candle NATR state over the registered ATR (§3.11)."""
+
+    period: int = 14
+    min_history: int = field(init=False)
+    _range: ATRState = field(init=False)
+    _value: float = field(init=False, default=NAN)
+
+    def __post_init__(self) -> None:
+        if self.period <= 0:
+            raise ValueError("period must be positive")
+        # The division adds no history of its own: it reads the close of the very
+        # bar whose ATR it normalizes, so warm-up is ATR's warm-up unchanged.
+        self.min_history = self.period
+        self._range = ATRState(self.period)
+
+    @property
+    def warmed_up(self) -> bool:
+        return self._range.warmed_up
+
+    def seed(self, candles: Sequence[Candle]) -> None:
+        self._range.seed(())
+        self._value = NAN
+        for candle in candles:
+            self.update(candle)
+
+    def update(self, candle: Candle) -> float:
+        self._value = _normalized_range(self._range.update(candle), candle.close)
+        return self._value
+
+    def current(self) -> float:
+        return self._value
+
+
+def _acceleration_ratio(high: float, low: float) -> float:
+    """Return one bar's range as a share of its high plus low (§3.12)."""
+    # §3.12 fixes the substitute at 0 when the two prices sum to zero. The bar
+    # then enters the two averages as its own high and its own low, with no term
+    # widening the bands, which is exactly what a ratio of zero produces.
+    return safe_divide(high - low, high + low, on_zero=0.0)
+
+
+def acceleration_bands(
+    candles: Sequence[Candle],
+    period: int = 20,
+) -> list[AccelerationBandsValue]:
+    """Compute Headley's Acceleration Bands (§3.12).
+
+    Each bar's range is expressed as a share of its own price level, so the same
+    absolute range widens the bands more at a low price than at a high one. The
+    bands are the averages of the widened highs and lows, not the average price
+    plus a symmetric width, which is why §3.12 records that the two sides are
+    generally not equidistant from the middle line.
+    """
+    if period <= 0:
+        raise ValueError("period must be positive")
+    ratios = [_acceleration_ratio(candle.high, candle.low) for candle in candles]
+    highs = sma(
+        [
+            candle.high * (1.0 + ACCELERATION_BAND_FACTOR * ratio)
+            for candle, ratio in zip(candles, ratios, strict=True)
+        ],
+        period,
+    )
+    middles = sma([candle.close for candle in candles], period)
+    lows = sma(
+        [
+            candle.low * (1.0 - ACCELERATION_BAND_FACTOR * ratio)
+            for candle, ratio in zip(candles, ratios, strict=True)
+        ],
+        period,
+    )
+    return [
+        {"upper": NAN, "middle": NAN, "lower": NAN}
+        if isnan(middle)
+        else {"upper": upper, "middle": middle, "lower": lower}
+        for upper, middle, lower in zip(highs, middles, lows, strict=True)
+    ]
+
+
+@dataclass(slots=True)
+class AccelerationBandsState:
+    """O(1)-per-candle Acceleration Bands state over three rolling averages."""
+
+    period: int = 20
+    min_history: int = field(init=False)
+    _upper: SmaState = field(init=False)
+    _middle: SmaState = field(init=False)
+    _lower: SmaState = field(init=False)
+    _value: AccelerationBandsValue = field(
+        init=False,
+        default_factory=lambda: {"upper": NAN, "middle": NAN, "lower": NAN},
+    )
+
+    def __post_init__(self) -> None:
+        if self.period <= 0:
+            raise ValueError("period must be positive")
+        # All three averages read the same bar and share one window, so the whole
+        # band is defined as soon as that window is full.
+        self.min_history = self.period
+        self._upper = SmaState(self.period)
+        self._middle = SmaState(self.period)
+        self._lower = SmaState(self.period)
+
+    @property
+    def warmed_up(self) -> bool:
+        return not isnan(self._value["middle"])
+
+    def seed(self, candles: Sequence[Candle]) -> None:
+        self._upper.reset()
+        self._middle.reset()
+        self._lower.reset()
+        self._value = {"upper": NAN, "middle": NAN, "lower": NAN}
+        for candle in candles:
+            self.update(candle)
+
+    def update(self, candle: Candle) -> AccelerationBandsValue:
+        ratio = _acceleration_ratio(candle.high, candle.low)
+        upper = self._upper.update(candle.high * (1.0 + ACCELERATION_BAND_FACTOR * ratio))
+        middle = self._middle.update(candle.close)
+        lower = self._lower.update(candle.low * (1.0 - ACCELERATION_BAND_FACTOR * ratio))
+        self._value = (
+            {"upper": NAN, "middle": NAN, "lower": NAN}
+            if isnan(middle)
+            else {"upper": upper, "middle": middle, "lower": lower}
+        )
+        return self.current()
+
+    def current(self) -> AccelerationBandsValue:
+        return dict(self._value)

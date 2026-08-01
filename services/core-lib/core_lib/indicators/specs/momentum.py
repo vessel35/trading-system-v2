@@ -488,4 +488,101 @@ SPECS: tuple[IndicatorSpec, ...] = (
         _vectorized=partial(momentum.center_of_gravity, period=10),
         _state_factory=partial(momentum.CenterOfGravityState, period=10),
     ),
+    IndicatorSpec(
+        name="Stochastic Slow",
+        params={"period": 14, "smooth_period": 3},
+        version="1.0.0",
+        pinned_impl=(
+            "technical_indicators_calc_spec.md §2.2 "
+            "(Slow %K = SMA(%K_raw,3), Slow %D = SMA(Slow %K,3)). Registered under "
+            "a name of its own rather than as another parameter combination of the "
+            "existing Stochastic: §2.2 says the fast and slow forms are separate "
+            "indicators that merely share the %K_raw part, and §11 counts them as "
+            "two of the 89 systems, which a second combination under one name would "
+            "not reproduce. The already registered Stochastic(period=14,"
+            "smooth_period=3) is §11's Stochastic Fast row and keeps its name and "
+            "its identifier unchanged; this registration is §11's Stochastic Slow "
+            "row. Slow %K is computed by consuming the fast form's %D, the same "
+            "value by §2.2's own definition."
+        ),
+        min_history=18,
+        category="momentum",
+        required_inputs=(),
+        _vectorized=partial(momentum.stochastic_slow, period=14, smooth_period=3),
+        _state_factory=partial(momentum.StochasticSlowState, period=14, smooth_period=3),
+    ),
+    IndicatorSpec(
+        name="APO",
+        params={"fast_period": 12, "slow_period": 26, "moving_average": "sma"},
+        version="1.0.0",
+        pinned_impl=(
+            "technical_indicators_calc_spec.md §2.28 "
+            "(MA(C,12) - MA(C,26) in price units). The kind of moving average is "
+            "part of the registered identity because §2.28 defines the indicator as "
+            "the general difference of two averages and leaves the kind to the "
+            "caller. The combination registered here is the section's own default, "
+            "the simple average, and the section states why it is not the "
+            "exponential one: EMA at 12 and 26 makes this value identical to the "
+            "§2.4 MACD line, so that combination is reached through MACD rather "
+            "than registered twice. No division appears in the formula, so there is "
+            "no zero-denominator case, and warm-up is the slow average's own 26."
+        ),
+        min_history=26,
+        category="momentum",
+        required_inputs=(),
+        _vectorized=partial(
+            momentum.apo,
+            fast_period=12,
+            slow_period=26,
+            moving_average="sma",
+        ),
+        _state_factory=partial(
+            momentum.APOState,
+            fast_period=12,
+            slow_period=26,
+            moving_average="sma",
+        ),
+    ),
+    IndicatorSpec(
+        name="BOP",
+        params={"period": 14},
+        version="1.0.0",
+        pinned_impl=(
+            "technical_indicators_calc_spec.md §2.29 "
+            "(SMA((C-O)/(H-L), 14)). The section adopts Livshin's short form and "
+            "keeps the six bull-and-bear terms only as an explanation, because the "
+            "two are algebraically the same expression rather than an approximation "
+            "of each other. A bar whose high equals its low gives a zero "
+            "denominator, and because the output is a plain number it cannot be "
+            "excused through undefined_outputs; §2.29 fixes 0 for that bar, which "
+            "is also the numerator's value there, since such a bar has its open and "
+            "its close at the same price and neither side moved it. That is the "
+            "convention §4.2 already applies to a collapsed range."
+        ),
+        min_history=14,
+        category="momentum",
+        required_inputs=(),
+        _vectorized=partial(momentum.bop, period=14),
+        _state_factory=partial(momentum.BOPState, period=14),
+    ),
+    IndicatorSpec(
+        name="IMI",
+        params={"period": 14},
+        version="1.0.0",
+        pinned_impl=(
+            "technical_indicators_calc_spec.md §2.30 "
+            "(100 * ISup / (ISup + ISdown) over 14 unsmoothed open-to-close "
+            "bodies). Both sums empty together only when every bar in the window "
+            "closed exactly at its open, and the output is a plain number that "
+            "undefined_outputs cannot excuse, so §2.30's substitute is used: the "
+            "neutral 50, no pressure standing on either side. The section's other "
+            "two answers, 100 with no losses and 0 with no gains, follow from the "
+            "arithmetic itself and need no substitute."
+        ),
+        min_history=14,
+        category="momentum",
+        required_inputs=(),
+        _vectorized=partial(momentum.imi, period=14),
+        _state_factory=partial(momentum.IMIState, period=14),
+    ),
 )

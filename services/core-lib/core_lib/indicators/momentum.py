@@ -1,7 +1,7 @@
 """Define required momentum indicators and the follow-up momentum catalog."""
 
 from collections import deque
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from math import isnan, log
 from typing import ClassVar
@@ -2304,6 +2304,309 @@ class CenterOfGravityState:
             self._value = NAN
             return self.current()
         self._value = _center_of_gravity_value(self._window, self.period)
+        return self.current()
+
+    def current(self) -> float:
+        return self._value
+
+
+def stochastic_slow(
+    candles: Sequence[Candle],
+    period: int = 14,
+    smooth_period: int = 3,
+) -> list[StochasticValue]:
+    """Compute slow Stochastic %K and %D (§2.2).
+
+    §2.2 writes Slow %K as `SMA(%K_raw, 3)`, which is the very line the fast form
+    already publishes as its %D, and Slow %D as that line smoothed once more. So
+    the fast calculation above is consumed rather than repeated: the rolling
+    high-low window, the flat-range convention, and the first smoothing all stay
+    written once. The section is explicit that sharing `%K_raw` is a sharing of
+    calculation and not a reason to merge the two into one indicator, because the
+    pair of lines each one publishes differs.
+    """
+
+    fast = stochastic(candles, period, smooth_period)
+    percent_k = [value["percent_d"] for value in fast]
+    percent_d = sma(percent_k, smooth_period)
+    return [
+        {"percent_k": current_k, "percent_d": current_d}
+        for current_k, current_d in zip(percent_k, percent_d, strict=True)
+    ]
+
+
+@dataclass(slots=True)
+class StochasticSlowState:
+    """O(1)-per-candle slow Stochastic state layered on the fast state."""
+
+    period: int = 14
+    smooth_period: int = 3
+    min_history: int = field(init=False)
+    _fast: StochasticState = field(init=False)
+    _smoothed: SmaState = field(init=False)
+    _value: StochasticValue = field(
+        init=False,
+        default_factory=lambda: {"percent_k": NAN, "percent_d": NAN},
+    )
+
+    def __post_init__(self) -> None:
+        if self.period <= 0 or self.smooth_period <= 0:
+            raise ValueError("periods must be positive")
+        self._fast = StochasticState(period=self.period, smooth_period=self.smooth_period)
+        # One more smoothing window sits on top of the fast state's own warm-up.
+        self.min_history = self._fast.min_history + self.smooth_period - 1
+        self._smoothed = SmaState(self.smooth_period)
+
+    @property
+    def warmed_up(self) -> bool:
+        return not isnan(self._value["percent_d"])
+
+    def seed(self, candles: Sequence[Candle]) -> None:
+        self._fast.seed(())
+        self._smoothed.reset()
+        self._value = {"percent_k": NAN, "percent_d": NAN}
+        for candle in candles:
+            self.update(candle)
+
+    def update(self, candle: Candle) -> StochasticValue:
+        percent_k = self._fast.update(candle)["percent_d"]
+        percent_d = self._smoothed.update(percent_k)
+        self._value = {"percent_k": percent_k, "percent_d": percent_d}
+        return self.current()
+
+    def current(self) -> StochasticValue:
+        return dict(self._value)
+
+
+_MovingAverageState = SmaState | EmaState | RmaState
+
+# §2.28 leaves the kind of moving average open as a user parameter, so the ones the
+# repository can serve on both execution paths are listed rather than hard-coded at
+# the call site. §0.4's WMA is absent: `primitives.py` publishes no incremental state
+# for it, only a private one inside the trend category, and writing a second weighted
+# window here would duplicate a primitive. Adding WMA means publishing that primitive
+# first, not re-deriving it in this module.
+_APO_MOVING_AVERAGES: dict[str, Callable[[Sequence[float], int], list[float]]] = {
+    "sma": sma,
+    "ema": ema,
+    "rma": rma,
+}
+
+_APO_MOVING_AVERAGE_STATES: dict[str, Callable[[int], _MovingAverageState]] = {
+    "sma": SmaState,
+    "ema": EmaState,
+    "rma": RmaState,
+}
+
+
+def _validate_apo(fast_period: int, slow_period: int, moving_average: str) -> None:
+    if fast_period <= 0 or slow_period <= 0:
+        raise ValueError("periods must be positive")
+    if fast_period >= slow_period:
+        raise ValueError("fast_period must be shorter than slow_period")
+    if moving_average not in _APO_MOVING_AVERAGES:
+        raise ValueError(
+            f"unsupported moving average: {moving_average!r}; "
+            f"expected one of {sorted(_APO_MOVING_AVERAGES)}"
+        )
+
+
+def apo(
+    candles: Sequence[Candle],
+    fast_period: int = 12,
+    slow_period: int = 26,
+    moving_average: str = "sma",
+) -> list[float]:
+    """Subtract a slow moving average of the close from a fast one (§2.28).
+
+    The kind of moving average is a parameter because §2.28 defines the indicator
+    that way, and the default is the simple average the section fixes. The section
+    states the consequence of the alternative outright: with EMA at 12 and 26 the
+    result is the §2.4 MACD line value for value, which is why the default is not
+    EMA and why that combination is not registered under this name.
+
+    There is no division here, so no zero-denominator case exists, and warm-up is
+    the slower average's own.
+    """
+
+    _validate_apo(fast_period, slow_period, moving_average)
+    average = _APO_MOVING_AVERAGES[moving_average]
+    closes = [candle.close for candle in candles]
+    fast = average(closes, fast_period)
+    slow = average(closes, slow_period)
+    return [
+        NAN if isnan(quick) or isnan(slow_value) else quick - slow_value
+        for quick, slow_value in zip(fast, slow, strict=True)
+    ]
+
+
+@dataclass(slots=True)
+class APOState:
+    """O(1)-per-candle Absolute Price Oscillator state over two moving averages."""
+
+    fast_period: int = 12
+    slow_period: int = 26
+    moving_average: str = "sma"
+    min_history: int = field(init=False)
+    _fast: _MovingAverageState = field(init=False)
+    _slow: _MovingAverageState = field(init=False)
+    _value: float = field(init=False, default=NAN)
+
+    def __post_init__(self) -> None:
+        _validate_apo(self.fast_period, self.slow_period, self.moving_average)
+        factory = _APO_MOVING_AVERAGE_STATES[self.moving_average]
+        self.min_history = self.slow_period
+        self._fast = factory(self.fast_period)
+        self._slow = factory(self.slow_period)
+
+    @property
+    def warmed_up(self) -> bool:
+        return not isnan(self._value)
+
+    def seed(self, candles: Sequence[Candle]) -> None:
+        self._fast.reset()
+        self._slow.reset()
+        self._value = NAN
+        for candle in candles:
+            self.update(candle)
+
+    def update(self, candle: Candle) -> float:
+        fast = self._fast.update(candle.close)
+        slow = self._slow.update(candle.close)
+        self._value = NAN if isnan(fast) or isnan(slow) else fast - slow
+        return self.current()
+
+    def current(self) -> float:
+        return self._value
+
+
+def _bop_raw(candle: Candle) -> float:
+    # §2.29: when the high equals the low the open and the close sit at that same
+    # value, so the numerator is zero as well and neither side pushed price. The
+    # section fixes 0 for that bar, the convention §4.2 already uses for a
+    # collapsed range in the Money Flow Multiplier.
+    return safe_divide(candle.close - candle.open, candle.high - candle.low, on_zero=0.0)
+
+
+def bop(candles: Sequence[Candle], period: int = 14) -> list[float]:
+    """Measure the body against the bar's whole range and smooth it (§2.29).
+
+    §2.29 adopts the short form `(C - O)/(H - L)`, noting that the author's six
+    bull-and-bear terms collapse to it algebraically rather than approximately, so
+    the six terms are not computed here.
+    """
+
+    if period <= 0:
+        raise ValueError("period must be positive")
+    return sma([_bop_raw(candle) for candle in candles], period)
+
+
+@dataclass(slots=True)
+class BOPState:
+    """O(1)-per-candle Balance of Power state over one rolling average."""
+
+    period: int = 14
+    min_history: int = field(init=False)
+    _smoothed: SmaState = field(init=False)
+    _value: float = field(init=False, default=NAN)
+
+    def __post_init__(self) -> None:
+        if self.period <= 0:
+            raise ValueError("period must be positive")
+        self.min_history = self.period
+        self._smoothed = SmaState(self.period)
+
+    @property
+    def warmed_up(self) -> bool:
+        return not isnan(self._value)
+
+    def seed(self, candles: Sequence[Candle]) -> None:
+        self._smoothed.reset()
+        self._value = NAN
+        for candle in candles:
+            self.update(candle)
+
+    def update(self, candle: Candle) -> float:
+        self._value = self._smoothed.update(_bop_raw(candle))
+        return self.current()
+
+    def current(self) -> float:
+        return self._value
+
+
+def _imi_value(up_average: float, down_average: float) -> float:
+    if isnan(up_average) or isnan(down_average):
+        return NAN
+    # §2.30 divides the summed gains by the summed gains and losses. The rolling
+    # average primitive divides both by the same window length, which leaves the
+    # ratio unchanged, so the sums are not written a second time here; §2.8's CMO
+    # reads its own sums the same way.
+    #
+    # The section names three substitutes and says they follow §2.1's convention,
+    # so all three are written out the way `_rsi_value` writes them. Leaving the
+    # empty-loss end to the arithmetic does not reach it: `100.0 * up / (up + 0.0)`
+    # rounds the multiplication before it divides, so it lands a unit in the last
+    # place away from 100 for most window totals, and on the far side of the 0-100
+    # range the same section states. A window where every bar closed at its open
+    # empties both sides at once, and §2.30 fixes the neutral 50 for it, no
+    # pressure standing on either side.
+    if down_average == 0.0 and up_average > 0.0:
+        return 100.0
+    if up_average == 0.0 and down_average > 0.0:
+        return 0.0
+    return safe_divide(100.0 * up_average, up_average + down_average, on_zero=50.0)
+
+
+def imi(candles: Sequence[Candle], period: int = 14) -> list[float]:
+    """Compute the Intraday Momentum Index from open-to-close bodies (§2.30).
+
+    §2.30 applies RSI's shape inside a single bar rather than across two, so the
+    gap between one bar's close and the next bar's open never enters the value,
+    and the sums stay unsmoothed instead of passing through Wilder's average.
+    """
+
+    if period <= 0:
+        raise ValueError("period must be positive")
+    gains = [max(candle.close - candle.open, 0.0) for candle in candles]
+    losses = [max(candle.open - candle.close, 0.0) for candle in candles]
+    return [
+        _imi_value(up_average, down_average)
+        for up_average, down_average in zip(sma(gains, period), sma(losses, period), strict=True)
+    ]
+
+
+@dataclass(slots=True)
+class IMIState:
+    """O(1)-per-candle Intraday Momentum Index state over two rolling sums."""
+
+    period: int = 14
+    min_history: int = field(init=False)
+    _gains: SmaState = field(init=False)
+    _losses: SmaState = field(init=False)
+    _value: float = field(init=False, default=NAN)
+
+    def __post_init__(self) -> None:
+        if self.period <= 0:
+            raise ValueError("period must be positive")
+        self.min_history = self.period
+        self._gains = SmaState(self.period)
+        self._losses = SmaState(self.period)
+
+    @property
+    def warmed_up(self) -> bool:
+        return not isnan(self._value)
+
+    def seed(self, candles: Sequence[Candle]) -> None:
+        self._gains.reset()
+        self._losses.reset()
+        self._value = NAN
+        for candle in candles:
+            self.update(candle)
+
+    def update(self, candle: Candle) -> float:
+        up_average = self._gains.update(max(candle.close - candle.open, 0.0))
+        down_average = self._losses.update(max(candle.open - candle.close, 0.0))
+        self._value = _imi_value(up_average, down_average)
         return self.current()
 
     def current(self) -> float:

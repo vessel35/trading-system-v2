@@ -806,3 +806,80 @@ class GuppyGMMAState:
 
     def current(self) -> GuppyValue:
         return {name: state.current() for name, state in self._averages}
+
+
+def _trima_lengths(period: int) -> tuple[int, int]:
+    """Return the two §1.11 simple-average lengths that overlap into one window.
+
+    Overlapping averages of length `a` and `b` reach across `a + b - 1` candles,
+    so a window of exactly `period` candles forces `a + b = period + 1`. What
+    picks one split out of those is §1.11's other requirement, that the weights
+    rise to the middle of the window and fall back to its end as a triangle. The
+    overlap holds its maximum for `abs(a - b) + 1` bars, so a triangle with no
+    plateau running past its apex needs `abs(a - b) <= 1`, which leaves
+    `period/2` and `period/2 + 1` for an even period and `(period + 1)/2` twice
+    for an odd one. Symmetry is not the condition that does this work: the
+    overlap of two rectangular windows is symmetric for every `a` and `b`, so a
+    period of 6 admits `[1,1,1,1,1,1]`, `[1,2,2,2,2,1]` and `[1,2,3,3,2,1]`
+    alike, and only the triangle requirement rejects the first two. §1.11 also
+    rejects the other reading, which uses `floor(period/2) + 1` on both sides and
+    stretches an even period's window to `period + 1` candles.
+    """
+    if period <= 0:
+        raise ValueError("period must be positive")
+    if period % 2 == 0:
+        return period // 2, period // 2 + 1
+    half = (period + 1) // 2
+    return half, half
+
+
+def trima(candles: Sequence[Candle], period: int = 21) -> list[float]:
+    """Average the close twice so the window's weights form a triangle (§1.11).
+
+    Nothing here restates a simple average: both passes are the §0.2 primitive,
+    and the second one reads the first one's NaN warm-up as an incomplete window,
+    which is what leaves the first `period - 1` candles undefined.
+    """
+    first, second = _trima_lengths(period)
+    closes = [candle.close for candle in candles]
+    return sma_primitive(sma_primitive(closes, first), second)
+
+
+@dataclass(slots=True)
+class TRIMAState:
+    """O(1)-per-candle triangular average state over two chained simple averages.
+
+    Chaining the two primitive states keeps the cost per candle constant: each
+    one evicts a single value from its own window, so no triangular weight is
+    ever multiplied out. §1.11 carries no recursion, so there is no seed rule
+    beyond the two windows filling up.
+    """
+
+    period: int = 21
+    min_history: int = field(init=False)
+    _inner: SmaState = field(init=False)
+    _outer: SmaState = field(init=False)
+
+    def __post_init__(self) -> None:
+        first, second = _trima_lengths(self.period)
+        # The inner average consumes `first` candles and the outer one then needs
+        # `second` of its outputs, which is `first + second - 1 = period` candles.
+        self.min_history = self.period
+        self._inner = SmaState(first)
+        self._outer = SmaState(second)
+
+    @property
+    def warmed_up(self) -> bool:
+        return self._outer.warmed_up
+
+    def seed(self, candles: Sequence[Candle]) -> None:
+        self._inner.reset()
+        self._outer.reset()
+        for candle in candles:
+            self.update(candle)
+
+    def update(self, candle: Candle) -> float:
+        return self._outer.update(self._inner.update(candle.close))
+
+    def current(self) -> float:
+        return self._outer.current()

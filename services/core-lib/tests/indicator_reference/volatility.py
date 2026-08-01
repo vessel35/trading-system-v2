@@ -7,12 +7,14 @@
 IDENTIFIERS: frozenset[str] = frozenset(
     {
         "ATR(period=14)",
+        "Acceleration Bands(period=20)",
         "Bollinger Bands(multiplier=2.0,period=20)",
         "Chaikin Volatility(period=10)",
         "Chandelier Exit(multiplier=3.0,period=22)",
         "Donchian Channel(period=20)",
         "Keltner Channel(atr_period=10,multiplier=2.0,period=20)",
         "Mass Index(period=9,sum_period=25)",
+        "NATR(period=14)",
         "Relative Volatility Index(deviation_period=10,period=14)",
         "SuperTrend(multiplier=3.0,period=10)",
         "Ulcer Index(period=14)",
@@ -22,22 +24,25 @@ IDENTIFIERS: frozenset[str] = frozenset(
 NAMES: frozenset[str] = frozenset(
     {
         "ATR",
+        "Acceleration Bands",
         "Bollinger Bands",
         "Chaikin Volatility",
         "Chandelier Exit",
         "Donchian Channel",
         "Keltner Channel",
         "Mass Index",
+        "NATR",
         "Relative Volatility Index",
         "SuperTrend",
         "Ulcer Index",
     }
 )
 
-# How many of the standard's 82 systems the registrations above account for. It is
+# How many of the standard's 89 systems the registrations above account for. It is
 # two more than the number of names because the standard counts Bollinger Bands as
-# three systems: the bands themselves, %B, and BandWidth.
-STANDARD_SYSTEMS = 12
+# three systems: the bands themselves, %B, and BandWidth. NATR is counted on its own
+# line rather than folded into ATR, which §3.11 states explicitly.
+STANDARD_SYSTEMS = 14
 
 # §3.10 writes "분모 0 → 미정의" for %B, so a collapsed band has no relative position
 # to report and the value stays NaN there. The spec declares this and the registry
@@ -48,6 +53,12 @@ STANDARD_SYSTEMS = 12
 # rather than a named set, and the engine's finiteness check can only skip a named
 # key. Each of the three therefore names a substitute in its `pinned_impl` and
 # `tests/test_indicator_volatility_flat_window.py` holds it to that value.
+#
+# §3.11 and §3.12 need no such choice made here: each writes its own substitute down,
+# 0 for NATR when the close is zero and a ratio of 0 for Acceleration Bands when the
+# high and the low sum to zero. Neither divisor is reachable through a `Candle`, which
+# rejects a non-positive price, so `tests/test_indicator_parity.py` holds those two
+# terms directly rather than through a candle stream.
 UNDEFINED_OUTPUTS: dict[str, tuple[str, ...]] = {
     "Bollinger Bands(multiplier=2.0,period=20)": ("percent_b",),
 }
@@ -203,6 +214,50 @@ REFERENCE: dict[str, dict[int, float]] = {
         100: 23.780883440330193,
         200: 26.131150030718743,
         299: 25.44530841651264,
+    },
+    # §3.11. Tulip Indicators 0.4.0's `natr(high, low, close, 14)`. Tulip is the
+    # comparison for the same reason it is for ATR above: §3.11 divides the finished
+    # ATR by the close, so it inherits whichever seed window the ATR underneath used,
+    # and Tulip is the one library that keeps both conventions §3.1 depends on — §0.6's
+    # first True Range `H_0 - L_0` and §0.5's seed of the mean of the first fourteen.
+    # The two agree to 0.0, 1.7e-16 and 1.2e-16 at the three points, the largest
+    # difference anywhere in the 287 overlapping bars is 2.7e-15, and both produce their
+    # first value at index 13.
+    #
+    # TA-Lib 0.7.1's `NATR(high, low, close, 14)` was computed as well and reads
+    # 4.518375372634951, 5.349448436846692 and 3.6688693492746975 at the three points,
+    # relative gaps of 8.0e-05, 4.0e-08 and 3.1e-11. That is the ATR seed gap already
+    # documented above and nothing else: TA-Lib skips the first bar, so its seed window
+    # starts one candle later and its series begins at index 14. The gap only shrinks,
+    # which is what a forgotten seed does and what a different formula does not. It is
+    # recorded here rather than pinned as a converging entry, because the Tulip
+    # comparison above is exact and the three tables may not both hold one output.
+    "NATR(period=14)": {
+        100: 4.51801444084562,
+        200: 5.349448221897854,
+        299: 3.6688693491619717,
+    },
+    # §3.12. TA-Lib 0.7.1's `ACCBANDS(high, low, close, timeperiod=20)`, which carries
+    # the whole indicator. The agreement is exact to floating point at every one of the
+    # 281 overlapping bars: the largest relative difference is 2.6e-16 on the upper band,
+    # 2.1e-15 on the middle and 2.2e-15 on the lower, and both series begin at index 19.
+    # This is what confirms §3.12's widening factor of 4, since a factor derived any
+    # other way from Headley's `1000 * 0.001` form would move the two outer bands while
+    # leaving the middle one, a plain `SMA(C, 20)`, exactly where it is.
+    "Acceleration Bands(period=20).upper": {
+        100: 136.1832241814359,
+        200: 109.94879639464662,
+        299: 140.28018126622834,
+    },
+    "Acceleration Bands(period=20).middle": {
+        100: 122.36709457641125,
+        200: 94.40787360648436,
+        299: 127.34389233173165,
+    },
+    "Acceleration Bands(period=20).lower": {
+        100: 110.19810050756271,
+        200: 78.97262898431636,
+        299: 112.94914421818078,
     },
 }
 
