@@ -11,9 +11,9 @@ the indicator package gives: a scan lets a module vanish from the build with
 nothing failing, while a missing name here is an import error the first time the
 registry is used.
 
-Two modules are listed today, holding §7.1's eleven patterns and §7.2's six.
-§7.3, §7.4, and §7.5 add three more modules and thirty-four more patterns; the
-registry itself does not change when they arrive.
+Three modules are listed today, holding §7.1's eleven patterns, §7.2's six, and
+§7.3's sixteen. §7.4 and §7.5 add two more modules and twenty-eight more
+patterns; the registry itself does not change when they arrive.
 
 The one departure from the indicator package is that the built registry lives
 here rather than in `registry.py`. The dependency runs the other way for
@@ -28,12 +28,13 @@ from types import MappingProxyType
 
 from core_lib.patterns.registry import PatternRegistry, PatternSpec
 
-from . import body_shadow, doji_umbrella
+from . import body_shadow, doji_umbrella, two_candle
 
 GROUP_SPECS: Mapping[str, tuple[PatternSpec, ...]] = MappingProxyType(
     {
         "doji_umbrella": doji_umbrella.SPECS,
         "body_shadow": body_shadow.SPECS,
+        "two_candle": two_candle.SPECS,
     }
 )
 

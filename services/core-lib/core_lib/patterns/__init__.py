@@ -6,11 +6,12 @@ of §2, the prior-trend judgment of §3, the engulfment and containment relation
 of §4.1, the four-key output contract of §5, the warm-up formulas of §6 — and the
 patterns of §7 that are registered so far.
 
-Seventeen of the sixty-one are here: §7.1's doji family and umbrella lines and
-§7.2's body-and-shadow shapes, in `doji_umbrella.py` and `body_shadow.py`.
-`judgment.py` holds what every pattern shares, so a section module carries its
-numbered rules and nothing else. The remaining forty-four arrive as three more
-module pairs and change nothing in this one.
+Thirty-three of the sixty-one are here: §7.1's doji family and umbrella lines,
+§7.2's body-and-shadow shapes, and §7.3's two-bar patterns, in
+`doji_umbrella.py`, `body_shadow.py`, and `two_candle.py`. `judgment.py` holds
+what every pattern shares, so a section module carries its numbered rules and
+nothing else. The remaining twenty-eight arrive as two more module pairs and
+change nothing in this one.
 
 Patterns keep their own registry and never enter `DEFAULT_REGISTRY`, so the
 indicator standard's count of 89 systems is not touched by anything here.

@@ -135,12 +135,21 @@ SECTION_MIN_HISTORY = {
     "pat_short_line": 1,
 }
 
-REGISTERED_SPECS: tuple[PatternSpec, ...] = tuple(DEFAULT_PATTERN_REGISTRY.list())
+REGISTERED_SPECS: tuple[PatternSpec, ...] = tuple(
+    spec for spec in DEFAULT_PATTERN_REGISTRY.list() if spec.name in SECTION_MIN_HISTORY
+)
+"""The registered specs of §7.1 and §7.2, which is what this file makes claims about.
+
+Every later group registers into the same registry, so a sweep over the whole of
+it would pull in sections this file's series were never built for. Each group's
+own test module holds the sweeps for its own sections; what stays shared is the
+registry-wide claim below that no pattern name ever meets an indicator name.
+"""
 
 
-def test_the_registry_holds_exactly_the_seventeen_sections_of_seven_one_and_seven_two() -> None:
+def test_the_registry_holds_the_seventeen_sections_of_seven_one_and_seven_two() -> None:
     """Check the registered catalog against §8.1's first two rows."""
-    assert DEFAULT_PATTERN_REGISTRY.names() == set(SECTION_MIN_HISTORY)
+    assert DEFAULT_PATTERN_REGISTRY.names() >= set(SECTION_MIN_HISTORY)
     assert len(REGISTERED_SPECS) == 17
     # No pattern takes a parameter, so an identity is its bare name.
     assert {spec.identifier for spec in REGISTERED_SPECS} == set(SECTION_MIN_HISTORY)
