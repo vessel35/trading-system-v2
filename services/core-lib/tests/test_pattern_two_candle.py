@@ -1039,7 +1039,7 @@ def test_the_registry_gained_exactly_the_sixteen_sections_of_seven_three() -> No
     # No pattern takes a parameter, so an identity is its bare name.
     assert {spec.identifier for spec in REGISTERED_SPECS} == set(SECTION_MIN_HISTORY)
 
-    assert len(DEFAULT_PATTERN_REGISTRY.list()) == PATTERNS_REGISTERED_BEFORE + 16 + 18  # §7.4
+    assert len(DEFAULT_PATTERN_REGISTRY.list()) == PATTERNS_REGISTERED_BEFORE + 16 + 18 + 10
     assert DEFAULT_PATTERN_REGISTRY.names() >= set(SECTION_MIN_HISTORY)
 
 
@@ -1389,3 +1389,21 @@ def test_a_degenerate_bar_cannot_confirm_the_match_before_it() -> None:
     barely_alive: Shape = (160.0, 160.01, 160.0, 160.0)
     values = run(two_candle.KICKING, [*KICKING_CASE, barely_alive])
     assert values[-1]["pat_kicking_confirm"] == outputs.MATCHED
+
+
+@pytest.mark.parametrize("spec", REGISTERED_SPECS, ids=lambda spec: spec.name)
+def test_no_section_reads_a_bar_after_the_one_it_reports_on(spec: PatternSpec) -> None:
+    """Check §5.4 structurally: truncating the series leaves earlier values alone.
+
+    Judging a prefix and judging the whole series must agree everywhere the
+    prefix reaches. A rule reaching forward — writing a confirmation back onto
+    the bar it confirms, say — would show up here as two different answers for
+    the same index. The series concatenates this group's own matching cases, so
+    every one of the sixteen sections is judged on bars it actually holds on.
+    """
+    candles = series(LONG_SERIES)
+    whole = spec.compute_vectorized(candles)
+    prefix_length = spec.min_history + 20
+    prefix = spec.compute_vectorized(candles[:prefix_length])
+
+    assert_same_series(whole[:prefix_length], prefix)

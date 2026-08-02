@@ -1148,7 +1148,7 @@ def test_the_registry_gained_exactly_the_eighteen_sections_of_seven_four() -> No
     # No pattern takes a parameter, so an identity is its bare name.
     assert {spec.identifier for spec in REGISTERED_SPECS} == set(SECTION_MIN_HISTORY)
 
-    assert len(DEFAULT_PATTERN_REGISTRY.list()) == PATTERNS_REGISTERED_BEFORE + 18
+    assert len(DEFAULT_PATTERN_REGISTRY.list()) == PATTERNS_REGISTERED_BEFORE + 18 + 10  # §7.5
 
 
 def test_each_section_warms_up_where_its_own_line_says() -> None:

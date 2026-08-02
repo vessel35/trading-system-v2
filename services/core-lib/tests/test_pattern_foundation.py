@@ -11,12 +11,13 @@ calling the code under test, so a formula and its check cannot drift together.
 
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
-from math import isnan
+from math import isnan, sin
 
 import pytest
 from core_lib.indicators.registry import DEFAULT_REGISTRY, IndicatorSpec
 from core_lib.patterns import outputs, primitives, scales, trend, warmup
 from core_lib.patterns.registry import PatternRegistry, PatternSeries, PatternSpec, PatternState
+from core_lib.patterns.specs import DEFAULT_PATTERN_REGISTRY
 from core_lib.series import SeriesSpec, SeriesState
 from core_lib.types import Candle
 
@@ -737,3 +738,86 @@ def test_patterns_stay_out_of_the_indicator_registry() -> None:
     """Check that this package did not move the indicator standard's tally."""
     registered = {spec.name for spec in DEFAULT_REGISTRY.list()}
     assert all(not name.startswith(outputs.NAME_PREFIX) for name in registered)
+
+
+# --- §5.4 across the whole catalog ------------------------------------------
+
+
+def varied_series(count: int = 400) -> list[Candle]:
+    """Return bars whose shapes vary widely enough to reach many sections.
+
+    Three sine waves of different periods drive the midpoint, the range, and
+    where the body sits inside that range, so the series runs through long
+    bodies, dojis, one-sided shadows, gaps both ways, and trends both ways
+    without any of it being aimed at a particular section.
+    """
+    candles = []
+    for index in range(count):
+        midpoint = 100.0 + 12.0 * sin(index / 9.0) + 5.0 * sin(index / 2.3)
+        span = 1.0 + 2.5 * abs(sin(index / 3.7))
+        high = midpoint + span
+        low = midpoint - span
+        # Body position and size both move, so shapes are not repeated in step.
+        top = midpoint + span * sin(index / 1.7) * 0.9
+        bottom = midpoint + span * sin(index / 5.1) * 0.9
+        open_price, close = (top, bottom) if index % 2 else (bottom, top)
+        candles.append(
+            make_candle(
+                index,
+                open_price=open_price,
+                high=max(high, open_price, close),
+                low=min(low, open_price, close),
+                close=close,
+            )
+        )
+    return candles
+
+
+VARIED_SERIES = varied_series()
+
+
+@pytest.mark.parametrize("spec", tuple(DEFAULT_PATTERN_REGISTRY.list()), ids=lambda spec: spec.name)
+def test_no_registered_section_reads_a_bar_after_the_one_it_reports_on(
+    spec: PatternSpec,
+) -> None:
+    """Check §5.4 structurally for every registered section, not group by group.
+
+    Judging a prefix and judging the whole series must agree everywhere the
+    prefix reaches. Anything reaching forward — a confirmation written back onto
+    the bar it confirms, a multi-bar deadline settling a value before the bars
+    that decide it have arrived, a variable span peeking past its own window —
+    shows up here as two different answers for one index.
+
+    This lives beside the shared layer rather than in a section group's module
+    because the property belongs to `judgment.py`. Each group also checks its own
+    sections; this is the sweep that no group can go missing from.
+    """
+    whole = spec.compute_vectorized(VARIED_SERIES)
+    prefix_length = spec.min_history + 40
+    prefix = spec.compute_vectorized(VARIED_SERIES[:prefix_length])
+
+    assert len(prefix) == prefix_length
+    for index, (left, right) in enumerate(zip(whole[:prefix_length], prefix, strict=True)):
+        assert left.keys() == right.keys(), f"index {index}"
+        for key in left:
+            if isnan(left[key]):
+                assert isnan(right[key]), f"{spec.name} index {index} key {key}"
+            else:
+                assert left[key] == right[key], f"{spec.name} index {index} key {key}"
+
+
+def test_the_varied_series_actually_reaches_the_catalog() -> None:
+    """Guard the sweep above against passing because nothing ever matched.
+
+    A series that matches nothing would satisfy prefix agreement trivially. This
+    pins that the shared series reaches a substantial part of the catalog, so the
+    sweep is comparing real values.
+    """
+    matched = {
+        spec.name
+        for spec in DEFAULT_PATTERN_REGISTRY.list()
+        if any(
+            value[spec.name] == outputs.MATCHED for value in spec.compute_vectorized(VARIED_SERIES)
+        )
+    }
+    assert len(matched) >= 20, sorted(matched)

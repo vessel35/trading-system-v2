@@ -975,3 +975,21 @@ def test_the_two_shadow_comparisons_answer_a_bodyless_bar_differently() -> None:
     assert not primitives.shadow_within_multiple(20.1, 10.0, 2.0)
     assert primitives.shadow_reaches_multiple(20.0, 10.0, 2.0)
     assert not primitives.shadow_reaches_multiple(19.9, 10.0, 2.0)
+
+
+@pytest.mark.parametrize("spec", REGISTERED_SPECS, ids=lambda spec: spec.name)
+def test_no_section_reads_a_bar_after_the_one_it_reports_on(spec: PatternSpec) -> None:
+    """Check §5.4 structurally: truncating the series leaves earlier values alone.
+
+    Judging a prefix and judging the whole series must agree everywhere the
+    prefix reaches. A rule reaching forward — writing a confirmation back onto
+    the bar it confirms, say — would show up here as two different answers for
+    the same index. The series is the shape catalog above, which is built to
+    reach these seventeen sections rather than to drift past them.
+    """
+    candles = series(VARIED)
+    whole = spec.compute_vectorized(candles)
+    prefix_length = spec.min_history + 20
+    prefix = spec.compute_vectorized(candles[:prefix_length])
+
+    assert_same_series(whole[:prefix_length], prefix)
