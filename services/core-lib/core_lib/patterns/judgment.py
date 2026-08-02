@@ -114,6 +114,37 @@ def confirms_by_close_direction(
     return False
 
 
+def _confirms_when_graded(
+    graded: float,
+    window: Sequence[Candle],
+    direction: float,
+    following: Candle,
+) -> bool:
+    """Apply §5.5's general rule on the one side of a section a source graded.
+
+    Morris grades the two sides of a section separately and marks one of them
+    `No` in sixteen sections of §7. §5.5 rules that a `No` side computes no
+    confirmation, so a match on that side leaves the key at 0.0 while the graded
+    side goes on to the ordinary close comparison.
+
+    Written as a plain function taking the graded direction first so each rule
+    can bind it with `partial`, which keeps the graded side visible at the
+    definition rather than hidden in a closure.
+    """
+    if direction != graded:
+        return False
+    return confirms_by_close_direction(window, direction, following)
+
+
+CONFIRMS_BEARISH_SIDE_ONLY: Confirm = partial(_confirms_when_graded, BEARISH)
+"""§5.5 for a section graded on its bearish side and `No` on its bullish side.
+
+Every asymmetrically graded section in §7 is graded this way round, so there is
+no bullish-only counterpart to name. `_confirms_when_graded` still takes the
+graded side as a parameter, so one appears the moment a section needs it.
+"""
+
+
 def judge_series(rule: PatternRule, candles: Sequence[Candle]) -> list[PatternValue]:
     """Compute the whole batch series for one rule.
 

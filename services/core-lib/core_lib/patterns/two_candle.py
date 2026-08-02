@@ -48,14 +48,18 @@ are not here. `judgment.py` holds them once for all sixty-one patterns.
 """
 
 from collections.abc import Sequence
-from functools import partial
 
 from core_lib.indicators.primitives import NAN
 from core_lib.types import Candle
 
 from . import body_shadow, scales
 from .inequalities import contain, engulf
-from .judgment import Confirm, Match, PatternRule, confirms_by_close_direction
+from .judgment import (
+    CONFIRMS_BEARISH_SIDE_ONLY,
+    Match,
+    PatternRule,
+    confirms_by_close_direction,
+)
 from .outputs import BEARISH, BOUNDARY_STRENGTH, BULLISH, FULL_STRENGTH
 from .primitives import (
     body,
@@ -80,37 +84,6 @@ def _wrap_strength(first: Candle, second: Candle) -> float:
     """
     ends_coincide = body_bottom(first) == body_bottom(second) or body_top(first) == body_top(second)
     return BOUNDARY_STRENGTH if ends_coincide else FULL_STRENGTH
-
-
-def _confirms_when_graded(
-    graded: float,
-    window: Sequence[Candle],
-    direction: float,
-    following: Candle,
-) -> bool:
-    """Apply §5.5's general rule on the one side of a section a source graded.
-
-    Morris grades the two sides of a section separately and marks one of them
-    `No` in seven sections here. §5.5 rules that a `No` side computes no
-    confirmation, so a match on that side leaves the key at 0.0 while the graded
-    side goes on to the ordinary close comparison.
-
-    Written as a plain function taking the graded direction first so each rule
-    can bind it with `partial`, which keeps the two sides visible at the
-    definition rather than hidden in a closure.
-    """
-    if direction != graded:
-        return False
-    return confirms_by_close_direction(window, direction, following)
-
-
-CONFIRMS_BEARISH_SIDE_ONLY: Confirm = partial(_confirms_when_graded, BEARISH)
-"""§5.5 applied to the seven sections graded on their bearish side and `No` on the other.
-
-Those are Harami, Harami Cross, Doji Star, Separating Lines, On-Neck, Thrusting,
-and the bearish Stick Sandwich. Nothing in this group is graded the other way
-round, so no bullish-only counterpart exists to name.
-"""
 
 
 def _is_marubozu(candle: Candle) -> bool:
