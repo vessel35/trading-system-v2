@@ -29,6 +29,7 @@ import pytest
 from core_lib.indicators.registry import DEFAULT_REGISTRY
 from core_lib.patterns import outputs, primitives, scales, two_candle
 from core_lib.patterns.judgment import (
+    CONFIRMS_BEARISH_SIDE_ONLY,
     PatternRule,
     PatternRuleState,
     confirms_by_close_direction,
@@ -1038,7 +1039,7 @@ def test_the_registry_gained_exactly_the_sixteen_sections_of_seven_three() -> No
     # No pattern takes a parameter, so an identity is its bare name.
     assert {spec.identifier for spec in REGISTERED_SPECS} == set(SECTION_MIN_HISTORY)
 
-    assert len(DEFAULT_PATTERN_REGISTRY.list()) == PATTERNS_REGISTERED_BEFORE + 16
+    assert len(DEFAULT_PATTERN_REGISTRY.list()) == PATTERNS_REGISTERED_BEFORE + 16 + 18  # §7.4
     assert DEFAULT_PATTERN_REGISTRY.names() >= set(SECTION_MIN_HISTORY)
 
 
@@ -1106,7 +1107,7 @@ def test_confirmation_is_computed_only_where_a_source_graded_it() -> None:
         elif grade == "both":
             assert rule.confirm is confirms_by_close_direction, name
         else:
-            assert rule.confirm is two_candle.CONFIRMS_BEARISH_SIDE_ONLY, name
+            assert rule.confirm is CONFIRMS_BEARISH_SIDE_ONLY, name
 
     counted = list(CONFIRMATION_GRADES.values())
     assert counted.count("both") == 7
