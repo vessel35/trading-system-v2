@@ -1,9 +1,23 @@
-"""Put our judgment and TA-Lib's side by side and count what happens on each bar.
+"""Put our judgment and TA-Lib's side by side, bar by bar, over every regime.
 
-The comparison is a tally, not an assertion. §10.3 says divergence is the expected
-outcome, so what is worth producing is a shape of disagreement specific enough to be
-attributed to a decision: how often both sides matched and pointed the same way, how often
-both matched and contradicted each other, and how often exactly one of them spoke.
+The comparison is a tally, not an assertion. §10.3 says divergence is the expected outcome,
+so what is worth producing is a shape of disagreement specific enough to be attributed to a
+decision.
+
+Counting matches on each side is not enough for that. Two sides that each match forty bars
+of a series have said nothing to each other unless those are the same forty bars, so every
+outcome here is decided per bar and the two questions are kept apart:
+
+`bar_agreement` asks whether the two sides fire on the same bars — of every bar either side
+matched, the fraction both matched. `direction_agreement` asks, of those shared bars, the
+fraction where the two did not claim opposite directions. A pattern can score high on the
+first and low on the second, and that combination is a different finding from either side
+being silent.
+
+Both are reported per regime and over the bundle. Where a pattern goes wrong is often a
+property of the market rather than of the rule — a gap pattern that agrees on a gappy
+market and diverges on a market with no gaps is telling you about §1.3, not about §7 — and
+a single pooled number hides that.
 
 Two things are deliberately not compared.
 
@@ -25,23 +39,23 @@ own sections separately and they do not correspond.
 
 import math
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from types import MappingProxyType
 
 from core_lib.patterns import DEFAULT_PATTERN_REGISTRY
 from core_lib.patterns.registry import PatternSpec
 
-from .series import reference_candles
+from .divergence import TALIB_FUNCTIONS
+from .series import REGIME_NAMES, candles_for
+from .talib_signals import SIGNALS
 
 
 @dataclass(frozen=True, slots=True)
 class Tally:
-    """The five outcomes of one pattern against its `CDL` function, over judged bars."""
+    """The five outcomes of one pattern against its `CDL` function, over one regime."""
 
     both_agree: int
-    """Both matched and their directions do not contradict each other."""
-
-    both_conflict: int
-    """Both matched and each claimed the opposite direction."""
+    """Both matched the same bar and their directions do not contradict each other."""
 
     ours_only: int
     """We matched and TA-Lib reported zero."""
@@ -59,6 +73,19 @@ class Tally:
     remaining bar, which is what catches a series and a capture of different lengths.
     """
 
+    conflict_bars: tuple[int, ...] = field(default=())
+    """The bars where both matched and each claimed the opposite direction.
+
+    The indices are kept rather than only their count. A conflict is the one outcome that
+    cannot be explained without looking at the bar it happened on, and a number nobody can
+    trace back to a bar is a number nobody investigates.
+    """
+
+    @property
+    def both_conflict(self) -> int:
+        """Return how many bars both matched on with opposite directions."""
+        return len(self.conflict_bars)
+
     @property
     def judged(self) -> int:
         """Return the bars the five outcomes were counted over."""
@@ -67,14 +94,19 @@ class Tally:
         )
 
     @property
+    def both_matched(self) -> int:
+        """Return how many bars both sides matched, whatever direction each claimed."""
+        return self.both_agree + self.both_conflict
+
+    @property
     def our_matches(self) -> int:
         """Return how many bars we matched on."""
-        return self.both_agree + self.both_conflict + self.ours_only
+        return self.both_matched + self.ours_only
 
     @property
     def talib_matches(self) -> int:
         """Return how many bars TA-Lib reported non-zero on."""
-        return self.both_agree + self.both_conflict + self.talib_only
+        return self.both_matched + self.talib_only
 
 
 def _directions_contradict(ours: float, theirs: int) -> bool:
@@ -97,12 +129,13 @@ def tally_one(
     *,
     name: str,
 ) -> Tally:
-    """Count the five outcomes for one pattern over one series.
+    """Count the five outcomes for one pattern over one regime.
 
     `theirs` is sparse in the sense `talib_signals.SIGNALS` is: a bar not present in it
     carried a zero. `ours` is the full series our vectorized path produced.
     """
-    outcomes = {"both_agree": 0, "both_conflict": 0, "ours_only": 0, "talib_only": 0, "neither": 0}
+    outcomes = {"both_agree": 0, "ours_only": 0, "talib_only": 0, "neither": 0}
+    conflicts: list[int] = []
     warming_up = 0
     for index, value in enumerate(ours):
         matched = value[name]
@@ -111,8 +144,10 @@ def tally_one(
             continue
         their_value = theirs.get(index, 0)
         if matched and their_value:
-            contradicted = _directions_contradict(value[f"{name}_dir"], their_value)
-            key = "both_conflict" if contradicted else "both_agree"
+            if _directions_contradict(value[f"{name}_dir"], their_value):
+                conflicts.append(index)
+                continue
+            key = "both_agree"
         elif matched:
             key = "ours_only"
         elif their_value:
@@ -120,23 +155,149 @@ def tally_one(
         else:
             key = "neither"
         outcomes[key] += 1
-    return Tally(**outcomes, warming_up=warming_up)
+    return Tally(**outcomes, warming_up=warming_up, conflict_bars=tuple(conflicts))
 
 
-def our_series() -> dict[str, list[dict[str, float]]]:
-    """Return every registered pattern's output over the comparison series.
+@dataclass(frozen=True, slots=True)
+class Comparison:
+    """One pattern against its `CDL` function across the whole bundle of regimes."""
 
-    Computed once and reused, because sixty-one patterns over four thousand bars is the
-    most expensive thing in this package and every test in the file wants the same answer.
+    pattern: str
+    talib_function: str
+    by_regime: Mapping[str, Tally]
+
+    def _total(self, attribute: str) -> int:
+        return sum(int(getattr(tally, attribute)) for tally in self.by_regime.values())
+
+    @property
+    def both_agree(self) -> int:
+        """Return shared bars with no direction contradiction, over the bundle."""
+        return self._total("both_agree")
+
+    @property
+    def both_conflict(self) -> int:
+        """Return shared bars where the two claimed opposite directions, over the bundle."""
+        return self._total("both_conflict")
+
+    @property
+    def both_matched(self) -> int:
+        """Return shared bars, over the bundle."""
+        return self._total("both_matched")
+
+    @property
+    def ours_only(self) -> int:
+        """Return bars only we matched, over the bundle."""
+        return self._total("ours_only")
+
+    @property
+    def talib_only(self) -> int:
+        """Return bars only TA-Lib matched, over the bundle."""
+        return self._total("talib_only")
+
+    @property
+    def neither(self) -> int:
+        """Return bars neither matched, over the bundle."""
+        return self._total("neither")
+
+    @property
+    def judged(self) -> int:
+        """Return the bars the outcomes were counted over, across every regime."""
+        return self._total("judged")
+
+    @property
+    def our_matches(self) -> int:
+        """Return how many bars we matched, across every regime."""
+        return self._total("our_matches")
+
+    @property
+    def talib_matches(self) -> int:
+        """Return how many bars TA-Lib matched, across every regime."""
+        return self._total("talib_matches")
+
+    @property
+    def matched_by_either(self) -> int:
+        """Return bars at least one side matched, across every regime."""
+        return self.both_matched + self.ours_only + self.talib_only
+
+    @property
+    def bar_agreement(self) -> float | None:
+        """Return the fraction of matched bars that both sides matched.
+
+        `None` when neither side matched anywhere, because a ratio out of no bars is not a
+        zero — it is the absence of evidence, and the two must not be reported alike.
+        """
+        if self.matched_by_either == 0:
+            return None
+        return self.both_matched / self.matched_by_either
+
+    @property
+    def direction_agreement(self) -> float | None:
+        """Return the fraction of shared bars where the directions did not contradict.
+
+        `None` when the two never matched the same bar, for the same reason as above.
+        """
+        if self.both_matched == 0:
+            return None
+        return self.both_agree / self.both_matched
+
+    @property
+    def conflict_bars_by_regime(self) -> Mapping[str, tuple[int, ...]]:
+        """Return the conflicting bars of each regime that has any."""
+        return MappingProxyType(
+            {
+                regime: tally.conflict_bars
+                for regime, tally in self.by_regime.items()
+                if tally.conflict_bars
+            }
+        )
+
+
+def our_series(regime_name: str) -> Mapping[str, list[dict[str, float]]]:
+    """Return every registered pattern's output over one regime.
+
+    Computed once per regime and reused, because sixty-one patterns over the bundle is the
+    most expensive thing in this package and every caller wants the same answer.
     """
-    if not _CACHE:
-        candles = reference_candles()
+    if regime_name not in _OUR_CACHE:
+        candles = candles_for(regime_name)
+        _OUR_CACHE[regime_name] = {
+            spec.name: [dict(value) for value in spec.compute_vectorized(candles)]
+            for spec in DEFAULT_PATTERN_REGISTRY.list()
+        }
+    return _OUR_CACHE[regime_name]
+
+
+_OUR_CACHE: dict[str, dict[str, list[dict[str, float]]]] = {}
+
+
+def compare_one(pattern: str) -> Comparison:
+    """Return one pattern's comparison across every regime."""
+    function = TALIB_FUNCTIONS[pattern]
+    return Comparison(
+        pattern=pattern,
+        talib_function=function,
+        by_regime=MappingProxyType(
+            {
+                regime: tally_one(
+                    our_series(regime)[pattern],
+                    SIGNALS[regime][function],
+                    name=pattern,
+                )
+                for regime in REGIME_NAMES
+            }
+        ),
+    )
+
+
+def comparisons() -> Mapping[str, Comparison]:
+    """Return every registered pattern's comparison, built once and reused."""
+    if not _COMPARISON_CACHE:
         for spec in DEFAULT_PATTERN_REGISTRY.list():
-            _CACHE[spec.name] = [dict(value) for value in spec.compute_vectorized(candles)]
-    return _CACHE
+            _COMPARISON_CACHE[spec.name] = compare_one(spec.name)
+    return MappingProxyType(_COMPARISON_CACHE)
 
 
-_CACHE: dict[str, list[dict[str, float]]] = {}
+_COMPARISON_CACHE: dict[str, Comparison] = {}
 
 
 def registered_specs() -> list[PatternSpec]:

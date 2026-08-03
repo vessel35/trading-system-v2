@@ -14,6 +14,15 @@ The script needs no other installation. It puts `services/core-lib` and its `tes
 directory on the path itself, so `core_lib` and the `pattern_reference` package import
 without the repository being installed into that environment.
 
+Every regime, every function
+----------------------------
+
+`pattern_reference.series.REGIMES` is a bundle of markets, not one market, and this script
+walks all of them: each of the sixty-one functions is called once per regime, over that
+regime's own bars. Capturing one regime and leaving the rest would make the comparison
+report the untouched regimes as bars TA-Lib never matched, which is the one wrong answer
+this whole package is built to avoid.
+
 What it writes, and what it deliberately does not
 -------------------------------------------------
 
@@ -30,7 +39,12 @@ the comparison a comparison against a configuration we invented.
 
 It does not touch our implementation, our thresholds, or the standard. §10.3 is explicit
 that a disagreement is resolved by re-reading the standard, never by moving toward the
-library.
+library. It also does not touch `series.py`: if a regime produces little, that is a fact
+about the market to be reported, not a series to be adjusted until the numbers improve.
+
+Section numbers in this file are the candlestick pattern standard's,
+`docs/references/candlestick_pattern_calc_spec.md`. The indicator standard numbers its
+own sections separately and they do not correspond.
 """
 
 from __future__ import annotations
@@ -85,17 +99,39 @@ def _underlying_version(talib: ModuleType) -> str | None:
 
 
 def _render_int_map(values: dict[int, int]) -> str:
-    """Render one function's non-zero bars as a sorted dict literal."""
+    """Render one function's non-zero bars as a sorted dict literal on one line."""
     body = ", ".join(f"{index}: {value}" for index, value in sorted(values.items()))
     return "{" + body + "}"
 
 
-def _render_signals(signals: dict[str, dict[int, int]]) -> str:
-    """Render every function's non-zero bars, one function per line."""
-    lines = [
-        f"    {function!r}: {_render_int_map(signals[function])},"
-        for function in sorted(signals)
-    ]
+def _render_signals(signals: dict[str, dict[str, dict[int, int]]]) -> str:
+    """Render every regime's functions, one function per line.
+
+    One line per function is what the `# fmt: off` around the block buys. Letting the
+    formatter expand these produces tens of thousands of lines of bare integers whose diff
+    nobody can read.
+    """
+    lines = ["{"]
+    for regime in sorted(signals):
+        lines.append(f"    {regime!r}: {{")
+        lines.extend(
+            f"        {function!r}: {_render_int_map(signals[regime][function])},"
+            for function in sorted(signals[regime])
+        )
+        lines.append("    },")
+    lines.append("}")
+    return "\n".join(lines)
+
+
+def _render_str_map(values: dict[str, str]) -> str:
+    """Render a name-to-text mapping, one entry per line."""
+    lines = [f"    {key!r}: {values[key]!r}," for key in sorted(values)]
+    return "{\n" + "\n".join(lines) + "\n}"
+
+
+def _render_int_by_name(values: dict[str, int]) -> str:
+    """Render a name-to-count mapping, one entry per line."""
+    lines = [f"    {key!r}: {values[key]!r}," for key in sorted(values)]
     return "{\n" + "\n".join(lines) + "\n}"
 
 
@@ -114,10 +150,10 @@ def _generated_block(
     *,
     talib_version: str,
     underlying_version: str | None,
-    fingerprint: str,
-    bar_count: int,
+    fingerprints: dict[str, str],
+    bar_counts: dict[str, int],
     parameters: dict[str, dict[str, float]],
-    signals: dict[str, dict[int, int]],
+    signals: dict[str, dict[str, dict[int, int]]],
 ) -> str:
     """Build the replacement for the block between the sentinels."""
     captured_at = datetime.now(UTC).date().isoformat()
@@ -127,11 +163,14 @@ def _generated_block(
             f"_TALIB_VERSION: str | None = {talib_version!r}",
             f"_TALIB_UNDERLYING_VERSION: str | None = {underlying_version!r}",
             f"_CAPTURED_AT: str | None = {captured_at!r}",
-            f"_SERIES_FINGERPRINT: str | None = {fingerprint!r}",
-            f"_BAR_COUNT: int | None = {bar_count}",
+            "_SERIES_FINGERPRINTS: dict[str, str] = " + _render_str_map(fingerprints),
+            "_BAR_COUNTS: dict[str, int] = " + _render_int_by_name(bar_counts),
             "_FUNCTION_PARAMETERS: dict[str, dict[str, float]] = "
             + _render_parameters(parameters),
-            "_SIGNALS: dict[str, dict[int, int]] = " + _render_signals(signals),
+            "# fmt: off",
+            "_SIGNALS: dict[str, dict[str, dict[int, int]]] = "
+            + _render_signals(signals),
+            "# fmt: on",
         )
     )
 
@@ -145,33 +184,52 @@ def _replace_block(text: str, block: str) -> str:
 
 
 def main() -> None:
-    """Read the comparison series, call every `CDL` function, and write the capture."""
+    """Read every regime, call every `CDL` function on each, and write the capture."""
     talib = _require_talib()
     import numpy
     from talib import abstract
 
     from pattern_reference.divergence import TALIB_FUNCTIONS
-    from pattern_reference.series import reference_candles, series_fingerprint
+    from pattern_reference.series import REGIMES, candles_for, series_fingerprint
 
-    candles = reference_candles()
-    arrays = {
-        name: numpy.array([getattr(candle, name) for candle in candles], dtype=float)
-        for name in ("open", "high", "low", "close")
-    }
-
-    signals: dict[str, dict[int, int]] = {}
+    function_names = sorted(set(TALIB_FUNCTIONS.values()))
+    signals: dict[str, dict[str, dict[int, int]]] = {}
+    fingerprints: dict[str, str] = {}
+    bar_counts: dict[str, int] = {}
     parameters: dict[str, dict[str, float]] = {}
-    for function_name in sorted(set(TALIB_FUNCTIONS.values())):
-        function = getattr(talib, function_name)
-        produced = function(
-            arrays["open"], arrays["high"], arrays["low"], arrays["close"]
-        )
-        # Every called function gets an entry, empty included: a function absent from the
-        # capture and a function that matched nothing are different facts, and the sparse
-        # encoding is the only thing that makes them look alike.
-        signals[function_name] = {
-            index: int(value) for index, value in enumerate(produced) if int(value) != 0
+
+    for regime in REGIMES:
+        candles = candles_for(regime.name)
+        arrays = {
+            name: numpy.array(
+                [getattr(candle, name) for candle in candles], dtype=float
+            )
+            for name in ("open", "high", "low", "close")
         }
+        fingerprints[regime.name] = series_fingerprint(candles)
+        bar_counts[regime.name] = len(candles)
+        per_function: dict[str, dict[int, int]] = {}
+        for function_name in function_names:
+            function = getattr(talib, function_name)
+            produced = function(
+                arrays["open"], arrays["high"], arrays["low"], arrays["close"]
+            )
+            # Every called function gets an entry, empty included: a function absent from
+            # the capture and a function that matched nothing are different facts, and the
+            # sparse encoding is the only thing that makes them look alike.
+            per_function[function_name] = {
+                index: int(value)
+                for index, value in enumerate(produced)
+                if int(value) != 0
+            }
+        signals[regime.name] = per_function
+        matched = sum(len(bars) for bars in per_function.values())
+        silent = sum(1 for bars in per_function.values() if not bars)
+        print(
+            f"  {regime.name}: {len(candles)} bars, {matched} non-zero, {silent} functions silent"
+        )
+
+    for function_name in function_names:
         declared = abstract.Function(function_name).parameters
         if declared:
             parameters[function_name] = {
@@ -181,8 +239,8 @@ def main() -> None:
     block = _generated_block(
         talib_version=str(talib.__version__),
         underlying_version=_underlying_version(talib),
-        fingerprint=series_fingerprint(candles),
-        bar_count=len(candles),
+        fingerprints=fingerprints,
+        bar_counts=bar_counts,
         parameters=parameters,
         signals=signals,
     )
@@ -190,14 +248,18 @@ def main() -> None:
         _replace_block(TARGET.read_text(encoding="utf-8"), block), encoding="utf-8"
     )
 
-    matched = sum(len(bars) for bars in signals.values())
-    silent = sorted(name for name, bars in signals.items() if not bars)
+    everywhere_silent = sorted(
+        function
+        for function in function_names
+        if not any(signals[regime][function] for regime in signals)
+    )
     print(f"wrote {TARGET.relative_to(REPOSITORY_ROOT)}")
     print(
-        f"  TA-Lib {talib.__version__}, {len(candles)} bars, {len(signals)} functions"
+        f"  TA-Lib {talib.__version__}, {len(signals)} regimes, "
+        f"{sum(bar_counts.values())} bars, {len(function_names)} functions"
     )
     print(
-        f"  {matched} non-zero bars in total; {len(silent)} functions matched nothing: {silent}"
+        f"  {len(everywhere_silent)} functions matched nothing anywhere: {everywhere_silent}"
     )
     print("  run `ruff format` on the rewritten file, then run the suite")
 

@@ -131,11 +131,36 @@ class Divergence:
     """
 
     expected_silence: str | None = None
-    """Why this pattern is expected never to match on the comparison series.
+    """Why this pattern is expected never to match anywhere in the bundle.
 
     `None` means we expect it to match, and the suite treats silence against a matching
     TA-Lib as an unexplained finding. Anything else must be the result of an
     investigation, written so a reader can check it.
+
+    It is judged over the whole bundle rather than over one regime. A pattern that stays
+    silent on a market with no gaps and matches on a market full of them is not silent, and
+    recording it as such would excuse the next real finding on that row.
+    """
+
+    mutual_silence: str | None = None
+    """Why neither side is expected to match this pattern anywhere in the bundle.
+
+    This is the weaker of the two silences and the one the bundle exists to shrink. When
+    TA-Lib is silent too, the comparison has produced no evidence about the pattern at all
+    — not agreement, not divergence — so what has to be written here is why no market in
+    the bundle reaches the shape, and whether any market could.
+
+    A row may not carry both this and `expected_silence`: TA-Lib matching and TA-Lib not
+    matching are different worlds, and a note claiming both describes neither.
+    """
+
+    direction_conflict: str | None = None
+    """Why the two sides claim opposite directions on some bar they both matched.
+
+    A conflict is the sharpest thing the comparison can produce and the easiest to leave
+    unread, so it is recorded rather than counted. Checked in both directions like the
+    silences: an unexplained conflict fails, and an explanation for a pattern that no
+    longer conflicts is stale.
     """
 
     def __post_init__(self) -> None:
@@ -143,6 +168,11 @@ class Divergence:
             raise ValueError(f"{self.pattern} records no cause of divergence")
         if not self.note.strip():
             raise ValueError(f"{self.pattern} records no note")
+        if self.expected_silence is not None and self.mutual_silence is not None:
+            raise ValueError(
+                f"{self.pattern} records both an expected silence and a mutual silence, which "
+                f"describe incompatible states of the comparison"
+            )
 
 
 _TABLE: tuple[Divergence, ...] = (
@@ -198,6 +228,17 @@ _TABLE: tuple[Divergence, ...] = (
         note=(
             "The mirror of the dragonfly and it inherits the same two chosen values, §2.3's "
             "three percent and §2.5's ten percent."
+        ),
+        direction_conflict=(
+            "Every shared bar conflicts — 58 of 58, in all seven regimes — and it is systematic "
+            "rather than data-dependent. §7.1.5 reports the gravestone as bearish, which is what "
+            "both sources make it, while `CDLGRAVESTONEDOJI` returns +100 on every bar it "
+            "matches without exception. TA-Lib's sign here is a recognition marker and not a "
+            "bearing, so the two numbers are not the same quantity and no bar could ever agree. "
+            "The mirrored §7.1.4 has no conflict at all because its bullish reading and TA-Lib's "
+            "fixed positive happen to coincide, which is the clearest evidence that the sign is "
+            "not carrying a direction on either function. Nothing follows for the "
+            "implementation: §10.3 makes the standard the source of the bearing."
         ),
     ),
     Divergence(
@@ -405,6 +446,20 @@ _TABLE: tuple[Divergence, ...] = (
             "is a §2.3 doji, so the three-percent tolerance decides how often the cross form "
             "separates from the plain harami."
         ),
+        direction_conflict=(
+            "Sixteen of 53 shared bars conflict, spread over six of the seven regimes, and the "
+            "cause is a rule §7.3.3 does not have. Our bearing comes from §3's prior trend "
+            "alone — bullish after a decline, bearish after an advance — because the section "
+            "asks for a doji and, unlike §7.3.2, says nothing about the first day's colour. "
+            "`CDLHARAMICROSS` takes its sign from that first day's colour instead, reporting "
+            "negative after a white bar and positive after a black one. Wherever the trend and "
+            "the first bar's colour point opposite ways the two disagree, which is about thirty "
+            "percent of shared bars. §7.3.2 is the control: it requires the first day's colour "
+            "to agree with the trend, and it conflicts on none of its 199 shared bars. The "
+            "difference between the two rows is exactly the colour requirement the cross form "
+            "drops, so this is a divergence in what the sign means and not a defect in either "
+            "reading."
+        ),
     ),
     Divergence(
         pattern="pat_doji_star",
@@ -462,16 +517,15 @@ _TABLE: tuple[Divergence, ...] = (
             "Two §2.1-long bodies of opposite colour closing at the same price, where 'the same' "
             "is §2.6's `Equal` at three percent of the range. §2.6 records that Morris's much "
             "tighter one-in-a-thousand rule from the matching-high entry was not adopted, "
-            "because he elsewhere directs that the doji tolerance be reused for equality."
-        ),
-        expected_silence=(
-            "Investigated against the capture. TA-Lib matched four bars. Rules 2 and 3 refuse on "
-            "all four because §2.1 makes a long body more than half of that same bar's range, "
-            "while TA-Lib compares the body against an average of recent bodies; a bar with long "
-            "shadows is long to TA-Lib and not to us. Rule 5 refuses on three of the four as "
-            "well, since §2.6 reads 'the closes are equal' with the doji tolerance of three "
-            "percent of the range. Two independent thresholds have to be met at once on two "
-            "adjacent bars. Reachable: §7.3.7's matching case holds. "
+            "because he elsewhere directs that the doji tolerance be reused for equality. "
+            "This section was silent on the original four thousand bars and was recorded as "
+            "such: TA-Lib matched four bars there and rules 2 and 3 refused on all four, since "
+            "§2.1 makes a long body more than half of that same bar's range while TA-Lib "
+            "compares the body against an average of recent bodies. The bundle settled it: one "
+            "match arrives in the sustained decline and one in the gapping market, so the "
+            "silence was a property of one series rather than of the rule. The finding stays "
+            "here because it is still what keeps the two sides down to a single shared bar out "
+            "of TA-Lib's thirty-six."
         ),
     ),
     Divergence(
@@ -502,6 +556,18 @@ _TABLE: tuple[Divergence, ...] = (
             "§2.8 read the unstated gap as a body gap, which §7.3.9 argues costs little here "
             "because a marubozu's body nearly fills its range."
         ),
+        mutual_silence=(
+            "Neither side matched this on any regime, and the marubozu is why. §7.2.2's "
+            "marubozu is a bar whose two shadows are each at most a tenth of its own range, "
+            "which the bundle produces on between 0.07 and 1.8 percent of bars depending on the "
+            "market. Two of them landing next to each other happened once in twenty-one "
+            "thousand bars, in the market that reverses every few bars, and that one pair "
+            "shared a colour — so the opposite-colour requirement, before the gap is even "
+            "reached, has nothing to work with. TA-Lib's own reading is stricter still on this "
+            "one and it matched nothing anywhere either. A market of near-shadowless bars would "
+            "reach it; none of the seven is that market, and building one would be building a "
+            "market to fire a pattern rather than to have a character."
+        ),
     ),
     Divergence(
         pattern="pat_kicking_by_length",
@@ -518,6 +584,12 @@ _TABLE: tuple[Divergence, ...] = (
             "the section also records that a tie is not a match, since inventing a direction "
             "would distort more than declining to report one. The pattern itself is TA-Lib's "
             "own, raised from a remark Morris reports without adopting."
+        ),
+        mutual_silence=(
+            "Silent on both sides for exactly the reason §7.3.9 is: this section adds a "
+            "tie-break to that arrangement and cannot hold anywhere the arrangement does not. "
+            "It is the one row in the table whose silence is settled by another row rather than "
+            "by anything of its own, and it stops being silent the moment §7.3.9 does."
         ),
     ),
     Divergence(
@@ -697,14 +769,20 @@ _TABLE: tuple[Divergence, ...] = (
             "third power governs how often this can appear at all."
         ),
         expected_silence=(
-            "Investigated against the capture. TA-Lib matched nine bars and rule 2 refuses on all "
-            "nine: not one of the three bars is a doji under §2.3's Body <= 0.03 * Range. TA- "
-            "Lib's BodyDoji is a fraction of an average of recent ranges and is far looser, so it "
-            "calls bars doji that carry several percent of their own range in body. Decision A "
-            "fixed our figure from Morris's one-to-three percent rather than from TA-Lib's "
-            "settings table, and requiring it of three consecutive bars cubes the rarity. The gap "
-            "requirement refused only two of the nine, so the doji threshold is the whole story. "
-            "Reachable: §7.4.6's matching case holds. "
+            "Investigated against the bundle, where TA-Lib matched ninety-five bars and we "
+            "matched none. Rule 2 refuses on ninety-three of them: not one of the three bars is "
+            "a doji under §2.3's Body <= 0.03 * Range. TA-Lib's BodyDoji is a fraction of an "
+            "average of recent ranges and is far looser, so it calls bars doji that carry "
+            "several percent of their own range in body. Decision A fixed our figure from "
+            "Morris's one-to-three percent rather than from TA-Lib's settings table, and "
+            "requiring it of three consecutive bars cubes the rarity. The two bars where all "
+            "three are doji by §2.3 are refused by rule 3 instead: the middle doji has to gap "
+            "away from the first and the third back toward it, in the direction the trend "
+            "fixes, and a three-doji run that also gaps the right way twice did not occur in "
+            "twenty-one thousand bars. The quiet market, where a body of zero ticks is common "
+            "and doji run to twelve percent of bars, is the one that produced those two, so the "
+            "constraint that remains is the arrangement rather than the tolerance. Reachable: "
+            "§7.4.6's matching case holds."
         ),
     ),
     Divergence(
@@ -733,14 +811,12 @@ _TABLE: tuple[Divergence, ...] = (
         note=(
             "Two crows with the additional requirement that the second black body engulf the "
             "first and the gap survive to the third bar, so it is strictly narrower than the "
-            "pattern above and both are reported separately."
-        ),
-        expected_silence=(
-            "Investigated against the capture. TA-Lib matched exactly one bar in four thousand, "
-            "and on it rule 2 refuses: the first day's white body is not long under §2.1's same- "
-            "bar denominator. One bar is too little to say anything about frequency, and the "
-            "pattern is rare in TA-Lib's own reading too. Reachable: §7.4.8's matching case "
-            "holds. "
+            "pattern above and both are reported separately. It was silent on the original four "
+            "thousand bars, where TA-Lib matched a single bar and rule 2 refused on it because "
+            "the first day's white body is not long under §2.1's same-bar denominator. The "
+            "bundle produced four matches of our own against eight of TA-Lib's, three of them "
+            "shared, so the silence was an artifact of one market rather than a property of the "
+            "rule."
         ),
     ),
     Divergence(
@@ -752,6 +828,19 @@ _TABLE: tuple[Divergence, ...] = (
             "Requiring three long bodies in a row makes this one of the places decision A's "
             "denominator matters most: a target measuring against recent bodies calls three "
             "ordinary bars long in a quiet stretch where §2.1 calls none of them long."
+        ),
+        mutual_silence=(
+            "Neither side matched this anywhere, and the funnel shows where it stops. Three "
+            "consecutive long white bodies occur 107 times across the bundle and the rising "
+            "closes survive 74 of those, but rule 4's staircase — each open strictly inside the "
+            "previous body — leaves 14, and rule 5's requirement that all three close at their "
+            "highs leaves exactly one, in the gapping market. That one window was then refused "
+            "by rule 1, because §7.4.9 asks for a *downtrend* before the soldiers and three long "
+            "white bars in a row are the least likely thing to follow one. The obstacle is "
+            "therefore not a §2 threshold but the conjunction of the staircase with the trend "
+            "gate, and no market character makes those two likelier at the same time: a market "
+            "that stages a sharp reversal often enough to produce it would be a market built "
+            "around this pattern. TA-Lib is silent on all seven regimes as well."
         ),
     ),
     Divergence(
@@ -766,6 +855,14 @@ _TABLE: tuple[Divergence, ...] = (
             "The bearish mirror of the soldiers, with the same three-long-bodies-in-a-row "
             "sensitivity to §2.1 and §2.5."
         ),
+        mutual_silence=(
+            "Silent on both sides, and it stops earlier than the soldiers do. Three consecutive "
+            "long black bodies occur 61 times across the bundle, the falling closes survive 42 "
+            "of those and the staircase leaves 8, and not one of those 8 has all three bars "
+            "closing at their lows as rule 5 requires. Where the soldiers reached the trend gate "
+            "with a complete shape once, the crows never assemble the shape at all, so nothing "
+            "here turns on decision B. TA-Lib matched nothing on any regime either."
+        ),
     ),
     Divergence(
         pattern="pat_identical_three_crows",
@@ -776,6 +873,15 @@ _TABLE: tuple[Divergence, ...] = (
             "to three consecutive long bodies compounds two chosen values, and §2.6 names this "
             "pattern as one that would effectively never match under the tighter tolerance it "
             "declined."
+        ),
+        expected_silence=(
+            "Investigated against the bundle, where TA-Lib matched a single bar — in the market "
+            "of long shadows — and we matched none. On that bar rule 2 refuses: the three bodies "
+            "are not long under §2.1's same-bar denominator, which is the same reading that "
+            "keeps §7.4.10's crows silent on every regime. Rule 4's equality refuses there too, "
+            "so both of the section's chosen values would have had to give way at once. One "
+            "TA-Lib bar in twenty-one thousand is thin evidence in either direction, and the "
+            "section is reachable: §7.4.11's matching case holds."
         ),
     ),
     Divergence(
@@ -789,18 +895,14 @@ _TABLE: tuple[Divergence, ...] = (
         note=(
             "Three white bodies that weaken, with §2.4's long upper shadows appearing on the "
             "later bars. The weakening is expressed as body comparisons between the bars rather "
-            "than through a §2 scale, so the shadow threshold is the main chosen value here."
-        ),
-        expected_silence=(
-            "Investigated against the capture. TA-Lib matched twenty bars, and on every one of "
-            "them rule 4 is what refuses. §2.4 measures a long upper shadow as at least twice the "
-            "body, while TA-Lib's ShadowLong is a fraction of an average of recent ranges, so on "
-            "a bar with an ordinary body the two readings are nowhere near each other. §7.4.12 "
-            "also drops any length requirement from rule 2, which leaves the three white bodies "
-            "free to be large, and a large body is exactly what makes a body-relative shadow test "
-            "hard to pass. The trend gate refused eight of the twenty as well. The section is "
-            "reachable: its own matching case in test_pattern_three_candle.py holds, so this is "
-            "strictness against neutral data rather than a rule no bar can satisfy. "
+            "than through a §2 scale, so the shadow threshold is the main chosen value here. It "
+            "was silent on the original four thousand bars, where TA-Lib matched twenty and rule "
+            "4 refused on every one: §2.4 measures a long upper shadow as at least twice the "
+            "body while TA-Lib's ShadowLong is a fraction of an average of recent ranges, and "
+            "§7.4.12 drops any length requirement from rule 2, which leaves the three white "
+            "bodies free to be large — and a large body is exactly what makes a body-relative "
+            "shadow test hard to pass. A market of long shadows was what the comparison lacked, "
+            "and adding one produced nineteen matches against TA-Lib's hundred and thirty-nine."
         ),
     ),
     Divergence(
@@ -831,6 +933,21 @@ _TABLE: tuple[Divergence, ...] = (
             "one way, and §7.4.14 closed it. The section is also one of the two an earlier "
             "arithmetic sweep found unsatisfiable as first written, which is exactly the failure "
             "mode this comparison exists to catch a second time from outside."
+        ),
+        mutual_silence=(
+            "Neither side matched this anywhere, and rule 4 is where it stops. The first three "
+            "conditions are reachable: two black bars with long lower shadows, the second the "
+            "smaller with a higher low, occur 143 times across the bundle, and the market of "
+            "long shadows supplies 81 of them on its own. Rule 4 then asks the third bar to be "
+            "black, smaller still, and to carry *neither* shadow — and a bar with no shadows at "
+            "all is what a long-shadow market does not have, while the markets that do have "
+            "such bars are the ones that rarely produce the two long lower shadows first. Those "
+            "requirements pull in opposite directions across every regime, which is why the "
+            "deepest the funnel gets is 8 windows reaching rule 4's colour and size test and "
+            "none surviving its shadow test. Both halves are satisfiable — §7.4.14's matching "
+            "case holds — but no single market character makes both likely at once, and "
+            "building one would be building a market to fire this pattern. TA-Lib is silent on "
+            "all seven regimes as well."
         ),
     ),
     Divergence(
@@ -886,6 +1003,17 @@ _TABLE: tuple[Divergence, ...] = (
             "body gap. Graded `No`, so no `_confirm` is computed. Four constrained bars in "
             "sequence make it among the rarest entries in the catalog."
         ),
+        mutual_silence=(
+            "Neither side matched this anywhere, and it fails on the same ingredient as §7.3.9: "
+            "rule 2 opens with two black marubozu in a row, which the bundle never produced "
+            "once in twenty-one thousand bars. Black marubozu themselves are common enough — "
+            "between 1 and 25 per regime — but two adjacent ones are the product of two "
+            "independent rarities, and there are three further constrained bars behind them "
+            "before the section can hold. That makes this the strictest opening in the catalog "
+            "and the silence a statement about the conjunction rather than about any one "
+            "threshold. §7.4.18's matching case holds, so the rule is reachable. TA-Lib is "
+            "silent on all seven regimes as well."
+        ),
     ),
     # §7.5 — four bars and up, and the gap-continuation family.
     Divergence(
@@ -918,6 +1046,17 @@ _TABLE: tuple[Divergence, ...] = (
             "the gap. The gap must survive across the middle of the window, so decision D's "
             "body-gap reading governs the whole pattern rather than one bar pair."
         ),
+        expected_silence=(
+            "Investigated against the bundle, where TA-Lib matched four bars — one in the "
+            "sustained advance, one in the market that reverses every few bars, two in the "
+            "gapping market — and we matched none. Rule 2 refuses on all four: the two bars "
+            "opening the run do not both carry the trend's colour with the first one long under "
+            "§2.1's same-bar denominator. Three of the four also fail rule 5's long body of the "
+            "opposite colour on the last bar and rule 4's two continuing closes, so this is a "
+            "five-bar conjunction refused in several places at once rather than one threshold "
+            "standing in the way. Four TA-Lib bars in twenty-one thousand says the shape is "
+            "rare in its reading too. Reachable: §7.5.2's matching case holds."
+        ),
     ),
     Divergence(
         pattern="pat_ladder_bottom",
@@ -927,15 +1066,12 @@ _TABLE: tuple[Divergence, ...] = (
             "Five bars, and the only place in §7 where a §2 scale is used negated: rule 3 asks "
             "for a bar that does *not* have a very short upper shadow. §2.7 records that a "
             "degenerate bar must be excluded before the scales are read precisely because a "
-            "false return would satisfy a negated rule instead of failing it."
-        ),
-        expected_silence=(
-            "Investigated against the capture. TA-Lib matched two bars and two of our "
-            "requirements refuse on both. First the trend: decision B gates this section on §3's "
-            "ten-period average while TA-Lib judges shape alone, so it can report a ladder bottom "
-            "with no decline behind it. Second rule 2, which wants three long black bodies in a "
-            "row under §2.1's same-bar denominator. Two bars is thin evidence either way, and the "
-            "section is reachable: §7.5.3's matching case holds. "
+            "false return would satisfy a negated rule instead of failing it. It was silent on "
+            "the original four thousand bars, where TA-Lib matched two and both of our first two "
+            "requirements refused: decision B gates the section on §3's ten-period average while "
+            "TA-Lib judges shape alone, and rule 2 wants three long black bodies in a row under "
+            "§2.1's same-bar denominator. The bundle produced one match, on the market that "
+            "reverses every few bars, against TA-Lib's twenty-seven."
         ),
     ),
     Divergence(
@@ -953,6 +1089,19 @@ _TABLE: tuple[Divergence, ...] = (
             "first body. Its `CDL` function takes `penetration`; §7.5.4 writes the depth into "
             "the rule from the source, so the captured default has no counterpart of ours to "
             "align with."
+        ),
+        mutual_silence=(
+            "Neither side matched this anywhere. The funnel on the bullish side gets four bars "
+            "deep and no further: an uptrend with a long white first bar occurs in the "
+            "thousands, a black body gapped up above it survives 139 windows across the bundle "
+            "and the gapping market alone supplies 74 of those, a third black closing back "
+            "inside the first body leaves 23, and a fourth black and short leaves 6. None of "
+            "those 6 has the fourth bar both lower than the third and still inside the first "
+            "bar's range, so rule 6 ends it before rule 7's breakout is ever asked. Five "
+            "consecutive bars each constrained against a different neighbour is what makes this "
+            "one of the longest conjunctions in §7, and its rarity is a property of the "
+            "conjunction rather than of any threshold; §7.5.4's matching case holds. TA-Lib is "
+            "silent on all seven regimes as well."
         ),
     ),
     Divergence(
@@ -1043,13 +1192,19 @@ _TABLE: tuple[Divergence, ...] = (
             "basic one."
         ),
         expected_silence=(
-            "§7.5.10 predicted this before any comparison was run. Rule 2 demands the context "
-            "bar's close equal its low exactly, with no tolerance, and rule 3 demands that bar's "
-            "range be strictly smaller than its predecessor's, on top of the whole basic hikkake "
-            "setup. On the comparison series the conjunction does not occur once in four "
-            "thousand bars, and the section states that lowering the frequency is the accepted "
-            "price of not altering the source. A tolerance here would be adopting TA-Lib's "
-            "reading, which §10.3 forbids."
+            "§7.5.10 predicted this before any comparison was run, and the bundle has not "
+            "changed the answer. Rule 2 demands the context bar's close equal its low exactly, "
+            "with no tolerance, and rule 3 demands that bar's range be strictly smaller than its "
+            "predecessor's, on top of the whole basic hikkake setup. TA-Lib matched six bars "
+            "across the seven regimes and on all six the context bar's close sits at neither its "
+            "low nor its high, so rule 2 refuses before anything else is read. Twenty-one "
+            "thousand bars did not produce the conjunction once, and the section states that "
+            "lowering the frequency is the accepted price of not altering the source. A "
+            "tolerance here would be adopting TA-Lib's reading, which §10.3 forbids. The "
+            "ingredient itself is not the obstacle: the quiet market closes exactly at its low "
+            "on 127 of 3000 bars, four times the rate of the original series, because a bar "
+            "there spans a handful of ticks. What does not arrive is that bar landing in the "
+            "one place the basic hikkake setup also holds."
         ),
     ),
 )
@@ -1092,6 +1247,45 @@ PENETRATION_FUNCTIONS: frozenset[str] = frozenset(
 Claimed here and checked against the capture rather than asserted: once
 `talib_signals.FUNCTION_PARAMETERS` exists, the suite compares the two, so a wrong claim
 about the library's surface fails instead of sitting in a comment.
+"""
+
+HIGH_AGREEMENT_FLOOR = 0.75
+"""The share of matched bars both sides have to match for a pattern to count as agreeing.
+
+Three in four, chosen once. The point of the set below is membership, not the exact ratio:
+a ratio recorded to three places would be re-recorded after every capture and would say
+nothing, while a pattern crossing a fixed bar in either direction is a real change in the
+relationship and is worth being made to explain itself.
+
+Nothing sits near the bar, so the figure is not doing fine work. The lowest member is at
+0.794 and the highest non-member at 0.503, and any floor anywhere inside that gap picks out
+the same three patterns.
+"""
+
+HIGH_AGREEMENT: frozenset[str] = frozenset(
+    {
+        "pat_high_wave",
+        "pat_hikkake",
+        "pat_spinning_top",
+    }
+)
+"""The patterns whose bars line up with TA-Lib's at or above the floor above.
+
+**Agreement is a finding and it is pinned like any other.** The rest of this file records
+where the two sides part company, and a file that recorded only that would not notice a
+pattern which used to track its `CDL` function bar for bar quietly drifting away from it.
+The suite compares this set against what the capture actually produces, so both directions
+fail: a pattern that falls out of it and a pattern that joins it.
+
+Membership here is not a target and carries no authority. §10.3 makes the standard the
+source and TA-Lib the comparison, so a pattern agreeing closely is a fact about how near
+the two readings happen to be on these markets, never a reason to keep them near.
+
+What the three have in common is instructive: not one of them is registered with
+`requires_trend`. §7.2's high wave and spinning top judge a single bar's shape, and §7.5.9's
+hikkake is an arrangement of ranges that reads no §2 scale at all. Decision B is what
+separates the two sides everywhere else, and this set is where it is absent — which is also
+why membership says nothing about whether a rule is right.
 """
 
 

@@ -18,24 +18,33 @@ threshold should move, and `divergence.py` records why each pattern diverges pre
 that the reason stays attached to a decision instead of drifting into "we matched the
 library".
 
-The output worth having
------------------------
+The three outputs worth having
+------------------------------
 
-A pattern TA-Lib matches repeatedly while we never match it once. Two sections were once
-written with conditions no bar could satisfy at all, and an arithmetic sweep found those; a
-rule that is satisfiable in principle but unreachable on real-shaped data survives that
-sweep untouched. This comparison is the only axis that can see it, so
-`test_pattern_reference_values.py` fails on any such pattern that has no investigated
-explanation recorded beside it.
+A pattern TA-Lib matches repeatedly while we never match it once, anywhere in the bundle.
+Two sections were once written with conditions no bar could satisfy at all, and an
+arithmetic sweep found those; a rule that is satisfiable in principle but unreachable on
+real-shaped data survives that sweep untouched. This comparison is the only axis that can
+see it, so `Divergence.expected_silence` has to carry an investigation for any such
+pattern.
 
-The four parts
+A pattern neither side matches anywhere. That is not a finding about the rule — it is the
+absence of one, a row of the catalog the comparison never got to say anything about, and
+`Divergence.mutual_silence` records why the bundle still fails to reach it. Shrinking that
+list is what adding a regime is for.
+
+A bar where both sides matched and each claimed the opposite direction. Counting those and
+never reading them leaves the sharpest disagreement the comparison can produce sitting in
+an integer, so `Divergence.direction_conflict` has to explain any pattern that has one.
+
+The five parts
 --------------
 
-`series.py` builds the four thousand bars both sides are run over and fingerprints them.
-`talib_signals.py` holds the captured `CDL` output, or declares that none has been
-captured. `divergence.py` is the hand-written table of expected relations and their causes.
-`comparison.py` counts the five per-bar outcomes. This module merges them and refuses a
-registered pattern that nobody classified.
+`series.py` builds the bundle of regimes both sides are run over and fingerprints each.
+`talib_signals.py` holds the captured `CDL` output per regime, or declares that none has
+been captured. `divergence.py` is the hand-written table of expected relations and their
+causes. `comparison.py` decides every bar's outcome and rolls the bundle up. `report.py`
+turns that into the findings above and into a printable table.
 
 Capturing the values
 --------------------
@@ -54,33 +63,76 @@ own sections separately and they do not correspond.
 from core_lib.patterns import DEFAULT_PATTERN_REGISTRY
 
 from . import talib_signals
-from .comparison import Tally, our_series, registered_specs, tally_one
+from .comparison import (
+    Comparison,
+    Tally,
+    compare_one,
+    comparisons,
+    our_series,
+    registered_specs,
+    tally_one,
+)
 from .divergence import (
     CAUSE_COVERAGE,
     DIVERGENCES,
+    HIGH_AGREEMENT,
+    HIGH_AGREEMENT_FLOOR,
     PENETRATION_FUNCTIONS,
     TALIB_FUNCTIONS,
     Cause,
     Divergence,
 )
-from .series import BAR_COUNT, reference_candles, series_fingerprint
+from .report import (
+    high_agreement_patterns,
+    patterns_matched_by_neither,
+    patterns_only_talib_matched,
+    patterns_only_we_matched,
+    patterns_with_direction_conflicts,
+    render_report,
+)
+from .series import (
+    REGIME_NAMES,
+    REGIMES,
+    REGIMES_BY_NAME,
+    TOTAL_BAR_COUNT,
+    Regime,
+    candles_for,
+    fingerprints,
+    series_fingerprint,
+)
 from .talib_signals import CAPTURED, SIGNALS
 
 __all__ = [
-    "BAR_COUNT",
     "CAPTURED",
     "CAPTURE_INSTRUCTIONS",
     "CAUSE_COVERAGE",
     "DIVERGENCES",
+    "HIGH_AGREEMENT",
+    "HIGH_AGREEMENT_FLOOR",
     "PENETRATION_FUNCTIONS",
+    "REGIMES",
+    "REGIMES_BY_NAME",
+    "REGIME_NAMES",
     "SIGNALS",
     "TALIB_FUNCTIONS",
+    "TOTAL_BAR_COUNT",
     "Cause",
+    "Comparison",
     "Divergence",
+    "Regime",
     "Tally",
+    "candles_for",
+    "compare_one",
+    "comparisons",
+    "fingerprints",
+    "high_agreement_patterns",
     "our_series",
-    "reference_candles",
+    "patterns_matched_by_neither",
+    "patterns_only_talib_matched",
+    "patterns_only_we_matched",
+    "patterns_with_direction_conflicts",
     "registered_specs",
+    "render_report",
     "series_fingerprint",
     "talib_signals",
     "tally_one",
