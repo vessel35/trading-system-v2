@@ -21,11 +21,10 @@ a single pooled number hides that.
 
 Two things are deliberately not compared.
 
-The magnitude of TA-Lib's value is ignored. It reports 100 on a match and 200 on the
-confirmed instance of the two Hikkake functions, while our `_strength` is 0.5 only for the
-§5.6 boundary case of an engulfment with one coinciding end. The two numbers answer
-unrelated questions, and pairing them would manufacture agreement or disagreement out of
-nothing.
+The magnitude of TA-Lib's value is not compared to our `_strength`. It is read only to
+separate its ordinary ±100 events from later or otherwise distinct events such as Hikkake
+confirmations. A non-±100 value can still be a TA-Lib match, but it is not the same event
+as our pattern match on that bar and is kept out of the overlap count.
 
 Bars still warming up are dropped rather than counted. §5.3 makes NaN mean "cannot judge
 yet" and it appears only before `min_history`; a bar we have not judged cannot belong in
@@ -49,13 +48,16 @@ from .divergence import TALIB_FUNCTIONS
 from .series import REGIME_NAMES, candles_for
 from .talib_signals import SIGNALS
 
+TALIB_BASE_MATCH_MAGNITUDE = 100
+"""TA-Lib's ordinary match magnitude, distinct from confirmation or other event markers."""
+
 
 @dataclass(frozen=True, slots=True)
 class Tally:
-    """The five outcomes of one pattern against its `CDL` function, over one regime."""
+    """The counted outcomes of one pattern against its `CDL` function, over one regime."""
 
     both_agree: int
-    """Both matched the same bar and their directions do not contradict each other."""
+    """Both matched the same event on the same bar and their directions do not contradict."""
 
     ours_only: int
     """We matched and TA-Lib reported zero."""
@@ -74,39 +76,98 @@ class Tally:
     """
 
     conflict_bars: tuple[int, ...] = field(default=())
-    """The bars where both matched and each claimed the opposite direction.
+    """The bars where both matched the same event and claimed the opposite direction.
 
     The indices are kept rather than only their count. A conflict is the one outcome that
     cannot be explained without looking at the bar it happened on, and a number nobody can
     trace back to a bar is a number nobody investigates.
     """
 
+    same_bar_different_event_bars: tuple[int, ...] = field(default=())
+    """The bars where both arrays are non-zero but TA-Lib did not report an ordinary event.
+
+    TA-Lib uses magnitudes other than ±100 for function-specific facts such as Hikkake
+    confirmation. Those bars are TA-Lib matches and may coincide with our non-zero match
+    key, but they are not counted as overlap because they are not the same event.
+    """
+
     @property
     def both_conflict(self) -> int:
-        """Return how many bars both matched on with opposite directions."""
+        """Return how many same-event bars both matched on with opposite directions."""
         return len(self.conflict_bars)
 
     @property
+    def same_bar_different_event(self) -> int:
+        """Return how many same-bar non-zero pairs were not the same event."""
+        return len(self.same_bar_different_event_bars)
+
+    @property
     def judged(self) -> int:
-        """Return the bars the five outcomes were counted over."""
+        """Return the bars the counted outcomes were counted over."""
         return (
-            self.both_agree + self.both_conflict + self.ours_only + self.talib_only + self.neither
+            self.both_agree
+            + self.both_conflict
+            + self.same_bar_different_event
+            + self.ours_only
+            + self.talib_only
+            + self.neither
         )
 
     @property
     def both_matched(self) -> int:
-        """Return how many bars both sides matched, whatever direction each claimed."""
+        """Return how many bars both sides matched the same event on."""
         return self.both_agree + self.both_conflict
 
     @property
     def our_matches(self) -> int:
         """Return how many bars we matched on."""
-        return self.both_matched + self.ours_only
+        return self.both_matched + self.same_bar_different_event + self.ours_only
 
     @property
     def talib_matches(self) -> int:
         """Return how many bars TA-Lib reported non-zero on."""
-        return self.both_matched + self.talib_only
+        return self.both_matched + self.same_bar_different_event + self.talib_only
+
+    @property
+    def matched_by_either(self) -> int:
+        """Return bars at least one side matched."""
+        return self.both_matched + self.same_bar_different_event + self.ours_only + self.talib_only
+
+    @property
+    def overlap_expectation(self) -> float | None:
+        """Return `ours * talib / judged`, used as a visibility measure for sparse rows."""
+        if self.our_matches == 0 or self.talib_matches == 0 or self.judged == 0:
+            return None
+        return self.our_matches * self.talib_matches / self.judged
+
+    @property
+    def overlap_rate(self) -> float | None:
+        """Return observed same-event overlap as a fraction of the maximum possible overlap."""
+        possible = min(self.our_matches, self.talib_matches)
+        if possible == 0:
+            return None
+        return self.both_matched / possible
+
+    @property
+    def bundle_zero_overlap(self) -> bool:
+        """Return whether both sides matched but never on the same event bar."""
+        return self.our_matches > 0 and self.talib_matches > 0 and self.both_matched == 0
+
+    @property
+    def regime_zero_overlap(self) -> bool:
+        """Return whether local zero overlap is visible enough to need investigation."""
+        expectation = self.overlap_expectation
+        return self.bundle_zero_overlap and expectation is not None and expectation >= 1.0
+
+    @property
+    def material_overlap_deficit(self) -> bool:
+        """Return whether observed overlap falls below expectation by more than sqrt(E)."""
+        expectation = self.overlap_expectation
+        return (
+            expectation is not None
+            and expectation >= 1.0
+            and expectation - self.both_matched > math.sqrt(expectation)
+        )
 
 
 def _directions_contradict(ours: float, theirs: int) -> bool:
@@ -136,6 +197,7 @@ def tally_one(
     """
     outcomes = {"both_agree": 0, "ours_only": 0, "talib_only": 0, "neither": 0}
     conflicts: list[int] = []
+    different_events: list[int] = []
     warming_up = 0
     for index, value in enumerate(ours):
         matched = value[name]
@@ -144,6 +206,9 @@ def tally_one(
             continue
         their_value = theirs.get(index, 0)
         if matched and their_value:
+            if abs(their_value) != TALIB_BASE_MATCH_MAGNITUDE:
+                different_events.append(index)
+                continue
             if _directions_contradict(value[f"{name}_dir"], their_value):
                 conflicts.append(index)
                 continue
@@ -155,7 +220,12 @@ def tally_one(
         else:
             key = "neither"
         outcomes[key] += 1
-    return Tally(**outcomes, warming_up=warming_up, conflict_bars=tuple(conflicts))
+    return Tally(
+        **outcomes,
+        warming_up=warming_up,
+        conflict_bars=tuple(conflicts),
+        same_bar_different_event_bars=tuple(different_events),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,6 +248,11 @@ class Comparison:
     def both_conflict(self) -> int:
         """Return shared bars where the two claimed opposite directions, over the bundle."""
         return self._total("both_conflict")
+
+    @property
+    def same_bar_different_event(self) -> int:
+        """Return same-bar non-zero pairs that were not the same event, over the bundle."""
+        return self._total("same_bar_different_event")
 
     @property
     def both_matched(self) -> int:
@@ -217,7 +292,43 @@ class Comparison:
     @property
     def matched_by_either(self) -> int:
         """Return bars at least one side matched, across every regime."""
-        return self.both_matched + self.ours_only + self.talib_only
+        return self.both_matched + self.same_bar_different_event + self.ours_only + self.talib_only
+
+    @property
+    def overlap_expectation(self) -> float | None:
+        """Return `ours * talib / judged`, used as a visibility measure for sparse rows."""
+        if self.our_matches == 0 or self.talib_matches == 0 or self.judged == 0:
+            return None
+        return self.our_matches * self.talib_matches / self.judged
+
+    @property
+    def overlap_rate(self) -> float | None:
+        """Return observed same-event overlap as a fraction of the maximum possible overlap."""
+        possible = min(self.our_matches, self.talib_matches)
+        if possible == 0:
+            return None
+        return self.both_matched / possible
+
+    @property
+    def bundle_zero_overlap(self) -> bool:
+        """Return whether both sides matched somewhere but never on the same event bar."""
+        return self.our_matches > 0 and self.talib_matches > 0 and self.both_matched == 0
+
+    @property
+    def regime_zero_overlap(self) -> bool:
+        """Return whether zero overlap is visible enough to need investigation."""
+        expectation = self.overlap_expectation
+        return self.bundle_zero_overlap and expectation is not None and expectation >= 1.0
+
+    @property
+    def material_overlap_deficit(self) -> bool:
+        """Return whether observed overlap falls below expectation by more than sqrt(E)."""
+        expectation = self.overlap_expectation
+        return (
+            expectation is not None
+            and expectation >= 1.0
+            and expectation - self.both_matched > math.sqrt(expectation)
+        )
 
     @property
     def bar_agreement(self) -> float | None:
@@ -248,6 +359,17 @@ class Comparison:
                 regime: tally.conflict_bars
                 for regime, tally in self.by_regime.items()
                 if tally.conflict_bars
+            }
+        )
+
+    @property
+    def same_bar_different_event_bars_by_regime(self) -> Mapping[str, tuple[int, ...]]:
+        """Return same-bar different-event bars of each regime that has any."""
+        return MappingProxyType(
+            {
+                regime: tally.same_bar_different_event_bars
+                for regime, tally in self.by_regime.items()
+                if tally.same_bar_different_event_bars
             }
         )
 

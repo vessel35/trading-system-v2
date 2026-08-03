@@ -50,7 +50,7 @@ own sections separately and they do not correspond.
 """
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from types import MappingProxyType
 
@@ -117,6 +117,29 @@ class Cause(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class OverlapExplanation:
+    """Why a same-event overlap finding is acceptable after investigation."""
+
+    bundle: str | None = None
+    """Bundle-level investigation, when both sides matched but never on the same event bar."""
+
+    by_regime: Mapping[str, str] = field(default_factory=dict)
+    """Regime-level investigations, keyed by regimes that pass a local overlap predicate."""
+
+    def __post_init__(self) -> None:
+        if self.bundle is not None and not self.bundle.strip():
+            raise ValueError("bundle overlap explanation must not be empty")
+        cleaned = {regime: note for regime, note in self.by_regime.items()}
+        if any(not regime.strip() for regime in cleaned):
+            raise ValueError("regime overlap explanations must use non-empty keys")
+        if any(not note.strip() for note in cleaned.values()):
+            raise ValueError("regime overlap explanations must not be empty")
+        if self.bundle is None and not cleaned:
+            raise ValueError("overlap explanation must record a bundle or regime finding")
+        object.__setattr__(self, "by_regime", MappingProxyType(cleaned))
+
+
+@dataclass(frozen=True, slots=True)
 class Divergence:
     """One pattern's expected relation to its `CDL` counterpart, and the reason."""
 
@@ -161,6 +184,14 @@ class Divergence:
     unread, so it is recorded rather than counted. Checked in both directions like the
     silences: an unexplained conflict fails, and an explanation for a pattern that no
     longer conflicts is stale.
+    """
+
+    low_overlap: OverlapExplanation | None = None
+    """Why a same-event overlap finding is acceptable after investigation.
+
+    Bundle notes are for zero same-event overlap over the whole bundle. Regime notes are
+    for local zero overlap with expected overlap at least one, or for a deficit larger than
+    `sqrt(E)`. `None` means no such finding is expected.
     """
 
     def __post_init__(self) -> None:
@@ -737,6 +768,19 @@ _TABLE: tuple[Divergence, ...] = (
             "The bearish mirror of the morning doji star, with the same doji tolerance and the "
             "same fixed penetration depth."
         ),
+        low_overlap=OverlapExplanation(
+            bundle=(
+                "Investigated against the bundle: ours matched three bars, TA-Lib sixty-five, "
+                "and none overlapped. All TA-Lib bars are bearish and were checked against "
+                "docs/references/candlestick_pattern_calc_spec.md §7.4.4. First failure counts "
+                "are §3 trend not up on 19 bars, rule 2 first white body not §2.1-long on 32, "
+                "rule 3 star not a §2.3 doji on 13, and rule 5 close not below the first body's "
+                "midpoint on 1. Examples: mixed_hourly 817 has star body 0.02 against doji "
+                "limit 0.01; strong_uptrend 471 has first body/range 0.419, not > 0.500; "
+                "strong_downtrend 76 has first midpoint 318.09 below EMA10 318.44; "
+                "quiet_small_bodies 470 closes exactly at the midpoint, 99.96 == 99.96."
+            ),
+        ),
     ),
     Divergence(
         pattern="pat_abandoned_baby",
@@ -752,6 +796,18 @@ _TABLE: tuple[Divergence, ...] = (
             "The strictest gap requirement in the catalog: a doji isolated by a gap on both "
             "sides. Decision D accepted that a market trading around the clock produces these "
             "rarely rather than relaxing the gap, and §7.4.5 says so in place."
+        ),
+        low_overlap=OverlapExplanation(
+            bundle=(
+                "The design review investigated the whole finding and the values still match "
+                "it: ours matched frequent_gaps bars 420, 2276, and 2915, while TA-Lib matched "
+                "frequent_gaps bars 1442, 2296, and 2880, with no overlap. TA-Lib's three bars "
+                "are bullish; our bullish branch stops at docs/references/"
+                "candlestick_pattern_calc_spec.md §3 because the prior trend is up, not down "
+                "(first midpoints 101.55, 103.78, 98.285 against EMA10 101.295, 103.768, "
+                "97.505). The baby bar also fails §2.3 doji on all three: body/range 0.034, "
+                "0.071, and 0.100 exceed the 0.03 limit."
+            ),
         ),
     ),
     Divergence(
@@ -1031,6 +1087,19 @@ _TABLE: tuple[Divergence, ...] = (
             "asymmetry, and an implementation that mirrors the bullish form to get the bearish "
             "one will disagree with us on one side while agreeing on the other."
         ),
+        low_overlap=OverlapExplanation(
+            bundle=(
+                "Investigated against the bundle: ours matched choppy_reversals bar 344, while "
+                "TA-Lib matched strong_downtrend 60, choppy_reversals 460 and 495, and "
+                "wide_swings 608, with no overlap. All four TA-Lib bars are positive, so the "
+                "bullish §7.5.1 path was checked. Bars 60, 460, and 608 stop at "
+                "docs/references/candlestick_pattern_calc_spec.md §3 because their first-day "
+                "midpoints are below EMA10 (319.75 < 321.18, 92.33 < 93.05, 118.04 < 118.49). "
+                "Bar 495 has an uptrend and the three white bars, but rule 3 fails: highs "
+                "93.02, 92.94, 93.34 are not strictly increasing; rule 5 also fails because "
+                "the last opens at 93.19, not above the third high 93.34."
+            ),
+        ),
     ),
     Divergence(
         pattern="pat_breakaway",
@@ -1119,6 +1188,19 @@ _TABLE: tuple[Divergence, ...] = (
             "adopted and the unbounded reading rejected, which is what makes the window finite "
             "at four to seven bars. A target that fixes the window at one length can only agree "
             "on instances of that length."
+        ),
+        low_overlap=OverlapExplanation(
+            bundle=(
+                "Investigated against the bundle: ours matched mixed_hourly bar 460 and "
+                "strong_uptrend bar 2008, while TA-Lib matched strong_downtrend bar 31 and "
+                "wide_swings bar 1124, with no overlap. At strong_downtrend 31, all falling "
+                "spans are blocked: n=2, 3, and 4 first bars are not §2.1-long "
+                "(body/range 0.138, 0.423, 0.475), and n=5 reaches rule 3 but has middle "
+                "body/range values 0.475 and 0.423, not §2.2-short. All spans also have middle "
+                "ranges outside the first range. At wide_swings 1124, all rising spans stop at "
+                "rule 2: first body/range values 0.010, 0.188, 0.235, and 0.052 are not long; "
+                "the last body/range is 0.083 and would fail rule 5 as well."
+            ),
         ),
     ),
     Divergence(

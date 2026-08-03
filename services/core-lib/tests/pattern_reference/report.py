@@ -33,10 +33,12 @@ Section numbers in this file are the candlestick pattern standard's,
 own sections separately and they do not correspond.
 """
 
+from collections import Counter
 from collections.abc import Mapping
 
 from . import talib_signals
-from .comparison import Comparison, comparisons
+from .comparison import TALIB_BASE_MATCH_MAGNITUDE, Comparison, comparisons
+from .divergence import TALIB_FUNCTIONS
 from .series import REGIME_NAMES, REGIMES_BY_NAME
 
 
@@ -106,6 +108,63 @@ def patterns_with_direction_conflicts(
     }
 
 
+def patterns_with_bundle_zero_overlap(
+    subject: Mapping[str, Comparison] | None = None,
+) -> tuple[str, ...]:
+    """Return patterns where both sides matched somewhere but never the same event bar."""
+    resolved = _resolve(subject)
+    return tuple(sorted(name for name, entry in resolved.items() if entry.bundle_zero_overlap))
+
+
+def patterns_with_regime_zero_overlap(
+    subject: Mapping[str, Comparison] | None = None,
+) -> dict[str, tuple[str, ...]]:
+    """Return per-regime zero-overlap findings whose expectation is at least one."""
+    resolved = _resolve(subject)
+    return {
+        name: tuple(
+            regime for regime in REGIME_NAMES if entry.by_regime[regime].regime_zero_overlap
+        )
+        for name, entry in sorted(resolved.items())
+        if any(tally.regime_zero_overlap for tally in entry.by_regime.values())
+    }
+
+
+def patterns_with_material_overlap_deficit(
+    subject: Mapping[str, Comparison] | None = None,
+) -> tuple[str, ...]:
+    """Return bundle rows where the overlap deficit exceeds sqrt(E)."""
+    resolved = _resolve(subject)
+    return tuple(sorted(name for name, entry in resolved.items() if entry.material_overlap_deficit))
+
+
+def patterns_with_material_overlap_deficit_by_regime(
+    subject: Mapping[str, Comparison] | None = None,
+) -> dict[str, tuple[str, ...]]:
+    """Return per-regime rows where the overlap deficit exceeds sqrt(E)."""
+    resolved = _resolve(subject)
+    return {
+        name: tuple(
+            regime for regime in REGIME_NAMES if entry.by_regime[regime].material_overlap_deficit
+        )
+        for name, entry in sorted(resolved.items())
+        if any(tally.material_overlap_deficit for tally in entry.by_regime.values())
+    }
+
+
+def talib_non_base_magnitudes_by_pattern() -> dict[str, dict[int, int]]:
+    """Return TA-Lib magnitudes other than ±100, keyed by pattern name."""
+    pattern_by_function = {function: pattern for pattern, function in TALIB_FUNCTIONS.items()}
+    counts: dict[str, Counter[int]] = {}
+    for regime in REGIME_NAMES:
+        for function, bars in talib_signals.SIGNALS[regime].items():
+            pattern = pattern_by_function[function]
+            for value in bars.values():
+                if abs(value) != TALIB_BASE_MATCH_MAGNITUDE:
+                    counts.setdefault(pattern, Counter())[value] += 1
+    return {pattern: dict(values) for pattern, values in sorted(counts.items())}
+
+
 def high_agreement_patterns(
     floor: float,
     subject: Mapping[str, Comparison] | None = None,
@@ -126,6 +185,10 @@ def high_agreement_patterns(
 
 def _ratio(value: float | None) -> str:
     return "     -" if value is None else f"{value:6.3f}"
+
+
+def _quantity(value: float | None) -> str:
+    return "       -" if value is None else f"{value:8.2f}"
 
 
 def render_report(subject: Mapping[str, Comparison] | None = None) -> str:
@@ -152,26 +215,47 @@ def render_report(subject: Mapping[str, Comparison] | None = None) -> str:
     only_theirs = patterns_only_talib_matched(resolved)
     only_ours = patterns_only_we_matched(resolved)
     nobody = patterns_matched_by_neither(resolved)
+    bundle_zero = patterns_with_bundle_zero_overlap(resolved)
+    regime_zero = patterns_with_regime_zero_overlap(resolved)
+    material_deficit = patterns_with_material_overlap_deficit(resolved)
+    material_deficit_by_regime = patterns_with_material_overlap_deficit_by_regime(resolved)
+    non_base = talib_non_base_magnitudes_by_pattern()
     lines.append("Coverage over the bundle")
     lines.append("-" * 100)
     lines.append(f"  patterns both sides matched somewhere : {both}")
     lines.append(f"  patterns only TA-Lib matched          : {len(only_theirs)}")
     lines.append(f"  patterns only we matched              : {len(only_ours)}")
     lines.append(f"  patterns neither side matched         : {len(nobody)}")
+    lines.append(f"  bundle zero-overlap findings          : {len(bundle_zero)}")
+    lines.append(
+        "  regime zero-overlap E>=1 findings     : "
+        f"{sum(len(regimes) for regimes in regime_zero.values())}"
+    )
+    material_deficit_count = len(material_deficit) + sum(
+        len(regimes) for regimes in material_deficit_by_regime.values()
+    )
+    lines.append(f"  material overlap-deficit findings     : {material_deficit_count}")
+    lines.append(
+        "  TA-Lib non-±100 magnitude bars        : "
+        f"{sum(sum(values.values()) for values in non_base.values())}"
+    )
     lines.append("")
 
     lines.append("Per pattern, over the bundle")
     lines.append("-" * 100)
     header = (
         f"  {'pattern':<28}{'CDL function':<22}{'ours':>7}{'talib':>7}"
-        f"{'both':>7}{'confl':>7}{'bar':>7}{'dir':>7}"
+        f"{'both':>7}{'other':>7}{'confl':>7}{'ovlp':>7}{'exp':>9}"
+        f"{'bar':>7}{'dir':>7}"
     )
     lines.append(header)
     for name in sorted(resolved):
         entry = resolved[name]
         lines.append(
             f"  {name:<28}{entry.talib_function:<22}{entry.our_matches:>7}"
-            f"{entry.talib_matches:>7}{entry.both_matched:>7}{entry.both_conflict:>7}"
+            f"{entry.talib_matches:>7}{entry.both_matched:>7}"
+            f"{entry.same_bar_different_event:>7}{entry.both_conflict:>7}"
+            f"{_ratio(entry.overlap_rate):>7}{_quantity(entry.overlap_expectation):>9}"
             f"{_ratio(entry.bar_agreement):>7}{_ratio(entry.direction_agreement):>7}"
         )
     lines.append("")
@@ -186,7 +270,9 @@ def render_report(subject: Mapping[str, Comparison] | None = None) -> str:
             lines.append(
                 f"      {regime_name:<20}ours {tally.our_matches:>5}  "
                 f"talib {tally.talib_matches:>5}  both {tally.both_matched:>5}  "
-                f"conflict {tally.both_conflict:>4}"
+                f"other {tally.same_bar_different_event:>4}  conflict {tally.both_conflict:>4}  "
+                f"ovlp {_ratio(tally.overlap_rate):>7}  "
+                f"exp {_quantity(tally.overlap_expectation):>8}"
             )
     lines.append("")
 
@@ -200,6 +286,35 @@ def render_report(subject: Mapping[str, Comparison] | None = None) -> str:
             lines.append(f"  {name:<28}{regime_name:<20}{list(bars)}")
     lines.append("")
 
+    lines.append("Regime zero-overlap findings, E>=1")
+    lines.append("-" * 100)
+    if not regime_zero:
+        lines.append("  none")
+    for name, regimes in regime_zero.items():
+        lines.append(f"  {name:<28}{', '.join(regimes)}")
+    lines.append("")
+
+    lines.append("Material overlap-deficit findings")
+    lines.append("-" * 100)
+    if not material_deficit and not material_deficit_by_regime:
+        lines.append("  none")
+    for name in material_deficit:
+        lines.append(f"  {name:<28}bundle")
+    for name, regimes in material_deficit_by_regime.items():
+        lines.append(f"  {name:<28}{', '.join(regimes)}")
+    lines.append("")
+
+    lines.append("TA-Lib non-±100 magnitudes")
+    lines.append("-" * 100)
+    if not non_base:
+        lines.append("  none")
+    for name, values in non_base.items():
+        total = sum(values.values())
+        rendered = ", ".join(f"{value}: {count}" for value, count in sorted(values.items()))
+        lines.append(f"  {name:<28}{total:>5} bars  ({rendered})")
+    lines.append("")
+
+    _append_list(lines, "Bundle zero-overlap findings", bundle_zero)
     _append_list(lines, "Patterns neither side matched anywhere", nobody)
     _append_list(lines, "Patterns only TA-Lib matched", only_theirs)
     _append_list(lines, "Patterns only we matched", only_ours)
