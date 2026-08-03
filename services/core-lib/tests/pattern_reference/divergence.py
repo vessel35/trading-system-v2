@@ -460,6 +460,15 @@ _TABLE: tuple[Divergence, ...] = (
             "tighter one-in-a-thousand rule from the matching-high entry was not adopted, "
             "because he elsewhere directs that the doji tolerance be reused for equality."
         ),
+        expected_silence=(
+            "Investigated against the capture. TA-Lib matched four bars. Rules 2 and 3 refuse on "
+            "all four because §2.1 makes a long body more than half of that same bar's range, "
+            "while TA-Lib compares the body against an average of recent bodies; a bar with long "
+            "shadows is long to TA-Lib and not to us. Rule 5 refuses on three of the four as "
+            "well, since §2.6 reads 'the closes are equal' with the doji tolerance of three "
+            "percent of the range. Two independent thresholds have to be met at once on two "
+            "adjacent bars. Reachable: §7.3.7's matching case holds. "
+        ),
     ),
     Divergence(
         pattern="pat_separating_lines",
@@ -683,6 +692,16 @@ _TABLE: tuple[Divergence, ...] = (
             "body gaps. Three doji in a row is a compound rarity: whatever the tolerance, its "
             "third power governs how often this can appear at all."
         ),
+        expected_silence=(
+            "Investigated against the capture. TA-Lib matched nine bars and rule 2 refuses on all "
+            "nine: not one of the three bars is a doji under §2.3's Body <= 0.03 * Range. TA- "
+            "Lib's BodyDoji is a fraction of an average of recent ranges and is far looser, so it "
+            "calls bars doji that carry several percent of their own range in body. Decision A "
+            "fixed our figure from Morris's one-to-three percent rather than from TA-Lib's "
+            "settings table, and requiring it of three consecutive bars cubes the rarity. The gap "
+            "requirement refused only two of the nine, so the doji threshold is the whole story. "
+            "Reachable: §7.4.6's matching case holds. "
+        ),
     ),
     Divergence(
         pattern="pat_two_crows",
@@ -711,6 +730,13 @@ _TABLE: tuple[Divergence, ...] = (
             "Two crows with the additional requirement that the second black body engulf the "
             "first and the gap survive to the third bar, so it is strictly narrower than the "
             "pattern above and both are reported separately."
+        ),
+        expected_silence=(
+            "Investigated against the capture. TA-Lib matched exactly one bar in four thousand, "
+            "and on it rule 2 refuses: the first day's white body is not long under §2.1's same- "
+            "bar denominator. One bar is too little to say anything about frequency, and the "
+            "pattern is rare in TA-Lib's own reading too. Reachable: §7.4.8's matching case "
+            "holds. "
         ),
     ),
     Divergence(
@@ -760,6 +786,17 @@ _TABLE: tuple[Divergence, ...] = (
             "Three white bodies that weaken, with §2.4's long upper shadows appearing on the "
             "later bars. The weakening is expressed as body comparisons between the bars rather "
             "than through a §2 scale, so the shadow threshold is the main chosen value here."
+        ),
+        expected_silence=(
+            "Investigated against the capture. TA-Lib matched twenty bars, and on every one of "
+            "them rule 4 is what refuses. §2.4 measures a long upper shadow as at least twice the "
+            "body, while TA-Lib's ShadowLong is a fraction of an average of recent ranges, so on "
+            "a bar with an ordinary body the two readings are nowhere near each other. §7.4.12 "
+            "also drops any length requirement from rule 2, which leaves the three white bodies "
+            "free to be large, and a large body is exactly what makes a body-relative shadow test "
+            "hard to pass. The trend gate refused eight of the twenty as well. The section is "
+            "reachable: its own matching case in test_pattern_three_candle.py holds, so this is "
+            "strictness against neutral data rather than a rule no bar can satisfy. "
         ),
     ),
     Divergence(
@@ -887,6 +924,14 @@ _TABLE: tuple[Divergence, ...] = (
             "for a bar that does *not* have a very short upper shadow. §2.7 records that a "
             "degenerate bar must be excluded before the scales are read precisely because a "
             "false return would satisfy a negated rule instead of failing it."
+        ),
+        expected_silence=(
+            "Investigated against the capture. TA-Lib matched two bars and two of our "
+            "requirements refuse on both. First the trend: decision B gates this section on §3's "
+            "ten-period average while TA-Lib judges shape alone, so it can report a ladder bottom "
+            "with no decline behind it. Second rule 2, which wants three long black bodies in a "
+            "row under §2.1's same-bar denominator. Two bars is thin evidence either way, and the "
+            "section is reachable: §7.5.3's matching case holds. "
         ),
     ),
     Divergence(
