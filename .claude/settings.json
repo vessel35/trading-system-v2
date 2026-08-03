@@ -50,8 +50,6 @@
       "Bash(git reset --hard:*)",
       "Bash(git checkout -- :*)",
       "Bash(npm publish:*)",
-      "Bash(pip install:*)",
-      "Bash(uv pip install:*)",
       "Bash(poetry add:*)",
       "Bash(docker:*)",
       "Bash(kubectl:*)"
