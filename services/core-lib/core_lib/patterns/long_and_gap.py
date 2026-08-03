@@ -41,6 +41,10 @@ Hikkake sections replace the general rule with the one their source states.
 The four keys, the degenerate gate, warm-up, the span loop, and the placement of
 confirmations are not here. `judgment.py` holds them once for all sixty-one
 patterns.
+
+Section numbers in this module are the candlestick pattern standard's,
+`docs/references/candlestick_pattern_calc_spec.md`. The indicator standard numbers its
+own sections separately and they do not correspond.
 """
 
 from collections.abc import Callable, Sequence

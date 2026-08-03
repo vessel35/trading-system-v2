@@ -17,6 +17,10 @@ confirmation back onto the pattern bar, because the value at index `t` may only
 depend on candles up to `t`. So the four builders below let `confirmed` be set on
 a bar that did not itself match: that combination is not a contradiction, it is
 the normal shape of a confirmed pattern.
+
+Section numbers in this module are the candlestick pattern standard's,
+`docs/references/candlestick_pattern_calc_spec.md`. The indicator standard numbers its
+own sections separately and they do not correspond.
 """
 
 import re

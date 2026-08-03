@@ -21,6 +21,10 @@ patterns: a pattern's spec is assembled from its judgment rule, so the group
 modules import `judgment.py`, which imports `registry.py`. Building the default
 registry inside `registry.py` would close that into a cycle, and this package is
 the first point above the group modules where nothing is left half-imported.
+
+Section numbers in this module are the candlestick pattern standard's,
+`docs/references/candlestick_pattern_calc_spec.md`. The indicator standard numbers its
+own sections separately and they do not correspond.
 """
 
 from collections.abc import Mapping

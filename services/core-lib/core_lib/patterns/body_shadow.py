@@ -12,6 +12,10 @@ High-Wave's shadows reach two bodies while Spinning Top only needs them longer
 than the body. And Long Line asks for a long body and nothing else: TA-Lib adds a
 shadow requirement to its own function, but Morris's Long Days passage has none,
 so §7.2.5 does not add one either.
+
+Section numbers in this module are the candlestick pattern standard's,
+`docs/references/candlestick_pattern_calc_spec.md`. The indicator standard numbers its
+own sections separately and they do not correspond.
 """
 
 from collections.abc import Sequence

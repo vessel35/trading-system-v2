@@ -22,6 +22,10 @@ only where a source graded one, and Morris grades some sections differently on
 their two sides. Twelve sections here take the general rule, three compute it on
 their bearish side alone, and three compute none at all. The three cases are
 checked as a table and then exercised on live bars.
+
+Section numbers in this file are the candlestick pattern standard's,
+`docs/references/candlestick_pattern_calc_spec.md`. The indicator standard numbers its
+own sections separately and they do not correspond.
 """
 
 from collections.abc import Sequence

@@ -29,6 +29,10 @@ path judges each index from a slice of the series; the incremental path judges
 from a `deque` it advances one confirmed candle at a time. Neither calls the
 other, so `test_pattern_single_candle.py` comparing them is a real check rather
 than a tautology.
+
+Section numbers in this module are the candlestick pattern standard's,
+`docs/references/candlestick_pattern_calc_spec.md`. The indicator standard numbers its
+own sections separately and they do not correspond.
 """
 
 from collections import deque

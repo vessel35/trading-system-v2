@@ -45,6 +45,10 @@ TA-Lib installed, rewrites `talib_signals.py` in place. Neither the suite nor co
 integration imports TA-Lib, and no test requires the environment to exist; the ones that
 need values skip while `CAPTURED` is false and say in the skip message how to produce them.
 `docs/roadmap-stage-3-0-plan.md` carries the same instructions.
+
+Section numbers in this file are the candlestick pattern standard's,
+`docs/references/candlestick_pattern_calc_spec.md`. The indicator standard numbers its
+own sections separately and they do not correspond.
 """
 
 from core_lib.patterns import DEFAULT_PATTERN_REGISTRY

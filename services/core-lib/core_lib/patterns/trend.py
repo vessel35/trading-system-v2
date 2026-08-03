@@ -10,6 +10,10 @@ midpoint, not the close. And the comparison happens on the first bar of the
 pattern, which for a `k`-bar pattern is `k - 1` bars behind the bar being judged
 — so a state holding only the current average cannot make the comparison at all.
 That is why `PriorTrendState` keeps a short queue.
+
+Section numbers in this module are the candlestick pattern standard's,
+`docs/references/candlestick_pattern_calc_spec.md`. The indicator standard numbers its
+own sections separately and they do not correspond.
 """
 
 from collections import deque

@@ -11,6 +11,10 @@ One decision runs through the whole module. §2 settled on *that bar's high-low
 range* as the denominator, out of the three ways Morris allowed. The consequence
 that matters for the code is in §6: a scale reading only its own bar carries no
 warm-up, so `min_history` never has a scale term.
+
+Section numbers in this module are the candlestick pattern standard's,
+`docs/references/candlestick_pattern_calc_spec.md`. The indicator standard numbers its
+own sections separately and they do not correspond.
 """
 
 from core_lib.types import Candle

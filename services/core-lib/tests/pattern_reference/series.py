@@ -48,6 +48,10 @@ consecutive doji, or a five-bar window with a gap inside it, appears a handful o
 times in a few thousand bars and not at all in a few hundred. Length buys those
 patterns an opportunity without shaping a single bar in their favour, which is
 the only kind of help this file is allowed to give.
+
+Section numbers in this file are the candlestick pattern standard's,
+`docs/references/candlestick_pattern_calc_spec.md`. The indicator standard numbers its
+own sections separately and they do not correspond.
 """
 
 import hashlib

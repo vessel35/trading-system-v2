@@ -16,6 +16,10 @@ Two fields exist here that `IndicatorSpec` has no use for. `bar_count` and
 `requires_trend` are what §6 needs to compute `min_history`, and computing it
 rather than declaring it is what stops a spec from carrying a warm-up length that
 disagrees with the standard's own formula.
+
+Section numbers in this module are the candlestick pattern standard's,
+`docs/references/candlestick_pattern_calc_spec.md`. The indicator standard numbers its
+own sections separately and they do not correspond.
 """
 
 import builtins

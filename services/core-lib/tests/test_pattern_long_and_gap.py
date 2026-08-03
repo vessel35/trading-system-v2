@@ -31,6 +31,10 @@ keeps both of its bars white on the bearish side, where every other two-sided
 section in the standard swaps the colours. And §7.5.9's polarity runs the way
 that surprises: the bullish setup is the one whose last bar breaks *below* the
 inside bar.
+
+Section numbers in this file are the candlestick pattern standard's,
+`docs/references/candlestick_pattern_calc_spec.md`. The indicator standard numbers its
+own sections separately and they do not correspond.
 """
 
 from collections.abc import Sequence

@@ -17,6 +17,10 @@ than requiring both ends to be strict.
 Nothing here reads a scale or the high-low range. The relation is between two
 real bodies and the sources fixed it exactly, which is why §7.3.1 Engulfing is
 one of the few sections whose "what we chose" note says: nothing.
+
+Section numbers in this module are the candlestick pattern standard's,
+`docs/references/candlestick_pattern_calc_spec.md`. The indicator standard numbers its
+own sections separately and they do not correspond.
 """
 
 from core_lib.types import Candle

@@ -9,6 +9,10 @@ Two formulas cover all sixty-one patterns, and the reason there are only two is
 §2's choice of denominator. Every scale reads its own bar's high-low range and no
 earlier bar, so no scale contributes warm-up. What is left is the pattern's own
 span and, when it asks for one, the trend average.
+
+Section numbers in this module are the candlestick pattern standard's,
+`docs/references/candlestick_pattern_calc_spec.md`. The indicator standard numbers its
+own sections separately and they do not correspond.
 """
 
 from .trend import TREND_EMA_PERIOD

@@ -26,6 +26,10 @@ the suite rejects them rather than comparing our output against another series' 
 them includes a `penetration` argument carrying a library default. **It is written down,
 not adopted.** Our depths come from §7 and the sources behind it; knowing what TA-Lib used
 explains a disagreement and never settles one.
+
+Section numbers in this file are the candlestick pattern standard's,
+`docs/references/candlestick_pattern_calc_spec.md`. The indicator standard numbers its
+own sections separately and they do not correspond.
 """
 
 from collections.abc import Mapping

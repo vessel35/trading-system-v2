@@ -17,6 +17,10 @@ Bars still warming up are dropped rather than counted. §5.3 makes NaN mean "can
 yet" and it appears only before `min_history`; a bar we have not judged cannot belong in
 any of the five outcomes, and folding it into "neither matched" would credit us with
 agreeing on bars we never looked at.
+
+Section numbers in this file are the candlestick pattern standard's,
+`docs/references/candlestick_pattern_calc_spec.md`. The indicator standard numbers its
+own sections separately and they do not correspond.
 """
 
 import math

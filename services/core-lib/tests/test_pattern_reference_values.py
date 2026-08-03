@@ -17,6 +17,10 @@ match. TA-Lib's sign means the candle's colour on some functions and the pattern
 on others, so an assertion either way would encode a belief about the comparison target
 rather than a claim of the standard. The count is kept instead: `Tally.both_conflict` is
 what to read when investigating whether the two sides disagree about a pattern's bearing.
+
+Section numbers in this file are the candlestick pattern standard's,
+`docs/references/candlestick_pattern_calc_spec.md`. The indicator standard numbers its
+own sections separately and they do not correspond.
 """
 
 import math

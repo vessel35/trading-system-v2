@@ -45,6 +45,10 @@ down for the twelve candle lines of §7.1 and §7.2.
 
 The four keys, the degenerate gate, warm-up, and the placement of confirmations
 are not here. `judgment.py` holds them once for all sixty-one patterns.
+
+Section numbers in this module are the candlestick pattern standard's,
+`docs/references/candlestick_pattern_calc_spec.md`. The indicator standard numbers its
+own sections separately and they do not correspond.
 """
 
 from collections.abc import Sequence

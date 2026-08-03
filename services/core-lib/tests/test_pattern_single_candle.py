@@ -12,6 +12,10 @@ The two execution paths are compared on every one of these hand-built series
 rather than only on a generated one, because `run` — which nearly every test calls
 — judges the batch path and the incremental path and refuses to return until they
 agree.
+
+Section numbers in this file are the candlestick pattern standard's,
+`docs/references/candlestick_pattern_calc_spec.md`. The indicator standard numbers its
+own sections separately and they do not correspond.
 """
 
 from collections.abc import Sequence

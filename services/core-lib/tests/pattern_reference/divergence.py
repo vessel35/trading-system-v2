@@ -43,6 +43,10 @@ an unreachable rule into a check that finds nothing.
 The field is also checked in the other direction: a recorded silence for a pattern that
 does match is stale, and stale is how a table stops describing the code it claims to
 describe.
+
+Section numbers in this file are the candlestick pattern standard's,
+`docs/references/candlestick_pattern_calc_spec.md`. The indicator standard numbers its
+own sections separately and they do not correspond.
 """
 
 from collections.abc import Mapping
