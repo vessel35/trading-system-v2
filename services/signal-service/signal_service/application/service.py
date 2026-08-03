@@ -12,8 +12,6 @@ from datetime import UTC, datetime, timedelta
 from core_lib.indicators import (
     DEFAULT_REGISTRY,
     IndicatorRegistry,
-    IndicatorSpec,
-    IndicatorState,
     assert_finalized,
 )
 from core_lib.money_management import (
@@ -23,6 +21,9 @@ from core_lib.money_management import (
     MoneyManagementPolicy,
     RiskLimits,
 )
+from core_lib.patterns import DEFAULT_PATTERN_REGISTRY, PatternRegistry
+from core_lib.series import SeriesSpec, SeriesState
+from core_lib.series_resolution import resolve_series_specs, series_key
 from core_lib.strategy import AdapterManager, StrategyAdapter, StrategyConfig
 from core_lib.types import (
     Candle,
@@ -65,18 +66,20 @@ class SignalGenerationService:
         sink: SignalSink,
         *,
         indicators: IndicatorRegistry = DEFAULT_REGISTRY,
+        patterns: PatternRegistry = DEFAULT_PATTERN_REGISTRY,
         queue: SignalQueue | None = None,
     ) -> None:
         self._feed = feed
         self._manager = manager
         self._sink = sink
         self._indicators = indicators
+        self._patterns = patterns
         self._queue = queue
         self._config: SignalGenerationConfig | None = None
         self._strategy: StrategyAdapter | None = None
         self._money_management: MoneyManagementPolicy | None = None
-        self._specs: list[IndicatorSpec] = []
-        self._states: dict[str, IndicatorState] = {}
+        self._specs: list[SeriesSpec] = []
+        self._states: dict[str, SeriesState] = {}
         self._confirmed: list[Candle] = []
         self._last_close: datetime | None = None
         self._resolved_params: dict[str, object] = {}
@@ -127,10 +130,12 @@ class SignalGenerationService:
                 if requirement.timeframe == "strategy"
             ]
         )
-        specs = self._indicators.resolve_specs(
+        specs = resolve_series_specs(
             "auto",
             [*metadata.required_indicators, *policy_indicators],
             (),
+            self._indicators,
+            self._patterns,
         )
         required_warmup = max(
             metadata.min_history,
@@ -278,7 +283,7 @@ class SignalGenerationService:
         for spec in self._specs:
             value = self._states[spec.identifier].update(candle)
             self._assert_finite_indicator(value, spec.identifier)
-            indicator_values[self._indicator_key(spec)] = value
+            indicator_values[series_key(spec)] = value
 
         config = self._require_config()
         signal = self._require_strategy().analyze(
@@ -569,23 +574,6 @@ class SignalGenerationService:
             for item in scalars
         ):
             raise ValueError(f"indicator {identifier} emitted a non-finite value")
-
-    @staticmethod
-    def _indicator_key(spec: IndicatorSpec) -> str:
-        name = re.sub(r"[^a-z0-9]+", "_", spec.name.casefold()).strip("_")
-        params = ",".join(
-            f"{key}={SignalGenerationService._indicator_param(value)}"
-            for key, value in sorted(spec.params.items())
-        )
-        return name if not params else f"{name}:{params}"
-
-    @staticmethod
-    def _indicator_param(value: object) -> str:
-        if isinstance(value, bool):
-            return str(value).lower()
-        if isinstance(value, float) and value.is_integer():
-            return str(int(value))
-        return str(value)
 
     @staticmethod
     def _utc(value: datetime, *, name: str) -> datetime:

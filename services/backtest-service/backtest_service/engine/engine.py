@@ -37,7 +37,7 @@ from core_lib.execution import (
     resolve_triggers,
     to_decimal,
 )
-from core_lib.indicators import DEFAULT_REGISTRY, IndicatorSpec, IndicatorState
+from core_lib.indicators import DEFAULT_REGISTRY
 from core_lib.money_management import (
     AccountRiskSnapshot,
     MarketSnapshot,
@@ -46,7 +46,14 @@ from core_lib.money_management import (
     RiskLimits,
     turtle_n_series,
 )
+from core_lib.patterns import DEFAULT_PATTERN_REGISTRY
 from core_lib.ports import Broker, CatalogStore, Clock, CostModel, DataFeed, EvidenceSink
+from core_lib.series import SeriesSpec, SeriesState
+from core_lib.series_resolution import (
+    resolve_series_specs,
+    series_key,
+    series_specs_from_descriptors,
+)
 from core_lib.sizing import exposure_limit, wallet_pct_size
 from core_lib.sizing import size as risk_size
 from core_lib.strategy import AdapterManager, StrategyAdapter, StrategyConfig
@@ -294,8 +301,8 @@ class Engine:
         self._evaluation: list[Candle] = []
         self._confirmed: list[Candle] = []
         self._minute_history: list[Candle] = []
-        self._indicator_specs: list[IndicatorSpec] = []
-        self._indicator_states: dict[str, IndicatorState] = {}
+        self._indicator_specs: list[SeriesSpec] = []
+        self._indicator_states: dict[str, SeriesState] = {}
         self._indicator_values: dict[str, object] = {}
         self._turtle_n_values: tuple[tuple[datetime, float], ...] = ()
         self._funding_rates: dict[datetime, tuple[Decimal, str]] = {}
@@ -363,15 +370,21 @@ class Engine:
             *metadata.required_indicators,
             *self._strategy_timeframe_policy_indicators(),
         ]
-        self._indicator_specs = DEFAULT_REGISTRY.resolve_specs(
+        self._indicator_specs = resolve_series_specs(
             config.indicator_mode,
             required_indicators,
             config.explicit_indicators,
+            DEFAULT_REGISTRY,
+            DEFAULT_PATTERN_REGISTRY,
         )
         if config.indicator_mode == "explicit":
             required_ids = {
                 spec.identifier
-                for spec in DEFAULT_REGISTRY.specs_from_descriptors(required_indicators)
+                for spec in series_specs_from_descriptors(
+                    required_indicators,
+                    DEFAULT_REGISTRY,
+                    DEFAULT_PATTERN_REGISTRY,
+                )
             }
             explicit_ids = {spec.identifier for spec in self._indicator_specs}
             missing_required = sorted(required_ids - explicit_ids)
@@ -1838,7 +1851,7 @@ class Engine:
                 EvidenceRecord(
                     "INDICATOR_DEFINITION",
                     {
-                        "indicator_key": self._indicator_key(spec),
+                        "indicator_key": series_key(spec),
                         "indicator_name": spec.name,
                         "params_json": dict(spec.params),
                         "impl_version": spec.version,
@@ -1856,7 +1869,7 @@ class Engine:
             state = self._indicator_states[spec.identifier]
             value = state.update(candle)
             self._assert_finite_indicator(value, spec.identifier, spec.undefined_outputs)
-            key = self._indicator_key(spec)
+            key = series_key(spec)
             values[key] = value
             recordable = self._recordable_indicator_value(value)
             self._sequence["indicator_snapshot"] += 1
@@ -1922,22 +1935,6 @@ class Engine:
             else item
             for key, item in value.items()
         }
-
-    @staticmethod
-    def _indicator_key(spec: IndicatorSpec) -> str:
-        name = re.sub(r"[^a-z0-9]+", "_", spec.name.casefold()).strip("_")
-        params = ",".join(
-            f"{key}={Engine._indicator_param(value)}" for key, value in sorted(spec.params.items())
-        )
-        return name if not params else f"{name}:{params}"
-
-    @staticmethod
-    def _indicator_param(value: object) -> str:
-        if isinstance(value, bool):
-            return str(value).lower()
-        if isinstance(value, float) and value.is_integer():
-            return str(int(value))
-        return str(value)
 
     def _track_excursions(self, candle: Candle, position: Position) -> None:
         active = self._active_trade
