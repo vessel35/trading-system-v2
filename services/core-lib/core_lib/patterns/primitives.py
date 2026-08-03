@@ -188,11 +188,20 @@ def shadow_within_multiple(shadow: float, body_size: float, multiple: float) -> 
     ratio to infinity when the shadow is positive, so the comparison is **false**
     there, and §1.4 makes it false for a zero shadow as well.
 
-    Carrying the lower bound's answer over to here would break the standard, and
-    §1.4 names the pattern it breaks. §7.1.9 Inverted Hammer asks for
-    `US <= 2.0 * Body`; if a zero body satisfied that, a gravestone doji with an
-    arbitrarily long upper shadow would pass Inverted Hammer's shape requirement,
-    which contradicts §7.1.5 Gravestone Doji existing as its own pattern.
+    **No section of §7 calls this today, and that is not an oversight.** §7.1.9
+    Inverted Hammer was the one place that bounded a shadow from above, and the
+    standard demoted that bound to a tendency once it turned out to confine the
+    section to a three-point band of the range. §1.4 keeps both directions defined
+    anyway, saying so in as many words, because the rule it states is about
+    division by a zero body rather than about whichever sections happen to divide
+    that way. This function is here so that half of §1.4 is not simply missing
+    from the code, and so the next section that needs an upper bound finds the
+    standard's answer rather than inventing one.
+
+    Carrying the lower bound's answer over to here would break the standard.
+    Under that reading a gravestone doji — zero body, no lower shadow, an
+    arbitrarily long upper one — would satisfy any upper bound at all, so an upper
+    bound would stop bounding exactly where it matters most.
     """
     if body_size == 0.0:
         return False

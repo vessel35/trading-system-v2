@@ -821,3 +821,27 @@ def test_the_varied_series_actually_reaches_the_catalog() -> None:
         )
     }
     assert len(matched) >= 20, sorted(matched)
+
+
+@pytest.mark.parametrize("spec", tuple(DEFAULT_PATTERN_REGISTRY.list()), ids=lambda spec: spec.name)
+def test_warm_up_outranks_the_degenerate_rule(spec: PatternSpec) -> None:
+    """Check §1.4's ordering of its own two rules where both apply to one bar.
+
+    A `Range = 0` bar inside the warm-up window is covered twice by §1.4: once by
+    the degenerate rule, which says a pattern touching such a bar is not matched
+    and carries `0.0`, and once by the NaN rule, which says the warm-up window
+    stays NaN. §1.4 settles it in favour of warm-up, because `0.0` asserts that a
+    judgment ran and failed, and inside the warm-up window no judgment can run at
+    all. Emitting `0.0` there would claim a judgment nobody made and collapse the
+    distinction §5.3 exists to keep.
+
+    The series is degenerate throughout, so every bar triggers both rules and the
+    only thing deciding the answer is which rule the code applies first.
+    """
+    candles = [flat_candle(index, 100.0) for index in range(spec.min_history + 2)]
+    series = spec.compute_vectorized(candles)
+
+    for index in range(spec.min_history - 1):
+        assert isnan(series[index][spec.name]), f"{spec.name} index {index}"
+    for index in range(spec.min_history - 1, len(candles)):
+        assert series[index][spec.name] == outputs.NOT_MATCHED, f"{spec.name} index {index}"
