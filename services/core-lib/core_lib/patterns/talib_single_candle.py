@@ -7,169 +7,45 @@ bar-level parity against captured TA-Lib output before the old implementation is
 retired.
 """
 
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
-from math import isnan
+from collections.abc import Mapping, Sequence
 
 from core_lib.types import Candle
 
-from .outputs import BOUNDARY_STRENGTH, FULL_STRENGTH, MATCHED, NOT_MATCHED, output_keys
-from .registry import PatternSeries, PatternValue
+from .registry import PatternSeries
 from .talib_candles import (
     CandleSettingType,
-    candle_average_series,
     candle_color,
     candle_settings_lookback,
     lower_shadow,
     real_body,
+    real_body_bottom,
+    real_body_top,
     upper_shadow,
 )
 from .talib_raw import (
     TALIB_SOURCE_VERSION,
-    TalibRawPatternSpec,
-    validate_talib_raw_integer_series,
+    AverageKey,
+    AverageSeries,
+    TalibPatternPort,
+    _avg,
+    sparse_talib_integer_signals,
+    talib_integer_from_outputs,
 )
-
-AverageKey = tuple[CandleSettingType, int]
-AverageSeries = Mapping[AverageKey, Sequence[float | None]]
-IntegerJudge = Callable[[Sequence[Candle], int, AverageSeries], int]
 
 _CURRENT: int = 0
 _PREVIOUS: int = 1
 
 
-def _avg(
-    averages: AverageSeries,
-    setting_type: CandleSettingType,
-    index: int,
-    *,
-    offset: int = _CURRENT,
-) -> float:
-    value = averages[(setting_type, offset)][index]
-    if value is None:
-        raise ValueError(f"{setting_type.value} average is unavailable at index {index}")
-    return value
-
-
 def _min_open_close(candle: Candle) -> float:
-    return min(candle.open, candle.close)
+    return real_body_bottom(candle)
 
 
 def _max_open_close(candle: Candle) -> float:
-    return max(candle.open, candle.close)
+    return real_body_top(candle)
 
 
 def _signed_hundred(candle: Candle) -> int:
     return candle_color(candle) * 100
-
-
-def _outputs_from_talib_integer(name: str, value: int) -> PatternValue:
-    match_key, direction_key, strength_key, confirm_key = output_keys(name)
-    if value == 0:
-        return {
-            match_key: NOT_MATCHED,
-            direction_key: NOT_MATCHED,
-            strength_key: NOT_MATCHED,
-            confirm_key: NOT_MATCHED,
-        }
-
-    direction = 1.0 if value > 0 else -1.0
-    magnitude = abs(value)
-    if magnitude == 200:
-        return {
-            match_key: NOT_MATCHED,
-            direction_key: direction,
-            strength_key: NOT_MATCHED,
-            confirm_key: MATCHED,
-        }
-    if magnitude == 100:
-        strength = FULL_STRENGTH
-    elif magnitude == 80:
-        strength = BOUNDARY_STRENGTH
-    else:
-        raise ValueError(f"unsupported TA-Lib pattern magnitude: {value}")
-    return {
-        match_key: MATCHED,
-        direction_key: direction,
-        strength_key: strength,
-        confirm_key: NOT_MATCHED,
-    }
-
-
-def _undetermined_outputs(name: str) -> PatternValue:
-    match_key, direction_key, strength_key, confirm_key = output_keys(name)
-    undetermined = float("nan")
-    return {
-        match_key: undetermined,
-        direction_key: undetermined,
-        strength_key: undetermined,
-        confirm_key: undetermined,
-    }
-
-
-def talib_integer_from_outputs(name: str, value: Mapping[str, float]) -> int | None:
-    """Rebuild TA-Lib's integer signal from this module's four-key output."""
-    match_key, direction_key, strength_key, confirm_key = output_keys(name)
-    matched = value[match_key]
-    direction = value[direction_key]
-    strength = value[strength_key]
-    confirmed = value[confirm_key]
-    if any(isnan(number) for number in (matched, direction, strength, confirmed)):
-        return None
-    sign = 1 if direction >= 0.0 else -1
-    if confirmed == MATCHED:
-        return sign * 200
-    if matched != MATCHED:
-        return 0
-    if strength == FULL_STRENGTH:
-        return sign * 100
-    if strength == BOUNDARY_STRENGTH:
-        return sign * 80
-    raise ValueError(f"unsupported pattern strength for {name}: {strength}")
-
-
-def sparse_talib_integer_signals(
-    name: str,
-    series: Sequence[Mapping[str, float]],
-) -> dict[int, int]:
-    """Return the sparse non-zero signal table used by the captured TA-Lib fixtures."""
-    signals: dict[int, int] = {}
-    for index, value in enumerate(series):
-        integer = talib_integer_from_outputs(name, value)
-        if integer:
-            signals[index] = integer
-    return signals
-
-
-@dataclass(frozen=True, slots=True)
-class TalibPatternPort(TalibRawPatternSpec):
-    """One TA-Lib ``CDL`` port with its own lookback and average offsets."""
-
-    average_keys: tuple[AverageKey, ...]
-    _judge: IntegerJudge
-
-    def compute_integers(self, candles: Sequence[Candle]) -> list[int]:
-        """Return TA-Lib integer outputs aligned to input candle indexes."""
-        averages = {
-            key: candle_average_series(key[0], candles, target_offset=key[1])
-            for key in self.average_keys
-        }
-        values = [0] * len(candles)
-        for index in range(self.lookback, len(candles)):
-            values[index] = self._judge(candles, index, averages)
-        validate_talib_raw_integer_series(self, values, candle_count=len(candles))
-        return values
-
-    def compute_vectorized(self, candles: Sequence[Candle]) -> PatternSeries:
-        """Return the repository four-key pattern outputs aligned to candles."""
-        integers = self.compute_integers(candles)
-        values: list[PatternValue] = []
-        for index, integer in enumerate(integers):
-            if index < self.lookback:
-                values.append(_undetermined_outputs(self.name))
-            else:
-                values.append(_outputs_from_talib_integer(self.name, integer))
-        return values
 
 
 def _lookback(

@@ -12,9 +12,15 @@ from core_lib.patterns.talib_candles import (
     CandleSettingType,
     candle_average_at,
     candle_average_series,
+    candle_gap_down,
+    candle_gap_up,
     candle_range,
     candle_settings_lookback,
     candle_settings_min_history,
+    real_body_bottom,
+    real_body_gap_down,
+    real_body_gap_up,
+    real_body_top,
 )
 from core_lib.types import Candle
 
@@ -96,6 +102,21 @@ def test_candle_range_uses_talib_range_type() -> None:
     assert candle_range(CandleSettingType.SHADOW_SHORT, candle) == 5.0
 
 
+def test_real_body_bounds_and_gap_helpers_match_talib_macros() -> None:
+    first = make_candle(0, 10.0, 12.0, 9.0, 11.0)
+    real_body_gap = make_candle(1, 12.5, 13.0, 11.5, 12.8)
+    high_low_gap = make_candle(2, 14.0, 15.0, 13.5, 14.5)
+    downside_gap = make_candle(3, 7.0, 8.0, 6.5, 6.8)
+
+    assert real_body_bottom(first) == 10.0
+    assert real_body_top(first) == 11.0
+    assert real_body_gap_up(real_body_gap, first)
+    assert not candle_gap_up(real_body_gap, first)
+    assert candle_gap_up(high_low_gap, first)
+    assert real_body_gap_down(downside_gap, first)
+    assert candle_gap_down(downside_gap, first)
+
+
 def test_candle_average_matches_hand_calculation() -> None:
     candles = averaging_candles()
 
@@ -109,6 +130,25 @@ def test_zero_average_period_uses_the_target_candle_itself() -> None:
 
     assert candle_average_at(CandleSettingType.SHADOW_LONG, candles, 10) == 3.0
     assert candle_average_at(CandleSettingType.SHADOW_VERY_LONG, candles, 10) == 6.0
+
+
+def test_same_setting_average_offsets_are_independent() -> None:
+    candles = [
+        make_candle(
+            index,
+            100.0 + index,
+            101.0 + index + index * 0.1,
+            99.0 + index,
+            101.0 + index + index * 0.1,
+        )
+        for index in range(20)
+    ]
+    current = candle_average_series(CandleSettingType.BODY_LONG, candles, target_offset=0)
+    previous = candle_average_series(CandleSettingType.BODY_LONG, candles, target_offset=1)
+
+    assert current[11] == candle_average_at(CandleSettingType.BODY_LONG, candles, 11)
+    assert previous[11] == candle_average_at(CandleSettingType.BODY_LONG, candles, 10)
+    assert current[11] != previous[11]
 
 
 @pytest.mark.parametrize("target_offset", [0, 1, 2])

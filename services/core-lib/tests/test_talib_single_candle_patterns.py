@@ -5,12 +5,14 @@ from math import isnan
 
 import pytest
 from core_lib.patterns.outputs import output_keys
-from core_lib.patterns.talib_single_candle import (
-    TALIB_SINGLE_CANDLE_BY_NAME,
-    TALIB_SINGLE_CANDLE_PATTERNS,
+from core_lib.patterns.talib_raw import (
     TalibPatternPort,
     sparse_talib_integer_signals,
     talib_integer_from_outputs,
+)
+from core_lib.patterns.talib_single_candle import (
+    TALIB_SINGLE_CANDLE_BY_NAME,
+    TALIB_SINGLE_CANDLE_PATTERNS,
 )
 from core_lib.types import Candle
 
