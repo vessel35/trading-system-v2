@@ -57,7 +57,9 @@ def test_core_lib_dependencies_follow_the_one_way_component_graph() -> None:
     core_package = Path(__file__).resolve().parents[1] / "core_lib"
     allowed_dependencies = {
         "types": set(),
+        "series": {"types"},
         "indicators": {"types"},
+        "patterns": {"indicators", "series", "types"},
         "sizing": {"types"},
         "money_management": {"types"},
         "costs": {"ports", "types"},
@@ -84,6 +86,17 @@ def test_core_lib_dependencies_follow_the_one_way_component_graph() -> None:
                 and target_component not in allowed_dependencies[source_component]
             ):
                 violations.append(f"{path.relative_to(core_package)} -> {target_component}")
+    assert violations == []
+
+
+def test_series_resolution_dependencies_are_explicitly_bounded() -> None:
+    """Keep top-level series resolution from importing strategy/runtime layers."""
+    core_package = Path(__file__).resolve().parents[1] / "core_lib"
+    path = core_package / "series_resolution.py"
+    allowed_dependencies = {"indicators", "patterns", "series"}
+
+    violations = sorted(_core_lib_import_components(path) - allowed_dependencies)
+
     assert violations == []
 
 
@@ -115,3 +128,27 @@ def test_pip_bootstrap_resolves_workspace_projects_together() -> None:
         (repository_root / "services" / "wallet-service" / "pyproject.toml").read_text()
     )["project"]
     assert "core-lib==0.2.0" in wallet_project["dependencies"]
+
+
+def _core_lib_import_components(path: Path) -> set[str]:
+    tree = ast.parse(path.read_text())
+    components: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            if node.module is None:
+                continue
+            parts = node.module.split(".")
+            if parts[0] != "core_lib":
+                continue
+            if len(parts) == 1:
+                components.update(
+                    alias.name.split(".")[0] for alias in node.names if alias.name != "*"
+                )
+            else:
+                components.add(parts[1])
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                parts = alias.name.split(".")
+                if parts[0] == "core_lib" and len(parts) > 1:
+                    components.add(parts[1])
+    return components

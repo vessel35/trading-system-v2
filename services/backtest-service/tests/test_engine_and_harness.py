@@ -24,6 +24,7 @@ from backtest_service.engine import Engine, RunResult
 from backtest_service.harness import Harness
 from core_lib.eval import MetricSet
 from core_lib.eval import thresholds as evaluation_thresholds
+from core_lib.indicators import DEFAULT_REGISTRY
 from core_lib.ports import CatalogStore, DataFeed, StrategyRegistry
 from core_lib.strategy import (
     AdapterManager,
@@ -275,6 +276,29 @@ class _Strategy:
         return None
 
 
+class _PatternStrategy(_Strategy):
+    observed_indicators: ClassVar[list[dict[str, object]]] = []
+
+    @classmethod
+    def get_metadata(cls) -> StrategyMetadata:
+        metadata = super().get_metadata()
+        metadata.required_indicators = [
+            {"name": "EMA", "params": {"period": 9}},
+            {"name": "pat_doji", "params": {}},
+        ]
+        return metadata
+
+    def analyze(
+        self,
+        market_data: dict[str, object],
+        current_position: Position | None,
+    ) -> TradingSignal | None:
+        indicators = market_data["indicators"]
+        assert isinstance(indicators, Mapping)
+        type(self).observed_indicators.append(dict(indicators))
+        return super().analyze(market_data, current_position)
+
+
 class _StrategyCatalog(StrategyRegistry):
     def get(self, strategy_id: str) -> dict[str, object]:
         assert strategy_id == "engine-fixture"
@@ -288,6 +312,25 @@ class _StrategyCatalog(StrategyRegistry):
 
     def list(self) -> list[dict[str, object]]:
         return [self.get("engine-fixture")]
+
+    def register(self, strategy_id: str, meta: dict[str, object]) -> None:
+        del strategy_id, meta
+        raise PermissionError("read-only fixture")
+
+
+class _PatternStrategyCatalog(StrategyRegistry):
+    def get(self, strategy_id: str) -> dict[str, object]:
+        assert strategy_id == "pattern-fixture"
+        return {
+            "strategy_id": strategy_id,
+            "class_name": _PatternStrategy.__name__,
+            "module_path": _PatternStrategy.__module__,
+            "is_active": True,
+            "is_deprecated": False,
+        }
+
+    def list(self) -> list[dict[str, object]]:
+        return [self.get("pattern-fixture")]
 
     def register(self, strategy_id: str, meta: dict[str, object]) -> None:
         del strategy_id, meta
@@ -426,6 +469,12 @@ def _manager() -> AdapterManager:
     plugins = InProcessStrategyRegistry()
     plugins.register("engine-fixture", _Strategy)
     return AdapterManager(_StrategyCatalog(), plugins)
+
+
+def _pattern_manager() -> AdapterManager:
+    plugins = InProcessStrategyRegistry()
+    plugins.register("pattern-fixture", _PatternStrategy)
+    return AdapterManager(_PatternStrategyCatalog(), plugins)
 
 
 def _reversal_manager() -> AdapterManager:
@@ -1655,6 +1704,122 @@ def test_indicator_mode_changes_selection_and_longest_history_owns_warmup(
     all_indicators = RunConfig.model_validate({**_config().model_dump(), "indicator_mode": "all"})
     with pytest.raises(ValueError, match="requires 200"):
         _engine(tmp_path / "all", catalog, brokers).run(all_indicators)
+
+
+def test_patternless_strategy_keeps_resolved_indicators_and_values_unchanged(
+    tmp_path: Path,
+) -> None:
+    catalog = _Catalog()
+    brokers: list[_Broker] = []
+    values = _candles()
+
+    result = _engine(tmp_path, catalog, brokers, candles=values).run(
+        _config(run_name="patternless-regression")
+    )
+
+    spec = DEFAULT_REGISTRY.get("EMA", {"period": 9})
+    state = spec.make_state()
+    state.seed(values[:9])
+    expected_values = [state.update(candle) for candle in values[9:]]
+    with sqlite3.connect(result.evidence_path) as connection:
+        (resolved_indicators_json,) = connection.execute(
+            "SELECT resolved_indicators_json FROM BACKTEST_RUN_LOCAL"
+        ).fetchone()
+        assert (
+            resolved_indicators_json == '[{"name":"EMA","params":{"period":9},"version":"1.0.0"}]'
+        )
+        definitions = connection.execute(
+            """
+            SELECT indicator_key, indicator_name, params_json, impl_version
+            FROM INDICATOR_DEFINITION
+            ORDER BY indicator_key
+            """
+        ).fetchall()
+        assert definitions == [
+            ("ema:period=9", "EMA", '{"period":9}', "1.0.0"),
+        ]
+        snapshots = connection.execute(
+            """
+            SELECT indicator_key, value, value_json
+            FROM INDICATOR_SNAPSHOT
+            ORDER BY snapshot_seq
+            """
+        ).fetchall()
+        assert snapshots == [("ema:period=9", expected, None) for expected in expected_values]
+
+
+def test_declared_pattern_reaches_backtest_strategy_and_evidence(
+    tmp_path: Path,
+) -> None:
+    catalog = _Catalog()
+    brokers: list[_Broker] = []
+    history = _candles()
+    config = RunConfig.model_validate(
+        {
+            **_config(run_name="pattern-series").model_dump(),
+            "strategy_id": "pattern-fixture",
+        }
+    )
+    costs = BacktestCostModel(config.cost_values)
+    broker = _Broker(costs)
+    brokers.append(broker)
+    sink = BacktestEvidenceSink(tmp_path)
+    _PatternStrategy.observed_indicators.clear()
+    engine = Engine(
+        _Feed(history),
+        broker,
+        BacktestClock.from_candles(history),
+        costs,
+        sink,
+        catalog,
+        _pattern_manager(),
+        prereg=_prereg(),
+    )
+
+    result = engine.run(config)
+
+    assert _PatternStrategy.observed_indicators
+    first_indicators = _PatternStrategy.observed_indicators[0]
+    assert set(first_indicators) == {"ema:period=9", "pat_doji"}
+    pattern_value = first_indicators["pat_doji"]
+    assert isinstance(pattern_value, dict)
+    assert set(pattern_value) == {
+        "pat_doji",
+        "pat_doji_confirm",
+        "pat_doji_dir",
+        "pat_doji_strength",
+    }
+    with sqlite3.connect(result.evidence_path) as connection:
+        resolved_json = connection.execute(
+            "SELECT resolved_indicators_json FROM BACKTEST_RUN_LOCAL"
+        ).fetchone()[0]
+        assert json.loads(resolved_json) == [
+            {"name": "EMA", "params": {"period": 9}, "version": "1.0.0"},
+            {"name": "pat_doji", "params": {}, "version": "1.0.0"},
+        ]
+        definition_keys = connection.execute(
+            "SELECT indicator_key FROM INDICATOR_DEFINITION ORDER BY indicator_key"
+        ).fetchall()
+        assert definition_keys == [("ema:period=9",), ("pat_doji",)]
+        pattern_snapshot = connection.execute(
+            """
+            SELECT value, value_json
+            FROM INDICATOR_SNAPSHOT
+            WHERE indicator_key = 'pat_doji'
+            ORDER BY snapshot_seq
+            LIMIT 1
+            """
+        ).fetchone()
+        assert pattern_snapshot is not None
+        value, value_json = pattern_snapshot
+        assert value is None
+        assert isinstance(value_json, str)
+        assert set(json.loads(value_json)) == {
+            "pat_doji",
+            "pat_doji_confirm",
+            "pat_doji_dir",
+            "pat_doji_strength",
+        }
 
 
 def test_explicit_indicator_mode_rejects_missing_strategy_requirement(

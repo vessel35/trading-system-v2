@@ -35,6 +35,7 @@ from signal_service.domain import PersistedSignal, SignalIntent, SignalMode
 
 _BASE = datetime(2026, 1, 1, tzinfo=UTC)
 _STRATEGY_ID = "probe"
+_PATTERN_STRATEGY_ID = "pattern-probe"
 
 
 def _candles(count: int) -> list[Candle]:
@@ -122,6 +123,26 @@ class _Catalog(StrategyRegistry):
         raise PermissionError
 
 
+class _PatternCatalog(StrategyRegistry):
+    def get(self, strategy_id: str) -> dict[str, object]:
+        if strategy_id != _PATTERN_STRATEGY_ID:
+            raise KeyError(strategy_id)
+        return {
+            "strategy_id": _PATTERN_STRATEGY_ID,
+            "class_name": "_PatternProbeStrategy",
+            "module_path": __name__,
+            "is_active": True,
+            "is_deprecated": False,
+        }
+
+    def list(self) -> list[dict[str, object]]:
+        return [self.get(_PATTERN_STRATEGY_ID)]
+
+    def register(self, strategy_id: str, meta: dict[str, object]) -> None:
+        del strategy_id, meta
+        raise PermissionError
+
+
 class _ProbeStrategy:
     calls: ClassVar[list[tuple[dict[str, object], Position | None]]] = []
 
@@ -179,6 +200,29 @@ class _ProbeStrategy:
         )
 
 
+class _PatternProbeStrategy(_ProbeStrategy):
+    observed_indicators: ClassVar[list[dict[str, object]]] = []
+
+    @classmethod
+    def get_metadata(cls) -> StrategyMetadata:
+        metadata = super().get_metadata()
+        metadata.required_indicators = [
+            {"name": "EMA", "params": {"period": 9}},
+            {"name": "pat_doji", "params": {}},
+        ]
+        return metadata
+
+    def analyze(
+        self,
+        market_data: dict[str, object],
+        current_position: Position | None,
+    ) -> TradingSignal | None:
+        indicators = market_data["indicators"]
+        assert isinstance(indicators, Mapping)
+        type(self).observed_indicators.append(dict(indicators))
+        return super().analyze(market_data, current_position)
+
+
 class _Sink(SignalSink):
     def __init__(self, *, inserted: bool = True) -> None:
         self.inserted = inserted
@@ -203,9 +247,25 @@ def _manager() -> AdapterManager:
     return AdapterManager(_Catalog(), plugins)
 
 
+def _pattern_manager() -> AdapterManager:
+    plugins = InProcessStrategyRegistry()
+    plugins.register(_PATTERN_STRATEGY_ID, _PatternProbeStrategy)
+    return AdapterManager(_PatternCatalog(), plugins)
+
+
 def _config() -> SignalGenerationConfig:
     return SignalGenerationConfig(
         strategy_id=_STRATEGY_ID,
+        symbol="BTCUSDT",
+        timeframe="1h",
+        market_type=MarketType.FUTURES,
+        mode=SignalMode.PAPER,
+    )
+
+
+def _pattern_config() -> SignalGenerationConfig:
+    return SignalGenerationConfig(
+        strategy_id=_PATTERN_STRATEGY_ID,
         symbol="BTCUSDT",
         timeframe="1h",
         market_type=MarketType.FUTURES,
@@ -260,6 +320,29 @@ def test_finalized_candle_uses_core_incremental_state_and_adaptee_contract() -> 
     next_market_data, _ = _ProbeStrategy.calls[-1]
     assert isinstance(next_market_data["candles"], list)
     assert len(next_market_data["candles"]) == 11
+
+
+def test_declared_pattern_reaches_signal_strategy_input() -> None:
+    values = _candles(10)
+    feed = _Feed(values)
+    sink = _Sink()
+    _PatternProbeStrategy.observed_indicators.clear()
+    service = SignalGenerationService(feed, _pattern_manager(), sink)
+
+    cycle = service.start(_pattern_config(), values[-1].close_time)
+
+    assert cycle.signal is not None
+    assert _PatternProbeStrategy.observed_indicators
+    observed = _PatternProbeStrategy.observed_indicators[0]
+    assert set(observed) == {"ema:period=9", "pat_doji"}
+    pattern_value = observed["pat_doji"]
+    assert isinstance(pattern_value, dict)
+    assert set(pattern_value) == {
+        "pat_doji",
+        "pat_doji_confirm",
+        "pat_doji_dir",
+        "pat_doji_strength",
+    }
 
 
 def test_unfinalized_mock_candle_is_rejected_before_indicator_update() -> None:
