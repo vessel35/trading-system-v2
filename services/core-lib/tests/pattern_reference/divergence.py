@@ -1,28 +1,29 @@
-"""State, by hand, how each of the sixty-one patterns is expected to relate to TA-Lib.
+"""State how each legacy four-key pattern currently relates to TA-Lib.
 
 Why a hand-written table
 ------------------------
 
-The indicator comparison could ask for equality: both sides compute the same number from
-the same standard's formula, so a mismatch is an error in one of them. This comparison
-cannot. §10.3 of the pattern standard says so outright — divergence is the expected
-outcome — and the two structural reasons are decisions the standard took deliberately.
+The direct port target can ask for equality: TA-Lib v0.7.1 raw integers are the source.
+This table does not describe that target. It describes the registered legacy four-key
+implementation that still exists until the raw port, adapter, and registry cutover are
+finished.
 
-Decision A refused to inherit TA-Lib's `TA_SetCandleSettings` table, and §2 put every scale
-over one denominator: the judged bar's own high-low range. TA-Lib measures the same English
-words ("long body", "very short shadow") against a moving average of recent bars. The same
-bar can therefore be a long body to one side and not to the other with neither side being
-wrong, because they are not measuring the same thing.
+Legacy decision A refused to inherit TA-Lib's `TA_SetCandleSettings` table, and §2 put
+every scale over one denominator: the judged bar's own high-low range. TA-Lib measures the
+same English words ("long body", "very short shadow") against a moving average of recent
+bars. The same bar can therefore be a long body to one side and not to the other because
+the legacy four-key rule and the raw source measure different things.
 
-Decision B made the prior trend part of the pattern rather than something a strategy
+Legacy decision B made the prior trend part of the pattern rather than something a strategy
 supplies, so §3 judges a ten-period exponential moving average of the range midpoint on the
 pattern's first bar. Forty-five of the sixty-one carry that gate. TA-Lib mostly judges shape
 alone, which means it can report a shape we refuse purely because the trend was absent.
 
-So a table of expected equalities would be false before it was written. What is worth
-pinning instead is *why* each pattern diverges, traced to the decision or the section it
-comes from, so that the reason cannot quietly change into a different one. A note that said
-only "differs from TA-Lib" would pin nothing.
+So a table of expected equalities would be false for the legacy implementation before it
+was written. What is worth pinning during migration is *why* each legacy pattern diverges,
+traced to the decision or the section it comes from, so that the reason cannot quietly
+change into a different one. A note that said only "differs from TA-Lib" would pin
+nothing.
 
 The one thing this table can be wrong about
 -------------------------------------------
@@ -56,14 +57,13 @@ from types import MappingProxyType
 
 
 class Cause(StrEnum):
-    """Why a pattern's judgment can differ from TA-Lib's on the same bar."""
+    """Why a legacy four-key judgment can differ from TA-Lib's raw integer."""
 
     SCALE_DENOMINATOR = "scale-denominator"
-    """§2 measures every scale against the judged bar's own high-low range.
+    """Legacy §2 measures every scale against the judged bar's own high-low range.
 
-    Decision A chose that denominator and refused TA-Lib's settings table, whose "long"
-    and "short" are relative to an average of recent bars. Fifty-six patterns read at
-    least one §2 scale and so inherit the difference.
+    The raw port follows TA-Lib's settings table. The legacy implementation chose this
+    denominator, so patterns that read at least one §2 scale can differ until cutover.
     """
 
     PRIOR_TREND = "prior-trend"
@@ -108,11 +108,11 @@ class Cause(StrEnum):
     """
 
     THRESHOLD_IS_NOT_A_PARAMETER = "threshold-is-not-a-parameter"
-    """§7 fixes the penetration depth from the source; TA-Lib takes it as an argument.
+    """Legacy §7 fixes penetration depth in the four-key rule; TA-Lib takes an argument.
 
-    Seven `CDL` functions accept `penetration`. The standard writes the depth into the
-    rule because the source stated it, so there is no argument to align and the captured
-    default is recorded as provenance rather than adopted.
+    Seven TA-Lib v0.7.1 `CDL` functions accept `penetration`. The raw port follows the
+    TA-Lib default call captured from the library; this cause remains only for the legacy
+    comparison table.
     """
 
 

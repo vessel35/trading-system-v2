@@ -50,6 +50,19 @@ from .registry import (
     PatternValue,
 )
 from .specs import DEFAULT_PATTERN_REGISTRY, build_default_pattern_registry
+from .talib_raw import (
+    TALIB_CDL_PATTERN_COUNT,
+    TALIB_RAW_ALLOWED_VALUES,
+    TALIB_RAW_BOUNDARY_MAGNITUDE,
+    TALIB_RAW_CONFIRMATION_MAGNITUDE,
+    TALIB_RAW_MATCH_MAGNITUDE,
+    TALIB_RAW_ZERO,
+    TALIB_SOURCE_VERSION,
+    TALIB_UNDERLYING_VERSION_PREFIX,
+    TalibRawPatternSpec,
+    validate_talib_raw_integer_series,
+    validate_talib_version_pin,
+)
 from .trend import (
     DOWNTREND,
     NO_TREND,
@@ -74,6 +87,14 @@ __all__ = [
     "NOT_MATCHED",
     "NO_TREND",
     "STANDARD_VERSION",
+    "TALIB_CDL_PATTERN_COUNT",
+    "TALIB_RAW_ALLOWED_VALUES",
+    "TALIB_RAW_BOUNDARY_MAGNITUDE",
+    "TALIB_RAW_CONFIRMATION_MAGNITUDE",
+    "TALIB_RAW_MATCH_MAGNITUDE",
+    "TALIB_RAW_ZERO",
+    "TALIB_SOURCE_VERSION",
+    "TALIB_UNDERLYING_VERSION_PREFIX",
     "TREND_EMA_PERIOD",
     "UPTREND",
     "Match",
@@ -85,6 +106,7 @@ __all__ = [
     "PatternState",
     "PatternValue",
     "PriorTrendState",
+    "TalibRawPatternSpec",
     "assert_pattern_name",
     "build_default_pattern_registry",
     "confirms_by_close_direction",
@@ -99,4 +121,6 @@ __all__ = [
     "spec_for",
     "trend_ema",
     "undetermined_outputs",
+    "validate_talib_raw_integer_series",
+    "validate_talib_version_pin",
 ]

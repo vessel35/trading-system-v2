@@ -1,8 +1,9 @@
-"""Check the sixty-one patterns against TA-Lib, and against the table that explains them.
+"""Check the legacy four-key patterns against captured TA-Lib raw integers.
 
 The values, the regimes they were produced from, and the hand-written classification of
-every pattern live in the `pattern_reference` package, whose docstring says why an outside
-library is a comparison here and never a source. This module states only what has to hold.
+every legacy pattern live in the `pattern_reference` package. TA-Lib v0.7.1 is now the
+source for the direct raw integer ports; this file keeps the old registered four-key
+comparison visible until the registry cutover removes it.
 
 Most of the file is dormant until somebody runs the capture. That is deliberate and it is
 also the file's main hazard, so the skips name the script that ends it rather than passing
@@ -17,11 +18,9 @@ regime. A pattern silent on a market with no gaps and matching on a market full 
 not silent, and a table that recorded it as such would excuse the next real finding on that
 row. `series.py` says why one series was not enough.
 
-One thing captured values are deliberately not asserted on is the magnitude of a shared
-match. TA-Lib's 80, 100, and 200 answer questions of its own and none of them is §5.6's
-`_strength`. The sign is read, and only where both sides claim one: where they claim
-opposite signs the bar is counted as a conflict and `Divergence.direction_conflict` has to
-explain it.
+Captured magnitudes are asserted where their meaning is known. Engulfing's 80/100 values
+line up with §5.6's 0.5/1.0 strength split on every shared bar; Hikkake's 200 remains a
+TA-Lib confirmation integer that the four-key adapter stage must preserve explicitly.
 
 Section numbers in this file are the candlestick pattern standard's,
 `docs/references/candlestick_pattern_calc_spec.md`. The indicator standard numbers its
@@ -35,6 +34,7 @@ from collections.abc import Iterable
 from typing import Protocol
 
 import pytest
+from core_lib.patterns.talib_raw import validate_talib_version_pin
 
 import pattern_reference.series as reference_series
 from pattern_reference import (
@@ -262,7 +262,10 @@ def test_the_capture_describes_these_series() -> None:
     assert dict(talib_signals.SERIES_FINGERPRINTS) == fingerprints()
     for regime in REGIMES:
         assert talib_signals.BAR_COUNTS[regime.name] == regime.bar_count
-    assert talib_signals.TALIB_VERSION, "a capture must record which TA-Lib produced it"
+    validate_talib_version_pin(
+        talib_signals.TALIB_VERSION,
+        talib_signals.TALIB_UNDERLYING_VERSION,
+    )
 
 
 @_NEEDS_CAPTURE
@@ -384,13 +387,10 @@ def test_a_pattern_only_we_never_match_is_explained(pattern: str) -> None:
     conditions no bar could satisfy; an arithmetic sweep caught those, and it cannot catch
     a rule that is satisfiable in principle but never reached on real-shaped data.
 
-    Divergence itself is expected and is not what fails here — §10.3 says so, and the
-    causes in `divergence.py` say which decision each divergence comes from. What fails is
-    silence on our side that nobody has looked into. The fix is to investigate the pattern
-    and write what was found into `expected_silence`, never to widen a rule until the
-    comparison agrees: §10.3 forbids moving an implementation or a threshold toward TA-Lib,
-    and doing it here would turn the one check that can find an unreachable rule into a
-    check that finds nothing.
+    Until the raw integer port replaces this registered legacy implementation, silence on
+    our side that nobody has looked into is still useful evidence. The fix is to
+    investigate the pattern and write what was found into `expected_silence`, or to move it
+    through the explicit raw-port migration rather than silently changing legacy behavior.
 
     Judged over the bundle, which is what makes the reverse direction bite. A silence
     recorded against one market goes stale the moment another market reaches the rule, and
@@ -529,8 +529,25 @@ def test_report_model_lists_the_current_overlap_findings() -> None:
 
 
 @_NEEDS_CAPTURE
+def test_engulfing_strength_matches_talib_80_and_100_magnitudes() -> None:
+    """The verified Engulfing size mapping is pinned until the adapter stage owns it."""
+    counts: Counter[tuple[float, int]] = Counter()
+    for regime in REGIME_NAMES:
+        produced = our_series(regime)["pat_engulfing"]
+        captured = SIGNALS[regime]["CDLENGULFING"]
+        for index, value in enumerate(produced):
+            if value["pat_engulfing"] == 1.0:
+                counts[(value["pat_engulfing_strength"], abs(captured.get(index, 0)))] += 1
+
+    assert dict(counts) == {
+        (0.5, 80): 169,
+        (1.0, 100): 597,
+    }
+
+
+@_NEEDS_CAPTURE
 def test_talib_non_base_magnitudes_are_reported_by_pattern() -> None:
-    """Every TA-Lib magnitude other than ±100 is visible as event-shape metadata."""
+    """Every TA-Lib magnitude other than ±100 stays visible for adapter decisions."""
 
     assert talib_non_base_magnitudes_by_pattern() == {
         "pat_engulfing": {-80: 237, 80: 167},

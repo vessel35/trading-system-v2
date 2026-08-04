@@ -30,9 +30,9 @@ signals describing bars that no longer exist, and the suite rejects them rather 
 comparing our output against another series' answers.
 
 `FUNCTION_PARAMETERS` records what each `CDL` function was called with, which for seven of
-them includes a `penetration` argument carrying a library default. **It is written down,
-not adopted.** Our depths come from §7 and the sources behind it; knowing what TA-Lib used
-explains a disagreement and never settles one.
+them includes a `penetration` argument carrying a library default. The direct raw port
+adopts the TA-Lib v0.7.1 default call. The legacy four-key comparison keeps these values
+visible until the adapter and registry cutover remove the old divergence table.
 
 Why the generated block is not reformatted
 ------------------------------------------
@@ -562,8 +562,8 @@ FUNCTION_PARAMETERS: Mapping[str, Mapping[str, float]] = MappingProxyType(
 Only functions that take an argument appear. What is recorded is the library's own
 default, read from `talib.abstract`, because the capture passes nothing of its own:
 overriding a default would make this a comparison against a tuning we invented rather than
-against the library as it ships. The arguments do not vary by regime, so this is not keyed
-by one.
+against TA-Lib v0.7.1 as it ships. The arguments do not vary by regime, so this is not
+keyed by one.
 """
 
 SIGNALS: Mapping[str, Mapping[str, Mapping[int, int]]] = MappingProxyType(
@@ -578,10 +578,8 @@ SIGNALS: Mapping[str, Mapping[str, Mapping[int, int]]] = MappingProxyType(
 
 TA-Lib reports a match as a non-zero integer. The capture holds six distinct values: ±100
 on nearly every function, ±200 on `CDLHIKKAKE` for a confirmed instance, and ±80 on
-`CDLENGULFING`, `CDLHARAMI`, and `CDLHARAMICROSS`. **None of those magnitudes is our
-`_strength`.** §5.6 gives half strength to an engulfment with exactly one coinciding end,
-which has nothing to do with confirmation or with whatever the library's 80 marks, so
-pairing the two numbers would compare unrelated quantities and call the result agreement.
-Only the sign is read, and `comparison.py` says why even that is not comparable on the nine
-shape-only lines.
+`CDLENGULFING`, `CDLHARAMI`, and `CDLHARAMICROSS`. Engulfing's 80/100 values have been
+verified against the legacy `pat_engulfing_strength` split: 0.5 maps to 80 and 1.0 maps
+to 100 on every shared matched bar. Other non-±100 values remain raw facts for the adapter
+stage, especially Hikkake's confirmation integers.
 """

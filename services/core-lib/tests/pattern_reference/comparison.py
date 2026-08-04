@@ -1,8 +1,8 @@
-"""Put our judgment and TA-Lib's side by side, bar by bar, over every regime.
+"""Put legacy four-key judgment and TA-Lib raw integers side by side.
 
-The comparison is a tally, not an assertion. §10.3 says divergence is the expected outcome,
-so what is worth producing is a shape of disagreement specific enough to be attributed to a
-decision.
+The comparison is a migration tally, not the target contract. TA-Lib v0.7.1 is the source
+for the direct raw integer ports, while the registered implementation still exposes the
+repository's older four-key shape until the adapter and registry cutover are complete.
 
 Counting matches on each side is not enough for that. Two sides that each match forty bars
 of a series have said nothing to each other unless those are the same forty bars, so every
@@ -19,12 +19,12 @@ property of the market rather than of the rule — a gap pattern that agrees on 
 market and diverges on a market with no gaps is telling you about §1.3, not about §7 — and
 a single pooled number hides that.
 
-Two things are deliberately not compared.
+Two things are still deliberately separated.
 
-The magnitude of TA-Lib's value is not compared to our `_strength`. It is read only to
-separate its ordinary ±100 events from later or otherwise distinct events such as Hikkake
-confirmations. A non-±100 value can still be a TA-Lib match, but it is not the same event
-as our pattern match on that bar and is kept out of the overlap count.
+TA-Lib magnitudes are compared to four-key strength only where their meaning is verified.
+Engulfing's ±80 and ±100 map to the legacy 0.5 and 1.0 strength split. Other non-±100
+values remain raw event-shape facts for the adapter stage, especially Hikkake's ±200
+confirmation markers.
 
 Bars still warming up are dropped rather than counted. §5.3 makes NaN mean "cannot judge
 yet" and it appears only before `min_history`; a bar we have not judged cannot belong in
@@ -42,14 +42,31 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 
 from core_lib.patterns import DEFAULT_PATTERN_REGISTRY
+from core_lib.patterns.outputs import BOUNDARY_STRENGTH, FULL_STRENGTH
 from core_lib.patterns.registry import PatternSpec
+from core_lib.patterns.talib_raw import (
+    TALIB_RAW_BOUNDARY_MAGNITUDE,
+    TALIB_RAW_MATCH_MAGNITUDE,
+)
 
 from .divergence import TALIB_FUNCTIONS
 from .series import REGIME_NAMES, candles_for
 from .talib_signals import SIGNALS
 
-TALIB_BASE_MATCH_MAGNITUDE = 100
+TALIB_BASE_MATCH_MAGNITUDE = TALIB_RAW_MATCH_MAGNITUDE
 """TA-Lib's ordinary match magnitude, distinct from confirmation or other event markers."""
+
+TALIB_STRENGTH_MAGNITUDES_BY_PATTERN: Mapping[str, Mapping[float, int]] = MappingProxyType(
+    {
+        "pat_engulfing": MappingProxyType(
+            {
+                BOUNDARY_STRENGTH: TALIB_RAW_BOUNDARY_MAGNITUDE,
+                FULL_STRENGTH: TALIB_RAW_MATCH_MAGNITUDE,
+            }
+        )
+    }
+)
+"""Verified legacy strength-to-TA-Lib magnitude mappings."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,11 +101,10 @@ class Tally:
     """
 
     same_bar_different_event_bars: tuple[int, ...] = field(default=())
-    """The bars where both arrays are non-zero but TA-Lib did not report an ordinary event.
+    """The bars where both arrays are non-zero but the raw integer maps to another event.
 
-    TA-Lib uses magnitudes other than ±100 for function-specific facts such as Hikkake
-    confirmation. Those bars are TA-Lib matches and may coincide with our non-zero match
-    key, but they are not counted as overlap because they are not the same event.
+    Hikkake confirmation is the known example: TA-Lib reports ±200 in the same integer
+    series, while the legacy shape has a separate confirmation key.
     """
 
     @property
@@ -184,6 +200,16 @@ def _directions_contradict(ours: float, theirs: int) -> bool:
     return (ours > 0.0) != (theirs > 0)
 
 
+def _is_same_event_magnitude(name: str, ours: Mapping[str, float], theirs: int) -> bool:
+    """Return whether a TA-Lib raw magnitude maps to the legacy matched event."""
+    magnitude = abs(theirs)
+    strength_mapping = TALIB_STRENGTH_MAGNITUDES_BY_PATTERN.get(name)
+    if strength_mapping is None:
+        return magnitude == TALIB_BASE_MATCH_MAGNITUDE
+    strength = ours[f"{name}_strength"]
+    return strength_mapping.get(strength) == magnitude
+
+
 def tally_one(
     ours: Sequence[Mapping[str, float]],
     theirs: Mapping[int, int],
@@ -206,7 +232,7 @@ def tally_one(
             continue
         their_value = theirs.get(index, 0)
         if matched and their_value:
-            if abs(their_value) != TALIB_BASE_MATCH_MAGNITUDE:
+            if not _is_same_event_magnitude(name, value, their_value):
                 different_events.append(index)
                 continue
             if _directions_contradict(value[f"{name}_dir"], their_value):

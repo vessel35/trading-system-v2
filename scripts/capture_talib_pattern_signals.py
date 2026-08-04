@@ -7,7 +7,7 @@ depending on it: the capture exists so the comparison keeps working long after t
 environment is gone.
 
     python -m venv /tmp/talib-capture
-    /tmp/talib-capture/bin/pip install numpy TA-Lib
+    /tmp/talib-capture/bin/pip install numpy TA-Lib==0.7.1
     /tmp/talib-capture/bin/python scripts/capture_talib_pattern_signals.py
 
 The script needs no other installation. It puts `services/core-lib` and its `tests`
@@ -32,15 +32,13 @@ sentinel comments, and leaves the rest of that file — every docstring in it �
 The prose there explains what the numbers mean and is maintained by hand.
 
 It passes **no arguments** to any `CDL` function. Seven of them take a `penetration`
-argument with a library default, and the script records those defaults as provenance
-rather than choosing values. §7 of the pattern standard fixes each depth from its source,
-so there is nothing of ours for a default to be tuned against, and passing one would make
-the comparison a comparison against a configuration we invented.
+argument with a TA-Lib v0.7.1 library default, and the script records those defaults
+because the direct raw port adopts TA-Lib's default call. Passing an explicit value would
+make the capture a comparison against a configuration we invented.
 
-It does not touch our implementation, our thresholds, or the standard. §10.3 is explicit
-that a disagreement is resolved by re-reading the standard, never by moving toward the
-library. It also does not touch `series.py`: if a regime produces little, that is a fact
-about the market to be reported, not a series to be adjusted until the numbers improve.
+It does not touch our implementation, thresholds, standard, or `series.py`: if a regime
+produces little, that is a fact about the market to be reported, not a series to be
+adjusted until the numbers improve.
 
 Section numbers in this file are the candlestick pattern standard's,
 `docs/references/candlestick_pattern_calc_spec.md`. The indicator standard numbers its
@@ -65,6 +63,8 @@ for path in (CORE_LIB, CORE_LIB / "tests"):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
+from core_lib.patterns.talib_raw import validate_talib_version_pin  # noqa: E402
+
 
 def _require_talib() -> ModuleType:
     """Import TA-Lib, or explain what is missing and stop.
@@ -78,8 +78,8 @@ def _require_talib() -> ModuleType:
         raise SystemExit(
             "TA-Lib is not installed in this interpreter, which is expected everywhere "
             "except the throwaway environment this script is meant to run in. Create one "
-            "with `pip install numpy TA-Lib` and run this script from it. Do not add TA-Lib "
-            "to the repository's dependencies."
+            "with `pip install numpy TA-Lib==0.7.1` and run this script from it. Do not "
+            "add TA-Lib to the repository's dependencies."
         ) from error
     return talib
 
@@ -96,6 +96,19 @@ def _underlying_version(talib: ModuleType) -> str | None:
     if isinstance(reported, str):
         return reported.strip() or None
     return None
+
+
+def _pinned_underlying_version(talib: ModuleType) -> str:
+    """Return the underlying version after enforcing the capture/source pin."""
+    talib_version = str(getattr(talib, "__version__", ""))
+    underlying_version = _underlying_version(talib)
+    try:
+        validate_talib_version_pin(talib_version, underlying_version)
+    except ValueError as error:
+        raise SystemExit(str(error)) from error
+    if underlying_version is None:
+        raise AssertionError("validated TA-Lib underlying version cannot be None")
+    return underlying_version
 
 
 def _render_int_map(values: dict[int, int]) -> str:
@@ -186,6 +199,7 @@ def _replace_block(text: str, block: str) -> str:
 def main() -> None:
     """Read every regime, call every `CDL` function on each, and write the capture."""
     talib = _require_talib()
+    underlying_version = _pinned_underlying_version(talib)
     import numpy
     from talib import abstract
 
@@ -238,7 +252,7 @@ def main() -> None:
 
     block = _generated_block(
         talib_version=str(talib.__version__),
-        underlying_version=_underlying_version(talib),
+        underlying_version=underlying_version,
         fingerprints=fingerprints,
         bar_counts=bar_counts,
         parameters=parameters,

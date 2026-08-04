@@ -1,22 +1,18 @@
-"""Compare the sixty-one candlestick patterns against TA-Lib's `CDL` functions.
+"""Compare legacy four-key candlestick patterns against TA-Lib's `CDL` functions.
 
 What this package is for, and what it is not for
 ------------------------------------------------
 
-`tests/indicator_reference/` is the model for the arrangement here — values captured once
-from an outside library, frozen, and never depended on at run time — but the question is a
-different one. There, an outside library computes the same formula from the same standard,
-so a mismatch means somebody transcribed something wrongly. Here, §10.3 of the pattern
-standard states that mismatches are expected, and the two structural reasons are decisions
-the standard took on purpose: decision A refused TA-Lib's `TA_SetCandleSettings` table and
-§2 put every scale over the judged bar's own high-low range, while decision B made §3's
-prior trend part of the pattern where TA-Lib mostly judges shape alone.
+`tests/indicator_reference/` is the model for the capture arrangement: values captured once
+from TA-Lib v0.7.1, frozen, and never depended on at run time. The target candlestick port
+now treats those TA-Lib raw integers as the source value. This package still compares them
+with the registered legacy four-key implementation so the old behavior remains visible
+until the raw port, adapter, and registry cutover are finished.
 
-**TA-Lib is the comparison, never the source.** Where the two disagree the standard is
-right and TA-Lib is different. Nothing here may be used to argue an implementation or a
-threshold should move, and `divergence.py` records why each pattern diverges precisely so
-that the reason stays attached to a decision instead of drifting into "we matched the
-library".
+The hand-written divergence table is therefore migration evidence, not a reason to keep
+the legacy formulas. Where a direct raw port disagrees with the capture, the raw port is
+wrong. Where the legacy four-key implementation disagrees, the difference stays recorded
+until the adapter stage decides how the TA-Lib integer should be represented.
 
 The three outputs worth having
 ------------------------------
