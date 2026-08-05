@@ -541,6 +541,16 @@ def test_repository_reads_correct_tables_columns_and_exact_values(
     assert snapshot.category == "trend"
     assert snapshot.impl_note == "fixture implementation"
 
+    definitions = reader.indicator_definitions()
+    assert [definition.model_dump() for definition in definitions] == [
+        {
+            "indicator_key": "ema-20",
+            "indicator_name": "EMA",
+            "series_kind": "indicator",
+            "impl_version": "1.2.3",
+        }
+    ]
+
     source_from, source_to = reader.source_range("1h")
     assert int(source_from.timestamp() * 1000) == BASE_TS
     assert int(source_to.timestamp() * 1000) == BASE_TS + 86_400_000
@@ -656,6 +666,7 @@ def test_empty_evidence_returns_empty_collections(tmp_path: Path) -> None:
     assert all(result.page.total == 0 for result in results)
     assert all(result.page.next_after_seq is None for result in results)
     assert all(result.page.has_more is False for result in results)
+    assert reader.indicator_definitions() == []
 
 
 def test_unimplemented_phase3_extension_writers_are_documented_as_absent(
@@ -910,13 +921,23 @@ def test_pre_v15_evidence_file_restores_series_kind_through_api(
                 f"/api/v1/runs/{RUN_ID}/indicator-snapshots",
                 params={"limit": 10},
             )
+            definitions_response = client.get(f"/api/v1/runs/{RUN_ID}/indicator-definitions")
         assert response.status_code == 200
+        assert definitions_response.status_code == 200
         snapshots = {item["indicator_key"]: item for item in response.json()["data"]}
         assert snapshots["pat_doji"]["series_kind"] == "pattern"
         assert snapshots["ema:period=9"]["series_kind"] == "indicator"
         for snapshot in snapshots.values():
             assert snapshot["category"] is None
             assert snapshot["impl_note"] is None
+        definitions = {item["indicator_key"]: item for item in definitions_response.json()}
+        assert definitions["pat_doji"] == {
+            "indicator_key": "pat_doji",
+            "indicator_name": "pat_doji",
+            "series_kind": "pattern",
+            "impl_version": "2.0.0+talib.0.7.1",
+        }
+        assert definitions["ema:period=9"]["series_kind"] == "indicator"
     finally:
         app.dependency_overrides.clear()
         get_settings.cache_clear()

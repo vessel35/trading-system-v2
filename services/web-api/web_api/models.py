@@ -298,6 +298,15 @@ class IndicatorSnapshot(BaseModel):
     is_warmup: bool
 
 
+class IndicatorDefinition(BaseModel):
+    """Calculation identities available in one immutable Evidence artifact."""
+
+    indicator_key: str
+    indicator_name: str
+    series_kind: Literal["indicator", "pattern"]
+    impl_version: str
+
+
 class MissedOpportunity(BaseModel):
     miss_id: int
     run_id: str

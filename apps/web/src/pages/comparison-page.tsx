@@ -22,6 +22,7 @@ import {
   type EquityPoint,
   type RunComparisonItem,
 } from "../api/client";
+import { seriesLabel } from "../components/evidence/pattern-markers";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -67,7 +68,46 @@ const METRICS: MetricDefinition[] = [
   { key: "psr", label: "PSR" },
 ];
 
-function flattenSettings(item: RunComparisonItem): Record<string, string> {
+type ResolvedSeries = { key: string; version: string };
+
+function seriesParam(value: unknown): string | null {
+  if (typeof value === "string") return `'${value.replaceAll("'", "\\'")}'`;
+  if (typeof value === "boolean") return value ? "True" : "False";
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return null;
+}
+
+export function resolvedSeries(value: unknown): ResolvedSeries[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) return [];
+    const record = item as Record<string, unknown>;
+    if (typeof record.name !== "string" || typeof record.version !== "string") {
+      return [];
+    }
+    if (
+      typeof record.params !== "object" ||
+      record.params === null ||
+      Array.isArray(record.params)
+    ) {
+      return [];
+    }
+    const params = Object.entries(record.params)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .flatMap(([key, rawValue]) => {
+        const rendered = seriesParam(rawValue);
+        return rendered === null ? [] : [`${key}=${rendered}`];
+      });
+    return [
+      {
+        key: params.length > 0 ? `${record.name}(${params.join(",")})` : record.name,
+        version: record.version,
+      },
+    ];
+  });
+}
+
+export function flattenSettings(item: RunComparisonItem): Record<string, string> {
   const base: Record<string, string> = {
     symbol: item.run.symbol,
     timeframe: item.run.timeframe,
@@ -95,7 +135,67 @@ function flattenSettings(item: RunComparisonItem): Record<string, string> {
           typeof value === "string" ? value : JSON.stringify(value);
       });
   }
+  resolvedSeries(item.run.resolved_indicators_json).forEach(({ key, version }) => {
+    base[`indicator.${key}`] = seriesLabel(key, version);
+  });
   return base;
+}
+
+export interface IndicatorVersionMismatch {
+  key: string;
+  runs: Array<{ runName: string; version: string }>;
+}
+
+export function indicatorVersionMismatches(
+  items: RunComparisonItem[],
+): IndicatorVersionMismatch[] {
+  const seriesByRun = items.map(
+    (item) =>
+      new Map(
+        resolvedSeries(item.run.resolved_indicators_json).map(({ key, version }) => [
+          key,
+          version,
+        ]),
+      ),
+  );
+  const keys = [...new Set(seriesByRun.flatMap((series) => [...series.keys()]))].sort();
+  return keys.flatMap((key) => {
+    const versions = items.flatMap((item, index) => {
+      const version = seriesByRun[index].get(key);
+      return version === undefined ? [] : [{ runName: item.run.run_name, version }];
+    });
+    return new Set(versions.map(({ version }) => version)).size > 1
+      ? [{ key, runs: versions }]
+      : [];
+  });
+}
+
+export function IndicatorVersionWarning({
+  mismatches,
+}: {
+  mismatches: IndicatorVersionMismatch[];
+}) {
+  if (mismatches.length === 0) return null;
+  return (
+    <div
+      className="rounded-lg border border-red-500/35 bg-red-500/10 p-3 text-sm text-red-100"
+      role="alert"
+    >
+      <div className="flex items-center gap-2 font-medium">
+        <AlertTriangle className="h-4 w-4 shrink-0" />
+        같은 지표 열쇠에 서로 다른 계산 판이 기록되어 있습니다.
+      </div>
+      <ul className="mt-2 space-y-1 pl-6 text-xs">
+        {mismatches.map((mismatch) => (
+          <li key={mismatch.key}>
+            <span className="font-mono">{mismatch.key}</span>: {mismatch.runs
+              .map(({ runName, version }) => `${runName} (${version})`)
+              .join(", ")}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }
 
 async function fetchEquity(runId: string): Promise<EquityDatum[]> {
@@ -224,6 +324,10 @@ export function ComparisonPage() {
   );
   const baseline = runs[baselineIndex];
   const settings = useMemo(() => runs.map(flattenSettings), [runs]);
+  const versionMismatches = useMemo(
+    () => indicatorVersionMismatches(runs),
+    [runs],
+  );
   const settingKeys = useMemo(() => {
     const keys = [...new Set(settings.flatMap((item) => Object.keys(item)))];
     return diffOnly
@@ -386,6 +490,7 @@ export function ComparisonPage() {
           설정 diff와 자본곡선 시간 범위를 함께 확인하세요.
         </div>
       )}
+      <IndicatorVersionWarning mismatches={versionMismatches} />
       {sameRerunIds.size > 0 && (
         <div className="flex items-center gap-2 rounded-lg border border-sky-500/25 bg-sky-500/10 p-3 text-sm text-sky-100">
           <RefreshCcw className="h-4 w-4 shrink-0" />

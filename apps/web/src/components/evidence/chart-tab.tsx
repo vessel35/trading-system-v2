@@ -15,10 +15,14 @@ import type {
   Candle,
   CandidateEvent,
   Execution,
+  IndicatorDefinition,
   IndicatorSnapshot,
   Signal,
 } from "../../api/client";
-import { useChartEvidence } from "../../hooks/use-evidence";
+import {
+  type IndicatorEvidencePage,
+  useChartEvidence,
+} from "../../hooks/use-evidence";
 import { cn, formatChartTime } from "../../lib/utils";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -28,6 +32,12 @@ import {
   EvidenceLoading,
   EvidenceTruncationNotice,
 } from "./evidence-state";
+import {
+  buildPatternMarkerGroups,
+  type PatternMarkerGroup,
+  patternEventDescription,
+  seriesLabel,
+} from "./pattern-markers";
 
 const INDICATOR_COLORS = ["#2dd4bf", "#38bdf8", "#fbbf24", "#c084fc", "#fb7185"];
 
@@ -96,8 +106,10 @@ function MarketChart({
   signals,
   candidates,
   visibleIndicators,
+  patternGroups,
   markerVisibility,
   onSelectTrade,
+  onSelectPatternGroup,
 }: {
   candles: Candle[];
   indicators: IndicatorSnapshot[];
@@ -105,8 +117,10 @@ function MarketChart({
   signals: Signal[];
   candidates: CandidateEvent[];
   visibleIndicators: Set<string>;
+  patternGroups: PatternMarkerGroup[];
   markerVisibility: Record<"trades" | "signals" | "candidates", boolean>;
   onSelectTrade: (tradeId: number) => void;
+  onSelectPatternGroup: (groupId: string) => void;
 }) {
   const container = useRef<HTMLDivElement>(null);
 
@@ -155,7 +169,13 @@ function MarketChart({
 
     const grouped = new Map<string, IndicatorSnapshot[]>();
     indicators.forEach((snapshot) => {
-      if (!visibleIndicators.has(snapshot.indicator_key) || snapshot.value === null) return;
+      if (
+        snapshot.series_kind !== "indicator" ||
+        !visibleIndicators.has(snapshot.indicator_key) ||
+        snapshot.value === null
+      ) {
+        return;
+      }
       const rows = grouped.get(snapshot.indicator_key) ?? [];
       rows.push(snapshot);
       grouped.set(snapshot.indicator_key, rows);
@@ -166,7 +186,7 @@ function MarketChart({
         color: INDICATOR_COLORS[index % INDICATOR_COLORS.length],
         lineWidth: auxiliary ? 1 : 2,
         priceScaleId: auxiliary ? "atr-pane" : "right",
-        title: key,
+        title: seriesLabel(key, rows[0].impl_version),
       });
       if (auxiliary) {
         chart.priceScale("atr-pane").applyOptions({
@@ -183,6 +203,7 @@ function MarketChart({
     });
 
     const markers: SeriesMarker<UTCTimestamp>[] = [];
+    patternGroups.forEach((group) => markers.push(group.marker));
     if (markerVisibility.trades) {
       executions.forEach((execution) => {
         const isExit = execution.exit_reason !== null || execution.reduce_only;
@@ -233,7 +254,12 @@ function MarketChart({
     createSeriesMarkers(candleSeries, markers);
     chart.subscribeClick((parameter) => {
       const markerId = parameter.hoveredInfo?.objectId ?? parameter.hoveredObjectId;
-      if (typeof markerId !== "string" || !markerId.startsWith("trade:")) return;
+      if (typeof markerId !== "string") return;
+      if (markerId.startsWith("pattern:")) {
+        onSelectPatternGroup(markerId);
+        return;
+      }
+      if (!markerId.startsWith("trade:")) return;
       const tradeId = Number(markerId.slice("trade:".length));
       if (Number.isInteger(tradeId) && tradeId > 0) onSelectTrade(tradeId);
     });
@@ -253,11 +279,65 @@ function MarketChart({
     indicators,
     markerVisibility,
     onSelectTrade,
+    onSelectPatternGroup,
+    patternGroups,
     signals,
     visibleIndicators,
   ]);
 
   return <div ref={container} className="h-[560px] w-full" aria-label="시장 캔들 차트" />;
+}
+
+export function SelectedSeriesTruncationNotice({
+  evidence,
+}: {
+  evidence: IndicatorEvidencePage | undefined;
+}) {
+  if (!evidence?.truncated) return null;
+  return (
+    <div
+      role="status"
+      className="flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 p-3 text-sm text-amber-100"
+    >
+      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+      <p>
+        선택 계열 값 일부가 Evidence 안전 상한에 걸려 잘렸습니다. 잘린 계열은
+        {" "}
+        <span className="font-mono">{evidence.truncatedKeys.join(", ")}</span>
+        이며, 현재 구간 전체가 표시된 것으로 해석하면 안 됩니다.
+      </p>
+    </div>
+  );
+}
+
+export function defaultVisibleSeries(
+  definitions: IndicatorDefinition[],
+): Set<string> {
+  return new Set(
+    definitions
+      .filter((definition) => definition.series_kind === "indicator")
+      .map((definition) => definition.indicator_key),
+  );
+}
+
+export function PatternGroupDetails({ group }: { group: PatternMarkerGroup }) {
+  return (
+    <div
+      className="mt-4 rounded-lg border border-violet-500/25 bg-violet-500/[0.08] p-4"
+      aria-label="선택한 봉의 패턴 목록"
+    >
+      <p className="text-sm font-medium">
+        이 봉에서 기록된 패턴 {group.events.length}개
+      </p>
+      <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
+        {group.events.map((event) => (
+          <li key={`${event.key}:${event.kind}`}>
+            {patternEventDescription(event)}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }
 
 export function ChartTab({
@@ -267,14 +347,30 @@ export function ChartTab({
   runId: string;
   onSelectTrade: (tradeId: number) => void;
 }) {
-  const evidence = useChartEvidence(runId);
+  const [visibleIndicators, setVisibleIndicators] = useState<Set<string> | null>(null);
+  const evidence = useChartEvidence(runId, visibleIndicators);
   const indicators = evidence.indicators.data ?? [];
-  const indicatorKeys = useMemo(
-    () => [...new Set(indicators.map((item) => item.indicator_key))],
+  const definitions = evidence.definitions.data ?? [];
+  const indicatorDefinitions = useMemo(
+    () => definitions.filter((item) => item.series_kind === "indicator"),
+    [definitions],
+  );
+  const patternDefinitions = useMemo(
+    () => definitions.filter((item) => item.series_kind === "pattern"),
+    [definitions],
+  );
+  const effectiveIndicators =
+    visibleIndicators ?? defaultVisibleSeries(definitions);
+  const patternGroups = useMemo(
+    () => buildPatternMarkerGroups(indicators),
     [indicators],
   );
-  const [visibleIndicators, setVisibleIndicators] = useState<Set<string> | null>(null);
-  const effectiveIndicators = visibleIndicators ?? new Set(indicatorKeys);
+  const [selectedPatternGroupId, setSelectedPatternGroupId] = useState<string | null>(
+    null,
+  );
+  const selectedPatternGroup = patternGroups.find(
+    (group) => group.id === selectedPatternGroupId,
+  );
   const [markerVisibility, setMarkerVisibility] = useState({
     trades: true,
     signals: false,
@@ -283,6 +379,7 @@ export function ChartTab({
 
   if (
     evidence.candles.isLoading ||
+    evidence.definitions.isLoading ||
     evidence.indicators.isLoading ||
     evidence.signals.isLoading ||
     evidence.candidates.isLoading ||
@@ -292,6 +389,7 @@ export function ChartTab({
   }
   const error =
     evidence.candles.error ??
+    evidence.definitions.error ??
     evidence.indicators.error ??
     evidence.signals.error ??
     evidence.candidates.error ??
@@ -303,19 +401,19 @@ export function ChartTab({
     <div className="space-y-4">
       <EvidenceTruncationNotice
         sources={[
-          evidence.indicators.evidence,
           evidence.signals.evidence,
           evidence.candidates.evidence,
           evidence.executions.evidence,
         ]}
       />
+      <SelectedSeriesTruncationNotice evidence={evidence.indicators.evidence} />
       <Card>
         <CardHeader>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <CardTitle className="flex items-center gap-2">
                 <CandlestickChart className="h-4 w-4 text-teal-400" />
-                시장 구조 · 캔들 + 저장 지표
+                시장 구조 · 캔들 + 저장 계열
               </CardTitle>
               <CardDescription>
                 crypto_data 1m → {evidence.candles.data?.page.timeframe} 확정봉{" "}
@@ -342,39 +440,81 @@ export function ChartTab({
             ))}
             <span>▲ 진입 · ▼ 청산</span>
           </div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {indicatorKeys.map((key) => (
-              <Button
-                key={key}
-                size="sm"
-                variant={effectiveIndicators.has(key) ? "secondary" : "outline"}
-                onClick={() => {
-                  const next = new Set(effectiveIndicators);
-                  if (next.has(key)) next.delete(key);
-                  else next.add(key);
-                  setVisibleIndicators(next);
-                }}
-              >
-                <Layers3 className="mr-1.5 h-3.5 w-3.5" />
-                {key}
-              </Button>
-            ))}
-            {(["trades", "signals", "candidates"] as const).map((kind) => (
-              <Button
-                key={kind}
-                size="sm"
-                variant={markerVisibility[kind] ? "secondary" : "outline"}
-                onClick={() =>
-                  setMarkerVisibility((current) => ({
-                    ...current,
-                    [kind]: !current[kind],
-                  }))
-                }
-                className={cn(kind === "trades" && "ml-2")}
-              >
-                {kind === "trades" ? "진입/청산" : kind === "signals" ? "신호" : "후보"}
-              </Button>
-            ))}
+          <div className="mt-3 space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="mr-1 text-xs font-medium text-muted-foreground">지표</span>
+              {indicatorDefinitions.map((definition) => (
+                <Button
+                  key={definition.indicator_key}
+                  size="sm"
+                  variant={
+                    effectiveIndicators.has(definition.indicator_key)
+                      ? "secondary"
+                      : "outline"
+                  }
+                  onClick={() => {
+                    const next = new Set(effectiveIndicators);
+                    if (next.has(definition.indicator_key)) {
+                      next.delete(definition.indicator_key);
+                    } else {
+                      next.add(definition.indicator_key);
+                    }
+                    setVisibleIndicators(next);
+                  }}
+                >
+                  <Layers3 className="mr-1.5 h-3.5 w-3.5" />
+                  {seriesLabel(definition.indicator_key, definition.impl_version)}
+                </Button>
+              ))}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="mr-1 text-xs font-medium text-muted-foreground">패턴</span>
+              {patternDefinitions.map((definition) => (
+                <Button
+                  key={definition.indicator_key}
+                  size="sm"
+                  variant={
+                    effectiveIndicators.has(definition.indicator_key)
+                      ? "secondary"
+                      : "outline"
+                  }
+                  onClick={() => {
+                    const next = new Set(effectiveIndicators);
+                    if (next.has(definition.indicator_key)) {
+                      next.delete(definition.indicator_key);
+                    } else {
+                      next.add(definition.indicator_key);
+                    }
+                    setVisibleIndicators(next);
+                  }}
+                >
+                  <CandlestickChart className="mr-1.5 h-3.5 w-3.5" />
+                  {seriesLabel(definition.indicator_key, definition.impl_version)}
+                </Button>
+              ))}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {(["trades", "signals", "candidates"] as const).map((kind) => (
+                <Button
+                  key={kind}
+                  size="sm"
+                  variant={markerVisibility[kind] ? "secondary" : "outline"}
+                  onClick={() =>
+                    setMarkerVisibility((current) => ({
+                      ...current,
+                      [kind]: !current[kind],
+                    }))
+                  }
+                  className={cn(kind === "trades" && "ml-2")}
+                >
+                  {kind === "trades"
+                    ? "진입/청산"
+                    : kind === "signals"
+                      ? "신호"
+                      : "후보"}
+                </Button>
+              ))}
+            </div>
           </div>
         </CardHeader>
         <CardContent>
@@ -397,18 +537,22 @@ export function ChartTab({
               signals={evidence.signals.data ?? []}
               candidates={evidence.candidates.data ?? []}
               visibleIndicators={effectiveIndicators}
+              patternGroups={patternGroups}
               markerVisibility={markerVisibility}
               onSelectTrade={onSelectTrade}
+              onSelectPatternGroup={setSelectedPatternGroupId}
             />
           ) : (
             <div className="grid min-h-80 place-items-center text-sm text-muted-foreground">
               이 범위에 완성된 캔들이 없습니다.
             </div>
           )}
+          {selectedPatternGroup && <PatternGroupDetails group={selectedPatternGroup} />}
         </CardContent>
       </Card>
       <p className="text-center text-[10px] text-muted-foreground">
-        ATR은 하단 동기 가격척도 · 매매/실현 후보 마커 클릭 시 거래 드로어
+        ATR은 하단 동기 가격척도 · 패턴 표식은 봉 위의 중립 사건이며 원시 부호는 매매 방향이
+        아님 · 묶음 표식을 누르면 상세 목록
       </p>
     </div>
   );

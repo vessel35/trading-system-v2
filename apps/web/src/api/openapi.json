@@ -3351,6 +3351,69 @@
         }
       }
     },
+    "/api/v1/runs/{run_id}/indicator-definitions": {
+      "get": {
+        "summary": "Get Indicator Definitions",
+        "operationId": "get_indicator_definitions_api_v1_runs__run_id__indicator_definitions_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/IndicatorDefinition"
+                  },
+                  "title": "Response Get Indicator Definitions Api V1 Runs  Run Id  Indicator Definitions Get"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
     "/api/v1/runs/{run_id}/indicator-snapshots": {
       "get": {
         "summary": "Get Indicator Snapshots",
@@ -5820,6 +5883,39 @@
           "web_api_version"
         ],
         "title": "HealthResponse"
+      },
+      "IndicatorDefinition": {
+        "properties": {
+          "indicator_key": {
+            "type": "string",
+            "title": "Indicator Key"
+          },
+          "indicator_name": {
+            "type": "string",
+            "title": "Indicator Name"
+          },
+          "series_kind": {
+            "type": "string",
+            "enum": [
+              "indicator",
+              "pattern"
+            ],
+            "title": "Series Kind"
+          },
+          "impl_version": {
+            "type": "string",
+            "title": "Impl Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "indicator_key",
+          "indicator_name",
+          "series_kind",
+          "impl_version"
+        ],
+        "title": "IndicatorDefinition",
+        "description": "Calculation identities available in one immutable Evidence artifact."
       },
       "IndicatorSnapshot": {
         "properties": {

@@ -80,6 +80,7 @@ from web_api.models import (
     FindingsCollection,
     FundingSettlement,
     HealthResponse,
+    IndicatorDefinition,
     IndicatorSnapshot,
     IntegrityCheck,
     JobStatus,
@@ -1568,6 +1569,23 @@ def get_decisions(
             decision_time_from=_epoch_ms(decision_time_from),
             decision_time_to=_epoch_ms(decision_time_to),
         )
+
+
+@app.get(
+    "/api/v1/runs/{run_id}/indicator-definitions",
+    response_model=list[IndicatorDefinition],
+    responses={
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+def get_indicator_definitions(
+    run_id: str,
+    repo: Annotated[CatalogRepository, Depends(repository)],
+) -> list[IndicatorDefinition]:
+    with evidence_repository(repo, run_id) as evidence:
+        return evidence.indicator_definitions()
 
 
 @app.get(

@@ -222,6 +222,19 @@ def test_scaled_decimals_timestamps_json_and_real_values_are_typed(
     assert isinstance(snapshot["category"], str) and snapshot["category"]
     assert isinstance(snapshot["impl_note"], str) and snapshot["impl_note"]
 
+    definitions = seeded_evidence.client.get(
+        f"/api/v1/runs/{seeded_evidence.run_id}/indicator-definitions"
+    )
+    assert definitions.status_code == 200
+    assert definitions.json() == sorted(definitions.json(), key=lambda item: item["indicator_key"])
+    assert definitions.json()
+    assert set(definitions.json()[0]) == {
+        "indicator_key",
+        "indicator_name",
+        "series_kind",
+        "impl_version",
+    }
+
 
 @pytest.mark.integration
 def test_filters_support_core_tabs_and_trade_drawer(

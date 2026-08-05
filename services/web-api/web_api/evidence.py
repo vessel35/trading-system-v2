@@ -29,6 +29,7 @@ from web_api.models import (
     FindingsCollection,
     FindingsMeta,
     FundingSettlement,
+    IndicatorDefinition,
     IndicatorSnapshot,
     IntegrityCheck,
     MissedOpportunity,
@@ -719,6 +720,28 @@ class EvidenceRepository:
             + definition_metadata_select,
             joins="JOIN INDICATOR_DEFINITION AS d ON d.indicator_key = s.indicator_key",
         )
+
+    def indicator_definitions(self) -> list[IndicatorDefinition]:
+        """Return the small calculation catalog without loading per-candle values."""
+
+        if self._schema_version < (1, 5, 0):
+            series_kind_select = """
+                CASE
+                    WHEN substr(indicator_key, 1, 4) = 'pat_' THEN 'pattern'
+                    ELSE 'indicator'
+                END AS series_kind
+            """
+        else:
+            series_kind_select = "series_kind"
+        rows = self._connection.execute(
+            f"""
+            SELECT indicator_key, indicator_name, impl_version,
+                   {series_kind_select}
+            FROM INDICATOR_DEFINITION
+            ORDER BY indicator_key
+            """
+        ).fetchall()
+        return [IndicatorDefinition.model_validate(dict(row)) for row in rows]
 
     def missed_opportunities(
         self,
