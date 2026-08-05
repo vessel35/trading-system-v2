@@ -46,7 +46,7 @@ NAMES: frozenset[str] = frozenset(
     }
 )
 
-# How many of the standard's 89 systems the registrations above account for. It is
+# How many of the standard's 93 systems the registrations above account for. It is
 # one fewer than the number of names because §0.3 classifies EMA as a primitive and
 # leaves it outside the 89. With §1 fully implemented the trend category now covers
 # §1.1 through §1.11, which is eleven of the 89.

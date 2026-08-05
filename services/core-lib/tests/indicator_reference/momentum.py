@@ -76,7 +76,7 @@ NAMES: frozenset[str] = frozenset(
     }
 )
 
-# How many of the standard's 89 systems the registrations above account for. Every
+# How many of the standard's 93 systems the registrations above account for. Every
 # momentum name is one of the 89, so the count equals the number of names. Center of
 # Gravity is one of them even though §11 files it under §8 Cycle rather than under §2:
 # its calculation carries no phase pipeline, so it is registered here. Stochastic and

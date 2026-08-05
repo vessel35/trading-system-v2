@@ -38,7 +38,7 @@ NAMES: frozenset[str] = frozenset(
     }
 )
 
-# How many of the standard's 89 systems the registrations above account for. It is
+# How many of the standard's 93 systems the registrations above account for. It is
 # two more than the number of names because the standard counts Bollinger Bands as
 # three systems: the bands themselves, %B, and BandWidth. NATR is counted on its own
 # line rather than folded into ATR, which §3.11 states explicitly.

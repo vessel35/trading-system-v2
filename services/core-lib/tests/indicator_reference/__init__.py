@@ -4,7 +4,7 @@ Two kinds of statement live here, and both are written by hand rather than read 
 from the code they check.
 
 The first is what a category registers: its combination identifiers, its indicator
-names, how many of the standard's 89 systems those registrations account for, and any
+names, how many of the standard's 93 systems those registrations account for, and any
 output the standard itself leaves undefined. A pin that derived those from the registry
 would agree with any registry, so `test_indicator_registry.py` compares the merged
 hand-written statement against the live registry and fails on a silent addition or
@@ -24,12 +24,14 @@ Nothing in this repository depends on TA-Lib at run time or in continuous integr
 regenerating them needs that environment again, and the generator is described in
 `docs/roadmap-stage-3-0-plan.md`.
 
-TA-Lib is a comparison, never a source. Where a value disagrees, the standard decides
-who is wrong, and the documented disagreements are seed-window conventions the standard
+TA-Lib is normally a comparison, never a source. The sole exception is the cycle
+module's seven Hilbert functions: calculation-standard §0.12 pins their TA-Lib 0.7.1
+C files as the source. Everywhere else the standard decides who is wrong when values
+disagree, and the documented disagreements are seed-window conventions the standard
 itself describes rather than errors in either implementation.
 
 Each category owns one module here, so two people adding indicators to different
-categories never edit the same file. This module merges the six and is the only place
+categories never edit the same file. This module merges the seven and is the only place
 that names them. Leaving a category out of the merge takes both of its statements with
 it, and the tests refuse to pass on the shorter list: the registry comparison sees a
 registered combination nobody expected, and the outside comparison sees a registered
@@ -40,7 +42,7 @@ from collections.abc import Iterable, Mapping
 from types import MappingProxyType
 from typing import NamedTuple, Protocol
 
-from . import momentum, strength, systems, trend, volatility, volume
+from . import cycle, momentum, strength, systems, trend, volatility, volume
 from .series import CONVERGENCE_NOISE_FLOOR, SAMPLE_INDICES, reference_candles
 
 __all__ = [
@@ -114,6 +116,7 @@ CATEGORY_DATA: Mapping[str, CategoryData] = MappingProxyType(
         "volume": _declared_by(volume),
         "strength": _declared_by(strength),
         "systems": _declared_by(systems),
+        "cycle": _declared_by(cycle),
     }
 )
 

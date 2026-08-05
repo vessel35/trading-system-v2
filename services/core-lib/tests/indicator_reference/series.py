@@ -1,6 +1,6 @@
 """Shared inputs of the outside comparison: the series, the sample points, the floor.
 
-Everything here is common to all six categories, so no category owns it and nobody
+Everything here is common to all seven categories, so no category owns it and nobody
 adding an indicator has a reason to edit this file. Changing the candle builder or
 the sample indices would invalidate every frozen number in the sibling modules at
 once, which is exactly why the values live apart from the series that produced them.

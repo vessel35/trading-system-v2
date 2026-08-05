@@ -24,7 +24,7 @@ NAMES: frozenset[str] = frozenset(
     }
 )
 
-# How many of the standard's 89 systems the registrations above account for. Every
+# How many of the standard's 93 systems the registrations above account for. Every
 # name is among the 89, so the count equals the number of names. §5.5's QQE is the
 # one §5 section still unregistered, because its trailing band rule lives in the
 # original code rather than in the standard.

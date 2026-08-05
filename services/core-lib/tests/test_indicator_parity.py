@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from math import isclose, isnan, sin, sqrt
 
 import pytest
-from core_lib.indicators import momentum, primitives, systems, trend, volatility, volume
+from core_lib.indicators import cycle, momentum, primitives, systems, trend, volatility, volume
 from core_lib.indicators.primitives import stdev
 from core_lib.indicators.registry import (
     DEFAULT_REGISTRY,
@@ -201,6 +201,16 @@ def assert_parity(spec: IndicatorSpec, candles: Sequence[Candle]) -> None:
 
 ALL_REGISTERED_SPECS = DEFAULT_REGISTRY.list()
 
+HILBERT_IDENTIFIERS = (
+    "HT_DCPERIOD",
+    "HT_DCPHASE",
+    "HT_PHASOR",
+    "HT_SINE",
+    "HT_TRENDLINE",
+    "HT_TRENDMODE",
+    "MAMA(fastlimit=0.5,slowlimit=0.05)",
+)
+
 
 @pytest.mark.parametrize("spec", ALL_REGISTERED_SPECS, ids=lambda spec: spec.identifier)
 @pytest.mark.parametrize("seed", [0, 7, 42, 2026])
@@ -291,6 +301,56 @@ def test_min_history_and_seed_warmup(identifier: str) -> None:
     assert bool(state.warmed_up)
     expected = spec.compute_vectorized(candles[: spec.min_history])[-1]
     assert_value_equal(expected, state.current())
+
+
+def test_hilbert_batch_path_does_not_call_the_incremental_core(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep the registry's batch parity oracle independent of state transitions."""
+
+    def fail_if_called(*_args: object) -> None:
+        raise AssertionError("the batch path called the incremental Hilbert core")
+
+    monkeypatch.setattr(cycle._HilbertStateCore, "update", fail_if_called)
+    candles = make_candles(100)
+    specs = {spec.identifier: spec for spec in DEFAULT_REGISTRY.list()}
+    for identifier in HILBERT_IDENTIFIERS:
+        assert len(specs[identifier].compute_vectorized(candles)) == len(candles)
+
+
+def test_mama_delta_phase_exactly_one_uses_the_fast_limit() -> None:
+    """The post-floor ``> 1.0`` branch is strict in TA-Lib's MAMA source."""
+
+    assert cycle._mama_alpha(1.0, 0.5, 0.05) == 0.5
+    assert cycle._mama_alpha(0.999999999999, 0.5, 0.05) == 0.5
+    assert cycle._mama_alpha(2.0, 0.5, 0.05) == 0.25
+
+
+def test_hilbert_warmups_and_trendmode_state_encoding_are_exact() -> None:
+    candles = make_candles(100)
+    specs = {spec.identifier: spec for spec in DEFAULT_REGISTRY.list()}
+    for identifier in HILBERT_IDENTIFIERS:
+        spec = specs[identifier]
+        values = spec.compute_vectorized(candles)
+        for value in values[: spec.min_history - 1]:
+            if isinstance(value, dict):
+                assert all(isnan(output) for output in value.values())
+            else:
+                assert isnan(value)
+
+    trendmode = specs["HT_TRENDMODE"].compute_vectorized(candles)
+    assert all(isinstance(value, float) and value in {0.0, 1.0} for value in trendmode[63:])
+
+
+@pytest.mark.parametrize("identifier", HILBERT_IDENTIFIERS)
+def test_hilbert_outputs_never_depend_on_a_later_bar(identifier: str) -> None:
+    candles = make_candles(180)
+    spec = next(
+        candidate for candidate in DEFAULT_REGISTRY.list() if candidate.identifier == identifier
+    )
+    full = spec.compute_vectorized(candles)
+    for cut in (spec.min_history, spec.min_history + 30, 179):
+        assert_series_equal(full[:cut], spec.compute_vectorized(candles[:cut]))
 
 
 def test_wave_one_indicators_satisfy_their_standard_relations() -> None:
