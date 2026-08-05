@@ -1,6 +1,6 @@
 # 기술적 분석 지표 계산 명세서 (★4 이상)
 
-> **범위**: 1차 마스터 목록에서 신뢰도 ★★★★ 이상으로 판정된 지표(원 저자 실명 + 문서화된 1차 출처)의 **계산 방법**을 플랫폼 독립적으로 기술한다. 이 기준에는 예외가 하나 있다. APO(§2.28)는 원저자를 세울 수 있는 1차 출처가 없어, 이동평균 종류를 파라미터로 남긴 문서화된 정의를 출처로 삼아 수록했다(§13의 27번). 기준을 넓힌 것이 아니라 이 한 항목만 예외로 못박은 것이다.
+> **범위**: 1차 마스터 목록에서 신뢰도 ★★★★ 이상으로 판정된 지표(원 저자 실명 + 문서화된 1차 출처)의 **계산 방법**을 플랫폼 독립적으로 기술한다. 이 수록 기준에는 예외가 하나 있다. APO(§2.28)는 원저자를 세울 수 있는 1차 출처가 없어, 이동평균 종류를 파라미터로 남긴 문서화된 정의를 출처로 삼아 수록했다(§13의 27번). 기준을 넓힌 것이 아니라 이 한 항목만 예외로 못박은 것이다. 계산 원본을 정하는 정책의 별도 예외는 §0.12에 한정해 둔다.
 > **중복 제거 원칙**: 여러 지표가 공유하는 기초 연산(EMA, SMA, WMA, Wilder 평활, True Range, Typical Price, 표준편차, rolling 최고/최저 등)은 **§0 공유 프리미티브**에 단 한 번만 정의하고, 각 지표는 이를 **참조**한다. 지표 본문에는 그 지표 고유의 계산만 기술한다.
 > **표기 규약**: `C`=종가, `O`=시가, `H`=고가, `L`=저가, `V`=거래량, `P`=대상 시계열(문맥상 대개 종가), 아래첨자 `t`=현재 봉, `t-1`=직전 봉. `n`=기간(period).
 
@@ -91,6 +91,39 @@ ROC(P, n)_t = 100 · (P_t − P_{t-n}) / P_{t-n}
 - **divide-by-zero**: 분모가 0이면 결과를 `0`, `100`(RSI류에서 손실=0), 또는 직전값으로 대체 — 구현체별 상이. 본 문서는 각 지표에서 해당 규약을 명시.
 - **NaN 전파**: warm-up 구간은 NaN 유지 권장(0 대체 시 초기 신호 왜곡).
 - **실시간(update) vs 배치**: 재귀형(EMA/RMA/SAR/누적)은 확정된 직전값만 사용해야 함 → **미확정(진행 중) 봉으로 상태 갱신 금지**(look-ahead/재계산 오염 방지). 프로젝트 규약 `close_time ≤ T` 준수.
+
+### 0.12 계산 출처 정책 예외 — TA-Lib Hilbert 일곱 함수
+
+일반 정책에서 TA-Lib과 다른 외부 라이브러리는 독립 계산 원본이 아니라 교차대조군이다.
+`services/core-lib/tests/indicator_reference/__init__.py`의 "TA-Lib은 대조군이고 계산
+원본이 아니다"라는 설명도 이 일반 정책을 가리킨다. 다만 아래 일곱 함수에는 그 정책을
+적용하지 않고 **TA-Lib C 구현 자체를 계산 원본으로 삼는다.** 이 예외는 다른 TA-Lib
+함수나 다른 지표로 자동 확대되지 않는다.
+
+| 함수 | 고정 원본 파일 |
+|---|---|
+| `MAMA`와 그 두 출력 `MAMA`, `FAMA` | `src/ta_func/ta_MAMA.c` |
+| `HT_SINE` | `src/ta_func/ta_HT_SINE.c` |
+| `HT_TRENDLINE` | `src/ta_func/ta_HT_TRENDLINE.c` |
+| `HT_DCPERIOD` | `src/ta_func/ta_HT_DCPERIOD.c` |
+| `HT_DCPHASE` | `src/ta_func/ta_HT_DCPHASE.c` |
+| `HT_PHASOR` | `src/ta_func/ta_HT_PHASOR.c` |
+| `HT_TRENDMODE` | `src/ta_func/ta_HT_TRENDMODE.c` |
+
+원본 저장소는 `https://github.com/TA-Lib/ta-lib`, 태그는 `v0.7.1`, 커밋은
+`2247d599bddf37ed37e3a709371517e46efc66f6`으로 고정한다. 위 파일들은 원래 경로를
+유지한 채 `third_party/ta-lib/src/ta_func/`에 반입한다. Ehlers 원저의 6-tap 계수와
+위상 파이프라인 상수를 확보하지 못해 §8.1과 §8.4가 미확정으로 남아 있었고, 상수를
+지어내는 대신 공개된 TA-Lib 구현을 계산 원본으로 삼기로 사용자가 확정했기 때문에
+이 일곱만 예외다.
+
+`third_party/ta-lib/SHA256SUMS`와
+`services/core-lib/tests/test_talib_vendored_sources.py`는 패턴 판정 소스 61개, 공용
+소스 2개, 위 지표 소스 7개의 경로 집합과 개수 및 각 SHA-256을 네트워크 없이
+검증한다. 계산 포트는 TA-Lib 0.7.1의 오프라인 포획값과 상대·절대 오차 모두
+`1e-9` 이내로 대조하고, 서로 독립인 배치 경로와 상태 경로는 상대·절대 오차 모두
+`1e-12` 이내로 대조한다. `HT_TRENDMODE`는 허용오차 없이 정확히 대조한다. 런타임과
+지속적 통합 환경은 외부 TA-Lib 설치에 의존하지 않는다.
 
 ---
 
@@ -757,19 +790,56 @@ TRIN = (Advancing Issues / Declining Issues) / (Advancing Volume / Declining Vol
 
 ## §8. Cycle / Ehlers 계열 (★4↑)
 
-> Ehlers 계열은 DSP 필터 기반이라 구현체별 계수·초기화가 갈린다. 아래는 원저자 서술의 표준형이며, 상수 미확신 부분은 명시한다.
+> Ehlers 계열은 DSP 필터 기반이라 구현체별 계수·초기화가 갈린다. §8.1과 §8.4부터
+> §8.9까지의 Hilbert 일곱 함수는 §0.12의 예외에 따라 TA-Lib v0.7.1 C 소스를
+> 계산 원본으로 고정한다. Center of Gravity와 Roofing Filter에는 일반 출처 정책을
+> 계속 적용한다.
+
+Hilbert 일곱 함수의 불안정 기간은 `0`으로 고정한다. 원본의 lookback은 고정 길이에
+`TA_GLOBALS_UNSTABLE_PERIOD(...)`를 더하지만, TA-Lib v0.7.1의 기본 전역 설정은
+불안정 기간을 `0`으로 초기화한다. 이 저장소는 같은 기본값을 고정해 전역 가변 설정을
+두지 않는다. 불안정 기간은 유효 출력 시작점과 부분 구간 계산의 초기화 시작점에
+영향을 준다.
+
+이 저장소의 워밍업은 `lookback + 1`이다. 따라서 다음 표의 `lookback` 개수만큼
+선행 출력이 NaN이고, `min_history`개째 봉부터 첫 유효 출력이 나온다.
+
+| 함수 | 출력 | lookback | `min_history` |
+|---|---|---:|---:|
+| `HT_DCPERIOD` | 단일 실수 | 32 | 33 |
+| `HT_PHASOR` | `inphase`, `quadrature` | 32 | 33 |
+| `MAMA` | `mama`, `fama` | 32 | 33 |
+| `HT_DCPHASE` | 단일 실수 | 63 | 64 |
+| `HT_SINE` | `sine`, `leadsine` | 63 | 64 |
+| `HT_TRENDLINE` | 단일 실수 | 63 | 64 |
+| `HT_TRENDMODE` | 단일 상태값 | 63 | 64 |
 
 ### 8.1 MAMA / FAMA — MESA Adaptive MA (John Ehlers, 2001) ★★★★★
-Hilbert 변환으로 지배 주기(dominant cycle)의 위상을 추정, 위상 변화속도로 α를 적응.
+계산 원본은 `ta_MAMA.c`다. §8.5의 공통 Hilbert 코어에서 갈라져 `I1`과 `Q1`의
+위상 변화속도로 α를 정하고 원가격 `P`를 적응 평활한다.
 ```
-개요:
-1) 가격 평활 후 Hilbert Transform으로 In-Phase(I)/Quadrature(Q) 성분 추출
-2) 위상각 Phase = atan(Q / I), 델타위상 ΔPhase = Phase_{t-1} − Phase_t (하한 클램프)
-3) α = FastLimit / ΔPhase, 단 α ∈ [SlowLimit, FastLimit]   (FastLimit=0.5, SlowLimit=0.05)
-4) MAMA_t = α·P_t + (1−α)·MAMA_{t-1}
-5) FAMA_t = 0.5·α·MAMA_t + (1−0.5·α)·FAMA_{t-1}
+Phase_t = atan(Q1_t / I1_t) · 180/π   if I1_t != 0
+Phase_t = 0                            if I1_t == 0
+DeltaPhase = Phase_{t-1} − Phase_t
+if DeltaPhase < 1.0: DeltaPhase = 1.0
+if DeltaPhase > 1.0:
+    α = fastlimit / DeltaPhase
+    if α < slowlimit: α = slowlimit
+else:
+    α = fastlimit
+MAMA_t = α·P_t + (1−α)·MAMA_{t-1}
+FAMA_t = 0.5·α·MAMA_t + (1−0.5·α)·FAMA_{t-1}
 ```
-- **검증 필요**: Hilbert 6-tap 계수·주기 평활 상수는 Ehlers 원 코드(*Rocket Science for Traders*, 2001) 그대로 사용해야 함. 여기 상수 재현은 원문 대조 전 "미확정" 취급.
+위상은 도 단위다. `I1`이 정확히 `0`이면 위상도 `0`으로 둔다. 특히 위상차를
+`1.0`으로 아래에서 물린 직후 곧바로 `> 1.0`으로 다시 시험한다. 따라서 원래
+위상차가 `1.0` 이하이면 α는 나눗셈 결과가 아니라 `fastlimit`이다. 이 조건 순서를
+일반적인 구간 클램프로 바꾸면 경계값이 달라진다.
+
+두 파라미터의 기본값은 `fastlimit=0.5`, `slowlimit=0.05`다. C 함수가 각각 허용하는
+범위는 양 끝을 포함한 `[0.01, 0.99]`다. TA-Lib은 `fastlimit`가 `slowlimit`보다
+큰지 따로 검증하지 않으므로 이 표준도 원본 동등성 계층에서 별도의 대소관계 조건을
+추가하지 않는다. 출력은 `mama`와 `fama` 두 선이며, lookback은 32이고
+`min_history`는 33이다.
 
 ### 8.2 Center of Gravity Oscillator (John Ehlers, 2002) ★★★★
 ```
@@ -783,8 +853,102 @@ High-Pass 필터(저주파 추세 제거) + Super Smoother(2-pole 고주파 잡�
 - **검증 필요**: HP cutoff(예 48봉)와 SuperSmoother 계수(a1,b1,c1..)는 Ehlers 원문(*Cycle Analytics for Traders*, 2013)의 정확한 수치가 있어야 하며, 상수 재현은 원문 대조 전 "미확정".
 
 ### 8.4 Sinewave / Instantaneous Trendline (John Ehlers) ★★★★
-지배 주기 위상에서 Sine = sin(Phase), LeadSine = sin(Phase+45°). Instantaneous Trendline은 주기 길이만큼의 평활 추세선.
-- **검증 필요**: 위상·주기 산출 파이프라인 전체가 §8.1과 연동되며 상수 원문 대조 필요.
+이 개념 항목은 원본 C에서 **두 함수로 나뉜다.** `ta_HT_SINE.c`의 `HT_SINE`은
+§8.7의 지배 주기 위상으로 `sine = sin(DCPhase)`와
+`leadsine = sin(DCPhase + 45°)` 두 출력을 만든다. `ta_HT_TRENDLINE.c`의
+`HT_TRENDLINE`은 `N = int(smoothPeriod + 0.5)`봉의 원가격 평균을 구한 뒤, 현재
+평균과 직전 세 평균에 각각 4, 3, 2, 1의 가중치를 주고 10으로 나눈
+Instantaneous Trendline 한 선을 출력한다. 추세선 평균에는 Hilbert 전단의 평활가격이
+아니라 원가격을 사용한다. 두 함수 모두 lookback은 63이고 `min_history`는 64다.
+
+### 8.5 공통 Hilbert 전단
+
+일곱 함수가 공유하는 코어의 경계는 **4봉 가중 평활, Hilbert 변환, `Re`와 `Im`,
+그리고 `period` 계산까지**다.
+
+```
+smoothPrice_t = (4·P_t + 3·P_{t-1} + 2·P_{t-2} + P_{t-3}) / 10
+adjustedPrevPeriod = 0.075·period_{t-1} + 0.54
+H(x)_t = (0.0962·x_t + 0.5769·x_{t-2}
+          − 0.5769·x_{t-4} − 0.0962·x_{t-6}) · adjustedPrevPeriod
+detrender_t = H(smoothPrice)_t
+Q1_t = H(detrender)_t
+I1_t = detrender_{t-3}
+jI_t = H(I1)_t
+jQ_t = H(Q1)_t
+I2_t = 0.2·(I1_t − jQ_t) + 0.8·I2_{t-1}
+Q2_t = 0.2·(Q1_t + jI_t) + 0.8·Q2_{t-1}
+Re_t = 0.2·(I2_t·I2_{t-1} + Q2_t·Q2_{t-1}) + 0.8·Re_{t-1}
+Im_t = 0.2·(I2_t·Q2_{t-1} − Q2_t·I2_{t-1}) + 0.8·Im_{t-1}
+```
+
+`Im`과 `Re`가 모두 0이 아닐 때 후보 주기를
+`360 / (atan(Im/Re) · 180/π)`로 구한다. 후보를 직전 주기의 1.5배 이하와 0.67배
+이상으로 차례로 제한하고, 다시 `[6, 50]`으로 제한한 뒤
+`period_t = 0.2·candidate + 0.8·period_{t-1}`로 평활한다. 이 `period` 계산까지가
+공통 코어다.
+
+상태 초기화는 비대칭이다. 먼저 4봉 WMA용 표본을 채우고, 이어지는 아홉 봉에서는
+Hilbert 계산 없이 WMA만 진행한 뒤 본 루프에 들어간다. Hilbert 순환 버퍼는 짝수 봉과
+홀수 봉을 분리하고 하나의 `hilbertIdx`를 공유하되, 인덱스는 짝수 갈래에서만 증가한다.
+이 홀짝 구분과 증가 위치는 계산의 일부다.
+
+두 번째 주기 평활인
+`smoothPeriod_t = 0.33·period_t + 0.67·smoothPeriod_{t-1}`는 일곱 함수 중
+`HT_DCPERIOD`, `HT_DCPHASE`, `HT_SINE`, `HT_TRENDLINE`, `HT_TRENDMODE` 다섯만
+사용하므로 공통 코어에 포함하지 않는다. `HT_PHASOR`는 홀짝 갈래 안에서 `I1`과
+`Q1`을 내보내고, `MAMA`는 같은 자리에서 위상과 α를 계산하므로 둘은
+`smoothPeriod` 이전에 갈라진다. 두 함수도 다음 봉의 공통 상태를 위해 `period`
+계산 자체는 계속 수행한다.
+
+선택 계층별 추가 상태는 다음과 같다.
+
+| 함수 | 공통 코어 뒤 또는 갈래 안의 추가 상태와 출력 |
+|---|---|
+| `HT_DCPERIOD` | `smoothPeriod`를 유지하고 그 값을 출력한다. |
+| `HT_DCPHASE` | `smoothPeriod`와 평활가격 50칸 버퍼로 지배 주기 위상을 출력한다. |
+| `HT_PHASOR` | 홀짝 갈래 안에서 `I1`과 `Q1`을 각각 `inphase`, `quadrature`로 출력한다. |
+| `HT_SINE` | `smoothPeriod`, 평활가격 50칸 버퍼, 지배 주기 위상으로 두 sine 선을 출력한다. |
+| `HT_TRENDLINE` | `smoothPeriod`, 최대 50봉의 원가격, 직전 세 주기 평균으로 추세선을 출력한다. |
+| `HT_TRENDMODE` | 위상, 두 sine 선, 추세선, `daysInTrend` 상태로 국면을 출력한다. |
+| `MAMA` | 홀짝 갈래 안의 위상, α, 직전 MAMA와 FAMA로 두 적응평균을 출력한다. |
+
+### 8.6 HT_DCPERIOD
+
+계산 원본은 `ta_HT_DCPERIOD.c`다. §8.5의 공통 `period`에 선택 계층의
+`smoothPeriod_t = 0.33·period_t + 0.67·smoothPeriod_{t-1}`를 적용한 값을 지배
+주기로 출력한다. 출력은 단일 실수이며, lookback은 32이고 `min_history`는 33이다.
+
+### 8.7 HT_DCPHASE
+
+계산 원본은 `ta_HT_DCPHASE.c`다. `N = int(smoothPeriod + 0.5)`로 두고 최근
+`N`개의 평활가격을 50칸 순환 버퍼에서 읽어 sine 가중합 `realPart`와 cosine 가중합
+`imagPart`를 만든다. `imagPart`가 0이 아니면 `atan(realPart / imagPart)`를 도 단위로
+바꾼다. 정확히 0이면 직전 `DCPhase`에서 시작해 `realPart < 0`일 때 90도를 빼고
+`realPart > 0`일 때 90도를 더하는 원본 분기를 따른다. 이어 90도와 WMA의 한 봉
+지연 보정 `360 / smoothPeriod`를 더한다. `imagPart < 0`이면 180도를 더하고, 결과가
+315도보다 크면 360도를 뺀 값이 `DCPhase`다. 출력은 단일 실수이며, lookback은
+63이고 `min_history`는 64다.
+
+### 8.8 HT_PHASOR
+
+계산 원본은 `ta_HT_PHASOR.c`다. §8.5의 홀짝 갈래 안에서 3봉 지연된 detrender인
+`I1`을 `inphase`로, 6-tap 사분 필터 출력 `Q1`을 `quadrature`로 내보낸다.
+`smoothPeriod`와 지배 주기 위상 계층은 사용하지 않는다. 두 출력의 lookback은 32이고
+`min_history`는 33이다.
+
+### 8.9 HT_TRENDMODE
+
+계산 원본은 `ta_HT_TRENDMODE.c`다. §8.7의 위상과 §8.4의 sine 두 선 및 추세선을
+함께 계산한다. 기본 상태는 추세 국면 `1`이다. sine과 leadsine이 교차하면
+`daysInTrend`를 0으로 되돌리고 순환 국면 `0`으로 바꾼다. `daysInTrend`가
+`0.5·smoothPeriod`보다 작거나, 위상 변화가
+`0.67·360/smoothPeriod`보다 크면서 `1.5·360/smoothPeriod`보다 작으면 `0`이다.
+평활가격과 추세선의 상대 차이 절댓값이 0.015 이상이면 마지막에 다시 `1`로 정한다.
+
+플랫폼 출력은 실수 계약에 맞춘 `0.0` 또는 `1.0`이며 방향 부호는 붙이지 않는다.
+성숙 전 63봉은 NaN이고 그 뒤의 상태값은 TA-Lib 정수 출력과 허용오차 없이 정확히
+일치해야 한다. lookback은 63이고 `min_history`는 64다.
 
 ## §9. 기타 주요 시스템 (★4↑)
 
@@ -947,15 +1111,16 @@ graph LR
 | §5 Trend Strength | DMI/ADX 시스템, Vortex, Aroon, Choppiness, QQE, RWI | 6 |
 | §6 Bill Williams | Alligator, Fractals, Gator, Market Facilitation Index | 4 |
 | §7 Market Breadth | McClellan Osc, McClellan Summation, TRIN | 3 |
-| §8 Cycle / Ehlers | MAMA/FAMA, Center of Gravity, Roofing Filter, Sinewave/ITrend | 4 |
+| §8 Cycle / Ehlers | 기존 4개 항목과 TA-Lib 원본 확정 항목 6개 | 10 |
 | §9 기타 시스템 | Parabolic SAR, Ichimoku, Elder Ray, Elder Impulse, TD Sequential, Woodies CCI | 6 |
-| **합계** | | **89** |
+| **합계** | | **95** |
 
-> 세는 규칙 명시: 위 표는 "시스템/지표 단위"로 **89개**(11+31+14+10+6+4+3+4+6=89)를 수록한다.
-> - DMI/ADX를 구성요소(+DI, −DI, ADX, ADXR) 4개로 펼치면 +3 → 92
-> - Bollinger를 밴드 1개로 묶고 %B·BandWidth를 파생으로 빼면 −2 → 87
-> - Stochastic의 Fast와 Slow를 한 시스템으로 묶으면 −1 → 88 (§2.2는 둘을 별개로 세고 별개로 등록한다)
-> - ATR과 NATR을 한 항목으로 묶으면 −1 → 88 (§3.11은 NATR을 독립 지표로 센다)
+> 세는 규칙 명시: 위 표는 "시스템/지표 단위"로 **95개**(11+31+14+10+6+4+3+10+6=95)를 수록한다.
+> 이번에 확정하거나 신설한 제목은 §8.1과 §8.4부터 §8.9까지 일곱이지만 신규 집계 항목은 여섯이다. §8.5 공통 Hilbert 전단은 독립 지표로 세지 않고, §8.4의 `HT_SINE`과 `HT_TRENDLINE`은 Sinewave/ITrend 한 항목으로 센다. 나머지 신규 집계 항목은 MAMA/FAMA, HT_DCPERIOD, HT_DCPHASE, HT_PHASOR, HT_TRENDMODE다.
+> - DMI/ADX를 구성요소(+DI, −DI, ADX, ADXR) 4개로 펼치면 +3 → 98
+> - Bollinger를 밴드 1개로 묶고 %B·BandWidth를 파생으로 빼면 −2 → 93
+> - Stochastic의 Fast와 Slow를 한 시스템으로 묶으면 −1 → 94 (§2.2는 둘을 별개로 세고 별개로 등록한다)
+> - ATR과 NATR을 한 항목으로 묶으면 −1 → 94 (§3.11은 NATR을 독립 지표로 센다)
 > - MACD와 MACD Histogram을 분리하면 +1
 >
 > **crypto 미수록(의도적 제외)**: Wilder의 Swing Index / ASI / CSI / Volatility Stop은 ★5이나 암호화폐 적용성이 낮아 제외했다. Swing Index·ASI는 "limit move" 파라미터가 무기한 시장에 정의되지 않고, Volatility Stop은 §3.5 Chandelier Exit(ATR 스톱)로 사실상 대체된다. 필요 시 별도 추가 가능.
@@ -970,11 +1135,12 @@ graph LR
 | Schaff Trend Cycle | 내부 이중 스토캐스틱 평활 상수/클램프 | Doug Schaff 원자료 |
 | Klinger VO | cm 초기화·VF 절댓값 처리 | Klinger 원자료 |
 | QQE | 트레일링 밴드 락 규칙 | Igor Livshin 원 코드 |
-| MAMA/FAMA | Hilbert 6-tap 계수·주기 평활 | Ehlers, *Rocket Science for Traders* (2001) |
 | Roofing Filter | HP cutoff·SuperSmoother 계수 | Ehlers, *Cycle Analytics for Traders* (2013) |
-| Sinewave/ITrend | 위상·주기 산출 파이프라인 상수 | Ehlers 상동 |
 | Special K | 항별 ROC기간·평활·가중치표 | Pring 원자료 |
 | Keltner | 원형(SMA+range) vs 현대형(EMA+ATR) | Keltner(1960) / Raschke |
+
+QQE, Roofing Filter, Special K는 TA-Lib v0.7.1에 대응 계산 함수가 없으므로 §0.12의
+예외로 확정할 수 없고 미확정 목록에 남는다.
 
 ## §13. 참고 문헌 (1차 출처)
 
@@ -999,7 +1165,7 @@ graph LR
 19. Richard W. Arms Jr., 1967. — TRIN(Arms Index)
 20. Tom DeMark, *The New Science of Technical Analysis*, 1994. — TD Sequential, DeMarker
 21. Goichi Hosoda(一目山人), 1969. — Ichimoku Kinko Hyo
-22. **라이브러리 교차대조**: TA-Lib(ta-lib.org), pandas-ta(github.com/twopirllc/pandas-ta), Tulip Indicators(tulipindicators.org), TradingView Pine 내장 함수 문서.
+22. **라이브러리 교차대조**: TA-Lib(ta-lib.org), pandas-ta(github.com/twopirllc/pandas-ta), Tulip Indicators(tulipindicators.org), TradingView Pine 내장 함수 문서. 다만 §0.12의 Hilbert 일곱 함수는 명시한 고정 TA-Lib C 구현을 계산 원본으로 쓰는 제한적 예외다.
 23. Igor Livshin, "Balance Of Power", *Technical Analysis of Stocks & Commodities* V.19:8, 2001년 8월, 18–32쪽. — BOP(§2.29). 축약형이 원문 전개형과 같음을 저자가 확인한 서신은 같은 잡지 2001년 10월 독자란.
 24. J. J. Payne, "A Better Way to Smooth Data", *Technical Analysis of Stocks & Commodities*, 1989년 10월. — 삼각가중(TRIMA, §1.11). 위 5번 Kaufman의 "Triangular Weighting" 절이 이 글을 1차 출처로 인용한다.
 25. John Forman, "Cross-Market Evaluations With Normalized Average True Range", *Technical Analysis of Stocks & Commodities* V.24:5, 2006년 5월, 60–63쪽. — NATR(§3.11)
@@ -1019,4 +1185,4 @@ LinRegSlope = b ;  LinRegIntercept = a
 
 ---
 
-*본 명세서는 1차 마스터 목록의 ★4 이상 지표에 대한 계산 계층이다. 계산의 뼈대는 원저자 1차 출처 기준으로 확정했으며, 구현체별로 갈리는 상수는 §12에 "검증 필요"로 명시하여 추측을 배제했다. 각 지표의 의사코드(반복문 포함)·시간복잡도·NaN/오버플로 처리·플랫폼별 수치 검증은 후속 상세 문서 단계에서 지표별로 확장한다.*
+*본 명세서는 1차 마스터 목록의 ★4 이상 지표에 대한 계산 계층이다. 계산의 뼈대는 원저자 1차 출처 기준으로 확정하되 §0.12의 Hilbert 일곱 함수만 고정 TA-Lib C 구현을 계산 원본으로 삼는다. 구현체별로 갈리는 나머지 상수는 §12에 "검증 필요"로 명시하여 추측을 배제했다. 각 지표의 의사코드(반복문 포함)·시간복잡도·NaN/오버플로 처리·플랫폼별 수치 검증은 후속 상세 문서 단계에서 지표별로 확장한다.*
