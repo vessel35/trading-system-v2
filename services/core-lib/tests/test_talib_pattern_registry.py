@@ -7,12 +7,11 @@ import pytest
 from core_lib.indicators import DEFAULT_REGISTRY
 from core_lib.patterns import (
     DEFAULT_PATTERN_REGISTRY,
-    LEGACY_PATTERN_REGISTRY,
-    STANDARD_VERSION,
     TALIB_CDL_PATTERN_COUNT,
     TALIB_PATTERN_REGISTRY_VERSION,
 )
 from core_lib.patterns.registry import PatternValue
+from core_lib.patterns.specs import TALIB_FUNCTIONS
 from core_lib.patterns.talib_hikkake import TALIB_HIKKAKE_PATTERNS, TalibStatefulPatternPort
 from core_lib.patterns.talib_multi_candle import TALIB_MULTI_CANDLE_PATTERNS
 from core_lib.patterns.talib_raw import TalibPatternPort, sparse_talib_integer_signals
@@ -26,7 +25,6 @@ from pattern_reference import (
     REGIME_NAMES,
     REGIMES_BY_NAME,
     SIGNALS,
-    TALIB_FUNCTIONS,
     TOTAL_BAR_COUNT,
     candles_for,
 )
@@ -80,8 +78,8 @@ def _first_mismatch(
 
 def test_public_default_pattern_registry_is_talib_cutover() -> None:
     specs = DEFAULT_PATTERN_REGISTRY.list()
-    legacy_history = {spec.name: spec.min_history for spec in LEGACY_PATTERN_REGISTRY.list()}
-    new_history = {spec.name: spec.min_history for spec in specs}
+    history = {spec.name: spec.min_history for spec in specs}
+    port_history = {port.name: port.min_history for port in _ALL_TALIB_PORTS}
 
     assert len(_STATELESS_TALIB_PORTS) == 59
     assert len(_ALL_TALIB_PORTS) == TALIB_CDL_PATTERN_COUNT == 61
@@ -89,16 +87,14 @@ def test_public_default_pattern_registry_is_talib_cutover() -> None:
     assert {spec.name for spec in specs} == set(TALIB_FUNCTIONS)
     assert all(spec.version == TALIB_PATTERN_REGISTRY_VERSION for spec in specs)
     assert TALIB_PATTERN_REGISTRY_VERSION == "2.0.0+talib.0.7.1"
-    assert STANDARD_VERSION == "1.0.0"
 
     assert all(not spec.params for spec in specs)
-    assert all(spec.explicit_min_history is not None for spec in specs)
-    assert all(spec.bar_count is None and spec.requires_trend is None for spec in specs)
-    assert all(new_history[name] != legacy_history[name] for name in new_history)
-    assert sum(new_history[name] > legacy_history[name] for name in new_history) == 53
-    assert sum(new_history[name] < legacy_history[name] for name in new_history) == 8
-    assert max(new_history.values()) == 15
-    assert new_history["pat_doji"] == 11
+    assert all(spec.explicit_min_history > 0 for spec in specs)
+    assert all(not hasattr(spec, "bar_count") for spec in specs)
+    assert all(not hasattr(spec, "requires_trend") for spec in specs)
+    assert history == port_history
+    assert max(history.values()) == 15
+    assert history["pat_doji"] == 11
 
 
 def test_public_pattern_names_stay_disjoint_from_indicators_and_indicator_tally_stays_put() -> None:

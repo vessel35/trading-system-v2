@@ -12,10 +12,8 @@ not share is the indicator-only vocabulary: `pinned_impl` and `required_inputs`
 stay in the indicator layer, because a pattern pins a different standard and
 takes no external input beyond its candles.
 
-Legacy specs carry two fields that `IndicatorSpec` has no use for. `bar_count`
-and `requires_trend` are what §6 needs to compute `min_history`. TA-Lib specs do
-not have those meanings, so they declare `explicit_min_history` from the source
-lookback instead of filling false span or trend metadata.
+TA-Lib specs declare `explicit_min_history` from the source lookback. The legacy
+span/trend warm-up derivation was retired with the hand-written pattern rules.
 
 Section numbers in this module are the candlestick pattern standard's,
 `docs/references/candlestick_pattern_calc_spec.md`. The indicator standard numbers its
@@ -34,7 +32,6 @@ from core_lib.series import SeriesParam
 from core_lib.types import Candle
 
 from .outputs import assert_pattern_name
-from .warmup import min_history_for
 
 PatternValue = dict[str, float]
 """One bar's four §5.1 outputs, keyed by name."""
@@ -92,24 +89,10 @@ class PatternSpec:
         compare=False,
     )
     _state_factory: Callable[[], PatternState] = field(repr=False, compare=False)
-    bar_count: int | None = None
-    """The bars the pattern spans, in its shortest admissible form (§6).
+    explicit_min_history: int
+    """Warm-up length declared directly from the source implementation.
 
-    Fixed by the pattern's definition rather than by a registered parameter, so
-    it never grows at runtime. Only Rising/Falling Three Methods admits a range
-    of spans; §6 takes its shortest form, which is the first bar where the
-    pattern can be judged at all.
-    """
-
-    requires_trend: bool | None = None
-    """Whether §3's prior trend is part of the judgment; 45 of the 61 say yes."""
-
-    explicit_min_history: int | None = None
-    """Warm-up length declared directly when span/trend metadata is not the source.
-
-    The TA-Lib registration path uses `lookback + 1`. Supplying a fake
-    `bar_count` or `requires_trend` to make the legacy formula return that value
-    would make the spec metadata lie about what the source implementation uses.
+    The TA-Lib registration path uses `lookback + 1`.
     """
 
     undefined_outputs: tuple[str, ...] = ()
@@ -125,12 +108,7 @@ class PatternSpec:
         assert_pattern_name(self.name)
         if not self.version:
             raise ValueError("pattern version must not be empty")
-        if self.explicit_min_history is None:
-            if self.bar_count is None or self.requires_trend is None:
-                raise ValueError("legacy pattern specs must declare bar_count and requires_trend")
-            # Raises when bar_count is not positive, so no separate check is needed.
-            min_history_for(self.bar_count, requires_trend=self.requires_trend)
-        elif self.explicit_min_history <= 0:
+        if self.explicit_min_history <= 0:
             raise ValueError("explicit_min_history must be positive")
         object.__setattr__(self, "params", MappingProxyType(dict(self.params)))
         object.__setattr__(self, "undefined_outputs", tuple(self.undefined_outputs))
@@ -148,11 +126,7 @@ class PatternSpec:
     @property
     def min_history(self) -> int:
         """Return the first valid output's required candle count."""
-        if self.explicit_min_history is not None:
-            return self.explicit_min_history
-        if self.bar_count is None or self.requires_trend is None:
-            raise ValueError("pattern spec has no min_history source")
-        return min_history_for(self.bar_count, requires_trend=self.requires_trend)
+        return self.explicit_min_history
 
     def compute_vectorized(self, candles: Sequence[Candle]) -> PatternSeries:
         """Compute the complete batch series."""
@@ -206,13 +180,12 @@ class PatternRegistry:
     def _assert_warmup_agrees(spec: PatternSpec) -> None:
         """Reject a spec whose state disagrees with it about warm-up length.
 
-        `PatternSpec.min_history` is derived from §6's formula and decides how
-        much history a run fetches; the incremental state carries its own
-        `min_history` and decides when it calls itself warmed up. The two are
-        written in different places, so nothing but this check stops them from
-        drifting apart, and a drift surfaces later as a first valid bar that is
-        off by exactly the difference — the one-bar class of error the whole
-        warm-up derivation exists to prevent.
+        `PatternSpec.min_history` decides how much history a run fetches; the
+        incremental state carries its own `min_history` and decides when it
+        calls itself warmed up. The two are written in different places, so
+        nothing but this check stops them from drifting apart, and a drift
+        surfaces later as a first valid bar that is off by exactly the
+        difference.
 
         Registration is the right moment because it is the last point where both
         numbers are visible and no run has fetched history yet. The indicator

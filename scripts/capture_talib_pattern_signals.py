@@ -203,7 +203,7 @@ def main() -> None:
     import numpy
     from talib import abstract
 
-    from pattern_reference.divergence import TALIB_FUNCTIONS
+    from core_lib.patterns.specs import TALIB_FUNCTIONS
     from pattern_reference.series import REGIMES, candles_for, series_fingerprint
 
     function_names = sorted(set(TALIB_FUNCTIONS.values()))
