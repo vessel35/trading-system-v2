@@ -37,7 +37,7 @@ from core_lib.execution import (
     resolve_triggers,
     to_decimal,
 )
-from core_lib.indicators import DEFAULT_REGISTRY
+from core_lib.indicators import DEFAULT_REGISTRY, IndicatorSpec
 from core_lib.money_management import (
     AccountRiskSnapshot,
     MarketSnapshot,
@@ -46,7 +46,12 @@ from core_lib.money_management import (
     RiskLimits,
     turtle_n_series,
 )
-from core_lib.patterns import DEFAULT_PATTERN_REGISTRY
+from core_lib.patterns import (
+    DEFAULT_PATTERN_REGISTRY,
+    TALIB_FUNCTIONS,
+    TALIB_SOURCE_VERSION,
+    PatternSpec,
+)
 from core_lib.ports import Broker, CatalogStore, Clock, CostModel, DataFeed, EvidenceSink
 from core_lib.series import SeriesSpec, SeriesState
 from core_lib.series_resolution import (
@@ -148,7 +153,9 @@ class _BoundEvidence(Protocol):
         catalog_config_matches: bool,
         catalog_source_matches: bool,
         same_config_run_exists: bool,
+        same_schema_run_exists: bool,
         source_data_hash: str,
+        evidence_schema_version: str,
         comparison_run_id: str | None,
         comparison_hash: str | None,
     ) -> None:
@@ -165,6 +172,7 @@ class _DeterminismCatalog(Protocol):
         run_id: str,
         config_hash: str,
         source_data_hash: str,
+        evidence_schema_version: str,
     ) -> DeterminismReference:
         """Return current-config and previous-hash catalog facts."""
 
@@ -457,6 +465,7 @@ class Engine:
             "seed": config.seed,
             "engine_version": self.engine_version,
             "core_lib_version": self.core_lib_version,
+            "evidence_schema_version": EVIDENCE_SCHEMA_VERSION,
             "config_hash": "",
             "profile_ref": config.profile_ref,
             "strategy_profile_json": profile_json,
@@ -716,12 +725,15 @@ class Engine:
             self._require_run_id(),
             str(self._run_meta["config_hash"]),
             source_data_hash,
+            EVIDENCE_SCHEMA_VERSION,
         )
         self.evidence.set_determinism_reference(
             catalog_config_matches=reference.catalog_config_matches,
             catalog_source_matches=reference.catalog_source_matches,
             same_config_run_exists=reference.same_config_run_exists,
+            same_schema_run_exists=reference.same_schema_run_exists,
             source_data_hash=source_data_hash,
+            evidence_schema_version=EVIDENCE_SCHEMA_VERSION,
             comparison_run_id=reference.comparison_run_id,
             comparison_hash=reference.comparison_hash,
         )
@@ -1847,6 +1859,20 @@ class Engine:
 
     def _record_indicator_definitions(self) -> None:
         for spec in self._indicator_specs:
+            if isinstance(spec, IndicatorSpec):
+                series_kind = "indicator"
+                category = spec.category
+                impl_note = spec.pinned_impl
+                pinned_impl = bool(spec.pinned_impl)
+            elif isinstance(spec, PatternSpec):
+                series_kind = "pattern"
+                category = "candlestick"
+                impl_note = f"TA-Lib v{TALIB_SOURCE_VERSION} {TALIB_FUNCTIONS[spec.name]}"
+                pinned_impl = True
+            else:
+                raise TypeError(f"unsupported series spec type: {type(spec).__name__}")
+            if not category or not impl_note:
+                raise ValueError(f"series metadata must not be empty: {spec.identifier}")
             self.evidence.record(
                 EvidenceRecord(
                     "INDICATOR_DEFINITION",
@@ -1855,7 +1881,10 @@ class Engine:
                         "indicator_name": spec.name,
                         "params_json": dict(spec.params),
                         "impl_version": spec.version,
-                        "pinned_impl": True,
+                        "pinned_impl": pinned_impl,
+                        "series_kind": series_kind,
+                        "category": category,
+                        "impl_note": impl_note,
                         "min_history": spec.min_history,
                         "computation_mode": BACKTEST_INDICATOR_EXECUTION_MODE,
                         "enabled_reason": self._config().indicator_mode,

@@ -4,6 +4,13 @@
 
 This repository contains direct Python ports of TA-Lib v0.7.1 candlestick
 calculation logic under `services/core-lib/core_lib/patterns/talib_*.py`.
+The corresponding unmodified C sources and the pinned sources for the planned
+Hilbert indicator ports are vendored under `third_party/ta-lib/` with their
+original path structure. The snapshot contains `src/ta_common/ta_global.c`,
+`src/ta_func/ta_utility.h`, the 61 `src/ta_func/ta_CDL*.c` files, and the seven
+indicator files `ta_HT_DCPERIOD.c`, `ta_HT_DCPHASE.c`, `ta_HT_PHASOR.c`,
+`ta_HT_SINE.c`, `ta_HT_TRENDLINE.c`, `ta_HT_TRENDMODE.c`, and `ta_MAMA.c` under
+`src/ta_func/`. The upstream `LICENSE` is preserved alongside the snapshot.
 
 TA-Lib license and copyright notice:
 

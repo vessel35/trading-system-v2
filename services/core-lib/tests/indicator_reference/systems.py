@@ -48,7 +48,7 @@ NAMES: frozenset[str] = frozenset(
     }
 )
 
-# How many of the standard's 89 systems the registrations above account for. §11
+# How many of the standard's 93 systems the registrations above account for. §11
 # counts every one of these ten separately: four of them under §6 Bill Williams
 # (Alligator, Fractals, Gator, Market Facilitation Index) and six under §9 (Parabolic
 # SAR, Ichimoku, Elder Ray, Elder Impulse, TD Sequential, Woodies CCI), so the count

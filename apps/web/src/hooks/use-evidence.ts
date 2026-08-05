@@ -13,6 +13,7 @@ import {
   type Execution,
   type FundingSettlement,
   type IntegrityCheck,
+  type IndicatorDefinition,
   type IndicatorSnapshot,
   type Finding,
   type MissedOpportunity,
@@ -40,6 +41,10 @@ export interface EvidencePage<T> {
   readonly truncated: boolean;
   readonly limit: number;
   readonly pageLimit: number;
+}
+
+export interface IndicatorEvidencePage extends EvidencePage<IndicatorSnapshot> {
+  readonly truncatedKeys: string[];
 }
 
 function evidencePage<T>(rows: T[], truncated: boolean): EvidencePage<T> {
@@ -314,7 +319,10 @@ export function useTradeDrawerEvidence(runId: string, tradeId: number | null) {
   return { funding, features, candidates, positions };
 }
 
-export function useChartEvidence(runId: string) {
+export function useChartEvidence(
+  runId: string,
+  selectedSeries: ReadonlySet<string> | null,
+) {
   const candles = useQuery({
     queryKey: ["evidence", runId, "candles"],
     queryFn: async () => {
@@ -329,24 +337,84 @@ export function useChartEvidence(runId: string) {
       return data as CandleCollection;
     },
   });
-  const indicators = useCursorQuery<IndicatorSnapshot>(
-    ["evidence", runId, "indicator-snapshots"],
-    async (after_seq) => {
+  const definitions = useQuery({
+    queryKey: ["evidence", runId, "indicator-definitions"],
+    queryFn: async () => {
       const { data, error } = await apiClient.GET(
-        "/api/v1/runs/{run_id}/indicator-snapshots",
-        {
-          params: { path: { run_id: runId }, query: { after_seq, limit: 200 } },
-        },
+        "/api/v1/runs/{run_id}/indicator-definitions",
+        { params: { path: { run_id: runId } } },
       );
       if (error) throw apiRequestError(error);
-      if (!data) throw new Error("지표 스냅샷 응답이 비어 있습니다.");
-      return data;
+      if (!data) throw new Error("지표 정의 목록 응답이 비어 있습니다.");
+      return data as IndicatorDefinition[];
     },
-  );
+  });
+  const defaultSeries =
+    definitions.data
+      ?.filter((definition) => definition.series_kind === "indicator")
+      .map((definition) => definition.indicator_key) ?? [];
+  const selectedKeys = [...(selectedSeries ?? new Set(defaultSeries))].sort();
+  const firstFeatureTime = candles.data?.data[0]?.close_time;
+  const lastFeatureTime = candles.data?.data.at(-1)?.close_time;
+  const indicatorQuery = useQuery({
+    queryKey: [
+      "evidence",
+      runId,
+      "indicator-snapshots",
+      selectedKeys,
+      firstFeatureTime,
+      lastFeatureTime,
+    ],
+    queryFn: async (): Promise<IndicatorEvidencePage> => {
+      const pages = await Promise.all(
+        selectedKeys.map(async (indicatorKey) => {
+          const page = await allPages<IndicatorSnapshot>(async (after_seq) => {
+            const { data, error } = await apiClient.GET(
+              "/api/v1/runs/{run_id}/indicator-snapshots",
+              {
+                params: {
+                  path: { run_id: runId },
+                  query: {
+                    after_seq,
+                    limit: 200,
+                    indicator_key: indicatorKey,
+                    feature_time_from: firstFeatureTime,
+                    feature_time_to: lastFeatureTime,
+                  },
+                },
+              },
+            );
+            if (error) throw apiRequestError(error);
+            if (!data) throw new Error("지표 스냅샷 응답이 비어 있습니다.");
+            return data;
+          });
+          return { indicatorKey, page };
+        }),
+      );
+      return {
+        rows: pages.flatMap(({ page }) => page.rows),
+        truncated: pages.some(({ page }) => page.truncated),
+        truncatedKeys: pages
+          .filter(({ page }) => page.truncated)
+          .map(({ indicatorKey }) => indicatorKey),
+        limit: EVIDENCE_ROW_LIMIT,
+        pageLimit: EVIDENCE_PAGE_LIMIT,
+      };
+    },
+    enabled:
+      selectedKeys.length > 0 &&
+      firstFeatureTime !== undefined &&
+      lastFeatureTime !== undefined,
+  });
+  const indicators = {
+    ...indicatorQuery,
+    data: indicatorQuery.data?.rows,
+    evidence: indicatorQuery.data,
+  };
   const signals = useSignals(runId);
   const candidates = useCandidateEvents(runId);
   const executions = useExecutions(runId);
-  return { candles, indicators, signals, candidates, executions };
+  return { candles, definitions, indicators, signals, candidates, executions };
 }
 
 export function useSignals(runId: string) {

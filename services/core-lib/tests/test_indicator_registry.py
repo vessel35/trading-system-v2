@@ -108,19 +108,27 @@ def test_each_category_registers_exactly_what_its_own_module_expects() -> None:
     }
 
 
-def test_the_registry_is_exactly_the_six_category_modules_gathered() -> None:
+def test_the_registry_is_exactly_the_seven_category_modules_gathered() -> None:
     """The registry must hold the category lists and nothing besides them.
 
     Registration is split so that one person's indicator never lands in another
     person's file. Three things can break that quietly: a module dropping out of the
     registration gathering, a module dropping out of the expectation merge, and a
     spec sitting in a module that does not own its category. The first two are caught
-    by pinning the six category names here and requiring both packages to cover
+    by pinning the seven category names here and requiring both packages to cover
     exactly them, and the third by comparing each spec's declared category with the
     module holding it.
     """
 
-    assert CATEGORIES == ("trend", "momentum", "volatility", "volume", "strength", "systems")
+    assert CATEGORIES == (
+        "trend",
+        "momentum",
+        "volatility",
+        "volume",
+        "strength",
+        "systems",
+        "cycle",
+    )
     assert COVERED_CATEGORIES == set(CATEGORIES)
     gathered = [spec.identifier for specs in CATEGORY_SPECS.values() for spec in specs]
     assert len(gathered) == len(set(gathered)), "a spec is gathered from two modules"
@@ -135,7 +143,7 @@ def test_the_registry_is_exactly_the_six_category_modules_gathered() -> None:
     assert {spec.category for spec in DEFAULT_REGISTRY.list()} <= set(CATEGORIES)
 
 
-def test_follow_up_catalog_preserves_all_8_not_yet_registered_items() -> None:
+def test_follow_up_catalog_preserves_all_6_not_yet_registered_items() -> None:
     follow_up = (
         trend.FOLLOW_UP_INDICATORS
         + momentum.FOLLOW_UP_INDICATORS
@@ -148,15 +156,23 @@ def test_follow_up_catalog_preserves_all_8_not_yet_registered_items() -> None:
         + systems.FOLLOW_UP_INDICATORS
         + donchian.FOLLOW_UP_INDICATORS
     )
-    # The standard carries 89 systems, and the registered ones plus this catalog must
-    # account for all of them. How many of the 89 a category has taken is stated in
+    # The standard carries 93 systems, and the registered ones plus this catalog must
+    # account for all of them. How many of the 93 a category has taken is stated in
     # that category's own module, so implementing an indicator moves one number in one
     # owner's file instead of a shared constant here. The counts differ from the
     # number of registered names where the standard says they should: EMA and Volume
-    # SMA are §0 primitives outside the 89, and Bollinger Bands is counted there as
+    # SMA are §0 primitives outside the 93, and Bollinger Bands is counted there as
     # three systems rather than one.
-    assert len(follow_up) == 89 - REGISTERED_STANDARD_SYSTEMS
+    assert len(follow_up) == 93 - REGISTERED_STANDARD_SYSTEMS
     assert len(set(follow_up)) == len(follow_up)
+    assert set(follow_up) == {
+        "McClellan Oscillator",
+        "McClellan Summation Index",
+        "TRIN/Arms",
+        "QQE",
+        "Roofing Filter",
+        "Special K",
+    }
 
 
 def test_specs_are_immutable_and_parameterized_identity_is_exact() -> None:

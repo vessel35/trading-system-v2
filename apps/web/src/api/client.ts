@@ -28,6 +28,7 @@ export type CandleCollection = components["schemas"]["CandleCollection"];
 export type Signal = components["schemas"]["Signal"];
 export type Decision = components["schemas"]["Decision"];
 export type IndicatorSnapshot = components["schemas"]["IndicatorSnapshot"];
+export type IndicatorDefinition = components["schemas"]["IndicatorDefinition"];
 export type MissedOpportunity = components["schemas"]["MissedOpportunity"];
 export type ConditionalExpectancy = components["schemas"]["ConditionalExpectancy"];
 export type Finding = components["schemas"]["Finding"];

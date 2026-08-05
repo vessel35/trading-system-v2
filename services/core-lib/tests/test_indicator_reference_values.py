@@ -46,9 +46,12 @@ def test_values_match_an_outside_implementation(name: str) -> None:
 
     produced = _computed_series()[name]
     for index, expected in REFERENCE[name].items():
-        assert produced[index] == pytest.approx(expected, rel=1e-9, abs=1e-9), (
-            f"{name} at index {index}"
-        )
+        if name == "HT_TRENDMODE":
+            assert produced[index] == expected, f"{name} at index {index}"
+        else:
+            assert produced[index] == pytest.approx(expected, rel=1e-9, abs=1e-9), (
+                f"{name} at index {index}"
+            )
 
 
 @pytest.mark.parametrize("name", sorted(CONVERGING))

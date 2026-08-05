@@ -11,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import ClassVar, cast
+from uuid import uuid4
 
 import psycopg
 import pytest
@@ -394,6 +395,7 @@ def test_catalog_issues_run_id_then_records_prereg_and_evaluated_metadata() -> N
         "seed": 0,
         "engine_version": "1.0.0",
         "core_lib_version": "0.1.0",
+        "evidence_schema_version": "1.5.0",
         "config_hash": "",
         "profile_ref": "m9-profile",
         "strategy_profile_json": {"family": "fixture"},
@@ -410,6 +412,7 @@ def test_catalog_issues_run_id_then_records_prereg_and_evaluated_metadata() -> N
             run_id,
             str(run_meta["config_hash"]),
             source_data_hash,
+            "1.5.0",
         )
         assert reference.catalog_config_matches is True
         assert reference.catalog_source_matches is True
@@ -445,6 +448,7 @@ def test_catalog_issues_run_id_then_records_prereg_and_evaluated_metadata() -> N
             same_source_run_id,
             str(run_meta["config_hash"]),
             source_data_hash,
+            "1.5.0",
         )
         assert same_source_reference.comparison_run_id == run_id
         assert same_source_reference.comparison_hash == "b" * 64
@@ -456,6 +460,7 @@ def test_catalog_issues_run_id_then_records_prereg_and_evaluated_metadata() -> N
             different_source_run_id,
             str(run_meta["config_hash"]),
             different_source_hash,
+            "1.5.0",
         )
         assert different_source_reference.comparison_run_id is None
         assert different_source_reference.comparison_hash is None
@@ -535,6 +540,7 @@ def _orphan_sweep_run_meta() -> dict[str, object]:
         "seed": 0,
         "engine_version": "1.0.0",
         "core_lib_version": "0.1.0",
+        "evidence_schema_version": "1.5.0",
         "config_hash": "",
         "profile_ref": "orphan-sweep-profile",
         "strategy_profile_json": {"family": "fixture"},
@@ -562,6 +568,139 @@ def _finalize_orphan_sweep_run(catalog: BacktestCatalogStore, run_id: str, hash_
             "evidence_hash": hashlib.sha256(f"{run_id}:{hash_seed}".encode()).hexdigest(),
         }
     )
+
+
+# This behavior guard inherits pytest.mark.integration from the module, so it runs only
+# on the explicit integration path and is excluded from the default test suite.
+def test_catalog_determinism_reference_executes_evidence_schema_filter() -> None:
+    """Compare only completed runs from the requested, known Evidence schema."""
+
+    def run_meta(fixture_id: str, evidence_schema_version: str) -> dict[str, object]:
+        values = _orphan_sweep_run_meta()
+        values.update(
+            {
+                "run_name": "schema-version-guard",
+                "params_json": {"fixture_id": fixture_id},
+                "evidence_schema_version": evidence_schema_version,
+            }
+        )
+        values["config_hash"] = normalized_config_hash(values)
+        return values
+
+    def finalize(catalog: BacktestCatalogStore, run_id: str, seed: str) -> str:
+        evidence_hash = hashlib.sha256(f"{run_id}:{seed}".encode()).hexdigest()
+        _finalize_orphan_sweep_run(catalog, run_id, seed)
+        return evidence_hash
+
+    def register_completed(
+        catalog: BacktestCatalogStore,
+        values: dict[str, object],
+        source_data_hash: str,
+        hash_seed: str,
+    ) -> tuple[str, str]:
+        run_id = catalog.register(values)
+        reference = catalog.determinism_reference(
+            run_id,
+            str(values["config_hash"]),
+            source_data_hash,
+            str(values["evidence_schema_version"]),
+        )
+        assert reference.catalog_config_matches is True
+        assert reference.catalog_source_matches is True
+        return run_id, finalize(catalog, run_id, hash_seed)
+
+    with _connect_writer("backtest_db") as connection:
+        catalog = BacktestCatalogStore(cast(WriteConnection, connection))
+
+        selection_fixture = uuid4().hex
+        selection_source_hash = hashlib.sha256(f"{selection_fixture}:source".encode()).hexdigest()
+        same_schema_meta = run_meta(selection_fixture, "1.5.0")
+        different_schema_meta = run_meta(selection_fixture, "1.4.0")
+        assert same_schema_meta["config_hash"] == different_schema_meta["config_hash"]
+
+        same_schema_run_id, same_schema_evidence_hash = register_completed(
+            catalog,
+            same_schema_meta,
+            selection_source_hash,
+            "same-schema",
+        )
+        different_schema_run_id, _ = register_completed(
+            catalog,
+            different_schema_meta,
+            selection_source_hash,
+            "different-schema-newer",
+        )
+        current_run_id = catalog.register(same_schema_meta)
+
+        reference = catalog.determinism_reference(
+            current_run_id,
+            str(same_schema_meta["config_hash"]),
+            selection_source_hash,
+            "1.5.0",
+        )
+
+        assert reference.comparison_run_id == same_schema_run_id
+        assert reference.comparison_run_id != different_schema_run_id
+        assert reference.comparison_hash == same_schema_evidence_hash
+        assert reference.same_config_run_exists is True
+        assert reference.same_schema_run_exists is True
+        finalize(catalog, current_run_id, "selected-current")
+
+        different_only_fixture = uuid4().hex
+        different_only_source_hash = hashlib.sha256(
+            f"{different_only_fixture}:source".encode()
+        ).hexdigest()
+        different_only_meta = run_meta(different_only_fixture, "1.4.0")
+        requested_schema_meta = run_meta(different_only_fixture, "1.5.0")
+        assert different_only_meta["config_hash"] == requested_schema_meta["config_hash"]
+        register_completed(
+            catalog,
+            different_only_meta,
+            different_only_source_hash,
+            "different-only",
+        )
+        requested_schema_run_id = catalog.register(requested_schema_meta)
+
+        different_only_reference = catalog.determinism_reference(
+            requested_schema_run_id,
+            str(requested_schema_meta["config_hash"]),
+            different_only_source_hash,
+            "1.5.0",
+        )
+
+        assert different_only_reference.comparison_run_id is None
+        assert different_only_reference.comparison_hash is None
+        assert different_only_reference.same_config_run_exists is True
+        assert different_only_reference.same_schema_run_exists is False
+        finalize(catalog, requested_schema_run_id, "different-only-current")
+
+        unknown_only_fixture = uuid4().hex
+        unknown_only_source_hash = hashlib.sha256(
+            f"{unknown_only_fixture}:source".encode()
+        ).hexdigest()
+        unknown_meta = run_meta(unknown_only_fixture, "unknown")
+        known_meta = run_meta(unknown_only_fixture, "1.5.0")
+        assert unknown_meta["config_hash"] == known_meta["config_hash"]
+        register_completed(
+            catalog,
+            unknown_meta,
+            unknown_only_source_hash,
+            "unknown-only",
+        )
+        known_run_id = catalog.register(known_meta)
+
+        unknown_only_reference = catalog.determinism_reference(
+            known_run_id,
+            str(known_meta["config_hash"]),
+            unknown_only_source_hash,
+            "1.5.0",
+        )
+
+        assert unknown_only_reference.comparison_run_id is None
+        assert unknown_only_reference.comparison_hash is None
+        assert unknown_only_reference.same_config_run_exists is False
+        assert unknown_only_reference.same_schema_run_exists is False
+        finalize(catalog, known_run_id, "unknown-only-current")
 
 
 def test_orphan_sweep_spares_runs_registered_after_it_started() -> None:

@@ -219,7 +219,6 @@ def candle_range(
         return high_low_range(candle)
     if range_type == CandleRangeType.SHADOWS:
         return upper_shadow(candle) + lower_shadow(candle)
-    return 0.0
 
 
 def candle_average(

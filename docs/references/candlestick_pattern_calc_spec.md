@@ -20,7 +20,7 @@
 
 - Nison, Morris, Chesler 원전에서 판정 규칙을 새로 유도하는 작업
 - TA-Lib C 판정 규칙을 문장으로 재기술한 규칙집
-- 지표 표준 `docs/references/technical_indicators_calc_spec.md`의 89종 집계
+- 지표 표준 `docs/references/technical_indicators_calc_spec.md` §11의 커버리지 집계
 - 전략이 패턴 값을 어떻게 해석해 매매 결정을 내리는지
 
 원전 조사 기록은 `docs/candlestick-patterns/analysis-1-original-sources.md`에 남아
@@ -39,9 +39,16 @@ TA-Lib 출처는 태그뿐 아니라 변경 불가능한 커밋으로 고정한�
 | 범위·평균 매크로 파일 | `src/ta_func/ta_utility.h` |
 | 판정 함수 파일 | `src/ta_func/ta_CDL*.c` |
 
-현재 저장소에는 위 C 소스 스냅샷을 두지 않는다. 외부 코드를 저장소에 들이는
-결정은 라이선스 고지와 유지 방식까지 포함하는 별도 판단이 필요하다. 따라서 원본
-저장소나 태그 접근이 사라질 위험은 남아 있으며, 이 문서는 그 위험을 기록만 한다.
+위 계산 원본 63개는 원래 경로를 유지해 `third_party/ta-lib/`에 보존한다. 범위는
+`src/ta_common/ta_global.c`, `src/ta_func/ta_utility.h`, `src/ta_func/ta_CDL*.c`
+61개뿐이다. `third_party/ta-lib/SHA256SUMS`는 원본 저장소 주소, 태그, 커밋과 각
+파일의 SHA-256을 고정하며, 기본 pytest 무결성 검사는 반입 파일 집합과 개수 및
+해시를 네트워크 없이 대조한다. 원본 BSD 3-clause `LICENSE`도 함께 보존한다.
+
+Hilbert 계열 C 소스 일곱 개는 같은 고정점에서 `third_party/ta-lib/`에 반입되어
+범용 TA-Lib 무결성 검사와 원본 목록의 보호를 받지만, 아직 계산 코드로 이식하지
+않았다. 계산 계약은 `docs/references/technical_indicators_calc_spec.md`가 소유하며
+이 캔들스틱 표준의 소유 범위에는 포함되지 않는다.
 
 ## §2. 계산 기반
 

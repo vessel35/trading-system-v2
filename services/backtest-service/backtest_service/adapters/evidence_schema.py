@@ -10,7 +10,7 @@ from decimal import Decimal
 from types import MappingProxyType
 from typing import Final
 
-EVIDENCE_SCHEMA_VERSION: Final = "1.4.0"
+EVIDENCE_SCHEMA_VERSION: Final = "1.5.0"
 MINIMUM_SQLITE_VERSION: Final = (3, 37, 0)
 DECIMAL_PLACES: Final = 8
 DECIMAL_SCALE: Final = Decimal(10) ** DECIMAL_PLACES
@@ -260,6 +260,9 @@ CREATE TABLE IF NOT EXISTS INDICATOR_DEFINITION (
     params_json TEXT NOT NULL DEFAULT '{{}}',
     impl_version TEXT NOT NULL,
     pinned_impl INTEGER NOT NULL DEFAULT 0 CHECK (pinned_impl IN (0, 1)),
+    series_kind TEXT NOT NULL CHECK (series_kind IN ('indicator', 'pattern')),
+    category TEXT NOT NULL,
+    impl_note TEXT NOT NULL,
     min_history INTEGER NOT NULL CHECK (min_history >= 1),
     computation_mode TEXT NOT NULL DEFAULT 'vectorized'
         CHECK (computation_mode IN ('vectorized', 'incremental')),

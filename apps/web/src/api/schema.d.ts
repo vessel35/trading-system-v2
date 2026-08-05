@@ -604,6 +604,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runs/{run_id}/indicator-definitions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Indicator Definitions */
+        get: operations["get_indicator_definitions_api_v1_runs__run_id__indicator_definitions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs/{run_id}/indicator-snapshots": {
         parameters: {
             query?: never;
@@ -1443,6 +1460,23 @@ export interface components {
             /** Web Api Version */
             web_api_version: string;
         };
+        /**
+         * IndicatorDefinition
+         * @description Calculation identities available in one immutable Evidence artifact.
+         */
+        IndicatorDefinition: {
+            /** Indicator Key */
+            indicator_key: string;
+            /** Indicator Name */
+            indicator_name: string;
+            /**
+             * Series Kind
+             * @enum {string}
+             */
+            series_kind: "indicator" | "pattern";
+            /** Impl Version */
+            impl_version: string;
+        };
         /** IndicatorSnapshot */
         IndicatorSnapshot: {
             /** Snapshot Seq */
@@ -1458,6 +1492,12 @@ export interface components {
             impl_version: string;
             /** Pinned Impl */
             pinned_impl: boolean;
+            /** Series Kind */
+            series_kind: ("indicator" | "pattern") | null;
+            /** Category */
+            category: string | null;
+            /** Impl Note */
+            impl_note: string | null;
             /** Min History */
             min_history: number;
             /** Computation Mode */
@@ -4568,6 +4608,55 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EvidenceCollection_Decision_"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_indicator_definitions_api_v1_runs__run_id__indicator_definitions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IndicatorDefinition"][];
                 };
             };
             /** @description Not Found */

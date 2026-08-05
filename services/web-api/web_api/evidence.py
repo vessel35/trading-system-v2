@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
@@ -28,6 +29,7 @@ from web_api.models import (
     FindingsCollection,
     FindingsMeta,
     FundingSettlement,
+    IndicatorDefinition,
     IndicatorSnapshot,
     IntegrityCheck,
     MissedOpportunity,
@@ -70,6 +72,24 @@ def _boolean(value: int) -> bool:
     return bool(value)
 
 
+def _read_evidence_schema_version(
+    connection: sqlite3.Connection,
+) -> tuple[int, int, int]:
+    row = connection.execute(
+        "SELECT evidence_schema_version FROM BACKTEST_RUN_LOCAL LIMIT 1"
+    ).fetchone()
+    if row is None or row[0] is None:
+        raise EvidenceUnavailableError("evidence_schema_version_missing")
+    value = row[0]
+    if not isinstance(value, str):
+        raise EvidenceUnavailableError("evidence_schema_version_invalid")
+    match = re.fullmatch(r"([0-9]+)\.([0-9]+)\.([0-9]+)", value)
+    if match is None:
+        raise EvidenceUnavailableError("evidence_schema_version_invalid")
+    major, minor, patch = match.groups()
+    return int(major), int(minor), int(patch)
+
+
 def remove_evidence_artifact(evidence_path: str | None) -> bool:
     """Delete one run's Evidence artifact under EVIDENCE_ROOT, if it is still there.
 
@@ -103,20 +123,23 @@ def open_evidence(evidence_path: str | None) -> Iterator[sqlite3.Connection]:
     path = get_settings().evidence_root / filename
     if not path.is_file():
         raise EvidenceUnavailableError("evidence_file_missing")
+    connection: sqlite3.Connection | None = None
     try:
         connection = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA query_only = ON")
         if connection.execute("PRAGMA query_only").fetchone()[0] != 1:
-            connection.close()
             raise EvidenceUnavailableError("evidence_not_read_only")
-        connection.execute(
-            "SELECT evidence_schema_version FROM BACKTEST_RUN_LOCAL LIMIT 1"
-        ).fetchone()
+        _read_evidence_schema_version(connection)
     except EvidenceUnavailableError:
+        if connection is not None:
+            connection.close()
         raise
     except sqlite3.Error as exc:
+        if connection is not None:
+            connection.close()
         raise EvidenceUnavailableError("evidence_file_invalid") from exc
+    assert connection is not None
     try:
         yield connection
     finally:
@@ -143,6 +166,7 @@ class EvidenceRepository:
 
     def __init__(self, connection: sqlite3.Connection) -> None:
         self._connection = connection
+        self._schema_version = _read_evidence_schema_version(connection)
 
     def _collection(
         self,
@@ -649,6 +673,20 @@ class EvidenceRepository:
         feature_time_from: int | None,
         feature_time_to: int | None,
     ) -> EvidenceCollection[IndicatorSnapshot]:
+        if self._schema_version < (1, 5, 0):
+            definition_metadata_select = """
+                CASE
+                    WHEN substr(d.indicator_key, 1, 4) = 'pat_' THEN 'pattern'
+                    ELSE 'indicator'
+                END AS series_kind,
+                NULL AS category,
+                NULL AS impl_note
+            """
+        else:
+            definition_metadata_select = """
+                d.series_kind, d.category, d.impl_note
+            """
+
         def decode(row: dict[str, Any]) -> dict[str, Any]:
             for column in (
                 "feature_ts",
@@ -677,10 +715,33 @@ class EvidenceRepository:
             ),
             select="""
                 s.*, d.indicator_name, d.params_json, d.impl_version,
-                d.pinned_impl, d.min_history, d.computation_mode, d.enabled_reason
-            """,
+                d.pinned_impl, d.min_history, d.computation_mode, d.enabled_reason,
+            """
+            + definition_metadata_select,
             joins="JOIN INDICATOR_DEFINITION AS d ON d.indicator_key = s.indicator_key",
         )
+
+    def indicator_definitions(self) -> list[IndicatorDefinition]:
+        """Return the small calculation catalog without loading per-candle values."""
+
+        if self._schema_version < (1, 5, 0):
+            series_kind_select = """
+                CASE
+                    WHEN substr(indicator_key, 1, 4) = 'pat_' THEN 'pattern'
+                    ELSE 'indicator'
+                END AS series_kind
+            """
+        else:
+            series_kind_select = "series_kind"
+        rows = self._connection.execute(
+            f"""
+            SELECT indicator_key, indicator_name, impl_version,
+                   {series_kind_select}
+            FROM INDICATOR_DEFINITION
+            ORDER BY indicator_key
+            """
+        ).fetchall()
+        return [IndicatorDefinition.model_validate(dict(row)) for row in rows]
 
     def missed_opportunities(
         self,

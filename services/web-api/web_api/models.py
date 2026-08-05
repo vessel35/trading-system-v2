@@ -284,6 +284,9 @@ class IndicatorSnapshot(BaseModel):
     params_json: JsonValue
     impl_version: str
     pinned_impl: bool
+    series_kind: Literal["indicator", "pattern"] | None
+    category: str | None
+    impl_note: str | None
     min_history: int
     computation_mode: str
     enabled_reason: str
@@ -293,6 +296,15 @@ class IndicatorSnapshot(BaseModel):
     value: float | None
     value_json: JsonValue | None
     is_warmup: bool
+
+
+class IndicatorDefinition(BaseModel):
+    """Calculation identities available in one immutable Evidence artifact."""
+
+    indicator_key: str
+    indicator_name: str
+    series_kind: Literal["indicator", "pattern"]
+    impl_version: str
 
 
 class MissedOpportunity(BaseModel):

@@ -498,7 +498,7 @@ SPECS: tuple[IndicatorSpec, ...] = (
             "a name of its own rather than as another parameter combination of the "
             "existing Stochastic: §2.2 says the fast and slow forms are separate "
             "indicators that merely share the %K_raw part, and §11 counts them as "
-            "two of the 89 systems, which a second combination under one name would "
+            "two of the 93 systems, which a second combination under one name would "
             "not reproduce. The already registered Stochastic(period=14,"
             "smooth_period=3) is §11's Stochastic Fast row and keeps its name and "
             "its identifier unchanged; this registration is §11's Stochastic Slow "

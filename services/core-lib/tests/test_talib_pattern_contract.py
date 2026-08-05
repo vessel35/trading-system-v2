@@ -23,7 +23,13 @@ from core_lib.patterns.outputs import (
     output_keys,
     undetermined_outputs,
 )
-from core_lib.patterns.registry import PatternRegistry, PatternSeries, PatternSpec, PatternValue
+from core_lib.patterns.registry import (
+    PatternRegistry,
+    PatternSeries,
+    PatternSpec,
+    PatternState,
+    PatternValue,
+)
 from core_lib.patterns.specs import TALIB_GROUP_PORTS
 from core_lib.patterns.talib_raw import (
     TALIB_PENETRATION_DEFAULTS,
@@ -161,6 +167,10 @@ def _all_values_finite(value: Mapping[str, float]) -> bool:
     return all(math.isfinite(number) for number in value.values())
 
 
+def _assert_not_warmed_up(state: PatternState, message: str) -> None:
+    assert not state.warmed_up, message
+
+
 def _pattern_targeting_terms() -> frozenset[str]:
     terms: set[str] = set()
     for pattern, talib_function in _talib_functions().items():
@@ -243,12 +253,15 @@ def test_all_talib_pattern_states_honor_seed_warmup_and_current_contract() -> No
             state = spec.make_state()
 
             assert state.min_history == spec.min_history
-            assert not state.warmed_up
+            _assert_not_warmed_up(state, f"{spec.name}/{regime} started warm")
             assert _all_values_nan(state.current())
 
             for index, candle in enumerate(candles[: spec.min_history - 1]):
                 value = state.update(candle)
-                assert not state.warmed_up, f"{spec.name}/{regime} warmed early at {index}"
+                _assert_not_warmed_up(
+                    state,
+                    f"{spec.name}/{regime} warmed early at {index}",
+                )
                 assert _all_values_nan(value)
                 _assert_same_value(spec.name, index, value, state.current())
 
