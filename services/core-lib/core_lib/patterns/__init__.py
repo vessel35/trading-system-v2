@@ -49,7 +49,12 @@ from .registry import (
     PatternState,
     PatternValue,
 )
-from .specs import DEFAULT_PATTERN_REGISTRY, build_default_pattern_registry
+from .specs import (
+    LEGACY_PATTERN_REGISTRY,
+    TALIB_PATTERN_REGISTRY,
+    TALIB_PATTERN_REGISTRY_VERSION,
+    build_talib_pattern_registry,
+)
 from .talib_raw import (
     TALIB_CDL_PATTERN_COUNT,
     TALIB_DBL_MAX,
@@ -63,6 +68,7 @@ from .talib_raw import (
     TALIB_SOURCE_VERSION,
     TALIB_UNDERLYING_VERSION_PREFIX,
     TalibPatternPort,
+    TalibPatternState,
     TalibRawPatternSpec,
     outputs_from_talib_integer,
     resolve_talib_penetration,
@@ -85,6 +91,12 @@ from .trend import (
 )
 from .warmup import min_history_for
 
+DEFAULT_PATTERN_REGISTRY = TALIB_PATTERN_REGISTRY
+"""The runtime default candlestick pattern registry, backed by TA-Lib v0.7.1 ports."""
+
+build_default_pattern_registry = build_talib_pattern_registry
+"""Build the runtime default TA-Lib-backed pattern registry."""
+
 __all__ = [
     "BEARISH",
     "BOUNDARY_STRENGTH",
@@ -93,6 +105,7 @@ __all__ = [
     "DIRECTIONLESS",
     "DOWNTREND",
     "FULL_STRENGTH",
+    "LEGACY_PATTERN_REGISTRY",
     "MATCHED",
     "NAME_PREFIX",
     "NOT_MATCHED",
@@ -107,6 +120,8 @@ __all__ = [
     "TALIB_RAW_CONFIRMATION_MAGNITUDE",
     "TALIB_RAW_MATCH_MAGNITUDE",
     "TALIB_RAW_ZERO",
+    "TALIB_PATTERN_REGISTRY",
+    "TALIB_PATTERN_REGISTRY_VERSION",
     "TALIB_SOURCE_VERSION",
     "TALIB_UNDERLYING_VERSION_PREFIX",
     "TREND_EMA_PERIOD",
@@ -121,9 +136,11 @@ __all__ = [
     "PatternValue",
     "PriorTrendState",
     "TalibPatternPort",
+    "TalibPatternState",
     "TalibRawPatternSpec",
     "assert_pattern_name",
     "build_default_pattern_registry",
+    "build_talib_pattern_registry",
     "confirms_by_close_direction",
     "contain",
     "engulf",

@@ -56,7 +56,7 @@ Section numbers in this file are the candlestick pattern standard's,
 own sections separately and they do not correspond.
 """
 
-from core_lib.patterns import DEFAULT_PATTERN_REGISTRY
+from core_lib.patterns.specs import LEGACY_PATTERN_REGISTRY as DEFAULT_PATTERN_REGISTRY
 
 from . import talib_signals
 from .comparison import (

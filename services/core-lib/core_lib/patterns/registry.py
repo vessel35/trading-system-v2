@@ -12,10 +12,10 @@ not share is the indicator-only vocabulary: `pinned_impl` and `required_inputs`
 stay in the indicator layer, because a pattern pins a different standard and
 takes no external input beyond its candles.
 
-Two fields exist here that `IndicatorSpec` has no use for. `bar_count` and
-`requires_trend` are what §6 needs to compute `min_history`, and computing it
-rather than declaring it is what stops a spec from carrying a warm-up length that
-disagrees with the standard's own formula.
+Legacy specs carry two fields that `IndicatorSpec` has no use for. `bar_count`
+and `requires_trend` are what §6 needs to compute `min_history`. TA-Lib specs do
+not have those meanings, so they declare `explicit_min_history` from the source
+lookback instead of filling false span or trend metadata.
 
 Section numbers in this module are the candlestick pattern standard's,
 `docs/references/candlestick_pattern_calc_spec.md`. The indicator standard numbers its
@@ -87,7 +87,12 @@ class PatternSpec:
     at `candlestick_pattern_calc_spec.md`, not the indicator standard.
     """
 
-    bar_count: int
+    _vectorized: Callable[[Sequence[Candle]], PatternSeries] = field(
+        repr=False,
+        compare=False,
+    )
+    _state_factory: Callable[[], PatternState] = field(repr=False, compare=False)
+    bar_count: int | None = None
     """The bars the pattern spans, in its shortest admissible form (§6).
 
     Fixed by the pattern's definition rather than by a registered parameter, so
@@ -96,14 +101,17 @@ class PatternSpec:
     pattern can be judged at all.
     """
 
-    requires_trend: bool
+    requires_trend: bool | None = None
     """Whether §3's prior trend is part of the judgment; 45 of the 61 say yes."""
 
-    _vectorized: Callable[[Sequence[Candle]], PatternSeries] = field(
-        repr=False,
-        compare=False,
-    )
-    _state_factory: Callable[[], PatternState] = field(repr=False, compare=False)
+    explicit_min_history: int | None = None
+    """Warm-up length declared directly when span/trend metadata is not the source.
+
+    The TA-Lib registration path uses `lookback + 1`. Supplying a fake
+    `bar_count` or `requires_trend` to make the legacy formula return that value
+    would make the spec metadata lie about what the source implementation uses.
+    """
+
     undefined_outputs: tuple[str, ...] = ()
     """Output keys the standard itself leaves undefined after warm-up.
 
@@ -117,8 +125,13 @@ class PatternSpec:
         assert_pattern_name(self.name)
         if not self.version:
             raise ValueError("pattern version must not be empty")
-        # Raises when bar_count is not positive, so no separate check is needed.
-        min_history_for(self.bar_count, requires_trend=self.requires_trend)
+        if self.explicit_min_history is None:
+            if self.bar_count is None or self.requires_trend is None:
+                raise ValueError("legacy pattern specs must declare bar_count and requires_trend")
+            # Raises when bar_count is not positive, so no separate check is needed.
+            min_history_for(self.bar_count, requires_trend=self.requires_trend)
+        elif self.explicit_min_history <= 0:
+            raise ValueError("explicit_min_history must be positive")
         object.__setattr__(self, "params", MappingProxyType(dict(self.params)))
         object.__setattr__(self, "undefined_outputs", tuple(self.undefined_outputs))
         if any(not isinstance(name, str) or not name for name in self.undefined_outputs):
@@ -134,7 +147,11 @@ class PatternSpec:
 
     @property
     def min_history(self) -> int:
-        """Return §6's warm-up length, derived rather than declared."""
+        """Return the first valid output's required candle count."""
+        if self.explicit_min_history is not None:
+            return self.explicit_min_history
+        if self.bar_count is None or self.requires_trend is None:
+            raise ValueError("pattern spec has no min_history source")
         return min_history_for(self.bar_count, requires_trend=self.requires_trend)
 
     def compute_vectorized(self, candles: Sequence[Candle]) -> PatternSeries:

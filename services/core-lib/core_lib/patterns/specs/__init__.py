@@ -27,12 +27,33 @@ Section numbers in this module are the candlestick pattern standard's,
 own sections separately and they do not correspond.
 """
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from types import MappingProxyType
+from typing import Final, Protocol, cast
 
-from core_lib.patterns.registry import PatternRegistry, PatternSpec
+from core_lib.patterns.registry import PatternRegistry, PatternSeries, PatternSpec, PatternState
+from core_lib.patterns.talib_hikkake import TALIB_HIKKAKE_PATTERNS
+from core_lib.patterns.talib_multi_candle import TALIB_MULTI_CANDLE_PATTERNS
+from core_lib.patterns.talib_raw import TALIB_SOURCE_VERSION
+from core_lib.patterns.talib_single_candle import TALIB_SINGLE_CANDLE_PATTERNS
+from core_lib.patterns.talib_three_candle import TALIB_THREE_CANDLE_PATTERNS
+from core_lib.patterns.talib_two_candle import TALIB_TWO_CANDLE_PATTERNS
+from core_lib.types import Candle
 
 from . import body_shadow, doji_umbrella, long_and_gap, three_candle, two_candle
+
+TALIB_PATTERN_REGISTRY_VERSION: Final = f"2.0.0+talib.{TALIB_SOURCE_VERSION}"
+"""Pattern calculation version for the TA-Lib v0.7.1 registry cutover."""
+
+
+class _TalibRegistryPort(Protocol):
+    name: str
+    min_history: int
+
+    def compute_vectorized(self, candles: Sequence[Candle]) -> PatternSeries: ...
+
+    def make_state(self) -> PatternState: ...
+
 
 GROUP_SPECS: Mapping[str, tuple[PatternSpec, ...]] = MappingProxyType(
     {
@@ -45,6 +66,17 @@ GROUP_SPECS: Mapping[str, tuple[PatternSpec, ...]] = MappingProxyType(
 )
 
 GROUPS: tuple[str, ...] = tuple(GROUP_SPECS)
+
+TALIB_GROUP_PORTS: Mapping[str, tuple[_TalibRegistryPort, ...]] = MappingProxyType(
+    {
+        "single_candle": cast(tuple[_TalibRegistryPort, ...], TALIB_SINGLE_CANDLE_PATTERNS),
+        "two_candle": cast(tuple[_TalibRegistryPort, ...], TALIB_TWO_CANDLE_PATTERNS),
+        "three_candle": cast(tuple[_TalibRegistryPort, ...], TALIB_THREE_CANDLE_PATTERNS),
+        "multi_candle": cast(tuple[_TalibRegistryPort, ...], TALIB_MULTI_CANDLE_PATTERNS),
+        "hikkake": cast(tuple[_TalibRegistryPort, ...], TALIB_HIKKAKE_PATTERNS),
+    }
+)
+TALIB_GROUPS: tuple[str, ...] = tuple(TALIB_GROUP_PORTS)
 
 
 def _reject_a_name_claimed_by_two_modules() -> None:
@@ -74,6 +106,23 @@ def all_specs() -> tuple[PatternSpec, ...]:
     return tuple(spec for specs in GROUP_SPECS.values() for spec in specs)
 
 
+def _talib_spec_for(port: _TalibRegistryPort) -> PatternSpec:
+    """Adapt one TA-Lib port to the shared seven-member consumption contract."""
+    return PatternSpec(
+        name=port.name,
+        params={},
+        version=TALIB_PATTERN_REGISTRY_VERSION,
+        _vectorized=port.compute_vectorized,
+        _state_factory=port.make_state,
+        explicit_min_history=port.min_history,
+    )
+
+
+def talib_all_specs() -> tuple[PatternSpec, ...]:
+    """Return every TA-Lib registered pattern spec in a fixed group order."""
+    return tuple(_talib_spec_for(port) for ports in TALIB_GROUP_PORTS.values() for port in ports)
+
+
 def build_default_pattern_registry() -> PatternRegistry:
     """Build the registry by gathering every group's registration list.
 
@@ -97,3 +146,18 @@ disjoint; one shared name for the two registries would invite exactly the
 confusion that decision exists to prevent. Nothing here reaches the indicator
 registry, so the indicator standard's tally of 89 systems does not move.
 """
+
+LEGACY_PATTERN_REGISTRY = DEFAULT_PATTERN_REGISTRY
+"""The legacy pattern-standard registry kept alive until the 5b cleanup."""
+
+
+def build_talib_pattern_registry() -> PatternRegistry:
+    """Build the TA-Lib-backed registry used by runtime consumers."""
+    registry = PatternRegistry()
+    for spec in talib_all_specs():
+        registry.register(spec)
+    return registry
+
+
+TALIB_PATTERN_REGISTRY = build_talib_pattern_registry()
+"""The TA-Lib v0.7.1 pattern registry used by the public package default."""

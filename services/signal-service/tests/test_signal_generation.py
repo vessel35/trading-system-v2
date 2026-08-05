@@ -323,7 +323,7 @@ def test_finalized_candle_uses_core_incremental_state_and_adaptee_contract() -> 
 
 
 def test_declared_pattern_reaches_signal_strategy_input() -> None:
-    values = _candles(10)
+    values = _candles(12)
     feed = _Feed(values)
     sink = _Sink()
     _PatternProbeStrategy.observed_indicators.clear()
@@ -332,6 +332,9 @@ def test_declared_pattern_reaches_signal_strategy_input() -> None:
     cycle = service.start(_pattern_config(), values[-1].close_time)
 
     assert cycle.signal is not None
+    pattern_spec = next(spec for spec in service._specs if spec.name == "pat_doji")
+    assert pattern_spec.min_history == 11
+    assert pattern_spec.version == "2.0.0+talib.0.7.1"
     assert _PatternProbeStrategy.observed_indicators
     observed = _PatternProbeStrategy.observed_indicators[0]
     assert set(observed) == {"ema:period=9", "pat_doji"}

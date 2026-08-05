@@ -41,9 +41,9 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
 
-from core_lib.patterns import DEFAULT_PATTERN_REGISTRY
 from core_lib.patterns.outputs import BOUNDARY_STRENGTH, FULL_STRENGTH
 from core_lib.patterns.registry import PatternSpec
+from core_lib.patterns.specs import LEGACY_PATTERN_REGISTRY as DEFAULT_PATTERN_REGISTRY
 from core_lib.patterns.talib_raw import (
     TALIB_RAW_BOUNDARY_MAGNITUDE,
     TALIB_RAW_MATCH_MAGNITUDE,

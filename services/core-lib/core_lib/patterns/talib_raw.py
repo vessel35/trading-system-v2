@@ -7,7 +7,7 @@ separate adapter stage decides how each raw integer maps to that older shape.
 
 import sys
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from math import isnan
 from types import MappingProxyType
 from typing import Final
@@ -16,7 +16,7 @@ from core_lib.types import Candle
 
 from .outputs import BOUNDARY_STRENGTH, FULL_STRENGTH, MATCHED, NOT_MATCHED, output_keys
 from .registry import PatternSeries, PatternValue
-from .talib_candles import CandleSettingType, candle_average_series
+from .talib_candles import CandleAverageState, CandleSettingType, candle_average_series
 
 TALIB_SOURCE_VERSION: Final = "0.7.1"
 """The TA-Lib source edition used for direct candlestick ports and captures."""
@@ -351,6 +351,15 @@ class TalibPatternPort(TalibRawPatternSpec):
     average_keys: tuple[AverageKey, ...]
     _judge: IntegerJudge
 
+    def make_state(self) -> "TalibPatternState":
+        """Create a fresh incremental state for this direct TA-Lib port."""
+        return TalibPatternState(
+            name=self.name,
+            lookback=self.lookback,
+            average_keys=self.average_keys,
+            judge=self._judge,
+        )
+
     def compute_integers(self, candles: Sequence[Candle]) -> list[int]:
         """Return TA-Lib integer outputs aligned to input candle indexes."""
         averages = {
@@ -375,6 +384,88 @@ class TalibPatternPort(TalibRawPatternSpec):
         return values
 
 
+@dataclass(slots=True)
+class TalibPatternState:
+    """Incrementally run one stateless TA-Lib ``CDL`` port."""
+
+    name: str
+    lookback: int
+    average_keys: tuple[AverageKey, ...]
+    judge: IntegerJudge
+    min_history: int = field(init=False)
+    _seen: int = field(init=False, default=0, repr=False)
+    _candles: list[Candle] = field(init=False, repr=False)
+    _average_states: dict[AverageKey, CandleAverageState] = field(init=False, repr=False)
+    _averages: dict[AverageKey, list[float | None]] = field(init=False, repr=False)
+    _current_integer: int | None = field(init=False, default=None, repr=False)
+    _current: PatternValue = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.lookback < 0:
+            raise ValueError("lookback must not be negative")
+        self.min_history = self.lookback + 1
+        self._candles = []
+        self._average_states = {
+            key: CandleAverageState(key[0], target_offset=key[1]) for key in self.average_keys
+        }
+        self._averages = {key: [] for key in self.average_keys}
+        self._current = _undetermined_outputs(self.name)
+
+    @property
+    def warmed_up(self) -> bool:
+        """Return whether this state has reached TA-Lib's first output index."""
+        return self._seen >= self.min_history
+
+    def reset(self) -> None:
+        """Clear candle and candle-average state."""
+        self._seen = 0
+        self._candles.clear()
+        for state in self._average_states.values():
+            state.reset()
+        for values in self._averages.values():
+            values.clear()
+        self._current_integer = None
+        self._current = _undetermined_outputs(self.name)
+
+    def seed(self, candles: Sequence[Candle]) -> None:
+        """Reset and replay prior candles in order."""
+        self.reset()
+        for candle in candles:
+            self.update(candle)
+
+    def update(self, candle: Candle) -> PatternValue:
+        """Advance by one confirmed candle and return the four-key output."""
+        integer = self.update_integer(candle)
+        self._current = (
+            _undetermined_outputs(self.name)
+            if integer is None
+            else outputs_from_talib_integer(self.name, integer)
+        )
+        return self._current
+
+    def update_integer(self, candle: Candle) -> int | None:
+        """Advance by one candle and return the raw integer, or ``None`` during warm-up."""
+        index = self._seen
+        self._seen += 1
+        self._candles.append(candle)
+        for key, state in self._average_states.items():
+            self._averages[key].append(state.update(candle))
+
+        if index < self.lookback:
+            self._current_integer = None
+            return self._current_integer
+        self._current_integer = self.judge(self._candles, index, self._averages)
+        return self._current_integer
+
+    def current(self) -> PatternValue:
+        """Return the latest four-key output, NaN-shaped while still warming up."""
+        return self._current
+
+    def current_integer(self) -> int | None:
+        """Return the latest raw integer, or ``None`` while still warming up."""
+        return self._current_integer
+
+
 __all__ = [
     "AverageKey",
     "AverageSeries",
@@ -391,6 +482,7 @@ __all__ = [
     "TALIB_SOURCE_VERSION",
     "TALIB_UNDERLYING_VERSION_PREFIX",
     "TalibPatternPort",
+    "TalibPatternState",
     "TalibRawPatternSpec",
     "outputs_from_talib_integer",
     "resolve_talib_penetration",
