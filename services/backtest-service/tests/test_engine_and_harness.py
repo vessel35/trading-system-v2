@@ -1753,7 +1753,16 @@ def test_declared_pattern_reaches_backtest_strategy_and_evidence(
 ) -> None:
     catalog = _Catalog()
     brokers: list[_Broker] = []
-    history = _candles()
+    base_history = _candles()
+    oldest = base_history[0]
+    history = [
+        replace(
+            oldest,
+            open_time=oldest.open_time - timedelta(hours=offset),
+            close_time=oldest.close_time - timedelta(hours=offset),
+        )
+        for offset in range(2, 0, -1)
+    ] + base_history
     config = RunConfig.model_validate(
         {
             **_config(run_name="pattern-series").model_dump(),
@@ -1790,12 +1799,13 @@ def test_declared_pattern_reaches_backtest_strategy_and_evidence(
         "pat_doji_strength",
     }
     with sqlite3.connect(result.evidence_path) as connection:
-        resolved_json = connection.execute(
-            "SELECT resolved_indicators_json FROM BACKTEST_RUN_LOCAL"
-        ).fetchone()[0]
+        resolved_json, warmup_candles = connection.execute(
+            "SELECT resolved_indicators_json, warmup_candles FROM BACKTEST_RUN_LOCAL"
+        ).fetchone()
+        assert warmup_candles == 11
         assert json.loads(resolved_json) == [
             {"name": "EMA", "params": {"period": 9}, "version": "1.0.0"},
-            {"name": "pat_doji", "params": {}, "version": "1.0.0"},
+            {"name": "pat_doji", "params": {}, "version": "2.0.0+talib.0.7.1"},
         ]
         definition_keys = connection.execute(
             "SELECT indicator_key FROM INDICATOR_DEFINITION ORDER BY indicator_key"

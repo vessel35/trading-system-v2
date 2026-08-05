@@ -154,6 +154,16 @@ def real_body(candle: Candle) -> float:
     return fabs(candle.close - candle.open)
 
 
+def real_body_bottom(candle: Candle) -> float:
+    """Return ``min(inOpen[IDX], inClose[IDX])`` for one candle."""
+    return min(candle.open, candle.close)
+
+
+def real_body_top(candle: Candle) -> float:
+    """Return ``max(inOpen[IDX], inClose[IDX])`` for one candle."""
+    return max(candle.open, candle.close)
+
+
 def upper_shadow(candle: Candle) -> float:
     """Return ``TA_UPPERSHADOW(IDX)`` for one candle."""
     body_top = candle.close if candle.close >= candle.open else candle.open
@@ -174,6 +184,26 @@ def high_low_range(candle: Candle) -> float:
 def candle_color(candle: Candle) -> int:
     """Return ``TA_CANDLECOLOR(IDX)``: ``1`` for close >= open, else ``-1``."""
     return 1 if candle.close >= candle.open else -1
+
+
+def real_body_gap_up(candle2: Candle, candle1: Candle) -> bool:
+    """Return ``TA_REALBODYGAPUP(IDX2, IDX1)``."""
+    return real_body_bottom(candle2) > real_body_top(candle1)
+
+
+def real_body_gap_down(candle2: Candle, candle1: Candle) -> bool:
+    """Return ``TA_REALBODYGAPDOWN(IDX2, IDX1)``."""
+    return real_body_top(candle2) < real_body_bottom(candle1)
+
+
+def candle_gap_up(candle2: Candle, candle1: Candle) -> bool:
+    """Return ``TA_CANDLEGAPUP(IDX2, IDX1)``."""
+    return candle2.low > candle1.high
+
+
+def candle_gap_down(candle2: Candle, candle1: Candle) -> bool:
+    """Return ``TA_CANDLEGAPDOWN(IDX2, IDX1)``."""
+    return candle2.high < candle1.low
 
 
 def candle_range(
@@ -482,6 +512,8 @@ __all__ = [
     "candle_average_at",
     "candle_average_series",
     "candle_color",
+    "candle_gap_down",
+    "candle_gap_up",
     "candle_period_total_at",
     "candle_range",
     "candle_settings_lookback",
@@ -490,5 +522,9 @@ __all__ = [
     "high_low_range",
     "lower_shadow",
     "real_body",
+    "real_body_bottom",
+    "real_body_gap_down",
+    "real_body_gap_up",
+    "real_body_top",
     "upper_shadow",
 ]

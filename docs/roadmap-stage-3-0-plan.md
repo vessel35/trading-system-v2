@@ -521,6 +521,15 @@ True Range와 §0.5의 시드 규약을 둘 다 지키는 Tulip Indicators 0.4.0
 
 ## 9. 캔들스틱 패턴 61종의 TA-Lib 대조 장치 (2026-08-03)
 
+> **현재 상태(2026-08-05)**: 이 장은 당시의 기록이다. 이때의 전제는 원전 기반
+> 수작업 판정과 TA-Lib 포획값의 차이를 설명하는 것이었고, 이후 5b 단계에서
+> 수작업 구현과 divergence/report 장치를 걷어내며 현재 계약은 TA-Lib v0.7.1
+> 동등성으로 대체됐다. 아래에 나오는 `divergence.py`, `comparison.py`,
+> `report.py`, `test_pattern_reference_values.py`,
+> `scripts/report_talib_pattern_comparison.py`는 당시 산출물 이름이며 현재 활성
+> 파일이 아니다. 지금은 고정 포획값과 포트가 같은 raw integer를 내는지가
+> 기준이고, “어긋나는 것이 정상”이라는 설명은 현재 표준에는 적용되지 않는다.
+
 지표 대조와 같은 자리에 패턴 대조를 하나 더 세웠다. 다만 **묻는 것이 다르다.** 지표 대조는
 같은 수식을 두 곳에서 계산한 결과가 같은지 묻지만, 패턴 대조는 같은 이름의 규칙을 서로 다른
 기준으로 판정한 결과가 어떻게 갈리는지 묻는다. 패턴 표준 §10.3이 **차이가 나는 것이 정상**
@@ -544,7 +553,7 @@ TA-Lib은 대부분 모양만 보므로, 추세 없이 온 모양을 우리는 �
 
 ### 9.2 무엇을 만들었나
 
-패키지는 `services/core-lib/tests/pattern_reference/`이고 다섯 부분이다.
+당시 패키지는 `services/core-lib/tests/pattern_reference/`이고 다섯 부분이었다.
 
 | 파일 | 담는 것 |
 |---|---|
@@ -554,9 +563,9 @@ TA-Lib은 대부분 모양만 보므로, 추세 없이 온 모양을 우리는 �
 | `comparison.py` | 봉마다 다섯 갈래로 세고 국면별과 묶음 전체를 함께 내는 집계기 |
 | `report.py` | 집계에서 산출 넷을 뽑고 사람이 읽을 표로 그리는 부분 |
 
-검사는 `services/core-lib/tests/test_pattern_reference_values.py`가 담는다. 표를 눈으로
-보려면 `scripts/report_talib_pattern_comparison.py`를 돌린다. 이 스크립트는 포획된 값만
-읽으므로 TA-Lib이 필요 없다.
+당시 검사는 `services/core-lib/tests/test_pattern_reference_values.py`가 담았다. 표를 눈으로
+보려면 `scripts/report_talib_pattern_comparison.py`를 돌렸다. 이 스크립트는 포획된 값만
+읽으므로 TA-Lib이 필요 없었다.
 
 ### 9.3 대조 계열이 어느 쪽에도 유리하지 않다고 보는 근거
 

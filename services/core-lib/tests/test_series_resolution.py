@@ -76,8 +76,7 @@ def _pattern(name: str) -> PatternSpec:
         name=name,
         params={},
         version="1.0.0",
-        bar_count=1,
-        requires_trend=False,
+        explicit_min_history=1,
         _vectorized=lambda candles: [{"pat_doji": 0.0} for _ in candles],
         _state_factory=_PatternState,
     )
