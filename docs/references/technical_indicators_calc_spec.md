@@ -1111,16 +1111,17 @@ graph LR
 | §5 Trend Strength | DMI/ADX 시스템, Vortex, Aroon, Choppiness, QQE, RWI | 6 |
 | §6 Bill Williams | Alligator, Fractals, Gator, Market Facilitation Index | 4 |
 | §7 Market Breadth | McClellan Osc, McClellan Summation, TRIN | 3 |
-| §8 Cycle / Ehlers | 기존 4개 항목과 TA-Lib 원본 확정 항목 6개 | 10 |
+| §8 Cycle / Ehlers | MAMA/FAMA, Center of Gravity, Roofing Filter, Sinewave/ITrend, HT_DCPERIOD, HT_DCPHASE, HT_PHASOR, HT_TRENDMODE | 8 |
 | §9 기타 시스템 | Parabolic SAR, Ichimoku, Elder Ray, Elder Impulse, TD Sequential, Woodies CCI | 6 |
-| **합계** | | **95** |
+| **합계** | | **93** |
 
-> 세는 규칙 명시: 위 표는 "시스템/지표 단위"로 **95개**(11+31+14+10+6+4+3+10+6=95)를 수록한다.
-> 이번에 확정하거나 신설한 제목은 §8.1과 §8.4부터 §8.9까지 일곱이지만 신규 집계 항목은 여섯이다. §8.5 공통 Hilbert 전단은 독립 지표로 세지 않고, §8.4의 `HT_SINE`과 `HT_TRENDLINE`은 Sinewave/ITrend 한 항목으로 센다. 나머지 신규 집계 항목은 MAMA/FAMA, HT_DCPERIOD, HT_DCPHASE, HT_PHASOR, HT_TRENDMODE다.
-> - DMI/ADX를 구성요소(+DI, −DI, ADX, ADXR) 4개로 펼치면 +3 → 98
-> - Bollinger를 밴드 1개로 묶고 %B·BandWidth를 파생으로 빼면 −2 → 93
-> - Stochastic의 Fast와 Slow를 한 시스템으로 묶으면 −1 → 94 (§2.2는 둘을 별개로 세고 별개로 등록한다)
-> - ATR과 NATR을 한 항목으로 묶으면 −1 → 94 (§3.11은 NATR을 독립 지표로 센다)
+> 세는 규칙 명시: 위 표는 "시스템/지표 단위"로 **93개**(11+31+14+10+6+4+3+8+6=93)를 수록한다.
+> 이번에 §8에서 확정하거나 신설한 제목은 §8.1과 §8.4부터 §8.9까지 일곱이지만 **집계가 늘어난 것은 넷**이다. MAMA/FAMA(§8.1)와 Sinewave/ITrend(§8.4)는 이전부터 집계에 있던 항목이고 이번에 계산 원본만 확정했으므로 다시 세지 않는다. §8.5 공통 Hilbert 전단은 여러 지표가 공유하는 계산 단계이지 독립 지표가 아니므로 세지 않는다. §8.4의 `HT_SINE`과 `HT_TRENDLINE`은 함수가 둘이지만 Sinewave/ITrend 한 항목으로 센다. 따라서 새로 더해진 넷은 HT_DCPERIOD, HT_DCPHASE, HT_PHASOR, HT_TRENDMODE다.
+> - DMI/ADX를 구성요소(+DI, −DI, ADX, ADXR) 4개로 펼치면 +3 → 96
+> - Bollinger를 밴드 1개로 묶고 %B·BandWidth를 파생으로 빼면 −2 → 91
+> - Stochastic의 Fast와 Slow를 한 시스템으로 묶으면 −1 → 92 (§2.2는 둘을 별개로 세고 별개로 등록한다)
+> - ATR과 NATR을 한 항목으로 묶으면 −1 → 92 (§3.11은 NATR을 독립 지표로 센다)
+> - `HT_SINE`과 `HT_TRENDLINE`을 별개로 세면 +1 → 94 (§8.4는 둘을 한 항목으로 센다)
 > - MACD와 MACD Histogram을 분리하면 +1
 >
 > **crypto 미수록(의도적 제외)**: Wilder의 Swing Index / ASI / CSI / Volatility Stop은 ★5이나 암호화폐 적용성이 낮아 제외했다. Swing Index·ASI는 "limit move" 파라미터가 무기한 시장에 정의되지 않고, Volatility Stop은 §3.5 Chandelier Exit(ATR 스톱)로 사실상 대체된다. 필요 시 별도 추가 가능.
