@@ -3,6 +3,7 @@
 from collections.abc import Mapping, Sequence
 from math import isnan
 
+import core_lib.patterns.specs as pattern_specs
 import pytest
 from core_lib.indicators import DEFAULT_REGISTRY
 from core_lib.patterns import (
@@ -95,6 +96,17 @@ def test_public_default_pattern_registry_is_talib_cutover() -> None:
     assert history == port_history
     assert max(history.values()) == 15
     assert history["pat_doji"] == 11
+
+
+def test_runtime_invariant_rejects_a_function_map_missing_a_registered_pattern(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    incomplete = dict(pattern_specs.TALIB_FUNCTIONS)
+    incomplete.pop("pat_doji")
+    monkeypatch.setattr(pattern_specs, "TALIB_FUNCTIONS", incomplete)
+
+    with pytest.raises(RuntimeError, match=r"missing_functions=\['pat_doji'\]"):
+        pattern_specs._assert_talib_registry_complete()
 
 
 def test_public_pattern_names_stay_disjoint_from_indicators_and_indicator_tally_stays_put() -> None:

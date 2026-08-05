@@ -13,6 +13,7 @@ from backtest_service.adapters.evidence_schema import (
     DECISION_CONTRACT_KEYS,
     ENTITY_SORT_KEYS,
     EVAL_DECISION_KEYS,
+    EVIDENCE_SCHEMA_VERSION,
     EVIDENCE_TABLES,
     EXTENSION_TABLES,
     HASH_EXCLUDED_COLUMNS,
@@ -52,8 +53,8 @@ EXPECTED_COLUMNS = {
         range_start range_end row_count gap_count fallback_used fallback_count content_hash note
     """.split(),
     "INDICATOR_DEFINITION": """
-        indicator_key run_id indicator_name params_json impl_version pinned_impl min_history
-        computation_mode enabled_reason
+        indicator_key run_id indicator_name params_json impl_version pinned_impl series_kind
+        category impl_note min_history computation_mode enabled_reason
     """.split(),
     "INDICATOR_SNAPSHOT": """
         snapshot_seq run_id indicator_key feature_ts candle_open_time candle_close_time value
@@ -222,6 +223,7 @@ def test_schema_creates_14_basic_and_7_extension_strict_tables(
     assert evidence_db.execute("PRAGMA foreign_keys").fetchone() == (1,)
     assert evidence_db.execute("PRAGMA integrity_check").fetchone() == ("ok",)
     assert evidence_db.execute("PRAGMA foreign_key_check").fetchall() == []
+    assert EVIDENCE_SCHEMA_VERSION == "1.5.0"
     for table in EVIDENCE_TABLES:
         assert "run_id" in _table_columns(evidence_db, table)
 
@@ -327,8 +329,11 @@ def test_foreign_keys_and_representative_checks_are_enforced(
             """
             INSERT INTO INDICATOR_DEFINITION (
                 indicator_key, run_id, indicator_name, impl_version, min_history,
-                enabled_reason
-            ) VALUES ('ema:period=200', 'missing', 'ema', '1', 200, 'auto')
+                series_kind, category, impl_note, enabled_reason
+            ) VALUES (
+                'ema:period=200', 'missing', 'ema', '1', 200,
+                'indicator', 'trend', 'fixture implementation', 'auto'
+            )
             """
         )
     _insert_run(evidence_db)
@@ -337,8 +342,11 @@ def test_foreign_keys_and_representative_checks_are_enforced(
             """
             INSERT INTO INDICATOR_DEFINITION (
                 indicator_key, run_id, indicator_name, impl_version, pinned_impl,
-                min_history, enabled_reason
-            ) VALUES ('ema:period=200', ?, 'ema', '1', 2, 200, 'auto')
+                min_history, series_kind, category, impl_note, enabled_reason
+            ) VALUES (
+                'ema:period=200', ?, 'ema', '1', 2, 200,
+                'indicator', 'trend', 'fixture implementation', 'auto'
+            )
             """,
             (RUN_ID,),
         )
@@ -442,8 +450,11 @@ def test_separate_feature_decision_execution_times_support_post_hoc_audit(
         """
         INSERT INTO INDICATOR_DEFINITION (
             indicator_key, run_id, indicator_name, impl_version, min_history,
-            enabled_reason
-        ) VALUES ('ema:period=200', ?, 'ema', '1', 200, 'auto')
+            series_kind, category, impl_note, enabled_reason
+        ) VALUES (
+            'ema:period=200', ?, 'ema', '1', 200,
+            'indicator', 'trend', 'fixture implementation', 'auto'
+        )
         """,
         (RUN_ID,),
     )

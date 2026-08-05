@@ -1458,6 +1458,12 @@ export interface components {
             impl_version: string;
             /** Pinned Impl */
             pinned_impl: boolean;
+            /** Series Kind */
+            series_kind: ("indicator" | "pattern") | null;
+            /** Category */
+            category: string | null;
+            /** Impl Note */
+            impl_note: string | null;
             /** Min History */
             min_history: number;
             /** Computation Mode */

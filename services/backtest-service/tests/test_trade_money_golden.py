@@ -294,10 +294,11 @@ class _RunCatalog(CatalogStore):
         run_id: str,
         config_hash: str,
         source_data_hash: str,
+        evidence_schema_version: str,
     ) -> DeterminismReference:
-        del run_id, config_hash, source_data_hash
+        del run_id, config_hash, source_data_hash, evidence_schema_version
         # No earlier run exists in this fixture, so nothing is compared against.
-        return DeterminismReference(True, True, False, None, None)
+        return DeterminismReference(True, True, False, False, None, None)
 
 
 def _manager() -> AdapterManager:

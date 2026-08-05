@@ -14,7 +14,7 @@ from backtest_service.adapters.catalog_store import (
     BacktestCatalogStore,
     normalized_config_hash,
 )
-from backtest_service.adapters.evidence_schema import encode_eval_decision
+from backtest_service.adapters.evidence_schema import EVIDENCE_SCHEMA_VERSION, encode_eval_decision
 from backtest_service.adapters.evidence_sink import BacktestEvidenceSink, EvidenceRecord
 from backtest_service.adapters.ohlcv_gaps import OhlcvGapContract
 from core_lib.ports import CatalogStore, EvidenceSink
@@ -64,7 +64,7 @@ def _local_values(run_seq: int) -> dict[str, object]:
             "edge_distinguishable": True,
             "higher_is_better": True,
         },
-        "evidence_schema_version": "1.0.0",
+        "evidence_schema_version": EVIDENCE_SCHEMA_VERSION,
     }
 
 
@@ -179,6 +179,9 @@ def _finalize(
                 "params_json": {"period": 9},
                 "impl_version": "1.0.0",
                 "pinned_impl": True,
+                "series_kind": "indicator",
+                "category": "trend",
+                "impl_note": "fixture implementation",
                 "min_history": 9,
                 "computation_mode": "incremental",
                 "enabled_reason": "auto",
@@ -419,6 +422,7 @@ def _run_meta() -> dict[str, object]:
         "seed": 0,
         "engine_version": "1.0.0",
         "core_lib_version": "0.1.0",
+        "evidence_schema_version": "1.5.0",
         "config_hash": "",
         "profile_ref": "fake-profile",
         "strategy_profile_json": {"family": "breakout"},
@@ -442,9 +446,63 @@ def test_catalog_register_uses_one_sequence_cte_before_any_filename() -> None:
     assert "nextval('public.backtest_run_seq')" in query
     assert "greatest(6, length(run_seq::text))" in query
     assert "evidence_path" in query
+    assert "evidence_schema_version" in query
+    assert EVIDENCE_SCHEMA_VERSION in params
     assert params[0] == "catalog"
     assert connection.commits == 1
     assert connection.rollbacks == 0
+
+
+def test_catalog_determinism_reference_filters_by_evidence_schema_version() -> None:
+    class DeterminismConnection(_Connection):
+        def execute(
+            self,
+            query: str,
+            params: Sequence[object] = (),
+        ) -> _Result:
+            self.calls.append((query, params))
+            if "UPDATE public.backtest_run" in query:
+                assert "evidence_schema_version = %s" in query
+                assert params == (
+                    "b" * 64,
+                    "BT_current",
+                    EVIDENCE_SCHEMA_VERSION,
+                    "b" * 64,
+                )
+                return _Result([("a" * 64, "b" * 64)])
+            if "SELECT run_id, evidence_hash" in query:
+                assert "evidence_schema_version <> 'unknown'" in query
+                return _Result([("BT_previous", "c" * 64)])
+            if "evidence_schema_version = %s" in query:
+                assert "evidence_schema_version <> 'unknown'" in query
+                return _Result([(True,)])
+            if "SELECT EXISTS" in query:
+                assert "evidence_schema_version <> 'unknown'" in query
+                return _Result([(True,)])
+            return _Result([])
+
+    connection = DeterminismConnection()
+    store = BacktestCatalogStore(connection)
+
+    reference = store.determinism_reference(
+        "BT_current",
+        "a" * 64,
+        "b" * 64,
+        EVIDENCE_SCHEMA_VERSION,
+    )
+
+    assert reference.comparison_run_id == "BT_previous"
+    assert reference.comparison_hash == "c" * 64
+    assert reference.same_config_run_exists is True
+    assert reference.same_schema_run_exists is True
+    comparison_query, comparison_params = connection.calls[1]
+    assert "evidence_schema_version = %s" in comparison_query
+    assert comparison_params == (
+        "a" * 64,
+        "b" * 64,
+        EVIDENCE_SCHEMA_VERSION,
+        "BT_current",
+    )
 
 
 def test_catalog_records_only_harness_aggregates_on_the_representative() -> None:

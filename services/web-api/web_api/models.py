@@ -284,6 +284,9 @@ class IndicatorSnapshot(BaseModel):
     params_json: JsonValue
     impl_version: str
     pinned_impl: bool
+    series_kind: Literal["indicator", "pattern"] | None
+    category: str | None
+    impl_note: str | None
     min_history: int
     computation_mode: str
     enabled_reason: str

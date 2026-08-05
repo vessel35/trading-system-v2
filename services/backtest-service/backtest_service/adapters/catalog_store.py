@@ -72,6 +72,7 @@ _RUN_INSERT_FIELDS = (
     "seed",
     "engine_version",
     "core_lib_version",
+    "evidence_schema_version",
     "config_hash",
     "profile_ref",
     "strategy_profile_json",
@@ -179,6 +180,7 @@ class DeterminismReference:
     catalog_config_matches: bool
     catalog_source_matches: bool
     same_config_run_exists: bool
+    same_schema_run_exists: bool
     comparison_run_id: str | None
     comparison_hash: str | None
 
@@ -534,27 +536,31 @@ class BacktestCatalogStore(CatalogStore):
         run_id: str,
         config_hash: str,
         source_data_hash: str,
+        evidence_schema_version: str,
     ) -> DeterminismReference:
-        """Persist the source key and find the latest same-config, same-source run."""
+        """Find the latest comparison run within one Evidence schema version."""
         if (
             len(source_data_hash) != 64
             or source_data_hash.lower() != source_data_hash
             or any(character not in "0123456789abcdef" for character in source_data_hash)
         ):
             raise ValueError("source_data_hash must be lowercase SHA-256 hex")
+        if not evidence_schema_version:
+            raise ValueError("evidence_schema_version must not be empty")
         try:
             current = self._connection.execute(
                 """
                 UPDATE public.backtest_run
                 SET source_data_hash = %s
                 WHERE run_id = %s
+                  AND evidence_schema_version = %s
                   AND (
                       source_data_hash IS NULL
                       OR source_data_hash = %s
                   )
                 RETURNING config_hash, source_data_hash
                 """,
-                (source_data_hash, run_id, source_data_hash),
+                (source_data_hash, run_id, evidence_schema_version, source_data_hash),
             ).fetchone()
             current_config_matches = current is not None and current[0] == config_hash
             current_source_matches = current is not None and current[1] == source_data_hash
@@ -564,13 +570,15 @@ class BacktestCatalogStore(CatalogStore):
                 FROM public.backtest_run
                 WHERE config_hash = %s
                   AND source_data_hash = %s
+                  AND evidence_schema_version = %s
+                  AND evidence_schema_version <> 'unknown'
                   AND run_id <> %s
                   AND evidence_hash IS NOT NULL
                   AND status IN ('COMPLETED', 'EVALUATED')
                 ORDER BY finished_at DESC NULLS LAST, run_seq DESC
                 LIMIT 1
                 """,
-                (config_hash, source_data_hash, run_id),
+                (config_hash, source_data_hash, evidence_schema_version, run_id),
             ).fetchone()
             same_config = self._connection.execute(
                 """
@@ -578,6 +586,7 @@ class BacktestCatalogStore(CatalogStore):
                     SELECT 1
                     FROM public.backtest_run
                     WHERE config_hash = %s
+                      AND evidence_schema_version <> 'unknown'
                       AND run_id <> %s
                       AND evidence_hash IS NOT NULL
                       AND status IN ('COMPLETED', 'EVALUATED')
@@ -585,16 +594,33 @@ class BacktestCatalogStore(CatalogStore):
                 """,
                 (config_hash, run_id),
             ).fetchone()
+            same_schema = self._connection.execute(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM public.backtest_run
+                    WHERE config_hash = %s
+                      AND evidence_schema_version = %s
+                      AND evidence_schema_version <> 'unknown'
+                      AND run_id <> %s
+                      AND evidence_hash IS NOT NULL
+                      AND status IN ('COMPLETED', 'EVALUATED')
+                )
+                """,
+                (config_hash, evidence_schema_version, run_id),
+            ).fetchone()
             self._connection.commit()
         except Exception:
             self._connection.rollback()
             raise
         same_config_run_exists = bool(same_config is not None and same_config[0])
+        same_schema_run_exists = bool(same_schema is not None and same_schema[0])
         if previous is None:
             return DeterminismReference(
                 current_config_matches,
                 current_source_matches,
                 same_config_run_exists,
+                same_schema_run_exists,
                 None,
                 None,
             )
@@ -605,6 +631,7 @@ class BacktestCatalogStore(CatalogStore):
             current_config_matches,
             current_source_matches,
             same_config_run_exists,
+            same_schema_run_exists,
             previous_run_id,
             previous_hash,
         )

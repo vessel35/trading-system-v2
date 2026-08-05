@@ -34,7 +34,11 @@ class UnitEvidence:
     run_id: str
 
 
-def _insert_run(connection: sqlite3.Connection) -> None:
+def _insert_run(
+    connection: sqlite3.Connection,
+    *,
+    evidence_schema_version: str = EVIDENCE_SCHEMA_VERSION,
+) -> None:
     connection.execute(
         """
         INSERT INTO BACKTEST_RUN_LOCAL (
@@ -55,7 +59,7 @@ def _insert_run(connection: sqlite3.Connection) -> None:
             BASE_TS + 86_400_000,
             10_000 * SCALE,
             "a" * 64,
-            EVIDENCE_SCHEMA_VERSION,
+            evidence_schema_version,
         ),
     )
 
@@ -193,9 +197,10 @@ def _create_evidence(path: Path, *, populated: bool) -> None:
             INSERT INTO INDICATOR_DEFINITION (
                 indicator_key, run_id, indicator_name, params_json,
                 impl_version, pinned_impl, min_history, computation_mode,
-                enabled_reason
+                enabled_reason, series_kind, category, impl_note
             ) VALUES ('ema-20', ?, 'EMA', '{"length":20}', '1.2.3', 1, 20,
-                      'incremental', 'auto')
+                      'incremental', 'auto', 'indicator', 'trend',
+                      'fixture implementation')
             """,
             (RUN_ID,),
         )
@@ -532,6 +537,9 @@ def test_repository_reads_correct_tables_columns_and_exact_values(
     assert snapshot.indicator_name == "EMA"
     assert snapshot.params_json == {"length": 20}
     assert snapshot.pinned_impl is True
+    assert snapshot.series_kind == "indicator"
+    assert snapshot.category == "trend"
+    assert snapshot.impl_note == "fixture implementation"
 
     source_from, source_to = reader.source_range("1h")
     assert int(source_from.timestamp() * 1000) == BASE_TS
@@ -819,6 +827,101 @@ def _client_for(
     )
 
 
+def _create_legacy_indicator_evidence(path: Path, schema_version: str) -> None:
+    """Create a complete file using the pre-1.5 Evidence table shapes."""
+    with sqlite3.connect(path) as connection:
+        initialize_evidence_schema(connection)
+        for column in ("series_kind", "category", "impl_note"):
+            connection.execute(f"ALTER TABLE INDICATOR_DEFINITION DROP COLUMN {column}")
+        _insert_run(connection, evidence_schema_version=schema_version)
+        connection.executemany(
+            """
+            INSERT INTO INDICATOR_DEFINITION (
+                indicator_key, run_id, indicator_name, params_json,
+                impl_version, pinned_impl, min_history, computation_mode,
+                enabled_reason
+            ) VALUES (?, ?, ?, ?, ?, 1, ?, 'incremental', 'auto')
+            """,
+            (
+                (
+                    "pat_doji",
+                    RUN_ID,
+                    "pat_doji",
+                    "{}",
+                    "2.0.0+talib.0.7.1",
+                    11,
+                ),
+                (
+                    "ema:period=9",
+                    RUN_ID,
+                    "ema",
+                    '{"period":9}',
+                    "1.0.0",
+                    9,
+                ),
+            ),
+        )
+        connection.executemany(
+            """
+            INSERT INTO INDICATOR_SNAPSHOT (
+                snapshot_seq, run_id, indicator_key, feature_ts,
+                candle_open_time, candle_close_time, value_json, is_warmup
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+            """,
+            (
+                (
+                    1,
+                    RUN_ID,
+                    "pat_doji",
+                    BASE_TS + 3_600_000,
+                    BASE_TS,
+                    BASE_TS + 3_600_000,
+                    '{"pat_doji":1,"pat_doji_confirm":0,"pat_doji_dir":1,"pat_doji_strength":1}',
+                ),
+                (
+                    2,
+                    RUN_ID,
+                    "ema:period=9",
+                    BASE_TS + 3_600_000,
+                    BASE_TS,
+                    BASE_TS + 3_600_000,
+                    "101.25",
+                ),
+            ),
+        )
+
+
+@pytest.mark.parametrize("schema_version", ["1.3.0", "1.4.0"])
+def test_pre_v15_evidence_file_restores_series_kind_through_api(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    schema_version: str,
+) -> None:
+    path = tmp_path / f"legacy-v{schema_version}.sqlite3"
+    _create_legacy_indicator_evidence(path, schema_version)
+    client = _client_for(
+        monkeypatch,
+        tmp_path,
+        _FakeEvidenceCatalog(evidence_path=path.name),
+    )
+    try:
+        with client:
+            response = client.get(
+                f"/api/v1/runs/{RUN_ID}/indicator-snapshots",
+                params={"limit": 10},
+            )
+        assert response.status_code == 200
+        snapshots = {item["indicator_key"]: item for item in response.json()["data"]}
+        assert snapshots["pat_doji"]["series_kind"] == "pattern"
+        assert snapshots["ema:period=9"]["series_kind"] == "indicator"
+        for snapshot in snapshots.values():
+            assert snapshot["category"] is None
+            assert snapshot["impl_note"] is None
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
 def test_summary_and_trade_cost_breakdowns_share_fixture_identities(
     unit_evidence: UnitEvidence,
     monkeypatch: pytest.MonkeyPatch,
@@ -925,6 +1028,25 @@ def test_open_evidence_rejects_non_sqlite_payload(
         with open_evidence(invalid.name):
             pass
     assert raised.value.reason == "evidence_file_invalid"
+    get_settings.cache_clear()
+
+
+def test_open_evidence_rejects_malformed_schema_version(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    invalid = tmp_path / "invalid-schema-version.sqlite3"
+    with sqlite3.connect(invalid) as connection:
+        initialize_evidence_schema(connection)
+        _insert_run(connection, evidence_schema_version="1.4")
+    monkeypatch.setenv("WEBAPI_EVIDENCE_ROOT", str(tmp_path))
+    get_settings.cache_clear()
+
+    with pytest.raises(EvidenceUnavailableError) as raised:
+        with open_evidence(invalid.name):
+            pass
+
+    assert raised.value.reason == "evidence_schema_version_invalid"
     get_settings.cache_clear()
 
 

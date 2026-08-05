@@ -5850,6 +5850,43 @@
             "type": "boolean",
             "title": "Pinned Impl"
           },
+          "series_kind": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "indicator",
+                  "pattern"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Series Kind"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "impl_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Impl Note"
+          },
           "min_history": {
             "type": "integer",
             "title": "Min History"
@@ -5912,6 +5949,9 @@
           "params_json",
           "impl_version",
           "pinned_impl",
+          "series_kind",
+          "category",
+          "impl_note",
           "min_history",
           "computation_mode",
           "enabled_reason",

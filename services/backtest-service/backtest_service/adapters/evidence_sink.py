@@ -142,6 +142,8 @@ class BacktestEvidenceSink(EvidenceSink):
         self._catalog_config_matches = True
         self._catalog_source_matches = True
         self._same_config_run_exists = False
+        self._same_schema_run_exists = False
+        self._evidence_schema_version: str | None = None
         self._comparison_run_id: str | None = None
         self._comparison_hash: str | None = None
         self._source_data_hash: str | None = None
@@ -241,7 +243,9 @@ class BacktestEvidenceSink(EvidenceSink):
         catalog_config_matches: bool,
         catalog_source_matches: bool,
         same_config_run_exists: bool,
+        same_schema_run_exists: bool,
         source_data_hash: str,
+        evidence_schema_version: str,
         comparison_run_id: str | None,
         comparison_hash: str | None,
     ) -> None:
@@ -260,10 +264,14 @@ class BacktestEvidenceSink(EvidenceSink):
             or any(character not in "0123456789abcdef" for character in source_data_hash)
         ):
             raise ValueError("source_data_hash must be lowercase SHA-256 hex")
+        if not evidence_schema_version:
+            raise ValueError("evidence_schema_version must not be empty")
         self._catalog_config_matches = catalog_config_matches
         self._catalog_source_matches = catalog_source_matches
         self._same_config_run_exists = same_config_run_exists
+        self._same_schema_run_exists = same_schema_run_exists
         self._source_data_hash = source_data_hash
+        self._evidence_schema_version = evidence_schema_version
         self._comparison_run_id = comparison_run_id
         self._comparison_hash = comparison_hash
 
@@ -481,10 +489,14 @@ class BacktestEvidenceSink(EvidenceSink):
             and previous_matches
         )
         if self._comparison_hash is None:
+            if self._same_schema_run_exists:
+                status = "source_changed"
+            elif self._same_config_run_exists:
+                status = "evidence_schema_changed"
+            else:
+                status = "no_prior_config_run"
             comparison: dict[str, object] = {
-                "status": (
-                    "source_changed" if self._same_config_run_exists else "no_prior_config_run"
-                ),
+                "status": status,
                 "comparison_run_id": None,
                 "comparison_hash": None,
             }
@@ -499,7 +511,9 @@ class BacktestEvidenceSink(EvidenceSink):
             "catalog_config_matches": self._catalog_config_matches,
             "catalog_source_matches": self._catalog_source_matches,
             "same_config_run_exists": self._same_config_run_exists,
+            "same_schema_run_exists": self._same_schema_run_exists,
             "source_data_hash": self._source_data_hash,
+            "evidence_schema_version": self._evidence_schema_version,
             "current_evidence_hash": evidence_hash,
             **comparison,
         }

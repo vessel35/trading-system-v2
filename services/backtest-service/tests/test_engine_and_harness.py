@@ -25,6 +25,7 @@ from backtest_service.harness import Harness
 from core_lib.eval import MetricSet
 from core_lib.eval import thresholds as evaluation_thresholds
 from core_lib.indicators import DEFAULT_REGISTRY
+from core_lib.patterns import TALIB_FUNCTIONS, TALIB_SOURCE_VERSION
 from core_lib.ports import CatalogStore, DataFeed, StrategyRegistry
 from core_lib.strategy import (
     AdapterManager,
@@ -680,6 +681,7 @@ class _Catalog(CatalogStore):
         run_id: str,
         config_hash: str,
         source_data_hash: str,
+        evidence_schema_version: str,
     ) -> DeterminismReference:
         current_matches = (
             self.runs[run_id]["config_hash"] == config_hash and not self.force_config_mismatch
@@ -695,9 +697,12 @@ class _Catalog(CatalogStore):
                 previous_id != run_id
                 and self.runs[str(previous_id)]["config_hash"] == config_hash
                 and self.runs[str(previous_id)].get("source_data_hash") == source_data_hash
+                and self.runs[str(previous_id)]["evidence_schema_version"]
+                == evidence_schema_version
             ):
                 return DeterminismReference(
                     current_matches,
+                    True,
                     True,
                     True,
                     str(previous_id),
@@ -709,10 +714,19 @@ class _Catalog(CatalogStore):
             if isinstance(summary, Mapping)
             for previous_id in (summary["run_id"],)
         )
+        same_schema_run_exists = any(
+            previous_id != run_id
+            and self.runs[str(previous_id)]["config_hash"] == config_hash
+            and self.runs[str(previous_id)]["evidence_schema_version"] == evidence_schema_version
+            for summary in self.summaries
+            if isinstance(summary, Mapping)
+            for previous_id in (summary["run_id"],)
+        )
         return DeterminismReference(
             current_matches,
             True,
             same_config_run_exists,
+            same_schema_run_exists,
             None,
             None,
         )
@@ -1313,6 +1327,36 @@ def test_same_config_with_different_source_is_not_a_determinism_target(
     assert '"status":"source_changed"' in detail
 
 
+def test_different_evidence_schema_is_not_a_determinism_target(
+    tmp_path: Path,
+) -> None:
+    catalog = _Catalog()
+    brokers: list[_Broker] = []
+    first = _engine(tmp_path / "one", catalog, brokers).run(_config())
+    catalog.runs[first.run_id] = {
+        **catalog.runs[first.run_id],
+        "evidence_schema_version": "1.4.0",
+    }
+
+    second = _engine(tmp_path / "two", catalog, brokers).run(_config())
+
+    assert second.integrity_status == "passed"
+    with sqlite3.connect(second.evidence_path) as connection:
+        passed, detail_json = connection.execute(
+            """
+            SELECT passed, detail_json
+            FROM INTEGRITY_CHECK
+            WHERE check_name = 'deterministic'
+            """
+        ).fetchone()
+    detail = json.loads(detail_json)
+    assert passed == 1
+    assert detail["status"] == "evidence_schema_changed"
+    assert detail["comparison_hash"] is None
+    assert detail["same_config_run_exists"] is True
+    assert detail["same_schema_run_exists"] is False
+
+
 def test_vessel_reference_end_to_end_dry_run_is_complete_and_deterministic(
     tmp_path: Path,
 ) -> None:
@@ -1807,10 +1851,29 @@ def test_declared_pattern_reaches_backtest_strategy_and_evidence(
             {"name": "EMA", "params": {"period": 9}, "version": "1.0.0"},
             {"name": "pat_doji", "params": {}, "version": "2.0.0+talib.0.7.1"},
         ]
-        definition_keys = connection.execute(
-            "SELECT indicator_key FROM INDICATOR_DEFINITION ORDER BY indicator_key"
+        definitions = connection.execute(
+            """
+            SELECT indicator_key, pinned_impl, series_kind, category, impl_note
+            FROM INDICATOR_DEFINITION
+            ORDER BY indicator_key
+            """
         ).fetchall()
-        assert definition_keys == [("ema:period=9",), ("pat_doji",)]
+        assert definitions == [
+            (
+                "ema:period=9",
+                1,
+                "indicator",
+                "trend",
+                "technical_indicators_calc_spec.md §0.3 (SMA seed, recursive)",
+            ),
+            (
+                "pat_doji",
+                1,
+                "pattern",
+                "candlestick",
+                f"TA-Lib v{TALIB_SOURCE_VERSION} {TALIB_FUNCTIONS['pat_doji']}",
+            ),
+        ]
         pattern_snapshot = connection.execute(
             """
             SELECT value, value_json

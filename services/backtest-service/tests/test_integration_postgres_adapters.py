@@ -394,6 +394,7 @@ def test_catalog_issues_run_id_then_records_prereg_and_evaluated_metadata() -> N
         "seed": 0,
         "engine_version": "1.0.0",
         "core_lib_version": "0.1.0",
+        "evidence_schema_version": "1.5.0",
         "config_hash": "",
         "profile_ref": "m9-profile",
         "strategy_profile_json": {"family": "fixture"},
@@ -410,6 +411,7 @@ def test_catalog_issues_run_id_then_records_prereg_and_evaluated_metadata() -> N
             run_id,
             str(run_meta["config_hash"]),
             source_data_hash,
+            "1.5.0",
         )
         assert reference.catalog_config_matches is True
         assert reference.catalog_source_matches is True
@@ -445,6 +447,7 @@ def test_catalog_issues_run_id_then_records_prereg_and_evaluated_metadata() -> N
             same_source_run_id,
             str(run_meta["config_hash"]),
             source_data_hash,
+            "1.5.0",
         )
         assert same_source_reference.comparison_run_id == run_id
         assert same_source_reference.comparison_hash == "b" * 64
@@ -456,6 +459,7 @@ def test_catalog_issues_run_id_then_records_prereg_and_evaluated_metadata() -> N
             different_source_run_id,
             str(run_meta["config_hash"]),
             different_source_hash,
+            "1.5.0",
         )
         assert different_source_reference.comparison_run_id is None
         assert different_source_reference.comparison_hash is None
@@ -535,6 +539,7 @@ def _orphan_sweep_run_meta() -> dict[str, object]:
         "seed": 0,
         "engine_version": "1.0.0",
         "core_lib_version": "0.1.0",
+        "evidence_schema_version": "1.5.0",
         "config_hash": "",
         "profile_ref": "orphan-sweep-profile",
         "strategy_profile_json": {"family": "fixture"},
