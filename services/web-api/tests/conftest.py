@@ -31,16 +31,16 @@ named AS (
 )
 INSERT INTO public.backtest_run (
     run_id, run_seq, run_name, status, strategy_id, strategy_name, strategy_version,
-    params_schema_version, symbol, exchange, timeframe, period_start, period_end,
-    data_source, initial_capital, risk_per_trade, engine_version, core_lib_version,
-    config_hash, evidence_path
+    params_schema_version, evidence_schema_version, symbol, exchange, timeframe,
+    period_start, period_end, data_source, initial_capital, risk_per_trade,
+    engine_version, core_lib_version, config_hash, evidence_path
 )
 SELECT
     named.run_id, named.run_seq, %s, 'EVALUATED', 'disposable-fixture',
-    'DisposableFixture', '1.0.0', '1.0.0', 'BTC/USDT:USDT', 'binance', '1h',
-    TIMESTAMPTZ '2025-01-01 00:00:00+00', TIMESTAMPTZ '2025-01-02 00:00:00+00',
-    'crypto_data.ohlcv_futures', 10000, 0.0100, 'test', 'test', repeat('0', 64),
-    named.run_id || '.sqlite'
+    'DisposableFixture', '1.0.0', '1.0.0', '1.5.0', 'BTC/USDT:USDT', 'binance',
+    '1h', TIMESTAMPTZ '2025-01-01 00:00:00+00',
+    TIMESTAMPTZ '2025-01-02 00:00:00+00', 'crypto_data.ohlcv_futures', 10000,
+    0.0100, 'test', 'test', repeat('0', 64), named.run_id || '.sqlite'
 FROM named
 RETURNING run_id
 """
