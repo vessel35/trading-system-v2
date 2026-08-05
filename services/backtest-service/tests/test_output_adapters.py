@@ -454,6 +454,8 @@ def test_catalog_register_uses_one_sequence_cte_before_any_filename() -> None:
 
 
 def test_catalog_determinism_reference_filters_by_evidence_schema_version() -> None:
+    """Guard SQL text presence only; an ``OR TRUE`` mutation can pass this fake."""
+
     class DeterminismConnection(_Connection):
         def execute(
             self,
