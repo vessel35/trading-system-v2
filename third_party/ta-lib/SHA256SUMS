@@ -1,7 +1,10 @@
 # Repository: https://github.com/TA-Lib/ta-lib
 # Tag: v0.7.1
 # Commit: 2247d599bddf37ed37e3a709371517e46efc66f6
-# Scope: 63 candlestick calculation source files vendored with original paths
+# Scope: TA-Lib calculation sources vendored with original paths
+# Candlestick pattern source count: 61
+# Shared source count: 2
+# Hilbert indicator source count: 7
 91c18070b376e71a562155dcebb7f4f16f40d991ec42b66be41fb90bbe4c3619  src/ta_common/ta_global.c
 bf72e526c8ba9cbf93b68f079a9f61bc0db342cef14b18d0695754e5dd045f29  src/ta_func/ta_CDL2CROWS.c
 a3b63bdb63a828dc1504ded39e388816bdab85b0346564b71998adfca0b4ab12  src/ta_func/ta_CDL3BLACKCROWS.c
@@ -65,3 +68,10 @@ a986052aa03ebcd044a6a747b1d2eb3829046e60bdfc0f3258bbdded3c142ae3  src/ta_func/ta
 f6e627fd18f468a8f1eed7b468d877c7d9f92e616f89ca86261028d836d032c5  src/ta_func/ta_CDLUPSIDEGAP2CROWS.c
 98843b27ed992246393233545acdae905d070af9a951422c83e43085cde5ddb6  src/ta_func/ta_CDLXSIDEGAP3METHODS.c
 3da109e187d4cc5f5da932f6c2615d1ff4ab4975ad8e18fec55d727bd4bb7d11  src/ta_func/ta_utility.h
+d5bd90d9a5cb1595de4eac16be3b01da50a60302ca8570e7f1cb868dec6f64b6  src/ta_func/ta_HT_DCPERIOD.c
+2abf127e3e730e92c3f0b297356fd0f62d8153206b7d0231408295a6fc6dee51  src/ta_func/ta_HT_DCPHASE.c
+671ab753832181b748de137ba338211f8982cff234dc667d849b5ed6f47201cf  src/ta_func/ta_HT_PHASOR.c
+383a9a7e64f663f5034bfbd97b6d324b88875b1a71f80fe5748d758b8997a78e  src/ta_func/ta_HT_SINE.c
+b900b16a77c6f649c2f225bc2e5db2c7c8bf2cc9cc6f5bfc907f35ba9f4ccf43  src/ta_func/ta_HT_TRENDLINE.c
+8c83aefaa6b48c6c41ee7ef238c855a214709b97b3c54499c75ae2946b1d9d95  src/ta_func/ta_HT_TRENDMODE.c
+2531025fb355bab68d589d89c4290ec22aff4a0fed9ae9dbdf7fd2c25029f6f7  src/ta_func/ta_MAMA.c

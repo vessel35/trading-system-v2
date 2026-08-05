@@ -20,7 +20,7 @@
 
 - Nison, Morris, Chesler 원전에서 판정 규칙을 새로 유도하는 작업
 - TA-Lib C 판정 규칙을 문장으로 재기술한 규칙집
-- 지표 표준 `docs/references/technical_indicators_calc_spec.md`의 89종 집계
+- 지표 표준 `docs/references/technical_indicators_calc_spec.md` §11의 커버리지 집계
 - 전략이 패턴 값을 어떻게 해석해 매매 결정을 내리는지
 
 원전 조사 기록은 `docs/candlestick-patterns/analysis-1-original-sources.md`에 남아
@@ -45,9 +45,10 @@ TA-Lib 출처는 태그뿐 아니라 변경 불가능한 커밋으로 고정한�
 파일의 SHA-256을 고정하며, 기본 pytest 무결성 검사는 반입 파일 집합과 개수 및
 해시를 네트워크 없이 대조한다. 원본 BSD 3-clause `LICENSE`도 함께 보존한다.
 
-Hilbert 계열 C 소스는 아직 이식하거나 반입하지 않았다. 이 문서의 소유 범위가
-아니므로 해당 이식이 자기 원본 목록과 무결성 검사를 갖출 때까지 외부 원본 접근성
-위험이 남아 있다.
+Hilbert 계열 C 소스 일곱 개는 같은 고정점에서 `third_party/ta-lib/`에 반입되어
+범용 TA-Lib 무결성 검사와 원본 목록의 보호를 받지만, 아직 계산 코드로 이식하지
+않았다. 계산 계약은 `docs/references/technical_indicators_calc_spec.md`가 소유하며
+이 캔들스틱 표준의 소유 범위에는 포함되지 않는다.
 
 ## §2. 계산 기반
 
