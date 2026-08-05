@@ -43,7 +43,7 @@ TALIB_RAW_ALLOWED_VALUES: Final = frozenset(
         TALIB_RAW_CONFIRMATION_MAGNITUDE,
     }
 )
-"""The raw integer values observed and accepted for TA-Lib v0.7.1 ``CDL`` output."""
+"""The source-allowed raw integer values for TA-Lib v0.7.1 ``CDL`` output."""
 
 TALIB_DBL_MAX: Final = sys.float_info.max
 """The ``DBL_MAX`` value used by TA-Lib penetration parameter guards."""
@@ -199,7 +199,13 @@ def _avg(
     return value
 
 
-def _outputs_from_talib_integer(name: str, value: int) -> PatternValue:
+def outputs_from_talib_integer(name: str, value: int) -> PatternValue:
+    """Map one source-allowed TA-Lib raw integer to the adapter's four-key output."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"TA-Lib pattern value for {name} must be int")
+    if value not in TALIB_RAW_ALLOWED_VALUES:
+        raise ValueError(f"unsupported TA-Lib pattern raw integer for {name}: {value}")
+
     match_key, direction_key, strength_key, confirm_key = output_keys(name)
     if value == 0:
         return {
@@ -223,7 +229,7 @@ def _outputs_from_talib_integer(name: str, value: int) -> PatternValue:
     elif magnitude == 80:
         strength = BOUNDARY_STRENGTH
     else:
-        raise ValueError(f"unsupported TA-Lib pattern magnitude: {value}")
+        raise ValueError(f"unsupported TA-Lib pattern magnitude for {name}: {value}")
     return {
         match_key: MATCHED,
         direction_key: direction,
@@ -243,25 +249,86 @@ def _undetermined_outputs(name: str) -> PatternValue:
     }
 
 
+def _talib_adapter_numbers(
+    name: str,
+    value: Mapping[str, float],
+) -> tuple[float, float, float, float]:
+    match_key, direction_key, strength_key, confirm_key = output_keys(name)
+    return (
+        value[match_key],
+        value[direction_key],
+        value[strength_key],
+        value[confirm_key],
+    )
+
+
+def validate_talib_adapter_outputs(name: str, value: Mapping[str, float]) -> None:
+    """Raise unless a four-key output is a TA-Lib adapter shape or warm-up row."""
+    matched, direction, strength, confirmed = _talib_adapter_numbers(name, value)
+    for number in (matched, direction, strength, confirmed):
+        if isinstance(number, bool) or not isinstance(number, (int, float)):
+            raise TypeError(f"TA-Lib adapter output for {name} must contain numeric floats")
+    nan_flags = tuple(isnan(number) for number in (matched, direction, strength, confirmed))
+    if all(nan_flags):
+        return
+    if any(nan_flags):
+        raise ValueError(f"TA-Lib adapter output for {name} is partially NaN")
+
+    if (
+        matched == NOT_MATCHED
+        and direction == NOT_MATCHED
+        and strength == NOT_MATCHED
+        and confirmed == NOT_MATCHED
+    ):
+        return
+
+    signed_direction = direction in (1.0, -1.0)
+    if (
+        matched == MATCHED
+        and signed_direction
+        and strength in (FULL_STRENGTH, BOUNDARY_STRENGTH)
+        and confirmed == NOT_MATCHED
+    ):
+        return
+
+    if (
+        matched == NOT_MATCHED
+        and signed_direction
+        and strength == NOT_MATCHED
+        and confirmed == MATCHED
+    ):
+        return
+
+    if matched == MATCHED and confirmed == MATCHED:
+        raise ValueError(f"TA-Lib adapter output for {name} cannot match and confirm together")
+    if matched == MATCHED and direction == NOT_MATCHED:
+        raise ValueError(f"TA-Lib matched output for {name} must carry direction")
+    if confirmed == MATCHED and direction == NOT_MATCHED:
+        raise ValueError(f"TA-Lib confirmation output for {name} must carry direction")
+
+    raise ValueError(
+        f"unsupported TA-Lib adapter output shape for {name}: "
+        f"matched={matched}, direction={direction}, strength={strength}, confirmed={confirmed}"
+    )
+
+
 def talib_integer_from_outputs(name: str, value: Mapping[str, float]) -> int | None:
     """Rebuild TA-Lib's integer signal from a direct port's four-key output."""
-    match_key, direction_key, strength_key, confirm_key = output_keys(name)
-    matched = value[match_key]
-    direction = value[direction_key]
-    strength = value[strength_key]
-    confirmed = value[confirm_key]
-    if any(isnan(number) for number in (matched, direction, strength, confirmed)):
+    validate_talib_adapter_outputs(name, value)
+    matched, direction, strength, confirmed = _talib_adapter_numbers(name, value)
+    if all(isnan(number) for number in (matched, direction, strength, confirmed)):
         return None
-    sign = 1 if direction >= 0.0 else -1
+
+    sign = 1 if direction == 1.0 else -1
     if confirmed == MATCHED:
-        return sign * 200
+        return sign * TALIB_RAW_CONFIRMATION_MAGNITUDE
     if matched != MATCHED:
-        return 0
+        return TALIB_RAW_ZERO
     if strength == FULL_STRENGTH:
-        return sign * 100
+        return sign * TALIB_RAW_MATCH_MAGNITUDE
     if strength == BOUNDARY_STRENGTH:
-        return sign * 80
-    raise ValueError(f"unsupported pattern strength for {name}: {strength}")
+        return sign * TALIB_RAW_BOUNDARY_MAGNITUDE
+    raise AssertionError(f"validated TA-Lib adapter strength is unreachable: {strength}")
 
 
 def sparse_talib_integer_signals(
@@ -304,7 +371,7 @@ class TalibPatternPort(TalibRawPatternSpec):
             if index < self.lookback:
                 values.append(_undetermined_outputs(self.name))
             else:
-                values.append(_outputs_from_talib_integer(self.name, integer))
+                values.append(outputs_from_talib_integer(self.name, integer))
         return values
 
 
@@ -325,11 +392,13 @@ __all__ = [
     "TALIB_UNDERLYING_VERSION_PREFIX",
     "TalibPatternPort",
     "TalibRawPatternSpec",
+    "outputs_from_talib_integer",
     "resolve_talib_penetration",
     "sparse_talib_integer_signals",
     "talib_integer_from_outputs",
     "talib_penetration_default",
     "talib_penetration_lookback",
     "validate_talib_raw_integer_series",
+    "validate_talib_adapter_outputs",
     "validate_talib_version_pin",
 ]

@@ -15,8 +15,8 @@ from .registry import PatternSeries, PatternValue
 from .talib_candles import CandleAverageState, CandleSettingType, candle_settings_lookback
 from .talib_raw import (
     TalibRawPatternSpec,
-    _outputs_from_talib_integer,
     _undetermined_outputs,
+    outputs_from_talib_integer,
     validate_talib_raw_integer_series,
 )
 
@@ -89,7 +89,7 @@ class TalibHikkakeState:
         self._current = (
             _undetermined_outputs(self.name)
             if integer is None
-            else _outputs_from_talib_integer(self.name, integer)
+            else outputs_from_talib_integer(self.name, integer)
         )
         return self._current
 
@@ -159,7 +159,7 @@ class TalibStatefulPatternPort(TalibRawPatternSpec):
             if index < self.lookback:
                 values.append(_undetermined_outputs(self.name))
             else:
-                values.append(_outputs_from_talib_integer(self.name, integer))
+                values.append(outputs_from_talib_integer(self.name, integer))
         return values
 
 
