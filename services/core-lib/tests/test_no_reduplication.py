@@ -70,7 +70,6 @@ def test_core_lib_dependencies_follow_the_one_way_component_graph() -> None:
             "money_management",
             "ports",
             "series",
-            "series_resolution",
             "types",
         },
         "execution": {"costs", "ports", "types"},

@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 
 from core_lib.indicators.registry import IndicatorRegistry
 from core_lib.patterns.registry import PatternRegistry
-from core_lib.series import SeriesSpec
-
-_SERIES_NAME_KEY = re.compile(r"[^a-z0-9]+")
+from core_lib.series import SeriesSpec, normalize_series_name
+from core_lib.series import series_key as series_key
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,18 +17,6 @@ class SplitSeriesDescriptors:
 
     indicators: tuple[Mapping[str, object], ...]
     patterns: tuple[Mapping[str, object], ...]
-
-
-def normalize_series_name(name: str) -> str:
-    """Return the execution-key name prefix shared by both services."""
-    return _SERIES_NAME_KEY.sub("_", name.casefold()).strip("_")
-
-
-def series_key(spec: SeriesSpec) -> str:
-    """Return the stable key used in indicator snapshots and strategy inputs."""
-    params = ",".join(f"{key}={_series_param(value)}" for key, value in sorted(spec.params.items()))
-    name = normalize_series_name(spec.name)
-    return name if not params else f"{name}:{params}"
 
 
 def assert_disjoint_series_registry_names(
@@ -150,11 +136,3 @@ def _name_key_map(names: Collection[str]) -> dict[str, str]:
     for name in sorted(names):
         result.setdefault(normalize_series_name(name), name)
     return result
-
-
-def _series_param(value: object) -> str:
-    if isinstance(value, bool):
-        return str(value).lower()
-    if isinstance(value, float) and value.is_integer():
-        return str(int(value))
-    return str(value)

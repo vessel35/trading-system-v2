@@ -2,7 +2,7 @@
 
 from core_lib.indicators import DEFAULT_REGISTRY
 from core_lib.patterns import DEFAULT_PATTERN_REGISTRY
-from core_lib.series_resolution import normalize_series_name, series_key
+from core_lib.series import normalize_series_name, series_key
 from core_lib.strategy import (
     ParameterSchema,
     StrategyAdapter,

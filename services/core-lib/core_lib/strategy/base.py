@@ -6,8 +6,7 @@ from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
 from core_lib.money_management import MoneyManagementPolicy
-from core_lib.series import SeriesSpec
-from core_lib.series_resolution import series_key
+from core_lib.series import SeriesSpec, series_key
 from core_lib.types import DecisionIntent, Position, TradingSignal
 
 from .config import ParameterSchema
