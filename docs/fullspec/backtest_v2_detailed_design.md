@@ -1,7 +1,8 @@
 # 백테스트 v2 상세 설계서
 
-암호화폐 무기한 선물·현물 전략의 백테스트·평가·개선 플랫폼을, 세 실행 모드(백테스트·페이퍼·라이브)가
-물리적으로 같은 코드를 쓰도록 공유 라이브러리 위에 다시 만든다. 이 문서는 그 시스템을 **위에서 아래로** —
+암호화폐 무기한 선물·현물 전략의 백테스트·평가·개선 플랫폼에서 현재 구현된 구조와 실행 경계를 기록한다.
+세 실행 모드(백테스트·페이퍼·라이브)가 공유 라이브러리의 같은 계약과 계산 코드를 소비하는 시스템을
+**위에서 아래로** —
 서비스, 코드 트리, 컴포넌트, 클래스 순으로 — 담는다. 데이터베이스 스키마는 성격이 다르고 분량도 커서 짝이 되는
 별도 문서 `백테스트 v2 데이터베이스 설계서`(`backtest_v2_detailed_design_database.md`)로 뺐다. 각 절은 다이어그램과
 정의를 함께 실어 자기완결로 쓴다. 다른 문서를 열지 않아도 되도록, 필드·수식·임계값·시그니처·불변식은 각 문서 안에
@@ -9,10 +10,14 @@
 
 이 문서는 최상위 구조 — 서비스 뷰(§1)·프로젝트 코드 트리(§2) — 와 문서 전체의 읽기 지도, 그 아래 컴포넌트
 뷰(§3, 서비스별 컴포넌트 다이어그램·정의서)에 더해, 클래스 뷰를 확정한다 — 공유 라이브러리 `core-lib` 쪽은 값
-타입과 지표(§4.1), 전략을 끼우는 계약과 파라미터 해석 시퀀스(§4.2), 체결·비용·사이징·포트와 판정 플로우(§4.3)이고,
-`backtest-service` 쪽은 Engine과 포트 어댑터·설정·Harness를 캔들 루프·1분 트리거 walk 시퀀스와 함께(§4.4), 그리고
+타입·지표·패턴·공통 계열 해석(§4.1), 전략 계약·파라미터 해석과 자금관리 조합(§4.2),
+체결·비용·사이징·포트와 판정 플로우(§4.3)이고,
+`backtest-service` 쪽은 Engine과 포트 어댑터·설정·Harness를 현재의 전략 TF 캔들 루프 시퀀스와 함께(§4.4), 그리고
 출력 저장 어댑터를 run 저장 시퀀스와 함께(§4.5) 다룬다. 컴포넌트마다 클래스 다이어그램과 정의서를 두고,
 시퀀스·플로우는 그 정의서 안에 둔다.
+
+전략 작성과 자금관리 변경의 규범은 `docs/strategy-authoring-contract.md`가 단독으로 소유한다. 이 문서는 그
+규칙을 다시 정의하지 않고, 현재 코드의 클래스 관계·책임 배치·실행면별 차이만 as-built로 보인다.
 
 ---
 
@@ -112,11 +117,10 @@
 
 ## 확정된 범위 조정
 
-첫 검증 스코프에서 두 항목을 유보한다(사용자 확정). 하나는 **트레일링 기계장치**(현재 이를 소비하는 전략이
-없다)로, 표준 위치(`core_lib.strategy.trailing`)는 코드 트리에 남기되 첫 검증 전략은 트레일링 없이 구현하고,
-재도입 시 단일 표준 계산기로 통합하며 파리티 기준을 확정한다. 다른 하나는 **1분 하위 집행 피드**로, 집행 판정을
-전략 타임프레임 캔들 수준의 보수 판정으로 두고(손절·익절 동시 도달 시 손절 우선, OHLC-locked), 1분 피드로 내려간
-집행과 그 파리티 허용 편차는 Engine 설계(§4.4)에서 확정한다. 두 유보는 뼈대의 구조를 바꾸지 않는다.
+현재 두 실행 능력은 예약 상태다. `core_lib.strategy.trailing`에는 docstring뿐이고 matcher는 trailing 주문을
+`NotImplementedError`로 거부한다. `trigger_feed` 열거형에는 `m1_subcandle`이 있으나 `RunConfig`와 Engine이 이를
+`NotImplementedError`로 거부한다. 따라서 현재 집행 판정은 전략 timeframe 캔들 수준의 보수 판정이며 손절·익절
+동시 도달 시 손절 우선이다.
 
 ## 문서 구성 (읽기 지도)
 
@@ -130,9 +134,9 @@
 | §1 | 서비스 다이어그램 + 정의서 | 어떤 서비스·저장소가 있고 어떻게 의존하는지 (최상위 뷰) | 이 문서 · 확정 |
 | §2 | 프로젝트 코드 트리 | 서비스 아래 디렉터리·패키지 구조 + 경로별 역할 | 이 문서 · 확정 |
 | §3 | 컴포넌트 다이어그램 + 정의서 (서비스별) | §3.1 `core-lib`(공유) · §3.2 `backtest-service` · §3.3 채택분(signal·wallet) | 이 문서 · 확정 |
-| §4 | 클래스 다이어그램 + 정의서 (컴포넌트별) | §4.1 타입·지표 · §4.2 전략(+config 시퀀스) · §4.3 실행·평가(+판정 플로우) · §4.4 Engine(+캔들 루프·집행 시퀀스) · §4.5 출력(+run 저장 시퀀스) | 이 문서 · 확정 |
+| §4 | 클래스 다이어그램 + 정의서 (컴포넌트별) | §4.1 타입·지표·패턴·계열 해석 · §4.2 전략(+config 시퀀스)과 자금관리(+실행면별 조합) · §4.3 실행·평가(+판정 플로우) · §4.4 Engine(+캔들 루프·집행 시퀀스) · §4.5 출력(+run 저장 시퀀스) | 이 문서 · as-built |
 | §5 | 데이터베이스 ERD + 정의서 (DB별) | §5.1 DB 전체 구성 + `crypto_data`·`signal_db` · §5.2 `backtest_db` · §5.3 Evidence SQLite | **별도 문서** `backtest_v2_detailed_design_database.md` · 확정 |
-| 부록 | 채택·회귀 절차 | 채택 지점·이행 순서·shim · 라이브 강제청산 수신 절차 · 회귀 범위·게이트 · 검증 기준선(구↔신 수치 대사 제외) · 비밀 저장 방식 변경 | 이 문서 · 확정 |
+| 부록 | 채택·회귀 절차와 개정 이력 | 채택 지점·이행 순서·shim · 라이브 강제청산 수신 절차 · 회귀 범위·게이트 · 검증 기준선(구↔신 수치 대사 제외) · 비밀 저장 방식 변경 · 전략 플랫폼 as-built 갱신 이력 | 이 문서 · 확정 |
 
 > **데이터베이스를 별도 문서로 뺀 이유.** 이 문서가 클래스 뷰까지만으로도 이미 길어, 스키마까지 한 파일에 담으면
 > 필요한 대목을 찾기 어려워진다. 데이터베이스는 다루는 대상(테이블·컬럼·키)과 표현(ER 다이어그램)이 클래스와
@@ -246,7 +250,7 @@ core-lib은 특정 DB에 묶이지 않는다. 이 방식은 현행 signal-servic
 
 | 저장소 | 유형 | 책임 | 접근 (쓰기/읽기) | 경계 |
 |---|---|---|---|---|
-| `crypto_data` | 공유·읽기 | 확정 캔들 OHLCV(1분 적재, 상위 TF는 연속 집계 뷰) + funding rate 시계열 | `OHLCV 수집기` 쓰기; `backtest-service`(DataFeed 포트)·`signal-service` 읽기; 백테스트 미기록 | **v2가 소유·프로비저닝하는 DB**(하이퍼테이블·상위 TF 연속집계 뷰·`ohlcv_futures` retention 2000일 포함); OHLCV 적재는 `OHLCV 수집기`가 맡음; `crypto-data-hub`는 v2가 사용하지 않는 참조 원천; 백테스트 결과 미저장; 전략 TF와 별도로 1분 트리거 캔들 보유(1분 집행 피드 사용은 §4.4 확정) |
+| `crypto_data` | 공유·읽기 | 확정 캔들 OHLCV(1분 적재, 상위 TF는 연속 집계 뷰) + funding rate 시계열 | `OHLCV 수집기` 쓰기; `backtest-service`(DataFeed 포트)·`signal-service` 읽기; 백테스트 미기록 | **v2가 소유·프로비저닝하는 DB**(하이퍼테이블·상위 TF 연속집계 뷰·`ohlcv_futures` retention 2000일 포함); OHLCV 적재는 `OHLCV 수집기`가 맡음; `crypto-data-hub`는 v2가 사용하지 않는 참조 원천; 현재 Engine의 캔들 내 trigger는 전략 TF만 사용 |
 | `backtest_db` | 신규·전용 메타 | run 요약·카탈로그·사전등록·태그 등 run 메타(검색·비교·집계 근거) | `backtest-service`(CatalogStore 포트) 쓰기, Harness 읽기; 조회용 읽기 전용 역할을 writer와 분리 | 운영 DB와 분리(연구 데이터 오염 방지); 상세 Evidence 미보유; 이름·writer 계승·스키마 신규·읽기 전용 역할 신설(필드는 §5.2) |
 | `signal_db` | 기존 + 레지스트리 | `signal-service` 운영 DB + 실행할 전략(Adaptee) 목록 레지스트리 — 현행 코드 상주(부팅 하드코딩) 목록을 DB로 승격해 전략 목록의 단일 출처로 삼음 | `signal-service` 쓰기; Adapter Manager가 주입 포트로 등록·조회(`backtest-service`도 주입 포트로 조회) | `core_lib` 직접 의존 없음(주입 포트 경유); 레지스트리는 현행 `trading_strategies`(클래스명·파라미터 JSONB·심볼·타임프레임·활성·버전) 구조 차용, ERD·필드는 §5.1 |
 | Evidence SQLite | run별 상세 | run별 캔들 신호·주문·체결·포지션·손익·지표 스냅샷(forensics·재현 원천) | `backtest-service`(EvidenceSink 포트) 쓰기; 대시보드·연구 읽기; 라이브는 연구 피드백용만 | run 자기완결(원천 스냅샷 로컬 사본); 운영 DB 미저장; 결정성 해시=정렬 행 정규화 직렬화(파일 바이트 아님)(필드는 §5.3) |
@@ -306,15 +310,15 @@ StrategyConfig)을 담고, `adapters/` 한 디렉터리가 어댑터 일곱을 �
 
 | 경로                                                                                               | §3 컴포넌트                                     | 개수              |
 | ------------------------------------------------------------------------------------------------ | ------------------------------------------- | --------------- |
-| `core_lib/{types, indicators, sizing, costs, execution, ports, eval}`                            | 각 동명 컴포넌트                                   | 각 1 (합 7)       |
+| `core_lib/{types, indicators, patterns, series, money_management, sizing, costs, execution, ports, eval}` | 각 동명 컴포넌트 | 각 1 (합 10) |
 | `core_lib/strategy/` (`base`+`profile`+`trailing` / `manager`(+`registry`+`factory`) / `config`) | StrategyAdapter · Adapter Manager · StrategyConfig | 3               |
 | `core_lib/strategy/adaptees/`                                                                    | 참조 플러그인 전략                                  | 0 (플랫폼 컴포넌트 아님) |
-| **§3.1 core-lib 소계**                                                                             |                                             | **10**          |
+| **§3.1 core-lib 소계**                                                                             |                                             | **13**          |
 | `backtest_service/{engine, config, harness}`                                                     | Engine · ConfigLayer · Harness              | 각 1 (합 3)       |
 | `backtest_service/adapters/`                                                                     | 포트 어댑터(6 대표 + `strategy_registry`)          | 7               |
 | **§3.2 backtest-service 소계**                                                                     |                                             | **3 + 어댑터 7**   |
 
-그래서 §3.1은 core-lib 컴포넌트 열 종을, §3.2는 Engine·ConfigLayer·Harness에 일곱 포트 어댑터를 더해 그린다.
+그래서 §3.1은 core-lib 컴포넌트 열세 종을, §3.2는 Engine·ConfigLayer·Harness에 일곱 포트 어댑터를 더해 그린다.
 
 ## §2.1 `core-lib` 트리 (설치형 공유 패키지)
 
@@ -325,7 +329,8 @@ services/core-lib/
     __init__.py                      # 패키지 진입점
     types/                           # [컴포넌트] 도메인 값 타입·금액 정밀도의 단일 정의처
       candle.py                      #   통합 캔들 타입(신규): symbol·exchange·timeframe·open_time·close_time·o·h·l·c·v·quote_volume?·trade_count?; 캔들 검증 불변식 강제
-      signal.py                      #   TradingSignal(판단 전용, 방향·수량 필드 없음)·SignalType — 신호 표준 승격
+      decision.py                    #   DecisionAction·DecisionIntent — 전략이 반환하는 목표 판단 계약(보호가격·수량·leverage 없음)
+      signal.py                      #   TradingSignal·SignalType — legacy 전략 입력과 실행면 내부 구체화·지속 경계
       order.py                       #   Order(주문·State Machine)
       position.py                    #   Position(포지션·가중평균·청산가)
       trade.py                       #   Trade(체결 완료 거래; r0=최초 위험 추가)
@@ -346,6 +351,22 @@ services/core-lib/
       donchian.py                    #   Donchian(등록 지표의 하나·옵션, 특정 전략용)
       registry.py                    #   지표 등록·버전·구현 고정 근거·min_history
       contracts.py                   #   확정 캔들 전용 계약 강제(close_time ≤ 판단 시각)
+      specs/                         #   카테고리별 IndicatorSpec 등록 목록
+    series/                          # [컴포넌트] 지표와 패턴이 실행면에 제공하는 공통 SeriesSpec·SeriesState Protocol
+      contracts.py                   #   두 실행면이 실제 소비하는 일곱 spec 멤버와 세 state 멤버
+    series_resolution.py             #   두 레지스트리 이름 분리·모드 해석·실행 열쇠(series_key)의 단일 경로
+    patterns/                        # [컴포넌트] TA-Lib 캔들 패턴 명세·증분 상태·별도 레지스트리
+      registry.py                    #   PatternSpec·PatternState·PatternRegistry
+      outputs.py                     #   match·direction·strength·confirmation 네 출력 계약
+      primitives.py                  #   패턴 계산 공용 프리미티브
+      talib_raw.py                   #   TA-Lib 정수 신호와 네 출력 사이의 검증된 어댑터
+      talib_candles.py               #   TA-Lib 입력 캔들 어댑터
+      talib_single_candle.py         #   단일 캔들 패턴 포트
+      talib_two_candle.py            #   두 캔들 패턴 포트
+      talib_three_candle.py          #   세 캔들 패턴 포트
+      talib_multi_candle.py          #   복수 캔들 패턴 포트
+      talib_hikkake.py               #   Hikkake 계열 패턴 포트
+      specs/                         #   기본 TA-Lib PatternSpec 등록 목록
     strategy/                        # [컴포넌트×3] StrategyAdapter(base.py) + Adapter Manager(manager.py) + StrategyConfig(config.py)
       base.py                        #   StrategyAdapter(typing.Protocol) — 전략 판단 계약(analyze·metadata·파라미터 스키마 선언)
       registry.py                    #   in-process 플러그인(Adaptee) 등록·조회 규약 — Adapter Manager 소관; 외부 signal_db 구현 카탈로그와 별개(그건 ports/strategy_registry.py)
@@ -353,13 +374,17 @@ services/core-lib/
       manager.py                     #   Adapter Manager — Adaptee 생성(Factory)·lifecycle; 외부 구현 카탈로그는 ports/strategy_registry.py(주입 포트)로 signal_db 등록·조회
       config.py                      #   StrategyConfig — 전략 파라미터 해석·검증·직렬화·UI JSON Schema 노출
       profile.py                     #   전략 프로파일 스키마(family·기대 승률/손익비 범위·tail_shape·성숙도 등) — 판단 계약 부속
-      trailing/                      #   ATR 트레일링 표준 위치 — 판단 계약 부속(첫 검증 스코프 유보; 재도입 시 단일 표준으로 통합·파리티 확정)
-        trailing_stop.py             #     트레일링 스탑 순수 함수 계산기(Adaptee가 상속 아닌 호출)
+      trailing/                      #   트레일링 예약 위치
+        trailing_stop.py             #     현재 구현은 모듈 docstring뿐이며 계산 클래스·함수 없음
       adaptees/                      #   구현 전략(Adaptee) 위치 — 코어 계약 거버넌스와 별도 관리되는 첫 검증 참조 플러그인(플랫폼 컴포넌트 아님); 진입·청산 엣지는 각 Adaptee 소유(범위 밖); in-process strategy/registry.py에 등록되고, 외부 signal_db 카탈로그 동기화는 Adapter Manager가 ports/strategy_registry.py로 수행
-        vessel_*.py                  #     첫 파이프라인 검증용 Vessel 계열 Adaptee(신규 구현, 트레일링 없이); 터틀 진입 전략은 만들지 않음
+        vessel_reference.py          #     EMA 9/21 진입·청산 DecisionIntent를 반환하는 VesselReference 2.0.0
+    money_management/                # [컴포넌트] 결정을 보호가격·요청 수량·요청 leverage가 있는 계획으로 변환
+      models.py                      #   PolicyIndicatorRequirement·MarketSnapshot·AccountRiskSnapshot·RiskLimits·MoneyManagementPlan
+      policies.py                    #   MoneyManagementPolicy Protocol·ManualMoneyManagement·TurtleMoneyManagement·turtle_n_series
+      registry.py                    #   MoneyManagementFactory와 mode별 엄격 설정 해석
     sizing/                          # [컴포넌트] 거래당 위험 규율과 사이징 인스턴스
       risk_money.py                  #   보편 사이징: 수량=(risk_per_trade×Equity)/손절거리, 1R≤1%, 노출 한도, RoR 연동
-      turtle_unit.py                 #   터틀 인스턴스(N 사이징·0.5N 피라미딩·유닛 한도) — 전략이 선택 조합
+      turtle_unit.py                 #   N 유닛 크기·0.5N 간격·유닛 상한의 저수준 계산기(현재 정책 런타임과 직접 조합되지 않음)
       wallet_pct.py                  #   pct 방식(호환) — framework 비준수 플래그 의무
       kelly.py                       #   Half/Quarter-Kelly 상한
       exposure_limit.py              #   노출 한도 검사(단일 시장·상관군·단일 방향 위험 합 한도) — §4.3.3 ExposureLimit
@@ -417,9 +442,8 @@ core_lib 안에서 값·타입으로 소비하므로 이 세 참조가 아래 �
 게다가 이 접근 포트는 Adaptee 카탈로그 식별자와 직렬화 metadata만 다루고 core 값 타입은 쓰지 않아, `types`로 가는
 엣지도 없다.
 
-셋째, `strategy/adaptees/`의 구현 전략은 이 그림에서 뺐다. 이들은 `strategy`(base·profile·trailing)·`indicators`·
-`types`를, 필요하면 `sizing`·`costs`까지만 참조하고, `ports`·`execution`이나 서비스 코드·DB 어댑터는 참조하지
-않는다 — 플러그인이 코어의 경계를 넘지 않게 하기 위해서다.
+셋째, `strategy/adaptees/`의 구현 전략은 이 그림에서 뺐다. 현재 `VesselReference`는 `strategy` 내부 계약과
+`types`만 참조하고 `ports`·`execution`·서비스 코드·DB 어댑터를 참조하지 않는다.
 
 각 클래스의 계약과 컴포넌트 인터페이스는 §3.1과 §4에서 확정한다.
 
@@ -427,6 +451,12 @@ core_lib 안에서 값·타입으로 소비하므로 이 세 참조가 아래 �
 flowchart TD
     TYPES["types (바닥)"]
     IND["indicators"]
+    PAT["patterns"]
+    subgraph SERIES["series 계열 선택 컴포넌트"]
+        SER["series<br/>공통 Protocol"]
+        RES["series_resolution<br/>레지스트리 선택·실행 열쇠"]
+    end
+    MM["money_management"]
     SIZ["sizing"]
     CST["costs"]
     EVAL["eval"]
@@ -438,18 +468,26 @@ flowchart TD
     REG(["ports · strategy_registry<br/>Adaptee 카탈로그 주입 포트"])
 
     IND --> TYPES
-    SIZ --> TYPES
+    PAT --> TYPES
+    PAT --> IND
+    PAT --> SER
+    RES --> IND
+    RES --> PAT
+    RES --> SER
+    SER --> TYPES
+    MM --> TYPES
     CST --> TYPES
     CST -->|CostModel 값 소비| PORT
     EVAL --> TYPES
     PORT --> TYPES
     STRAT --> TYPES
-    STRAT -->|지표 값 소비| IND
+    STRAT --> MM
     EXE --> TYPES
     EXE --> CST
     EXE -->|CostModel 값 소비| PORT
     MGR --> STRAT
     MGR --> CFG
+    MGR --> MM
     MGR --> REG
 ```
 
@@ -516,8 +554,8 @@ services/backtest-service/
 
 ## §3.1 core-lib 컴포넌트 (공유)
 
-`core-lib`는 세 실행 모드가 공유하는 도메인 표준의 유일한 구현처다. 열 개 컴포넌트로 이뤄지며, 여기서 한 번
-정의해 모든 소비자가 참조한다. 아래 다이어그램이 열 컴포넌트와 그 내부 의존 방향을 담는다 — `types`가 바닥이고,
+`core-lib`는 세 실행 모드가 공유하는 도메인 표준의 유일한 구현처다. 열세 개 컴포넌트로 이뤄지며, 여기서 한 번
+정의해 모든 소비자가 참조한다. 아래 다이어그램이 열세 컴포넌트와 그 내부 의존 방향을 담는다 — `types`가 바닥이고,
 화살표는 "참조한다(의존)"를 뜻하며 역방향은 없다. `strategy/adaptees/`의 구현 전략(Adaptee)은 플랫폼 컴포넌트가
 아니라 참조 플러그인이므로 이 뷰에 컴포넌트로 등장하지 않는다 — 플랫폼은 전략을 끼우는 계약(`StrategyAdapter`)만
 그린다. `ports`·`eval`은 아래로는 `types`만 참조한다. `eval`의 소비자는 서비스 계층(Engine 등)뿐이라 이 내부 뷰가 아니라
@@ -535,6 +573,12 @@ flowchart TD
     subgraph CORELIB["core-lib (설치형 공유 패키지 · import core_lib)"]
         TYPES["types<br/>값 타입·금액 정밀도"]
         IND["indicators<br/>지표·프리미티브"]
+        PAT["patterns<br/>캔들 패턴·별도 레지스트리"]
+        subgraph SERIES["series 계열 선택 컴포넌트"]
+            SER["series<br/>공통 소비 Protocol"]
+            RES["series_resolution<br/>레지스트리 선택·실행 열쇠"]
+        end
+        MM["money_management<br/>결정→한계 지어진 계획"]
         STRAT["StrategyAdapter (Protocol)<br/>전략 판단 계약"]
         SIZ["sizing<br/>거래당 위험 규율"]
         CST["costs<br/>net 비용 4수식"]
@@ -545,9 +589,16 @@ flowchart TD
         CFG["StrategyConfig<br/>파라미터 해석·검증·스키마"]
     end
     IND --> TYPES
+    PAT --> TYPES
+    PAT -->|확정 캔들 계약 재사용| IND
+    PAT --> SER
+    RES --> IND
+    RES --> PAT
+    RES --> SER
+    SER --> TYPES
+    MM --> TYPES
     STRAT --> TYPES
-    STRAT -->|지표 값 소비| IND
-    SIZ --> TYPES
+    STRAT --> MM
     CST --> TYPES
     CST -->|CostModel 값 소비| PORT
     EXE --> TYPES
@@ -557,6 +608,7 @@ flowchart TD
     EVAL --> TYPES
     MGR -->|스키마 취득·Adaptee 생성| STRAT
     MGR -->|스키마 주입해 resolve| CFG
+    MGR -->|정책 runtime 조합| MM
     MGR -->|주입 포트 경유| PORT
 ```
 
@@ -566,23 +618,26 @@ flowchart TD
 
 | 컴포넌트 | 책임 | 인터페이스 경계 (공개 표면 · 하지 않음) | 구성 (§2 트리) |
 |---|---|---|---|
-| `types` | 세 실행 모드가 공유하는 값 타입·금액 정밀도의 유일한 정의처 | 공개: `Candle`·`TradingSignal`(판단 전용, 수량·방향 필드 없음)·`Order`·`Position`·`Trade`(`r0` 포함)·`Fill`·enums·`money`(ZERO·Q_*·quantize_*). 하지 않음: 계산·IO 없음; 캔들 검증(한 캔들 내부 `high ≥ max(open,close)`·`low ≤ min(open,close)`는 타입 계층, 시계열 단조는 적재 층이 강제) | `types/`의 candle·signal·order·position·trade·fill·enums·money |
+| `types` | 세 실행 모드가 공유하는 값 타입·금액 정밀도의 유일한 정의처 | 공개: 목표 판단 `DecisionIntent`·legacy 및 내부 구체화 경계 `TradingSignal`·`Candle`·`Order`·`Position`·`Trade`(`r0` 포함)·`Fill`·enums·`money`(ZERO·Q_*·quantize_*). 하지 않음: 계산·IO 없음; 캔들 검증(한 캔들 내부 `high ≥ max(open,close)`·`low ≤ min(open,close)`는 타입 계층, 시계열 단조는 적재 층이 강제) | `types/`의 candle·decision·signal·order·position·trade·fill·enums·money |
 | `indicators` | 공용 프리미티브 + 지표 표준(벡터화·증분 두 계산 방식). 계약은 등록된 지표를 **공통 방식으로 관리**하는 것이며 지표 개수가 아니다(목록·단위는 §4.1) | 공개: `registry.get(name, params)`·`compute_batch(candles, enabled_set)`·`IndicatorState.update(candle)`·`contracts.assert_finalized`. 하지 않음: 확정 캔들만 입력(`close_time ≤ 판단 시각`); 계산은 float64(Decimal 변환은 `execution` 관문 소관); 계산 대상은 run 설정이 결정 | `indicators/`의 primitives·지표군 9파일·donchian·registry·contracts |
-| `StrategyAdapter` | 전략을 끼우는 판단 계약(Strategy 패턴)의 선언 | 공개: `StrategyAdapter`(`typing.Protocol`) — `get_metadata()`·`get_parameter_schema()`·`analyze(market_data, position?) → TradingSignal`; metadata에 `required_indicators`·`min_history`·`timeframe`·프로파일 선언. 하지 않음: 판단만(읽기·저장·루프 없음); Adaptee는 stateless; 미래 데이터 자가 인출 없음(look-ahead는 Engine 피드 경계가 통제); 파라미터 스키마는 선언만(해석은 `StrategyConfig`); 진입·청산 엣지는 각 Adaptee 소유(범위 밖); 트레일링은 순수 함수 호출(상속 아님·유보) | `strategy/base.py`·`profile.py`·`trailing/`(유보) |
-| `sizing` | 거래당 위험 규율과 사이징 인스턴스 | 공개: `risk_money.size(equity, stop_distance, risk_per_trade ≤ 1%)`·`turtle_unit`·`wallet_pct.size`(호환)·`kelly.cap`·`exposure_limit`(단일 시장·상관군·단일 방향 위험 합 한도 검사). 하지 않음: 엣지 창조 없음(엣지는 진입 신호); `1R = |체결가 − 최초 보호 스탑| × 수량`이고 `1R ≤ 1%`; pct 경로는 보장 실패 시 비준수 플래그 의무 | `sizing/`의 risk_money·turtle_unit·wallet_pct·kelly·exposure_limit |
+| `patterns` | 캔들 패턴 계산 신원·증분 상태·네 출력 계약의 별도 등록처 | 공개: `PatternSpec`·`PatternState`·`PatternRegistry`·TA-Lib 어댑터. 하지 않음: 지표 레지스트리에 패턴을 섞지 않음; 워밍업 뒤 비일치는 `0.0`, 워밍업 전만 NaN; 확인을 과거 패턴 캔들에 소급하지 않음 | `patterns/`의 registry·outputs·primitives·talib_*·specs |
+| `series` | 지표와 패턴을 두 실행면이 한 경로로 소비하게 하는 최소 Protocol과 선택 해석 | 공개: `SeriesSpec`·`SeriesState`·`resolve_series_specs`·`series_specs_from_descriptors`·`series_key`. 하지 않음: `IndicatorSpec`과 `PatternSpec`의 계산 신원을 합치지 않음; `all`에서도 패턴 전체를 자동 활성화하지 않음 | `series/contracts.py`·`series_resolution.py` |
+| `money_management` | 전략 결정을 보호가격·요청 수량·요청 leverage가 있는 한계 지어진 계획으로 변환 | 공개: `MoneyManagementPolicy`·manual/turtle 정책·값 타입·`MoneyManagementFactory`. 하지 않음: 진입·청산 edge, 계좌 전체 승인, 주문 전송을 소유하지 않음 | `money_management/`의 models·policies·registry |
+| `StrategyAdapter` | 전략을 끼우는 판단 계약(Strategy 패턴)의 선언 | 공개: `StrategyAdapter`(`typing.Protocol`) — `get_metadata()`·`get_parameter_schema()`·`analyze(market_data, position?) → DecisionIntent | TradingSignal | None`; metadata에 계열·이력·timeframe·프로파일·`MoneyManagementSupport` 선언. 현재 `VesselReference`는 `DecisionIntent`를 반환하고 다른 legacy 전략의 `TradingSignal`은 호환 경계로 수용한다. 하지 않음: 데이터 읽기·저장·루프·보호가격·수량·leverage 계산 | `strategy/base.py`·`profile.py`·`adaptees/`·`trailing/`(예약) |
+| `sizing` | 거래당 위험 규율과 사이징 인스턴스 | 공개: `risk_money.size(risk_per_trade, equity, stop_distance)`·`turtle_unit`·`wallet_pct.size`(호환)·`kelly.cap`·`exposure_limit`(단일 시장·상관군·단일 방향 위험 합 한도 검사). 하지 않음: 엣지 창조 없음(엣지는 진입 신호); `1R = |체결가 − 최초 보호 스탑| × 수량`이고 `1R ≤ 1%`; pct 경로는 보장 실패 시 비준수 플래그 의무 | `sizing/`의 risk_money·turtle_unit·wallet_pct·kelly·exposure_limit |
 | `costs` | net 손익 4개 비용 수식 표준(값은 주입) | 공개: `fee.calc`·`slippage.apply`·`funding.settle`·`liquidation.price/is_triggered`. 하지 않음: 비용 값 미보유(전량 `CostModel` 주입); 펀딩은 이산 정산(UTC 경계, 정산가 = 경계 포함 최소 가용 TF 캔들 시가); 청산은 Isolated 우선·보수 방향 | `costs/`의 fee·slippage·funding·liquidation |
 | `execution` | 주문 라이프사이클·결정적 체결·포지션 장부·회계 + Decimal 단일 변환 관문 | 공개: `order_lifecycle`(VALID_TRANSITIONS)·`matcher`(체결 규칙)·`position_book`·`accounting.recompute`·`normalizer`. 하지 않음: `cash + position = equity` 유지·비용 1회 차감; float→Decimal 단일 변환은 `normalizer` 한 곳에서만(모든 Broker 어댑터가 `submit()`에서 통과, 어댑터별 캐스팅 금지); `decision_ts < execution_ts` 강제 | `execution/`의 order_lifecycle·matcher·position_book·accounting·normalizer |
 | `ports` | 환경별 관심사의 어댑터 경계(전부 ABC, 구현은 서비스 주입) | 공개: 7 ABC — `DataFeed`·`Broker`·`Clock`·`CostModel`·`EvidenceSink`·`CatalogStore`·`StrategyRegistry`. 하지 않음: 추상 계약만 선언(`types`만 참조, `execution` 미참조); wall-clock·네트워크·파일 IO는 구현 어댑터 안에만; 특정 DB 직접 의존 없음(레지스트리도 주입 포트) | `ports/`의 7파일 |
 | `eval` | 성과 수식 표준 1곳 + 판정 3단계 | 공개: `metrics`·`integrity.check`·`hard_gate.judge`·`profile.check_envelope`·`decision.decide`·`thresholds`. 하지 않음: 판정 순서는 무결성 → Hard Gate → Decision 고정; 통과선은 한 곳 구현(수식·임계값 수치는 §4가 확정); 프로파일은 established 회귀만 reject | `eval/`의 metrics·integrity·hard_gate·decision·thresholds·profile |
-| `Adapter Manager` | Adaptee 생성(Factory)·lifecycle + 구현 목록 레지스트리 | 공개: `create(strategy_id, raw_config) → StrategyAdapter`(내부에서 `StrategyConfig` 해석 호출)·lifecycle·`registry.list()/register()`. 하지 않음: 전략 결정 로직·파라미터 검증 로직 미보유(각각 Adaptee·`StrategyConfig`); 레지스트리 DB 접근은 주입 포트로만(core-lib은 특정 DB 직접 의존 없음) | `strategy/manager.py`·`registry.py`·`factory.py` |
+| `Adapter Manager` | Adaptee 생성(Factory)·lifecycle·구현 목록 레지스트리와 정책 runtime 조합 | 공개: `create(strategy_id, raw_config) → StrategyAdapter`·`create_runtime(strategy_id, raw_config, money_management_config) → StrategyRuntime`·lifecycle·`registry.list()/register()`. 정책 id 지원 여부와 turtle의 signal-exit capability를 검사한다. 하지 않음: 전략 결정·정책 수식·파라미터 검증 로직 미보유 | `strategy/manager.py`·`registry.py`·`factory.py` |
 | `StrategyConfig` | 전략 파라미터 config의 해석·검증·직렬화·스키마 노출 | 공개: `resolve(schema, raw_config) → ResolvedConfig`·`json_schema(schema)`·`serialize/version`(스키마를 값으로 받아 무순환; 정확한 시그니처는 §4.2). 하지 않음: 스키마 선언은 Adaptee 소유(여기서 재정의 금지); 값은 호출자 소유(소스 미보유); 파라미터 스윕·실행 설정은 범위 밖(`ConfigLayer`) | `strategy/config.py` |
 
 유보한 것과 표준에 더한 파일만 따로 정리한다.
 
-- **구현 전략·트레일링은 유보(지금 만들지 않음).** `strategy/adaptees/`의 구현 전략과 `strategy/trailing/`은 지금은
-  두지 않는다. 첫 검증 전략은 트레일링 없이 ATR 기반 고정 손절·익절로 만든다.
-- **트레일링 재도입 시.** 트레일링을 쓰는 전략이 들어올 때 `trailing`을 하나의 표준 계산기로 되살리고, 두 구현의
-  결과가 같은지(파리티) 확인한다. 표준 자리는 트리에 남아 있고, 컴포넌트 계약은 바뀌지 않는다.
+- **현재 참조 Adaptee.** `strategy/adaptees/vessel_reference.py`의 `VesselReference`가 EMA 9와 EMA 21로 진입·청산
+  edge만 판단하고 `DecisionIntent`를 반환한다. ATR 보호가격과 수량 및 leverage는 전략이 아니라 정책이 만든다.
+- **트레일링 예약 상태.** `strategy/trailing/trailing_stop.py`에는 예약 위치를 알리는 docstring만 있고 계산 클래스나
+  함수가 없다. 열거형에 trailing 값은 있으나 matcher가 명시적으로 거부하므로 실행 가능한 기능이 아니다.
 - **`execution/normalizer` — 표준에 더한 파일.** float→Decimal 변환을 한 곳에 모은다.
 - **`ports/StrategyRegistry` — 표준에 더한 파일.** 전략(Adaptee) 목록 접근을 주입 포트로 분리해, `core_lib`이 특정
   DB에 직접 묶이지 않게 한다.
@@ -674,7 +729,7 @@ flowchart TD
 
 | 어댑터 (backtest 구현)   | 구현하는 포트 ABC        | 구체 동작                                                                                                                                                                                                                                                            | core_lib 소비                                            | 저장소 접근                      |
 | ------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ | --------------------------- |
-| DataFeed 구현         | `DataFeed`         | 과거 확정 OHLCV·funding·mark_price를 **전략 TF 캔들**로 공급, `up_to` 경계 이후 캔들 미노출(look-ahead 구조 배제). 1분 하위 집행 피드는 유보되어 이 어댑터 표면은 전략 TF 캔들 기준이며, 1분 트리거 walk·트레일링 파리티 편차는 Engine 설계(§4.4)에서 확정하되 소비 전략이 없어 재유보                                                               | `ports.DataFeed`·`types.Candle`                        | `crypto_data` 읽기(백테스트 미기록)  |
+| DataFeed 구현         | `DataFeed`         | 과거 확정 OHLCV·funding·mark_price를 timeframe별로 공급하고 `up_to` 경계 이후 캔들을 노출하지 않는다. Engine은 전략 TF, funding 근거 1분봉, turtle 정책의 별도 일봉을 읽지만 캔들 내 trigger에는 현재 전략 TF만 사용한다. | `ports.DataFeed`·`types.Candle` | `crypto_data` 읽기(백테스트 미기록) |
 | Broker 구현           | `Broker`           | 결정적 시뮬 체결(다음 캔들 시가 기본·intrabar 트리거·캔들 내 손절·익절 동시 도달 시 손절 우선 OHLC-locked·갭·수량 절삭) + `CostModel` 적용. `submit()`은 `core_lib.execution.normalizer`(공유)를 통과해 float→Decimal 단일 변환 — 어댑터 자체 캐스팅 없음                                                                      | `ports.Broker`·`execution`(matcher·normalizer)·`costs` | —                           |
 | Clock 구현            | `Clock`            | 시뮬 캔들 시각 공급(결정적, wall-clock 금지)                                                                                                                                                                                                                                  | `ports.Clock`                                          | —                           |
 | CostModel 구현        | `CostModel`        | 보수적 주입 시작 기본값 공급(수수료·유지증거금률·펀딩 정산 간격·펀딩 fallback·pct 사이징 등 — 구체 수치는 CostModel 클래스가 정본, §4.3); 슬리피지는 호환 bps 기본이되 표준 경로는 스프레드 절반 + 충격 스트레스. 부과 규칙·fallback rate만 소유(실측 rate는 미소유) | `ports.CostModel`                                      | 없음(펀딩 실측 rate는 DataFeed 소유) |
@@ -817,7 +872,7 @@ flowchart TD
 - **그대로 두는 것** — 신호 큐 소비자, 서비스 소유 live Broker 어댑터(`submit()`은 `core_lib.execution.normalizer`
   통과), `wallet_db`. 큐·폴링·HTTP·WebSocket 등 라이브 인프라도 wallet에 그대로 둔다.
 - **유보·기타** — wall-clock 즉시 체결(`filled_at = now()`)은 `Clock` 포트·`fill_timing`으로 대체. 구 import 경로엔
-  re-export shim. 트레일링은 유보(현행 wallet 3곳 중복은 재도입 시 하나로 합침).
+  re-export shim이 있다. 트레일링 열거형은 남아 있지만 계산 구현이 없고 matcher가 거부한다.
 
 ---
 
@@ -890,13 +945,14 @@ Ehlers 필터 계수, Wilder 평활 상수, T3 볼륨 팩터)만은 그 양이 �
 
 ### §4.1.1 `types` 컴포넌트
 
-값 타입의 단일 정의처다. 다이어그램은 값 타입 일곱(`Candle`·`TradingSignal`·`Order`·`OrderRequest`·`Fill`·
-`Position`·`Trade`), 금액 정밀도 유틸리티 `money`, ENUM 여덟과 그 관계를 담는다.
+값 타입의 단일 정의처다. 다이어그램은 목표 판단 `DecisionIntent`, legacy 및 내부 구체화 경계 `TradingSignal`을
+포함한 값 타입 여덟(`Candle`·`DecisionIntent`·`TradingSignal`·`Order`·`OrderRequest`·`Fill`·`Position`·`Trade`),
+금액 정밀도 유틸리티 `money`, ENUM 아홉과 그 관계를 담는다.
 
 **타입마다 수치 정밀도가 갈리는 이유.** 값이 어느 경로에 놓이느냐가 그 타입의 정밀도를 정한다.
 
 - **판단 경로는 `float`** — 지표를 계산하고 전략이 판단하는 길이다. 값이 많고 자주 계산되며 끝자리 오차가 판단을
-  뒤집지 않으므로 빠른 `float`를 쓴다. `Candle`·`TradingSignal`과, 체결 관문 이전의 float 주문 요청
+  뒤집지 않으므로 빠른 `float`를 쓴다. `Candle`·`DecisionIntent`·`TradingSignal`과, 체결 관문 이전의 float 주문 요청
   `OrderRequest`가 여기 있다.
 - **체결·금액 경로는 `Decimal`** — 실제로 돈이 오가고 장부에 남는 길이다. 끝자리 오차가 체결 여부와 잔고를 바꾸므로
   오차 없는 `Decimal`을 쓴다. `Order`·`Fill`·`Position`·`Trade`가 여기 있다.
@@ -926,7 +982,25 @@ classDiagram
         +Optional~int~ trade_count
         +validate() None
     }
+    class DecisionAction {
+        <<enumeration>>
+        ENTER_LONG
+        ENTER_SHORT
+        EXIT
+        HOLD
+    }
+    class DecisionIntent {
+        <<frozen>>
+        +DecisionAction action
+        +str symbol
+        +datetime timestamp
+        +float reference_price
+        +float confidence
+        +str reason
+        +Mapping metadata
+    }
     class TradingSignal {
+        <<legacy and internal materialization>>
         +str symbol
         +datetime timestamp
         +float confidence
@@ -1118,6 +1192,7 @@ classDiagram
         SELL
         HOLD
     }
+    DecisionIntent *-- DecisionAction
     Order ..> money : quantize
     Fill ..> money : quantize
     Position ..> money : quantize
@@ -1160,17 +1235,50 @@ classDiagram
       `execution.normalizer`)이 `Decimal(str(x))` 직후에 호출하는 유일한 자릿수 확정 지점이다.
 - **불변식** — 없음(자릿수 규약을 정의만 하고, 강제는 `normalizer`가 관문에서 한다).
 
+#### `DecisionIntent`
+
+```mermaid
+classDiagram
+    direction LR
+    class DecisionAction {
+        <<enumeration>>
+        ENTER_LONG
+        ENTER_SHORT
+        EXIT
+        HOLD
+    }
+    class DecisionIntent {
+        <<frozen>>
+        +action DecisionAction
+        +symbol str
+        +timestamp datetime
+        +reference_price float
+        +confidence float
+        +reason str
+        +metadata Mapping
+    }
+    DecisionIntent *-- DecisionAction
+```
+
+- **개요** — 전략이 무엇을 할지 명시적으로 반환하는 목표 판단 타입.
+- **책임** — `ENTER_LONG`·`ENTER_SHORT`·`EXIT`·`HOLD` 행동, 판단 기준 가격·시각·근거와 메타데이터만 담는다.
+  `stop_loss`·`take_profit`·`quantity`·`leverage`·`market_type`·계좌 상태는 담지 않는다.
+- **필드** — `timestamp`는 timezone-aware여야 하고 `reference_price`는 유한한 양의 float, `confidence`는 유한한
+  0 이상 1 이하의 float다. `metadata`는 생성 시 읽기 전용 매핑으로 동결된다.
+- **불변식** — 방향은 보호가격의 상대 위치가 아니라 `DecisionAction`으로 명시된다. 현재 `VesselReference`가 이
+  타입을 반환하며, 진입 결정은 자금관리 정책의 입력이 된다.
+
 #### `TradingSignal`
 
-- **개요** — 전략 `analyze()`의 반환형이자 판단 전용 타입.
-- **책임** — 판단의 근거와 전략이 제안하는 보호 수준만 담는다. 주문 방향(`OrderSide`)·수량 필드를 갖지 않는다 —
-  수량은 사이징(§4.3.3)이, 주문 방향·라우팅은 실행 계층(§4.3.1)이 소유한다. 방향 필드가 없으므로 방향과 행동은
-  신호가 아니라 신호를 소비하는 실행 드라이버(§4.4의 Engine)가 아래 규칙으로 도출한다.
-    - **도출 입력** — 현행 signal-service의 `TradingSignal`은 방향 필드 `signal_type`(BUY=롱/SELL=숏/HOLD)을
-      갖고 주문 구성에 직접 소비됐지만, 신규 타입은 이 방향·수량 결합을 **의도적으로 뗐다**. 도출에 쓰는 것은
-      **보호 수준의 유무·기하**와 **`analyze`에 넘긴 `current_position` 문맥** 둘뿐이며, 아래 세 갈래가 서로
-      겹치지 않는다.
-        - **관망(HOLD)** — `analyze()`가 `None`을 반환하면 아무 행동도 하지 않는다.
+- **개요** — legacy 전략의 반환형이자 `DecisionIntent`를 정책 적용 뒤 실행·지속 형식으로 구체화할 때 쓰는 호환
+  타입. 신규 전략의 목표 반환 계약은 위 `DecisionIntent`다.
+- **책임** — 판단 근거와 이미 정해진 보호 수준·시장 종류·요청 leverage를 담는다. 주문 방향(`OrderSide`)·수량
+  필드는 갖지 않으며, 방향과 행동은 legacy 호환 경계에서 실행 드라이버가 아래 규칙으로 도출한다.
+    - **도출 입력** — core-lib의 `TradingSignal`에는 `signal_type`이 없다. signal-service는 보호 수준의 유무·기하와
+      `analyze`에 넘긴 `current_position` 문맥으로 `SignalIntent`·`PositionSide`를 도출한 뒤, 서비스 지속 값인
+      `PersistedSignal.signal_type`을 정한다. `DecisionIntent`에서 구체화한 신호에는 원래 행동을
+      `metadata.decision_action`으로 함께 남긴다. 아래 세 갈래는 서로 겹치지 않는다.
+        - **관망(HOLD)** — `analyze()`가 `None` 또는 `DecisionAction.HOLD`를 반환하면 아무 행동도 하지 않는다.
         - **전략 청산(EXIT)** — `stop_loss`와 `take_profit`이 둘 다 NULL인 신호는 청산 의도다(보호할 새 포지션이
           없기 때문). 보유 포지션을 전량 청산하고 `ExitReason.SIGNAL_EXIT`로 기록하며, 무포지션이면 무동작이다.
           전략이 방향 없이도 "관망이 아니라 지금 평평하게 나가라"를 표현하는 유일한 경로이며, 리버설과 구분된다.
@@ -1186,12 +1294,12 @@ classDiagram
           무동작, 피라미딩 활성 시에만 증량). 이 절이 고정하는 것은 방향 없는 신호를 방향·행동으로 읽는 **계약**
           이며, `current_position` 문맥에 따른 최종 행동 선택과 노출 한도 검사의 상세 실행 흐름은 §4.4 Engine이
           소유·확정한다.
-    - **`SignalType`의 자리** — 방향 열거형 `SignalType`(BUY/SELL/HOLD)은 이 타입의 필드가 아니다. 라이브 경로가
+    - **`SignalType`의 자리** — 방향 열거형 `SignalType`(BUY/SELL/HOLD)은 이 타입의 필드가 아니다. signal-service가
       signal_db에 신호를 적재·enqueue할 때 드라이버가 위 규칙으로 도출해 쓰는 지속 계층 전용 값으로만 남긴다.
 - **상속관계** — 없음(독립 값 타입).
-- **필드** — `price`는 실행가가 아니라 판단 기준가(신호 캔들 종가)이며 실제 체결가는 다음 캔들 시가에서
-  정해진다. `stop_loss`·`take_profit`은 전략이 제안하는 최초 보호 스탑·목표가로 NULL을 허용하고, `confidence`는
-  0~1이다.
+- **필드** — `price`는 실행가가 아니라 판단 기준가이며 실제 체결가는 다음 캔들 시가에서 정해진다.
+  `stop_loss`·`take_profit`은 legacy 전략이 제안했거나 자금관리 정책이 만든 보호가격으로 NULL을 허용하고,
+  `leverage`는 legacy 입력 또는 정책 요청값이며 `confidence`는 0~1이다.
 - **메서드** — 없음(순수 값. 판단은 이 타입이 아니라 전략의 `analyze()`가 한다).
 - **불변식** — statelessness. 순수 값이며 계산·입출력을 갖지 않는다. Adaptee가 상태를 갖지 않는다는 불변식과
   맞물려, 같은 입력은 항상 같은 신호를 만든다.
@@ -1316,7 +1424,7 @@ classDiagram
 - `LIMIT` — 지정가 주문.
 - `STOP_MARKET` — 스탑 가격에 닿으면 시장가로 나가는 손절 주문.
 - `TAKE_PROFIT_MARKET` — 목표가에 닿으면 시장가로 나가는 익절 주문.
-- `TRAILING_STOP_MARKET` — 트레일링 스탑 주문. 트레일링 재도입에 대비해 값만 남긴다(§4.2에서 유보).
+- `TRAILING_STOP_MARKET` — 열거형 값은 남아 있지만 matcher가 `NotImplementedError`로 거부하는 예약 주문이다.
 
 #### `OrderSide` (ENUM)
 
@@ -1325,8 +1433,9 @@ classDiagram
 - `BUY` — 매수.
 - `SELL` — 매도.
 
-이것은 **실행 계층의 주문 방향**이며 전략의 판단 방향과 다르다. `TradingSignal`은 방향 필드를 갖지 않고, 이 값은
-실행 드라이버가 보호 수준의 기하로 도출한다.
+이것은 **실행 계층의 주문 방향**이며 전략의 판단 행동과 다르다. 목표 계약에서는 `DecisionIntent.action`이 행동을
+명시하고, 정책 적용 뒤 주문으로 바꿀 때 `OrderSide`가 정해진다. legacy `TradingSignal`에는 방향 필드가 없으므로
+호환 드라이버가 보호 수준의 기하와 현재 포지션 문맥으로 방향을 도출한다.
 
 #### `OrderStatus` (ENUM)
 
@@ -1365,7 +1474,7 @@ classDiagram
 
 - `STOP_LOSS` — 손절가 도달.
 - `TAKE_PROFIT` — 목표가 도달.
-- `TRAILING_STOP` — 트레일링 스탑 도달. 트레일링 재도입에 대비해 값만 남긴다.
+- `TRAILING_STOP` — 열거형 값은 존재하지만 현재 matcher가 trailing 주문을 거부하므로 생성되지 않는 예약 사유다.
 - `LIQUIDATION` — 강제청산. 거래소(라이브)가 집행했거나 매처(백테스트·페이퍼)가 검출한 것이며, 전략이 신호한
   것이 아니다(§4.3.2).
 - `SIGNAL_EXIT` — 전략이 낸 청산 신호(위 방향·행동 도출 규칙의 EXIT 갈래).
@@ -1375,7 +1484,8 @@ classDiagram
 
 #### `SignalType` (ENUM)
 
-신호의 방향. 현행 signal-service의 값 그대로이나, 쓰임을 **지속 계층 전용**으로 좁힌다.
+신호의 방향. core-lib에 정의되어 있지만 전략 판단 계약에는 쓰이지 않고, signal-service의 `PersistedSignal` 지속
+경계에서만 사용한다.
 
 - `BUY` — 롱 의도.
 - `SELL` — 숏 의도.
@@ -1384,9 +1494,10 @@ classDiagram
 `TradingSignal`의 필드가 **아니다.** 라이브 드라이버가 위 방향·행동 도출 규칙으로 값을 정해 signal_db 적재·
 enqueue에만 쓰며, 백테스트 판단 경로는 이 ENUM을 쓰지 않는다.
 
-### §4.1.2 `indicators` 컴포넌트
+### §4.1.2 `indicators`·`patterns`·`series` 컴포넌트
 
-지표의 유일 구현처다. 다이어그램은 지표 명세 `IndicatorSpec`, 등록·조회 `IndicatorRegistry`, 증분 상태
+지표와 캔들 패턴은 서로 다른 레지스트리와 계산 신원을 유지하되 두 실행면에서는 공통 `SeriesSpec`·`SeriesState`
+계약으로 소비된다. 첫 다이어그램은 지표 명세 `IndicatorSpec`, 등록·조회 `IndicatorRegistry`, 증분 상태
 `IndicatorState`, look-ahead 계약 `contracts`, 공용 프리미티브 `primitives`와 그 관계를 담는다. 한 지표는 같은 값을 내는 두 가지 계산
 방식을 가진다. **벡터화 방식**(`compute_vectorized`)은 확정된 전 구간을 한 번에 계산하는 연구·일괄 계산
 인터페이스이자 증분 구현을 독립적으로 대조하는 일치 검증 기준이다. **증분 방식**(`IndicatorState.update`)은 확정
@@ -1460,6 +1571,83 @@ classDiagram
     IndicatorState ..> primitives
     IndicatorRegistry ..> contracts
 ```
+
+```mermaid
+classDiagram
+    direction LR
+    class SeriesSpec {
+        <<Protocol>>
+        +identifier str
+        +name str
+        +params Mapping
+        +version str
+        +min_history int
+        +undefined_outputs tuple
+        +make_state() SeriesState
+    }
+    class SeriesState {
+        <<Protocol>>
+        +warmed_up bool
+        +seed(candles: Sequence) None
+        +update(candle: Candle) SeriesValue
+    }
+    class IndicatorSpec
+    class IndicatorState
+    class PatternSpec {
+        <<frozen>>
+        +name str
+        +params Mapping
+        +version str
+        +explicit_min_history int
+        +undefined_outputs tuple
+        +identifier str
+        +min_history int
+        +compute_vectorized(candles: Sequence) PatternSeries
+        +make_state() PatternState
+    }
+    class PatternState {
+        <<Protocol>>
+        +min_history int
+        +warmed_up bool
+        +seed(candles: Sequence) None
+        +update(candle: Candle) PatternValue
+        +current() PatternValue
+    }
+    class PatternRegistry {
+        +get(name: str, params: Mapping) PatternSpec
+        +register(spec: PatternSpec) None
+        +list() list~PatternSpec~
+        +names() set~str~
+        +specs_for(enabled_set: Collection) list~PatternSpec~
+        +specs_from_descriptors(descriptors: Collection) list~PatternSpec~
+        +resolve_enabled(mode: str, declared: Collection, explicit: Collection) set~str~
+        +resolve_specs(mode: str, declared: Collection, explicit: Collection) list~PatternSpec~
+        +compute_batch(candles: Sequence, enabled_set: set) dict
+    }
+    class SeriesResolution["core_lib.series_resolution"] {
+        <<module>>
+        +normalize_series_name(name: str) str
+        +series_key(spec: SeriesSpec) str
+        +assert_disjoint_series_registry_names(indicators: IndicatorRegistry, patterns: PatternRegistry) None
+        +split_series_descriptors(descriptors, indicators, patterns) SplitSeriesDescriptors
+        +series_specs_from_descriptors(descriptors, indicators, patterns) list~SeriesSpec~
+        +resolve_series_specs(mode, declared, explicit, indicators, patterns) list~SeriesSpec~
+    }
+    IndicatorSpec ..|> SeriesSpec
+    PatternSpec ..|> SeriesSpec
+    IndicatorState ..|> SeriesState
+    PatternState ..|> SeriesState
+    PatternRegistry *-- PatternSpec
+    PatternSpec --> PatternState
+    SeriesResolution --> IndicatorRegistry
+    SeriesResolution --> PatternRegistry
+    SeriesResolution --> SeriesSpec
+```
+
+`IndicatorSpec`와 `PatternSpec`는 상속으로 하나의 계산 타입이 되지 않는다. 두 타입이 구조적으로 만족하는
+`SeriesSpec`은 Engine과 `SignalGenerationService`가 실제로 읽는 일곱 멤버만 선언하고, `SeriesState`는 두
+실행면이 호출하는 `seed`·`update`와 `warmed_up`만 선언한다. `compute_vectorized`와 `current`는 batch 검증과 증분
+parity 확인을 위한 레지스트리별 API이며 실행 루프의 공통 소비 계약에는 없다.
 
 #### `IndicatorSpec`
 
@@ -1554,25 +1742,100 @@ classDiagram
     - `linreg` : 선형회귀.
 - **불변식** — 없음.
 
+#### `PatternSpec`·`PatternState`·`PatternRegistry`
+
+```mermaid
+classDiagram
+    direction LR
+    class PatternSpec {
+        +name str
+        +params Mapping
+        +version str
+        +explicit_min_history int
+        +min_history int
+        +undefined_outputs tuple
+        +identifier str
+        +make_state() PatternState
+        +compute_vectorized(candles: Sequence) PatternSeries
+    }
+    class PatternState {
+        +min_history int
+        +warmed_up bool
+        +seed(candles: Sequence) None
+        +update(candle: Candle) PatternValue
+        +current() PatternValue
+    }
+    class PatternRegistry {
+        +get(name: str, params: Mapping) PatternSpec
+        +register(spec: PatternSpec) None
+        +list() list~PatternSpec~
+        +names() set~str~
+        +specs_from_descriptors(descriptors: Collection) list~PatternSpec~
+        +resolve_specs(mode: str, declared: Collection, explicit: Collection) list~PatternSpec~
+        +compute_batch(candles: Sequence, enabled_set: set) dict
+    }
+    PatternRegistry *-- PatternSpec
+    PatternSpec --> PatternState
+```
+
+패턴 레지스트리는 지표 레지스트리와 별도로 이름·파라미터 조합을 계산 신원으로 등록한다. descriptor는 정확히
+`name`과 `params` 두 키를 가져야 하고 이름은 대소문자를 무시하며 파라미터는 등록값과 정확히 같아야 한다. 등록
+시 `PatternSpec.min_history`와 새 상태의 `min_history`가 다르면 즉시 거부한다. 현재 기본 레지스트리는 TA-Lib
+0.7.1 포트에 기반한 61개 조합과 61개 고유 이름을 가진다. 이 개수는 현재 등록 상태일 뿐 계약이 아니다.
+
+패턴 하나는 캔들마다 기본 일치 키, `_dir`, `_strength`, `_confirm`의 네 값을 낸다. 워밍업 전에는 네 값이 모두
+NaN이고, 워밍업 뒤 판단을 수행한 비일치는 `0.0`이다. 확인은 미래 패턴 캔들에 소급 기록하지 않고 확인이 실제로
+일어난 뒤의 캔들에 기록한다.
+
+#### `series_resolution`
+
+```mermaid
+sequenceDiagram
+    participant C as Engine 또는 SignalGenerationService
+    participant R as series_resolution
+    participant IR as IndicatorRegistry
+    participant PR as PatternRegistry
+    participant S as SeriesState
+    participant A as StrategyAdapter
+
+    C->>R: resolve_series_specs(mode, declared, explicit, indicators, patterns)
+    R->>R: assert_disjoint_series_registry_names(indicators, patterns)
+    R->>R: descriptor를 이름 소유 레지스트리로 분리
+    alt mode가 auto임
+        R->>IR: 선언된 지표 descriptor 해석
+        R->>PR: 선언된 패턴 descriptor 해석
+    else mode가 explicit임
+        R->>IR: 명시 지표 descriptor 해석
+        R->>PR: 명시 패턴 descriptor 해석
+    else mode가 all임
+        R->>IR: 등록 지표 전체 조회
+        R->>PR: 선언된 패턴 descriptor만 해석
+    end
+    R-->>C: IndicatorSpec 다음 PatternSpec 순서의 목록
+    C->>S: seed(확정 warm-up 캔들)
+    loop 새 확정 캔들
+        C->>S: update(candle)
+        S-->>C: SeriesValue
+        C->>R: series_key(spec)
+        R-->>C: 전략 입력 및 Evidence 열쇠
+        C->>A: analyze(market_data, current_position)
+    end
+```
+
+두 레지스트리의 이름은 원래 이름과 실행 열쇠 정규화 결과 모두에서 서로소여야 한다. `series_key`는 이름을
+소문자로 만들고 영숫자가 아닌 연속 문자를 밑줄로 바꾼 뒤 정렬한 `key=value` 파라미터를 붙인다. 예를 들어
+`EMA`, `period=9`의 실행 열쇠는 `ema:period=9`다. 이 열쇠는 대문자 이름과 `repr` 파라미터를 쓰는
+`IndicatorSpec.identifier`와 용도가 다르다.
+
+`auto`는 전략과 strategy-timeframe 정책이 선언한 지표·패턴만, `explicit`은 명시 목록만 먼저 해석한다. 백테스트
+Engine은 explicit 결과에 모든 필수 조합이 있는지 다시 확인한다. `all`은 등록 지표 전체와 전략이 선언한 패턴만
+계산하며 패턴 전체를 자동 활성화하지 않는다. signal-service는 현재 `auto`만 사용한다.
+
 #### 등록 지표 목록 (현재 수집분)
 
-**개수는 계약이 아니다.** 아래 표는 지금까지 수집한 지표를 정리한 것이다. 규칙이 불명확해 빠질 것도 있고 새
-지표가 들어올 수도 있으므로, 총수는 현재 상태를 적은 것이지 고정값이 아니다. 고정하는 것은 위에 적은 **공통 관리
-방식**이며, 목록의 증감은 `registry` 항목의 증감일 뿐 설계를 바꾸지 않는다. 그래서 구현자가 맞춰야 할 것은 "몇
-개를 만들었나"가 아니라 "**모든 지표가 같은 방식으로 등록·계산되는가**"다. 각 지표의 닫힌 형태 계산식은 지표
-계산 명세 표준이 계산 권위로 고정한다(구현까지 유지 참조).
-
-| 계열 | 지표 (현재 개수) |
-|---|---|
-| 추세·이동평균 (10) | DEMA, TEMA, T3, HMA, ZLEMA, ALMA, KAMA, VIDYA, McGinley Dynamic, Guppy GMMA |
-| 모멘텀·오실레이터 (27) | RSI, Stochastic(%K/%D), Stochastic RSI, MACD(+Histogram), PPO, TRIX, TSI, SMI, CMO, Williams %R, CCI, Ultimate Oscillator, Awesome Oscillator, Accelerator Oscillator, Fisher Transform, Connors RSI, QStick, Chande Forecast Oscillator, DeMarker, DPO, Schaff Trend Cycle, Relative Vigor Index(Ehlers), Laguerre RSI, Pretty Good Oscillator, KST, Coppock Curve, Special K |
-| 변동성 (12) | ATR, Bollinger Bands, %B, BandWidth, Keltner Channel, Donchian Channel, SuperTrend, Chandelier Exit, Ulcer Index, Relative Volatility Index(Dorsey), Chaikin Volatility, Mass Index |
-| 거래량 (10) | OBV, A/D Line, Chaikin Oscillator, CMF, MFI, Force Index, EMV, Klinger Volume Oscillator, NVI, PVI |
-| 추세강도·방향성 (6) | DMI/ADX 시스템, Vortex, Aroon, Choppiness Index, QQE, Random Walk Index |
-| Bill Williams (4) | Alligator, Fractals, Gator Oscillator, Market Facilitation Index |
-| 시장폭 (3) | McClellan Oscillator, McClellan Summation Index, TRIN/Arms |
-| 사이클·Ehlers (4) | MAMA/FAMA, Center of Gravity Oscillator, Roofing Filter, Sinewave/Instantaneous Trendline |
-| 기타 시스템 (6) | Parabolic SAR, Ichimoku Kinko Hyo, Elder Ray, Elder Impulse System, TD Sequential, Woodies CCI |
+**개수는 계약이 아니다.** 현재 기본 지표 레지스트리에는 91개 이름·파라미터 조합과 88개 고유 이름이 있다.
+`IndicatorRegistry.list()`의 결정적 정렬 결과가 현재 목록의 정본이며, 목록 증감은 레지스트리 항목의 증감일 뿐
+공통 관리 계약을 바꾸지 않는다. 각 지표의 닫힌 형태 계산식은 지표 계산 명세 표준이 계산 권위다.
 
 이 목록에 적용되는 규칙은 네 가지다. 각 항목은 **굵은 제목**과 그 뒤의 설명으로 되어 있다.
 
@@ -1589,9 +1852,8 @@ classDiagram
   등락 종목 수나 시장 전체 거래량 같은 별도 입력 채널이 있어야 계산된다. 단일 심볼의 OHLCV만으로는 그 입력이 없어
   비활성으로 둔다. 구현은 `required_inputs`에 필요한 채널을 선언하고, 그 채널이 없으면 `compute_batch`가 해당
   지표를 건너뛴다.
-- **첫 검증 전략 커버리지** — 첫 파이프라인 검증에 쓰는 전략이 반드시 필요로 하는 최소 지표 집합이다. EMA
-  9/21/55/200, RSI 14, Bollinger Bands(기간 20·표준편차 2.0), Stochastic(%K 14·%D 3), ATR 14, 거래량 이동평균
-  20이 여기 든다. 현재 목록이 이들을 빠짐없이 덮는다. 목록이 바뀌더라도 이 집합만은 계속 유지해야 한다.
+- **현재 참조 전략과 정책 요구** — `VesselReference`는 EMA 9와 EMA 21을 선언한다. manual 정책은 strategy
+  timeframe ATR 14를 별도로 선언하고, turtle 정책은 전략 입력과 분리된 일봉 `TURTLE_N`을 선언한다.
 
 #### 워밍업·seed 규약
 
@@ -1615,8 +1877,9 @@ classDiagram
 - **두 방식의 seed 통일** — 초기값 산정, `adjust` 여부, 표준편차 분모, 0 나눗셈 처리를 지표 계산 명세 표준이
   통일한다. 벡터화 방식과 증분 방식이 같은 규칙을 써야 초반 캔들에서도 값이 어긋나지 않는다.
 - **유효 시점** — 각 지표의 `min_history`만큼 캔들이 쌓이기 전 값은 유효하지 않다.
-- **preload** — 실행 드라이버는 평가 구간 시작 전에 `max(전략 min_history, 지표 최장 워밍업)` 캔들을 별도
-  preload하고, 그 구간의 신호는 버린다(§4.4에서 확정).
+- **preload** — 실행 드라이버는 평가 구간 시작 전에 `max(전략 min_history, 해석된 SeriesSpec의 최장 워밍업)`
+  캔들을 별도 preload한다. strategy-timeframe 정책 요구도 이 목록에 합쳐진다. 별도 일봉 정책 요구는 달력 구간
+  계산과 전용 정책 원천에서 처리한다.
 
 #### 지표 계산 플로우
 
@@ -1625,11 +1888,11 @@ classDiagram
 
 ```mermaid
 flowchart TD
-    CFG["run 설정: 계산 대상 모드<br/>auto · explicit · all"] --> RESOLVE["IndicatorRegistry.resolve_specs<br/>계산할 지표 명세 확정"]
-    RESOLVE --> INC["IndicatorState.seed 워밍업<br/>확정 캔들마다 update O(1)<br/>백테스트·라이브·페이퍼 실행"]
+    CFG["run 설정: 계산 대상 모드<br/>auto · explicit · all"] --> RESOLVE["series_resolution.resolve_series_specs<br/>지표·패턴 명세 확정"]
+    RESOLVE --> INC["SeriesState.seed 워밍업<br/>확정 캔들마다 update<br/>백테스트·signal-service 실행"]
     INC --> GATE["contracts.assert_finalized<br/>close_time ≤ 판단 시각 T"]
     GATE --> OUT["시각 t 지표 값<br/>전략 판단에 입력"]
-    RESOLVE --> VEC["compute_batch<br/>확정 전 구간 일괄 계산<br/>연구·일치 검증 전용"]
+    RESOLVE --> VEC["각 레지스트리 compute_batch<br/>확정 전 구간 일괄 계산<br/>연구·일치 검증 전용"]
     VEC -. 독립 일치 테스트 .-> INC
 ```
 
@@ -1639,13 +1902,15 @@ flowchart TD
 쓰인다. 두 방식의 값은 같아야 한다. 계산은 전부 `float`이고 Decimal 변환은 이 컴포넌트 밖 체결 관문에서만
 일어난다.
 
-## §4.2 전략 클래스 (+ config 해석 시퀀스)
+## §4.2 전략·자금관리 클래스 (+ config·runtime 조합 시퀀스)
 
 전략 계층은 "전략을 끼우는 자리"를 정의한다. 플랫폼은 판단 계약(`StrategyAdapter`)·생성(`Adapter Manager`)·
-파라미터 해석(`StrategyConfig`)만 소유하고, 각 전략(Adaptee)의 진입·청산 판단 자체는 전략 작성자 소유(범위 밖)다.
+파라미터 해석(`StrategyConfig`)만 소유하고, 각 전략(Adaptee)의 진입·청산 판단 자체는 전략 작성자 소유다.
 이 계층의 핵심 경계는 **파라미터 스키마를 Adaptee가 선언하고, StrategyConfig가 해석·검증하며, Adapter Manager가
 생성한다** — 이 세 책임이 겹치지 않게 갈린다. 다이어그램은 그 계약·관계를, 정의서 안의 시퀀스는 생성·해석 순서를
 담는다.
+
+### §4.2.1 전략 계약과 설정
 
 ```mermaid
 classDiagram
@@ -1654,23 +1919,35 @@ classDiagram
         <<Protocol>>
         +get_metadata() StrategyMetadata
         +get_parameter_schema() ParameterSchema
-        +analyze(dict, Optional~Position~) Optional~TradingSignal~
+        +analyze(market_data: dict~str,object~, current_position: Position|None) DecisionIntent|TradingSignal|None
     }
-    class Adaptee {
-        <<realization>>
+    class VesselReference {
+        <<Adaptee>>
+        +VERSION str
+        +config ResolvedConfig
         +get_metadata() StrategyMetadata
         +get_parameter_schema() ParameterSchema
-        +analyze(dict, Optional~Position~) Optional~TradingSignal~
+        +analyze(market_data: dict~str,object~, current_position: Position|None) DecisionIntent|None
     }
     class StrategyMetadata {
         +list~dict~ required_indicators
         +int min_history
         +list~str~ supported_timeframes
         +StrategyProfile profile
+        +MoneyManagementSupport money_management
+    }
+    class MoneyManagementSupport {
+        +tuple~str~ supported
+        +str|None default
+        +bool supports_external_stop
+        +bool supports_external_take_profit
+        +bool supports_signal_exit
+        +bool supports_pyramiding
     }
     class ParameterSchema {
         +dict~str_FieldSpec~ fields
         +bool extra_forbidden
+        +tuple cross_validators
     }
     class StrategyConfig {
         +resolve(ParameterSchema, dict) ResolvedConfig
@@ -1685,11 +1962,18 @@ classDiagram
         +str schema_version
     }
     class AdapterManager["Adapter Manager"] {
-        +create(str, dict) StrategyAdapter
-        +activate(str) None
-        +deactivate(str) None
+        +create(strategy_id: str, raw_config: Mapping) StrategyAdapter
+        +create_runtime(strategy_id: str, raw_config: Mapping, money_management_config: Mapping) StrategyRuntime
+        +activate(strategy_id: str) None
+        +deactivate(strategy_id: str) None
+        +is_active(strategy_id: str) bool
         +list_registered() list~str~
-        +register(str, dict) None
+        +register(strategy_id: str, meta: dict) None
+    }
+    class StrategyRuntime {
+        <<frozen>>
+        +StrategyAdapter strategy
+        +MoneyManagementPolicy|None money_management
     }
     class StrategyProfile {
         +str id
@@ -1705,27 +1989,30 @@ classDiagram
         +float envelope_tolerance
         +str envelope_status
     }
-    class TrailingStopCalculator {
-        <<reserved>>
-        +compute_initial_risk(float, float) float
-        +update(TrailingState, list~Candle~) float
-    }
     class FieldSpec {
         +str type
         +object default
         +tuple range
         +bool required
     }
-    class TrailingState {
-        <<reserved>>
-        +float current_stop
-        +float extreme_price
+    class DecisionIntent
+    class TradingSignal {
+        <<legacy boundary>>
     }
-    Adaptee ..|> StrategyAdapter
-    Adaptee ..> TrailingStopCalculator
+    class MoneyManagementPolicy {
+        <<Protocol>>
+    }
+    VesselReference ..|> StrategyAdapter
+    VesselReference --> ResolvedConfig
+    StrategyAdapter --> DecisionIntent
+    StrategyAdapter --> TradingSignal
     StrategyMetadata *-- StrategyProfile
+    StrategyMetadata *-- MoneyManagementSupport
     AdapterManager ..> StrategyConfig : delegate resolve
     AdapterManager ..> StrategyRegistry : injected
+    AdapterManager --> StrategyRuntime
+    StrategyRuntime *-- StrategyAdapter
+    StrategyRuntime *-- MoneyManagementPolicy
 ```
 
 > `StrategyRegistry`는 §4.3 `ports`가 정의하는 Adaptee 카탈로그 주입 포트(ABC)다. `Adapter Manager`가 이
@@ -1740,14 +2027,14 @@ classDiagram
   요구하며, `Adaptee`가 이 계약을 실현한다.
 - **필드** — 없음(계약만 정하는 Protocol이라 보유 속성이 없다).
 - **메서드**
-    - `get_metadata()` : 이 전략이 선언해 둔 메타데이터 — 필요 지표(`{name, params}` 목록)·최소 이력·지원
-      타임프레임·프로파일 — 를 반환한다. 값을 새로 만드는 게 아니라 Adaptee가 선언한 것을 그대로 넘겨준다.
+    - `get_metadata()` : 이 전략이 선언해 둔 메타데이터 — 필요 계열(`{name, params}` 목록)·최소 이력·지원
+      타임프레임·프로파일·자금관리 지원 capability — 를 반환한다.
     - `get_parameter_schema()` : 이 전략의 파라미터 스키마(각 필드의 타입·기본값·범위, 잉여 키 금지)를 반환한다.
       스키마는 "허용되는 파라미터가 무엇인가"에 대한 선언일 뿐이며, 실제 `raw_config` 해석·검증은 이 자리가 아니라
       `StrategyConfig`가 한다.
-    - `analyze(market_data, current_position)` : Engine이 push한 사전 계산 지표의 평평한 dict와 현재 포지션을
-      받아 판단을 반환한다. 진입·청산 판단이면 `TradingSignal`, 관망이면 `None`이며, 반환은 판단뿐이라 수량·주문
-      방향을 정하지 않는다.
+    - `analyze(market_data, current_position)` : 실행면이 push한 확정 캔들·사전 계산 계열 dict와 현재 포지션을
+      받아 `DecisionIntent | TradingSignal | None`을 반환한다. `DecisionIntent`가 목표 계약이고 `TradingSignal`은
+      다른 전략을 위한 legacy 호환 경계다. `VesselReference`는 이미 `DecisionIntent | None`을 반환한다.
 - **불변식**
     - **stateless** — 호출 간 상태를 보유하지 않는다. 같은 입력은 항상 같은 신호를 낸다.
     - **판단 전용** — 데이터 읽기·결과 저장·캔들 루프를 갖지 않는다(각각 Engine·포트 소관).
@@ -1756,21 +2043,22 @@ classDiagram
     - **라이브·백테스트 동형** — 입력 dict의 형태와 호출 계약이 두 환경에서 같다. 같은 코드가 두 환경에서 같은
       값을 본다.
 
-#### `Adaptee`
+#### `VesselReference`와 Adaptee 역할
 
-- **개요** — `StrategyAdapter` Protocol을 실현하는 실제 전략.
-- **책임** — 진입·청산 엣지와 파라미터 값을 소유한다. 이 둘은 전략 작성자 소유라 이 설계의 범위 밖이고, 플랫폼은
-  계약 형태만 정한다. 첫 검증 Adaptee는 트레일링을 제외한 개념의 신규 구현으로 ATR 기반 고정 손절·익절을 쓴다.
-- **상속관계** — `StrategyAdapter` Protocol을 실현(realize)한다. 트레일링은 상속이 아니라
-  `TrailingStopCalculator`의 순수 함수를 호출한다(첫 검증 스코프에서는 유보).
-- **필드** — 없음(전략별 파라미터 값은 각 구현이 불변 `ResolvedConfig`로 주입받으며, 이 설계가 필드로 고정하지
-  않는다).
+- **개요** — 코드에는 `Adaptee`라는 기반 클래스가 없다. 등록 클래스가 `StrategyAdapter`의 구조를 만족하면
+  Adaptee 역할을 하며, 현재 기본 실행 조립에 등록되는 참조 구현은 `VesselReference` 2.0.0이다.
+- **책임** — EMA 9와 EMA 21의 상대 위치로 진입·청산 edge만 판단한다. 무포지션에서는 명시적인
+  `ENTER_LONG`·`ENTER_SHORT`, 보유 중 regime가 뒤집히면 `EXIT`, 그 밖에는 `None`을 반환한다. ATR 손절·목표·수량·
+  leverage는 만들지 않는다.
+- **상속관계** — 기반 클래스를 상속하지 않고 `StrategyAdapter` Protocol을 구조적으로 만족한다.
+- **필드** — 생성 때 불변 `ResolvedConfig`를 받아 `config`로 보유한다. `VERSION`은 `2.0.0`이다.
 - **메서드**
     - `get_metadata` : 이 전략이 선언한 `StrategyMetadata`를 반환한다(계약은 `StrategyAdapter` 참조).
     - `get_parameter_schema` : 이 전략의 `ParameterSchema`를 반환한다.
-    - `analyze` : 이 전략의 진입·청산 판단을 수행한다. 이 판단 로직 자체가 전략 작성자 소유(범위 밖)의 핵심이다.
-- **불변식** — `StrategyAdapter`의 불변식(stateless·판단 전용·미래 데이터 자가 인출 금지·두 환경 동형)을 그대로
-  진다. 특히 stateless라 같은 입력은 같은 신호를 내고, 주입된 `ResolvedConfig`는 실행 중 바뀌지 않는다.
+    - `analyze` : 확정 캔들과 `ema:period=9`, `ema:period=21` 값을 읽어 `DecisionIntent | None`을 반환한다.
+- **불변식** — 같은 입력과 설정에 같은 판단을 내며, 데이터베이스·파일·네트워크·계좌 상태를 읽지 않는다. legacy
+  저장 설정 호환 때문에 `atr_stop_multiple`·`reward_risk`·`leverage`가 현재 `ParameterSchema`에 임시로 남지만
+  `analyze`가 이 값으로 보호가격이나 수량을 만들지는 않는다.
 
 #### `StrategyMetadata`
 
@@ -1779,13 +2067,16 @@ classDiagram
   선언을 실어 나른다.
 - **상속관계** — 없음(독립 값 타입).
 - **필드**
-    - `required_indicators` — 이 전략이 요구하는 지표 목록이다. 각 항목은 지표 이름과 파라미터의 쌍 `{name, params}`
-      이며(예: EMA 200이면 `name`은 `ema`, `params`는 `{"period": 200}`), Engine이 이 선언만큼 지표를 계산해
+    - `required_indicators` — 이 전략이 요구하는 등록 계열 목록이다. 각 항목은 이름과 파라미터의 쌍 `{name, params}`
+      이며, `series_resolution`이 지표 또는 패턴 소유 레지스트리로 보낸 뒤 실행면이 계산해
       `analyze`에 넘긴다.
     - `min_history` — 판단을 시작하기 전에 필요한 최소 캔들 수다. Engine이 워밍업 preload 길이를 정할 때 지표의
       최장 워밍업과 함께 큰 쪽을 취한다.
     - `supported_timeframes` — 이 전략이 도는 캔들 주기 목록이다(예: `["1h", "4h"]`).
     - `profile` — 이 전략의 형태 선언 `StrategyProfile`이다(아래 정의). 기대 범위 대조·회귀 판정의 근거가 된다.
+    - `money_management` — 허용 정책 id, 기본 정책, 외부 보호가격·신호 청산·피라미딩 capability를 담은
+      `MoneyManagementSupport`다. 현재 `VesselReference`는 manual과 turtle을 허용하고 기본은 manual이며,
+      외부 stop·take-profit과 signal exit는 참, pyramiding은 거짓이다.
 - **메서드** — 없음(순수 값).
 - **불변식** — 없음.
 
@@ -1857,12 +2148,17 @@ classDiagram
 - **필드** — 없음.
 - **메서드**
     - `create(strategy_id, raw_config)` : 생성을 오케스트레이션한다(아래 시퀀스).
+    - `create_runtime(strategy_id, raw_config, money_management_config)` : 위 생성 뒤 메타데이터가 정책을 지원하면
+      `MoneyManagementFactory`로 엄격히 해석한 정책을 결합해 `StrategyRuntime`을 반환한다. 정책 id가 지원 목록에
+      없으면 거부하고 turtle은 `supports_signal_exit`가 참일 때만 허용한다.
     - `activate` : Adaptee를 활성화한다.
     - `deactivate` : Adaptee를 비활성화한다.
     - `list_registered` : signal_db 레지스트리의 등록 목록을 조회한다.
-    - `register` : signal_db 레지스트리에 등록한다.
-- **불변식** — 레지스트리 DB 접근은 주입된 `StrategyRegistry` 포트로만 한다. 그래서 core-lib은 특정 DB에 직접
-  의존하지 않는다.
+    - `register` : 같은 id의 in-process 클래스가 있는지 확인한 뒤 외부 포트에 위임한다. 현재 backtest와 signal
+      서비스의 포트 구현은 읽기 전용이므로 쓰기는 `PermissionError`로 거부된다.
+- **불변식** — 레지스트리 DB 접근은 주입된 `StrategyRegistry` 포트로만 한다. 외부 카탈로그와 클래스의
+  `class_name`·`module_path`·`min_history`·`supported_timeframes`·`required_indicators_json`을 대조하고 어긋나면
+  실행을 거부한다. 전략 판·파라미터 기본값·프로파일·정책 capability는 현재 이 대조 범위에 없다.
 
 #### Adaptee 생성·config 해석 시퀀스
 
@@ -1873,30 +2169,41 @@ classDiagram
 sequenceDiagram
     participant E as Engine · signal-service 엔진
     participant AM as Adapter Manager
-    participant REG as StrategyRegistry (주입)
-    participant AD as Adaptee (전략 구현)
+    participant CR as StrategyRegistry (외부 카탈로그)
+    participant IR as InProcessStrategyRegistry
+    participant AD as 등록된 Adaptee 클래스
     participant SC as StrategyConfig
-    Note over E: strategy_id는 run 설정이 이미 고른 값이다.<br/>가용 전략 목록을 훑는 조회 StrategyRegistry.list는<br/>그 앞의 선택·등록 흐름이라 이 시퀀스에 넣지 않는다.
-    E->>AM: create(strategy_id, raw_config)
-    AM->>REG: get(strategy_id)
-    REG-->>AM: Adaptee 클래스 식별
+    participant AF as AdapterFactory
+    participant MF as MoneyManagementFactory
+    E->>AM: create_runtime(strategy_id, raw_config, money_management_config)
+    AM->>CR: get(strategy_id)
+    CR-->>AM: catalog_entry
+    AM->>AM: active·deprecated·외부 id 검사
+    AM->>IR: get(strategy_id)
+    IR-->>AM: adaptee_class
+    AM->>AM: 클래스 신원과 등록 이력 선언 대조
     AM->>AD: get_parameter_schema()
     AD-->>AM: ParameterSchema (값)
     AM->>SC: resolve(schema, raw_config)
     Note over SC: 기본값 병합 · extra=forbid · 타입/범위 · 교차필드 검증
     SC-->>AM: ResolvedConfig (불변)
-    AM->>AD: __init__(ResolvedConfig)
-    AD-->>AM: StrategyAdapter 인스턴스
-    AM-->>E: Adaptee
+    AM->>AF: create(adaptee_class, ResolvedConfig)
+    AF-->>AM: StrategyAdapter
+    AM->>AD: instance.get_metadata()
+    AD-->>AM: MoneyManagementSupport
+    alt supported가 비어 있음
+        AM-->>E: StrategyRuntime(strategy, None)
+    else 정책 지원 선언이 있음
+        AM->>MF: create(money_management_config)
+        MF-->>AM: MoneyManagementPolicy
+        AM->>AM: 정책 id와 turtle signal-exit capability 검사
+        AM-->>E: StrategyRuntime(strategy, policy)
+    end
 ```
 
-읽는 법: `strategy_id`는 이 시퀀스가 시작되기 전에 정해진다 — 사용자·run 설정이 등록된 전략 목록을 먼저 조회해
-(`Adapter Manager.list_registered()`, 내부적으로 `StrategyRegistry.list()`) 하나를 고른 값이다. 그래서 `create`는
-이미 아는 id로 `get(strategy_id)`를 불러 카탈로그에서 그 하나만 가져온다. 무엇이 있는지 훑는 목록 조회는 선택·등록
-흐름이라 이 생성 시퀀스에서는 의도적으로 뺐다. 그다음 스키마는 Adaptee가 선언하고, Config는 그 스키마 값을 받아
-해석하며, Manager가 생성을 소유한다. Config가 Adaptee를 되짚지 않으므로 의존은 한 방향으로만 흐른다 — Manager가
-Config와 Adaptee를 부르고, Config는 스키마 타입에만 의존한다. 레지스트리 조회는 주입 포트를 거쳐 core-lib이 DB에
-묶이지 않는다.
+외부 카탈로그는 실행 가능 여부와 운영자에게 보이는 선언을 제공하고, in-process 레지스트리는 실제 클래스를
+제공한다. 두 값이 어긋나면 어느 쪽이 낡았는지 추정하지 않고 거부한다. 그다음 스키마 선언·설정 해석·인스턴스 생성·
+정책 runtime 조합을 순서대로 수행한다. `StrategyConfig`는 스키마 값만 받아 Adaptee를 되짚지 않는다.
 
 #### `StrategyProfile`
 
@@ -1920,26 +2227,232 @@ Config와 Adaptee를 부르고, Config는 스키마 타입에만 의존한다. �
 - **불변식** — `envelope_status`(성숙도)가 순환 논리를 막는다. 아직 확립되지 않은(`provisional`) 기대 범위로 신규
   전략을 탈락시키지 않고, 확립된(`established`) 전략이 그 형태를 잃은 회귀만 reject한다.
 
-#### `TrailingStopCalculator` (유보)
+#### 트레일링 예약 상태
 
-- **개요** — ATR 트레일링의 표준 위치(순수 함수). 첫 검증 스코프에서는 유보.
-- **책임** — 고정 손절이 없는 전략에 트레일링 스탑과 최초 위험(`r0`)을 순수 함수로 제공한다. 첫 검증 스코프의 어떤
-  전략도 쓰지 않아 유보하며, 재도입 시 이 단일 표준으로 통합하고 파리티 기준을 확정한다.
-- **상속관계** — 없음(순수 함수 모음. 전략은 상속이 아니라 이 함수를 호출한다).
-- **필드** — 없음(순수 함수).
-- **메서드**
-    - `compute_initial_risk` : 최초 위험 `r0`를 계산해 제공한다(고정 손절이 없는 전략의 최초 보호 스탑).
-    - `update` : 트레일링 상태와 확정 캔들로 갱신된 스탑 수준을 낸다.
-- **불변식** — 없음(유보 상태라 이 절의 계약을 바꾸지 않는다).
+`strategy/trailing/trailing_stop.py`에는 예약 위치를 알리는 모듈 docstring만 있다. `TrailingStopCalculator`나
+`TrailingState` 클래스 및 계산 함수는 현재 코드에 없다. `OrderType.TRAILING_STOP_MARKET`과
+`ExitReason.TRAILING_STOP` 값은 존재하지만 matcher는 해당 주문을 `NotImplementedError`로 거부한다. 따라서 이
+문서에는 트레일링 계산 클래스나 실행 가능한 트레일링 경로를 그리지 않는다.
 
-#### `TrailingState` (유보)
+### §4.2.2 자금관리 계층 — 결정을 한계 지어진 계획으로 변환
 
-- **개요** — `TrailingStopCalculator`가 캔들 사이에 들고 가는 트레일링 상태(유보).
-- **책임** — 갱신에 필요한 직전 스탑 수준과 유리 방향 극값을 보유한다. `TrailingStopCalculator`와 함께 유보 상태다.
-- **상속관계** — 없음(값 타입).
-- **필드** — `current_stop`(현재 트레일링 스탑 수준), `extreme_price`(진입 후 유리 방향 극값).
-- **메서드** — 없음(순수 값).
-- **불변식** — 없음(유보 상태라 계약을 확정하지 않는다).
+```mermaid
+classDiagram
+    direction LR
+    class MoneyManagementPolicy {
+        <<Protocol>>
+        +id str
+        +version str
+        +required_indicators() tuple~PolicyIndicatorRequirement~
+        +resolved_config() Mapping
+        +plan_entry(decision: DecisionIntent, market: MarketSnapshot, account: AccountRiskSnapshot, global_limits: RiskLimits) MoneyManagementPlan
+    }
+    class ManualMoneyManagement {
+        <<frozen>>
+        +leverage int
+        +reward_risk float
+        +atr_stop_multiple float
+        +id str
+        +version str
+        +required_indicators() tuple~PolicyIndicatorRequirement~
+        +resolved_config() Mapping
+        +plan_entry(decision, market, account, global_limits) MoneyManagementPlan
+    }
+    class TurtleMoneyManagement {
+        <<frozen>>
+        +n_period int
+        +n_timeframe str
+        +stop_n_multiple float
+        +leverage_cap int
+        +id str
+        +version str
+        +required_indicators() tuple~PolicyIndicatorRequirement~
+        +resolved_config() Mapping
+        +plan_entry(decision, market, account, global_limits) MoneyManagementPlan
+    }
+    class MoneyManagementFactory {
+        +create(raw_config: Mapping) MoneyManagementPolicy
+    }
+    class PolicyIndicatorRequirement {
+        <<frozen>>
+        +name str
+        +params Mapping
+        +timeframe Literal~strategy,1d~
+        +min_history int
+    }
+    class MoneyManagementPlan {
+        <<frozen>>
+        +stop_loss float
+        +take_profit float|None
+        +requested_quantity float
+        +requested_leverage int
+        +initial_risk_amount float
+        +diagnostics Mapping
+    }
+    class RiskLimits {
+        <<frozen>>
+        +risk_per_trade float
+        +maintenance_margin_rate float
+        +max_leverage int
+    }
+    class AccountRiskSnapshot {
+        <<frozen>>
+        +equity float
+        +available_cash float
+        +market_type MarketType
+    }
+    class MarketSnapshot {
+        <<frozen>>
+        +reference_price float
+        +volatility float
+        +volatility_name str
+        +volatility_timestamp datetime
+    }
+    class DecisionIntent
+
+    ManualMoneyManagement ..|> MoneyManagementPolicy
+    TurtleMoneyManagement ..|> MoneyManagementPolicy
+    MoneyManagementFactory --> ManualMoneyManagement
+    MoneyManagementFactory --> TurtleMoneyManagement
+    MoneyManagementPolicy --> PolicyIndicatorRequirement
+    MoneyManagementPolicy --> MoneyManagementPlan
+    MoneyManagementPolicy --> DecisionIntent
+    MoneyManagementPolicy --> MarketSnapshot
+    MoneyManagementPolicy --> AccountRiskSnapshot
+    MoneyManagementPolicy --> RiskLimits
+```
+
+이 계층은 전략도 실행도 아니다. 현재 `core_lib.money_management`에서 진입 `DecisionIntent`를 최초 보호가격,
+선택적 목표가격, 요청 수량, 요청 leverage와 최초 위험액이 있는 `MoneyManagementPlan`으로 바꾼다. 전략이 edge를
+정한 뒤 실행이 주문을 만들기 전에 호출된다. 정책은 상태와 외부 입출력을 보유하지 않고, 계좌 사실은 Engine이 만든
+불변 `AccountRiskSnapshot`으로만 받는다.
+
+`PolicyIndicatorRequirement.timeframe`은 현재 `strategy`와 `1d`만 허용한다. `strategy` 요구는 전략 선언과 합쳐
+공통 `series_resolution`을 통과하고, `1d` 요구는 전략 입력과 분리된 정책 전용 일봉 경로에서 처리된다.
+`RiskLimits.risk_per_trade`는 0보다 크고 1퍼센트 이하여야 하며 정책이 확대할 수 없다.
+
+`MoneyManagementPlan`은 요청 계획이지 주문이나 체결 결과가 아니다. Engine과 matcher는 실제 체결 가격에 최초
+stop을 다시 고정하고 위험예산·가용 증거금·비용에 따라 수량을 축소할 수 있다. 이 계층이 전략에서 떼어 낸 것은 최초
+보호가격, 목표 수량과 요청 leverage이며, 계좌 전체 노출 승인과 주문 전송은 계속 뒤 실행 경로가 맡는다.
+
+`MoneyManagementFactory.create`는 `mode`가 없으면 manual로 해석하고 mode별 허용 키 이외의 값은 거부한다. 현재
+생성 가능한 정책은 모두 판 `1.0.0`인 manual과 turtle 두 개다.
+
+#### `ManualMoneyManagement`
+
+```mermaid
+sequenceDiagram
+    participant E as Engine 또는 SignalGenerationService
+    participant ATR as strategy timeframe ATR 상태
+    participant M as ManualMoneyManagement
+
+    E->>ATR: 현재 확정 캔들 update(candle)
+    ATR-->>E: ATR(14)
+    E->>M: plan_entry(decision, MarketSnapshot, AccountRiskSnapshot, RiskLimits)
+    M->>M: 손절거리 = ATR 곱하기 atr_stop_multiple
+    M->>M: 위험예산 = equity 곱하기 risk_per_trade
+    M->>M: 요청수량 = 위험예산 나누기 손절거리
+    M->>M: 방향별 stop_loss와 take_profit 계산
+    M-->>E: MoneyManagementPlan
+```
+
+manual은 strategy timeframe의 ATR 14를 요구한다. 손절거리는 ATR과 `atr_stop_multiple`의 곱이고 목표가격은 그
+거리에 `reward_risk`를 적용한다. 요청 수량은 `equity × risk_per_trade ÷ 손절거리`다. futures에서는 설정
+leverage, spot에서는 1을 요청하며 전역 최대 leverage를 넘으면 거부한다.
+
+이 정책이 legacy Vessel의 ATR 손절, 고정 reward-risk 목표와 leverage 결과를 보존한다. 백테스트 `RunConfig`에서
+`money_management`가 없는 `vessel-reference` 설정은 과거 평면 `leverage`·`reward_risk`·`atr_stop_multiple` 값을
+manual 설정으로 정규화한다. `RunConfig.money_management`와 `VesselReference` 메타데이터의 기본값도 manual이다.
+
+#### `TurtleMoneyManagement`와 별도 일봉
+
+```mermaid
+sequenceDiagram
+    participant E as backtest Engine
+    participant F as DataFeed
+    participant N as turtle_n_series
+    participant T as TurtleMoneyManagement
+
+    E->>T: required_indicators()
+    T-->>E: TURTLE_N, period, timeframe 1d, min_history
+    E->>F: candles(symbol, "1d", run_end)
+    F-->>E: 일봉 목록
+    E->>N: turtle_n_series(확정 일봉, period)
+    N-->>E: close_time별 N 값
+    Note over E: 판단 시각 이하의 가장 최근 N만 선택한다.
+    E->>T: plan_entry(decision, MarketSnapshot(N), AccountRiskSnapshot, RiskLimits)
+    T->>T: 손절거리·위험예산·요청수량 계산
+    T->>T: 최소 정수 leverage와 청산 안전성 검사
+    T-->>E: take_profit이 없는 MoneyManagementPlan
+```
+
+turtle은 `TURTLE_N` 하나를 일봉에서 요구한다. Engine은 전략 timeframe 이력을 재표본화하지 않고 같은 실행에서
+`DataFeed.candles(symbol, "1d", end)`를 별도로 호출한다. `turtle_n_series`는 True Range의 첫 기간 평균 뒤 Wilder
+방식으로 N을 갱신한다. 판단 시점에는 그 시각까지 완전히 닫힌 가장 최근 일봉의 N만 사용한다.
+
+turtle은 `N × stop_n_multiple`을 손절거리로 쓰고 manual과 같은 전역 위험 상한으로 수량을 계산한다. 요청
+leverage는 요청 notional을 가용 현금으로 나눈 값의 올림이며 최소 1이다. futures에서는 정책 cap과 전역 cap 중
+작은 값을 넘으면 거부하고, spot에서는 leverage 1로 감당하지 못하면 거부한다. 예상 청산가격이 손절보다 먼저
+도달하면 거부하고 고정 take-profit은 만들지 않는다.
+
+현재 turtle 정책은 피라미딩이나 단계별 익절 계획을 만들지 않으며 전체 역사적 Turtle 시스템을 구현하지 않는다.
+진입과 청산 edge는 계속 전략 소유다. `core_lib.sizing.turtle_unit`의 유닛 및 0.5N 계산 함수는 존재하지만 현재
+`TurtleMoneyManagement`나 Engine이 이를 호출하지 않는다.
+
+#### 실행면별 정책 조합
+
+같은 `core_lib` 계약을 사용해도 백테스트와 신호 생성의 정책 선택 및 수량 책임은 다르다.
+
+```mermaid
+sequenceDiagram
+    participant RC as RunConfig
+    participant E as backtest Engine
+    participant AM as AdapterManager
+    participant F as MoneyManagementFactory
+    participant P as Manual 또는 Turtle 정책
+
+    RC-->>E: discriminated money_management 설정
+    E->>AM: create_runtime(strategy_id, raw_config, money_management_config)
+    AM->>F: create(money_management_config)
+    alt mode가 manual임
+        F-->>AM: ManualMoneyManagement
+    else mode가 turtle임
+        F-->>AM: TurtleMoneyManagement
+    end
+    AM-->>E: StrategyRuntime(strategy, policy)
+    E->>P: 진입 DecisionIntent마다 plan_entry(...)
+```
+
+백테스트 `RunConfig`는 manual과 turtle을 `mode`로 구분하는 설정 union을 가진다. 설정이 없으면 manual이고,
+turtle은 `sizing_method="risk_based"`일 때만 허용된다. Engine은 실제 equity·가용 현금·시장·전역 위험 한도로 계획을
+만들며 정책이 `MoneyManagementError`로 거부하면 주문 없이 `money_management_rejected` 후보 Evidence를 기록한다.
+
+```mermaid
+sequenceDiagram
+    participant C as SignalGenerationConfig
+    participant S as SignalGenerationService
+    participant AM as AdapterManager
+    participant P as ManualMoneyManagement
+    participant Sink as SignalSink
+
+    S->>S: params에서 manual_config 구성
+    S->>AM: create_runtime(strategy_id, raw_config, manual_config)
+    AM-->>S: StrategyRuntime(strategy, manual policy)
+    alt 진입 DecisionIntent임
+        S->>S: policy가 ManualMoneyManagement인지 검사
+        S->>P: plan_entry(...)
+        P-->>S: 보호가격·고정 leverage가 있는 계획
+        S->>S: requested_quantity는 신호에 싣지 않음
+    else 청산 DecisionIntent임
+        S->>S: 정책 호출 없이 청산 TradingSignal 생성
+    end
+    S->>Sink: store(PersistedSignal)
+```
+
+`SignalGenerationConfig`에는 정책 mode 선택 필드가 없다. `SignalGenerationService.start`는 전략 params의 legacy
+세 값을 읽어 manual 설정을 만들어 고정 전달한다. 진입 결정을 구체화할 때 정책이 `ManualMoneyManagement`가 아니면
+`ValueError("signal generation currently requires manual money management")`를 발생시킨다. 이 실행면에는 계좌·주문
+권한이 없으므로 보호가격과 고정 leverage만 사용하고 정책의 `requested_quantity`는 운영 신호에 넣지 않는다.
 
 ## §4.3 실행·평가 클래스 (+ 판정 플로우)
 
@@ -1970,12 +2483,12 @@ classDiagram
     }
     class Matcher {
         <<module>>
-        +match(Order, Candle, list~Candle~, CostModel, str) Fill
-        +resolve_triggers(Position, list~Candle~, CostModel) Optional~Fill~
-        +recompute_qty_and_stop(Order, Decimal) tuple
+        +match(order: Order, candle: Candle, history: list~Candle~, cost_model: CostModel, fill_timing: str, risk_budget: Decimal|None, available_margin: Decimal|None, leverage: int) Fill
+        +resolve_triggers(position: Position, candles: list~Candle~, cost_model: CostModel, stop_price: Decimal|None, take_profit_price: Decimal|None, entry_time: datetime|None) Fill|None
+        +recompute_qty_and_stop(order: Order, fill_price: Decimal, risk_budget: Decimal|None, available_margin: Decimal|None, leverage: int, cost_model: CostModel|None) tuple
     }
     class PositionBook {
-        +apply(Fill) None
+        +apply(fill: Fill, leverage: int|None, margin_type: MarginType|None, market_type: MarketType, liquidation_price: Decimal) None
         +weighted_average(Fill) Decimal
         +reduce(Fill) Decimal
         +apply_funding(Position, Decimal, Decimal) FundingMarginResult
@@ -2031,10 +2544,10 @@ classDiagram
       `max(다음 캔들 open_time, 결정 캔들 close_time + 1ms)`이고, 다음 캔들의 여는 시각이 결정 캔들의 닫는 시각과
       이어지지 않으면 그 주문은 이 메서드로 넘기지 않는다. 결측 구간을 건너 먼 미래 캔들에서 체결하는 것은 허용하지
       않는다.
-    - `resolve_triggers` : 손절·트레일링·익절·청산 채널·강제청산의 캔들 내 발동을 판정한다. 첫 검증 스코프에서는
-      전략 TF 캔들 수준의 보수 판정이고(1분 하위 집행 피드는 유보), 1분 트리거 walk와 그 파리티 허용 편차는 Engine
-      설계(§4.4)에서 확정한다. 어떤 포지션도 자기 체결 캔들 이전으로 소급 검사하지 않는다(`PositionBook`의
-      `skip_first_sl_check`와 같은 규칙).
+    - `resolve_triggers` : 손절·익절·강제청산의 캔들 내 발동을 판정한다. 현재 Engine이 허용하는 입력은 전략 TF
+      캔들 하나뿐이며, `m1_subcandle`은 `RunConfig`와 Engine이 `NotImplementedError`로 거부한다. 어떤 포지션도
+      자기 체결 시각 이하 캔들로 소급 검사하지 않는다. trailing 주문은 `_trigger_reference`에서
+      `NotImplementedError("trailing-stop matching is reserved")`로 거부된다.
     - `recompute_qty_and_stop` : 수량과 최초 보호 스탑을 신호 캔들 종가가 아니라 실제 체결가 기준으로 재산정한다.
       갭으로 마진이 부족하면 주문 거부가 아니라 수량 절삭 후 Evidence에 기록한다. 반환은 `(재산정 수량, 재산정 최초
       보호 스탑)` tuple이다. 진입 가능 수량은 진입 마진·진입 수수료·강제청산 시 한 번 부과할 청산 수수료까지
@@ -2051,6 +2564,8 @@ classDiagram
       우선이다(익절 우선으로 구현하면 승률·PF가 계통적으로 부풀려진다). 손절과 강제청산이 겹치면 정상 설정에서는
       손절가가 청산가보다 안쪽이라 손절 우선(청산 미발생)이고, 손절가가 청산가 바깥인 설정 오류만 청산 처리하며
       설정 오류로 마킹한다. 즉 기본은 손절이고 청산은 갭·오류 예외다.
+    - **트레일링 미구현** — `OrderType.TRAILING_STOP_MARKET`과 `ExitReason.TRAILING_STOP`은 열거형에만 있다.
+      matcher는 trailing 주문을 거부하고 `resolve_triggers`에는 trailing 가격 인자가 없다.
 
 #### `OrderLifecycle`
 
@@ -2076,13 +2591,16 @@ classDiagram
     - `apply` : 체결 하나를 장부에 반영한다(진입·증량·감량·청산 반영의 진입점).
     - `weighted_average` : 체결을 반영해 가중평균 진입가를 갱신한다. 평균가 계산 자체는 값 타입
       `Position.add_quantity`가 소유하고, 이 메서드는 어느 포지션에 적용할지의 장부 조율만 한다.
-    - `reduce` : `reduce_only` 실현과 마진 반환을 처리한다.
+    - `reduce` : `reduce_only` Fill의 수량만큼 감량하고 마진을 반환한다. 전량이면 장부에서 제거하며 임의의 더 작은
+      수량이면 남은 포지션을 유지한다.
     - `apply_funding` : 선물 격리 포지션의 이론 펀딩 비용을 포지션 마진에 적용하고, 이론 비용·실제 적용 비용·마진
       소진 여부를 `FundingMarginResult`로 돌려준다. 지급 비용은 남은 격리 마진을 넘지 못하고, 펀딩 수취는 마진을
       늘린다. 적용 뒤 남은 마진으로 강제청산가를 다시 계산한다.
     - `check_liquidation` : Isolated를 우선해 청산을 판정한다 — 발동 비교 자체는 `costs.Liquidation.is_triggered`에
       위임하고(수식·비교 복제 방지) 이 메서드는 장부 차원의 적용만 한다.
-- **불변식** — 없음(회계 항등식 `cash + position = equity`는 `Accounting`이 강제한다).
+- **불변식** — 이 임의 수량 감량 능력은 저수준 체결 회계다. 현재 `MoneyManagementPlan`과 Engine에는 목표가격이
+  하나뿐이고 matcher의 목표 trigger는 포지션 전량 exit Fill을 만들므로 단계별 부분 익절 계획은 존재하지 않는다.
+  회계 항등식 `cash + position = equity`는 `Accounting`이 강제한다.
 
 #### `Accounting`
 
@@ -2214,7 +2732,12 @@ classDiagram
 ### §4.3.3 `sizing` 컴포넌트
 
 거래당 위험을 계좌의 정해진 비율로 묶는 생존 사이징. 엣지는 진입 신호에서 오며, 손절·익절 배치로 기대값을
-창조하지 않는다. **사이징은 판단 경로라 전부 `float`로 계산한다** — Equity 스냅샷·손절거리(예: `k×ATR`)·산출
+창조하지 않는다. 이 모듈들은 자금관리 계층으로 대체되지 않았다. 자금관리 정책은 `DecisionIntent`와 계좌·시장
+snapshot으로 `MoneyManagementPlan`을 만들며, 이 절의 순수 계산과 같은 위험 수학 위에서 요청 수량을 낸다.
+Engine은 목표 계약의 `requested_quantity`를 우선 소비하고 legacy 신호에는 `risk_money.size` fallback을 적용하며,
+matcher는 체결 가격·위험예산·가용 증거금으로 최종 수량을 다시 축소한다.
+
+**사이징은 판단 경로라 전부 `float`로 계산한다** — Equity 스냅샷·손절거리(예: `k×ATR`)·산출
 수량이 모두 `float`이다. 이 `float` 수량은 **주문 요청 `OrderRequest`**(§4.1.1, float 타입)로 담겨
 `Broker.submit()`에 전달되고, 거기서 `execution`의 `normalizer`가 `OrderRequest`를 받아 `float→Decimal` 단일
 변환을 수행해 낸 `Order`·`Fill`이 `Decimal`이다. 사이징 자체는
@@ -2226,13 +2749,13 @@ classDiagram
     direction LR
     class RiskMoney {
         <<module>>
-        +size(float, float, float) float
-        +one_r(float, float, float) float
-        +equity(float, float, float) float
+        +size(risk_per_trade: float, equity: float, stop_distance: float) float
+        +one_r(entry: float, stop: float, quantity: float) float
+        +equity(cash: float, used_margin: float, unrealized: float) float
     }
     class TurtleUnit {
         <<module>>
-        +unit_size(float, float, float) float
+        +unit_size(risk_per_trade: float, equity: float, n: float) float
         +pyramid_step() float
         +int unit_limit$
     }
@@ -2253,26 +2776,38 @@ classDiagram
         +correlation_group(list~float~, float) bool
         +single_direction(list~float~, float) bool
     }
+    class MoneyManagementPolicy {
+        <<Protocol>>
+        +plan_entry(...) MoneyManagementPlan
+    }
+    class MoneyManagementPlan {
+        +requested_quantity float
+        +initial_risk_amount float
+    }
+    class Engine
+    class Matcher
+    MoneyManagementPolicy --> MoneyManagementPlan
+    Engine --> MoneyManagementPlan : 목표 계약 수량 우선 소비
+    Engine --> RiskMoney : legacy fallback
+    Engine --> ExposureLimit : 공통 노출 검사
+    Engine --> Matcher : risk_budget·available_margin 전달
 ```
 
 #### `RiskMoney`
 
 - **개요** — 보편 사이징(모듈). 거래당 위험을 계좌 비율로 묶는다.
 - **책임** — 거래당 위험을 계좌 비율(`risk_per_trade`)로 고정해 수량을 산정한다. 손절거리와 Equity로 수량을
-  정하고, 레버리지는 입력이 아니라 결과로 역산한다.
+  정한다. 이 모듈 자체는 leverage를 계산하지 않는다.
 - **상속관계** — 없음(모듈).
 - **필드** — 없음(모듈. 산출값은 사이징 시점의 `float` 스냅샷).
 - **메서드**
     - `size(risk_per_trade, equity, stop_distance)` : `수량 = (risk_per_trade × Equity) / 손절거리`. 여기서
       `1R = 손절거리 × 수량`이 성립한다. 손절거리는 변동성 척도(예: `k×ATR`)로 잡는 것이 기본이라, 변동성이 큰
-      시장일수록 수량이 작아져 모든 포지션의 위험기여도가 균등화된다. 레버리지는 `명목가치 = 수량 × 가격`에서
-      역산하며 거래소 한도 안에 드는지 확인한다.
-    - `one_r(entry, stop, quantity)` : `1R = |체결가 − 최초 보호 스탑| × 수량`으로 최초 위험을 계산한다(수량을
-      인자로 받아야 곱이 성립하며, 이 값이 곧 `Trade.r0`다). 두 예외가 있다 —
-      고정 손절이 없는 전략은 트레일링 계산기의 초기 위험 `R0 = clamp(1.5×ATR/entry, 0.45%~0.65%) × entry`를
-      최초 보호 스탑으로 채택해 `Trade.r0`에 기록하고, 최초 스탑을 아예 정의할 수 없는 거래는 R 기반 지표
-      (SQN·기대값·파산확률)에서 제외하고 그 건수를 카탈로그 요약의 제외 건수(`r_excluded_count`)에 남긴다
-      (Evidence에서는 최초 위험 `r0`가 NULL인 거래 수로 파생된다).
+      시장일수록 수량이 작아져 모든 포지션의 위험기여도가 균등화된다. 요청 leverage는 자금관리 정책이, 최종
+      증거금 허용은 matcher가 처리한다.
+    - `one_r(entry, stop, quantity)` : `1R = |체결가 − 최초 보호 스탑| × 수량`으로 최초 위험을 계산한다. 현재
+      자금관리 계획은 모두 최초 stop을 제공하며 트레일링 계산기는 구현되어 있지 않다. 최초 stop을 정의할 수 없는
+      legacy 거래는 `r0`를 NULL로 두고 R 기반 지표에서 제외한다.
     - `equity(cash, used_margin, unrealized)` : `cash + 사용 마진 + 미실현 손익`(신호 캔들 종가 마크). 회계
       항등식의 equity와 같은 개념이며, 사이징 시점의 값은 `float` 스냅샷이다.
 - **불변식** — 거래당 위험 `1R ≤ 0.01 × Equity`(계좌 1%)를 넘지 않는다. 파산확률이 0.1%를 넘으면
@@ -2280,14 +2815,17 @@ classDiagram
 
 #### `TurtleUnit`
 
-- **개요** — 터틀 사이징 방식(모듈). `RiskMoney`의 한 방식이며 전략이 선택해 조합한다.
-- **책임** — 변동성 단위 `N`으로 유닛 크기를 잡고 피라미딩과 유닛 상한을 적용한다.
+- **개요** — 변동성 단위 `N`의 저수준 계산기. `TurtleMoneyManagement`와 이름은 관련되지만 현재 runtime에서 직접
+  호출되지 않는다.
+- **책임** — `unit_size`로 N 기준 한 유닛 크기를 계산하고 0.5N 간격과 네 유닛 상수를 노출한다. 실제 포지션을
+  증량하거나 계획을 생성하지 않는다.
 - **상속관계** — 없음(모듈. `RiskMoney` 수식을 조합해 쓴다).
 - **필드** — `unit_limit`는 단일 시장의 유닛 상한을 담은 상수다(원조 4유닛).
 - **메서드**
-    - `unit_size(...)` : 변동성 단위 `N`으로 한 유닛의 크기를 잡는다.
+    - `unit_size(risk_per_trade, equity, n)` : 변동성 단위 `N`으로 한 유닛의 크기를 잡는다.
     - `pyramid_step()` : 0.5N마다 증량한다.
-- **불변식** — 없음.
+- **불변식** — 현재 Engine은 피라미딩을 실행하지 않고 `VesselReference.supports_pyramiding`도 거짓이다. 이
+  모듈의 존재를 피라미딩 계획이 구현됐다는 뜻으로 읽지 않는다.
 
 #### `WalletPct`
 
@@ -2642,9 +3180,9 @@ classDiagram
 - **개요** — 판정 전 무결성 검사(판정 3단계의 첫 단계).
 - **책임** — 판정 전에 여섯 가지를 검산하며, 하나라도 실패하면 `diagnostic_only`로 **멈춰서** 데이터·기록을 고쳐
   재실행한다 — 파이프라인의 유일한 정지다. 지표의 벡터화↔증분 일치는 run-time 검사가 아니라 §4.1.2의 빌드-타임
-  일치 테스트가 담당하므로 이 여섯 검사에는 넣지 않는다. 트리거 세밀도가 1분 하위 캔들인 run에서는 일곱 번째
-  검사(트레일링 파리티)가 조건부로 더해진다 — 비교 대상이 파일 밖(라이브 경로)이라 실행 시점에 산출해 기록하는
-  검사이며(§4.4의 파리티 규약), 실패는 다른 검사와 동일하게 정지시킨다.
+  일치 테스트가 담당하므로 이 여섯 검사에는 넣지 않는다. `check`는 입력 mapping에 `trailing_parity`가 있을 때만
+  선택적인 일곱 번째 검사로 처리하지만, 현재 backtest Evidence sink는 여섯 표준 키만 만들며 Engine도 trailing과
+  `m1_subcandle`을 거부한다. 따라서 현행 run에서 선택 검사가 실행되는 경로는 없다.
 - **상속관계** — 없음(모듈).
 - **필드** — 없음(모듈).
 - **메서드**
@@ -2769,7 +3307,7 @@ forensics로 가 개선 루프를 돌고, 둘 다 통과한 run만 Decision이 �
 WFA·MC)는 여러 run·분할에 걸친 교차검증이라 `eval`이 아니라 Harness(§4.4)가 산출·적용하며, `eval.HardGate`는 단일
 run의 형태 무관 통과선과 프로파일 대조만 판정한다.
 
-## §4.4 backtest-service 클래스 — Engine·포트 어댑터·설정·Harness (+ 캔들 루프·1분 집행 시퀀스)
+## §4.4 backtest-service 클래스 — Engine·포트 어댑터·설정·Harness (+ 캔들 루프 시퀀스)
 
 **이 절의 자리.** §4.1~§4.3은 세 실행 모드가 공유하는 `core-lib`의 도메인 클래스를 확정했다. `core-lib`는 계산
 방법만 담을 뿐 스스로 돌지 않는다. §4.4는 그 표준을 **실제로 돌리는 유일한 신규 서비스 `backtest-service`**의
@@ -2780,8 +3318,8 @@ run의 형태 무관 통과선과 프로파일 대조만 판정한다.
 run을 굴리는 데 협력한다.
 
 - **`Engine` — 중심 구동부.** 확정 캔들을 시간 순서로 돌리며 지표 갱신·전략 판단·사이징·체결·저장·판정을 정해진
-  순서로 호출한다. 도메인 로직은 하나도 갖지 않고 전부 `core-lib`을 불러 쓰며(다른 서비스는 import하지 않는다),
-  `Engine`이 소유하는 것은 "무엇을 어떤 순서로 언제 부르는가"라는 실행 순서뿐이다.
+    순서로 호출한다. 전략 runtime과 정책을 조합하고 그 결과를 실행 형식으로 구체화하지만 정책 수식은 갖지 않는다.
+    `Engine`이 소유하는 것은 "무엇을 어떤 순서로 언제 부르는가"라는 실행 순서와 Evidence 조립이다.
 - **포트 어댑터 다섯 — 인프라 경계.** 환경(백테스트·페이퍼·라이브)에 따라 구현이 갈리는 다섯 외부 의존성 —
   데이터 공급·체결·시각·비용값·전략 목록 — 을 도메인 바깥으로 격리한다. 각각 `ports`의 추상 계약(§4.3.4)을
   backtest용으로 구현한 어댑터이고, `Engine`은 그 구현이 아니라 포트 추상에 의존하며(의존성 역전) 어댑터를
@@ -2809,12 +3347,10 @@ run을 굴리는 데 협력한다.
       execution_ts`, 결정에 쓴 캔들로 체결하지 않는다). `core-lib`의 `execution.matcher`(§4.3.1)가 이 규칙을
       소유하고, `Engine`은 종가에 만든 주문 요청을 다음 시가까지 들고 있다가 그때 `Broker.submit()`을 호출해
       순서를 강제한다.
-    - **캔들 내 트리거는 1분 집행 피드를 시간 순서로** — 손절·트레일링·익절·청산 채널·강제청산의 캔들 내 발동은
-      전략 TF 캔들의 고저가 아니라 `t` 구간의 1분 하위 캔들을 시간 순서로 훑어 판정하고, 어떤 포지션도 자기 체결
-      하위 캔들 이전으로 소급 검사하지 않는다. 이 1분 트리거 walk와 트레일링 파리티 허용 편차를 이 절이 확정하되,
-      첫 검증 스코프는 이를 소비하는 전략(트레일링 단독 출구 전략)이 없어 재유보하고 보수적 TF 캔들 판정을 기본으로
-      둔다(아래 `Engine`의 트리거 walk 규약).
-    - **동시 도달 손절 우선(보수적 최악 경로)** — 같은 하위 캔들에서 손절과 익절이 모두 범위 안이면 손절 우선이다.
+    - **캔들 내 트리거는 전략 TF 캔들로 판정** — 현재 실행 가능한 `trigger_feed`는 `tf_candle`뿐이다.
+      `m1_subcandle`은 `RunConfig` 검증과 `Engine.run` 및 `walk_triggers`가 `NotImplementedError`로 거부한다.
+      손절·익절·강제청산을 전략 TF 캔들의 고저로 보수 판정하며 trailing은 matcher가 거부한다.
+    - **동시 도달 손절 우선(보수적 최악 경로)** — 같은 전략 TF 캔들에서 손절과 익절이 모두 범위 안이면 손절 우선이다.
       이 우선순위는 `execution.matcher.resolve_triggers`(§4.3.1)가 소유하고 `Engine`은 그 판정을 구동만 한다.
 - **유효성 규칙** — `Engine.preload`(§4.4.1)가 평가 구간 시작 전 워밍업에서만 적용한다. 지표가 덜 쌓인 워밍업
   값으로는 진입·청산을 판단하지 않는다.
@@ -2835,7 +3371,7 @@ run을 굴리는 데 협력한다.
       목적은 그대로다(표본 추출에서 오는 불확실성은 부트스트랩 신뢰구간이 따로 정량화한다). 이 둘만 고정하면 같은
       입력·같은 seed는 언제나 같은 정규화 Evidence 해시를 낸다.
 
-### §4.4.1 `Engine` 컴포넌트 (+ 캔들 루프·1분 트리거 walk 시퀀스)
+### §4.4.1 `Engine` 컴포넌트 (+ 캔들 루프 시퀀스)
 
 결정적 실행 드라이버이자 입출력 오케스트레이터. 다이어그램은 `Engine`과 그 실행 결과 값 타입 `RunResult`, 그리고
 `Engine`이 주입받는 포트(§4.3.4 ABC)와 소비하는 `core-lib` 컴포넌트의 관계를 담는다. 포트 ABC와 `execution`·
@@ -2853,9 +3389,11 @@ classDiagram
         -CatalogStore catalog
         -AdapterManager manager
         -RunConfig config
-        -list~OrderRequest~ pending
+        -list~_PendingOrder~ pending
+        -StrategyAdapter|None _strategy
+        -MoneyManagementPolicy|None _money_management
+        -list~SeriesSpec~ _indicator_specs
         +run(RunConfig) RunResult
-        +preload() list~Candle~
         +step_open(Candle) None
         +step_close(Candle) None
         +walk_triggers(Position, list~Candle~) Optional~Fill~
@@ -2876,7 +3414,13 @@ classDiagram
     class EvidenceSink { <<abstract>> }
     class CatalogStore { <<abstract>> }
     class AdapterManager["Adapter Manager"] { <<factory>> }
-    Engine ..> AdapterManager : Adaptee 생성
+    class StrategyRuntime
+    class SeriesSpec { <<Protocol>> }
+    class MoneyManagementPolicy { <<Protocol>> }
+    Engine ..> AdapterManager : StrategyRuntime 생성
+    Engine --> StrategyRuntime
+    Engine --> SeriesSpec
+    Engine --> MoneyManagementPolicy
     Engine ..> Matcher : 트리거 판정(resolve_triggers)
     Engine ..> RiskMoney : 수량 산정
     Engine ..> PositionBook : 장부 적용
@@ -2890,7 +3434,7 @@ classDiagram
 
 > `DataFeed`·`Broker`·`Clock`·`CostModel`·`EvidenceSink`·`CatalogStore`는 §4.3.4가 정의한 추상 계약(ABC)이고,
 > `RiskMoney`는 §4.3.3, `Matcher`·`PositionBook`·`Accounting`은 §4.3.1, `Funding`은 §4.3.2, `Metrics`·`Integrity`·
-> `Decision`·`MetricSet`·`DecisionResult`는 §4.3.5, `Adapter Manager`는 §4.2가 정의한다. 위 다이어그램은
+> `Decision`·`MetricSet`·`DecisionResult`는 §4.3.5, `Adapter Manager`와 `MoneyManagementPolicy`는 §4.2가 정의한다. 위 다이어그램은
 > 이들을 소비 대상 참조 노드로만 두고 재정의하지 않는다. `Engine`이 포트를 필드로 들고 있으므로(주입) 그 의존은
 > 속성 타입이 이미 보여 주어 화살표를 겹쳐 긋지 않고, 화살표는 시그니처에 드러나지 않는 소비 관계만 그린다.
 
@@ -2898,29 +3442,35 @@ classDiagram
 
 - **개요** — 확정 캔들을 시간 순서로 돌리는 결정적 실행 드라이버이자 입출력 오케스트레이터.
 - **책임** — 사전등록·run_id 발급·워밍업 preload·피드 push·전략 판단·사이징·체결·2계층 저장·finalize·판정 호출을
-  한 흐름으로 엮는다. 도메인 로직(전략·지표·사이징·비용 수식·체결 규칙·평가)은 소유하지 않고 전부 `core-lib`을
-  호출해 쓰며, 데이터·체결·시각·기록·전략 목록은 전부 주입된 포트 어댑터로만 접근한다. 캔들 루프의 두 순간 순서와
-  1분 트리거 walk의 순서를 소유한다(순서 자체가 look-ahead 방지 장치라 `Engine`이 소유해야 한다).
+  한 흐름으로 엮는다. `AdapterManager.create_runtime`으로 전략과 정책을 조합하고, 공통 계열 요구를 해석하며,
+  `DecisionIntent`를 정책 적용 뒤 내부 `TradingSignal` 형식으로 구체화한다. 전략·정책·지표·사이징·비용·체결·평가
+  수식은 `core-lib` 구현을 호출한다. 데이터·체결·시각·기록·전략 목록은 주입 포트로만 접근한다.
 - **상속관계** — 없음(구체 드라이버. 포트 ABC를 상속하지 않고 주입받아 소비한다).
 - **필드**
     - `feed`·`broker`·`clock`·`cost_model`·`evidence`·`catalog` — 주입된 여섯 포트 어댑터. 타입은 §4.3.4의 ABC이고
       실체는 backtest 구현 어댑터(§4.4.2·§4.5)다.
-    - `manager` — `Adapter Manager`(§4.2). `strategy_id`·파라미터로 Adaptee를 생성한다. 내부적으로 주입된
+    - `manager` — `Adapter Manager`(§4.2). `strategy_id`·전략 파라미터·자금관리 설정으로 `StrategyRuntime`을
+      생성한다. 내부적으로 주입된
       `StrategyRegistry` 어댑터(§4.4.2)를 통해 전략 목록에 접근한다.
     - `config` — 검증을 마친 `RunConfig`(§4.4.3).
     - `engine_version`·`core_lib_version` — 설치된 `backtest-service`와 `core-lib` 패키지 메타데이터에서 읽은
       실행 코드 버전이다. 생성자가 명시적으로 덮어쓰는 검증 경로를 제외하면 사람이 별도 상수를 갱신하지 않으며,
       같은 값이 카탈로그와 Evidence에 기록된다.
-    - `pending` — 직전 캔들 종가에 산출해 다음 캔들 시가에 체결할 주문 요청 목록. 보통 0개(신호 없음)나 1개이고,
+    - `_strategy`·`_money_management` — 현재 runtime에서 분리해 보관한 판단 전략과 선택 정책이다. 정책은
+      `DecisionIntent` 진입에만 적용하며 legacy `TradingSignal`에는 적용하지 않는다.
+    - `_indicator_specs` — 전략 선언과 strategy-timeframe 정책 요구를 `resolve_series_specs`로 해석한
+      `IndicatorSpec | PatternSpec` 목록이다. turtle의 일봉 N은 이 목록과 별도다.
+    - `pending` — 직전 캔들 종가에 산출해 다음 캔들 시가에 체결할 `_PendingOrder` 목록. 보통 0개나 1개이고,
       리버설이면 청산 주문과 반대 진입 주문을 그 순서로 담는다. 이 한 칸 지연이 `decision_ts < execution_ts`를
       구조로 강제하며, `step_open`이 이 목록을 담긴 순서대로 체결한 뒤 비운다(이중 체결 방지).
       직전 캔들의 닫는 시각과 다음 캔들의 여는 시각이 같을 때만 주문을 만들 수 있으며, 그 사이에 결측이 있으면
       판단은 `next_candle_gap` 사유의 건너뜀으로 기록한다. 방어적으로 남은 주문이 결측 경계를 건너면 실행을 거부한다.
 - **메서드**
-    - `run(config)` : run 하나를 처음부터 끝까지 구동해 `RunResult`를 낸다. 사전등록 기록과 `run_id` 발급으로 열고
-      (§4.5의 저장 시퀀스), preload→캔들 루프→finalize 순으로 진행한다.
-    - `preload()` : 평가 구간 시작 전에 `max(전략 min_history, 지표 최장 워밍업)` 캔들을 `DataFeed`로 별도 preload
-      해 지표 상태를 워밍업한다. 이 구간에서 만들어진 신호는 버린다(discard). 반환은 워밍업에 쓴 캔들 목록이다.
+    - `run(config)` : run 하나를 처음부터 끝까지 구동해 `RunResult`를 낸다. 설정을 재검증하고
+      `create_runtime`으로 전략과 정책을 조합하며, 전략과 정책 계열을 해석한다. 평가 시작 전
+      `max(전략 min_history, strategy-timeframe SeriesSpec 최장 min_history)` 캔들을 내부 `_preload`로 선택해
+      상태를 seed하고, turtle이면 별도 일봉 N 원천도 준비한 뒤 캔들 루프와 finalize를 진행한다. `preload()`라는
+      공개 메서드는 없으며 제한 조회가 부족하면 하한 제한을 풀고 다시 읽는다.
     - `step_open(t)` : 캔들 `t`가 열리는 순간의 일. `Clock`이 `t` 시가에 있을 때 호출된다. `pending`의 주문을 담긴
       순서대로 `Broker.submit`해 `t` 시가에 체결하고 각 체결마다 `position_book.apply`·`accounting.recompute`로 장부·
       항등식을 갱신하며 Execution을 기록한 뒤 `pending`을 비운다(포지션·자산곡선 행은 체결마다가 아니라 캔들마다
@@ -2928,32 +3478,27 @@ classDiagram
       시점의 지표·국면을 Trade Feature Snapshot(진입·청산과 보유 중 최대 불리/유리 편차 시점)으로 함께 남긴다. 리버설이면 청산 주문을 먼저
       체결·정산한 다음 진입 주문을 체결하므로 진입의 마진 가용성은 청산 정산 후 계좌 상태 기준이 된다(리버설의 두
       체결 순서는 `Engine`이 이 순서로 소유하고, 각 체결의 atomic 규칙·마진 부족 시 수량 절삭은 `matcher`가 소유한다).
-      그다음 `t` 구간의 1분 하위 캔들에 대해 `walk_triggers`로 기존 포지션의 손절·트레일링·익절·청산·강제청산을
+      그다음 전략 TF 캔들 하나에 대해 `walk_triggers`로 기존 포지션의 손절·익절·강제청산을
       판정하고(발동하면 신호 없는 판단으로 Decision(`signal_id` 비움)과 Execution·Trade를 기록한다), UTC 정산 경계를
       지나면 `costs.funding.settle`로 펀딩을 부과한다. 펀딩으로 격리 마진이 소진되면 그 정산 경계의 1밀리초 뒤에
       `LIQUIDATION` 체결을 만들어 해당 포지션을 닫는다.
     - `step_close(t)` : 캔들 `t`가 닫히는 순간의 일. `Clock`이 `t` 종가로 전진한 뒤 호출된다. `DataFeed`로 `up_to =
-      t.close`까지만 받아 지표를 갱신하고 Feature/Indicator Snapshot과 캔들 종가로 마킹한 Position·Portfolio/PnL
-      행(캔들당 1회)을 기록한 뒤, `Adaptee.analyze(market_data[t],
-      current_position)`로 `TradingSignal`을 받아 Signal·Decision을 기록한다. 진입·청산 신호면 `sizing`으로 수량을
-      산출하고 `ExposureLimit`으로 한도를 검사한 뒤 float 주문 요청 `OrderRequest`를 만들어 `pending`에 넣는다(체결은
-      다음 `step_open`). preload 구간이면 여기서 만든 신호·주문은 버린다. 진입 후보는 노출 한도 등에 막힌 경우까지
+      t.close`까지만 받아 모든 `SeriesState`를 갱신하고 Indicator Snapshot과 캔들 종가로 마킹한 Position·Portfolio/PnL
+      행을 기록한 뒤 `StrategyAdapter.analyze(market_data[t], current_position)`를 호출한다. 반환값이 진입
+      `DecisionIntent`이면 정책의 `plan_entry`로 보호가격·요청 수량·요청 leverage를 만들고, 청산 결정이면 정책을
+      호출하지 않는다. 두 경우 모두 내부 `TradingSignal`로 구체화한다. 처음부터 legacy `TradingSignal`이면 그
+      보호가격과 leverage를 그대로 사용한다. 구체화한 신호를 Signal·Decision으로 기록하고, 목표 계약의 요청 수량
+      또는 legacy risk sizing을 적용한 뒤 `ExposureLimit`을 검사하여 `OrderRequest`를 `pending`에 넣는다. 진입 후보는
+      정책이나 노출 한도 등에 막힌 경우까지
       Candidate Event로, 사전 선언 규칙이 잡은 놓친 기회는 Missed Opportunity로 함께 기록한다.
       현재 캔들의 닫는 시각과 다음 캔들의 여는 시각이 이어지지 않으면 주문을 예약하지 않는다. 열린 포지션은 마지막
       확정 가격으로 결측 직전에 `DATA_GAP` 청산하고 일반 청산과 같은 수수료·슬리피지를 적용한다. 그 뒤 결측이 삼킨
       펀딩 경계는 도달 불가 경계로 세어 Source Data Snapshot과 run 요약에 남기므로, 펀딩 정산 완성도가 당시 포지션
       보유 여부에 우연히 좌우되지 않는다.
-    - `walk_triggers(position, subcandles)` : `t` 구간의 1분 하위 캔들을 시간 순서로 훑어 첫 발동을 찾는다. 대상은
-      포지션의 체결 시점 이후 하위 캔들이다 — 체결 하위 캔들 이전은 소급 검사하지 않고, 방금 체결된 포지션은 자기
-      체결 하위 캔들 다음 하위 캔들부터 검사 대상이다(legacy `skip_first_sl_check`와 같은 취지). 각 하위 캔들에서
-      `Engine`이 `execution.matcher.resolve_triggers`(§4.3.1)를 `cost_model`과 함께 직접 호출해 손절·익절·청산을
-      판정하며(트리거 판정은 환경 무관 순수 로직이라 포트를 거치지 않는다), 같은 하위 캔들 안 동시 도달은 손절
-      우선이다. 첫 발동 하위 캔들의 `Fill`을 돌려주고 없으면 `None`이다. **시각 부여 규약** — 트리거 판단의
-      `decision_ts`와 기록되는 발동 하위 캔들 시각(`trigger_subcandle_ts`)은 그 하위 캔들의 **여는 시각**, 체결의
-      `execution_ts`는 같은 하위 캔들의 **닫는 시각**이다(1분 뒤라 `decision_ts < execution_ts` 엄격 부등이 항상
-      성립하고, 구현마다 관례가 갈려 해시가 흔들리는 일을 막는다). TF 캔들 판정 모드(`tf_candle`)에서는 판단 = 그
-      TF 캔들의 여는 시각, 체결 = 닫는 시각이고 하위 캔들 시각은 비운다. 아래 트리거 walk 규약이 활성/유보 조건을
-      정한다.
+    - `walk_triggers(position, subcandles)` : 이름은 `subcandles`를 받지만 현재 `trigger_feed != "tf_candle"`이면
+      즉시 `NotImplementedError`를 발생시킨다. Engine은 `[candle]` 하나를 넘겨 `resolve_triggers`의 손절·익절·
+      강제청산 보수 판정을 실행한다. `entry_time` 이하 캔들은 건너뛰고 같은 캔들의 손절·익절 동시 도달은 손절
+      우선이다. trailing 가격 인자는 없고 1분 하위 캔들 walk도 실행되지 않는다.
     - `finalize()` : 캔들 루프 종료 후 열린 포지션을 마지막 확정 캔들 종가로 강제 정리해
       `Fill(exit_reason=END_OF_DATA)`로 남긴다(그래서 정상 종료 run에 미청산 거래 행이 남지 않는다). 이 정리도
       별도 경로가 아니라 여느 청산처럼 `OrderRequest(reduce_only=TRUE, close_position=TRUE)`를 `Broker.submit`으로
@@ -2989,10 +3534,12 @@ sequenceDiagram
     participant ENG as Engine
     participant BR as Broker (어댑터)
     participant DF as DataFeed (어댑터)
-    participant AD as Adaptee (core-lib)
+    participant SER as SeriesState (core-lib)
+    participant AD as StrategyAdapter (core-lib)
+    participant MM as MoneyManagementPolicy (core-lib)
     participant EX as execution (core-lib)
     participant CST as costs (core-lib)
-    participant SIZ as sizing (core-lib)
+    participant SIZ as sizing·risk (core-lib)
     participant EV as EvidenceSink (어댑터)
     Note over CLK,EV: 캔들 t의 여는 순간(open_time). 지난 캔들이 남긴 일을 처리한다.
     ENG->>CLK: now()
@@ -3009,9 +3556,7 @@ sequenceDiagram
         ENG->>EV: record(Execution)
     end
     Note over ENG: pending 클리어(이중 체결 방지)
-    ENG->>DF: candles(symbol, "1m", up_to=t.close)
-    DF-->>ENG: 1m 하위 캔들 목록
-    ENG->>EX: matcher.resolve_triggers(position, subcandles, cost_model)
+    ENG->>EX: matcher.resolve_triggers(position, [t], cost_model, stop_price, take_profit_price, entry_time)
     EX-->>ENG: Fill 또는 None
     alt 트리거 발동 (동시 도달 손절 우선)
         ENG->>EX: position_book.apply(fill)
@@ -3027,13 +3572,28 @@ sequenceDiagram
     CLK-->>ENG: t 종가
     ENG->>DF: candles(symbol, tf, up_to=t.close)
     DF-->>ENG: 확정 캔들 목록(미래 미노출)
-    ENG->>EV: record(Feature/Indicator Snapshot·Position·Portfolio/PnL — 캔들당 1회 격자)
+    ENG->>SER: update(t)
+    SER-->>ENG: series_key별 값
+    ENG->>EV: record(Indicator Snapshot·Position·Portfolio/PnL — 캔들당 1회 격자)
     ENG->>AD: analyze(market_data[t], current_position)
-    AD-->>ENG: TradingSignal 또는 None
-    ENG->>EV: record(Signal·Decision)
-    opt 진입·청산 신호
-        ENG->>SIZ: risk_money.size(risk_per_trade, equity, stop_distance)
-        SIZ-->>ENG: quantity
+    alt 진입 DecisionIntent
+        AD-->>ENG: DecisionIntent
+        ENG->>MM: plan_entry(decision, market, account, limits)
+        MM-->>ENG: MoneyManagementPlan
+        ENG->>ENG: 내부 TradingSignal로 구체화
+    else 청산 DecisionIntent
+        AD-->>ENG: DecisionIntent
+        ENG->>ENG: 정책 호출 없이 청산 TradingSignal로 구체화
+    else legacy TradingSignal
+        AD-->>ENG: TradingSignal
+        Note over ENG,MM: legacy 보호가격·leverage를 사용하고 정책은 호출하지 않는다.
+    else None 또는 HOLD
+        AD-->>ENG: 관망
+    end
+    opt 구체적인 TradingSignal
+        ENG->>EV: record(Signal·Decision)
+        ENG->>SIZ: 정책 요청 수량 또는 legacy risk sizing·노출 제한
+        SIZ-->>ENG: 허용 quantity
         ENG->>SIZ: exposure_limit.single_market(exposures, cap)
         SIZ-->>ENG: bool
         Note over ENG: OrderRequest(float) 생성 후 pending에 보관(다음 t+1 시가 체결)
@@ -3058,50 +3618,22 @@ sequenceDiagram
 기록은 전부 포트 어댑터를 거치고, `Engine`은 순서만 소유한다. `analyze`가 `None`을 내면 주문을 만들지 않고, preload
 구간이면 이 종가에서 만든 신호·주문은 버린다.
 
-`walk_triggers`가 1분 하위 캔들을 훑는 순서와 발동 우선순위를 보인다.
+`walk_triggers`의 현재 실행 가능 경로와 예약 경계를 보인다.
 
 ```mermaid
 flowchart TD
-    START["step_open(t): 포지션 보유 중"] --> HASSUB{"trigger_feed = m1_subcandle<br/>이고 소비 전략 활성?"}
-    HASSUB -->|"아니오(첫 검증 스코프 기본)"| TF["보수적 TF 캔들 판정<br/>resolve_triggers(position, [t]): 손절·익절·청산, 동시 도달 손절 우선"]
-    HASSUB -->|"예"| SUB["t 구간 1분 하위 캔들 나열<br/>체결 하위 캔들 다음부터 · 시간 오름차순"]
-    SUB --> ITER{"다음 하위 캔들 sc"}
-    ITER -->|"있음"| CHK["resolve_triggers(position, …sc):<br/>손절·트레일링·익절·청산·강제청산 판정"]
-    CHK --> FIRE{"발동?"}
-    FIRE -->|"손절·익절 동시 범위 → 손절 우선"| OUT["Fill(exit_reason) 산출 → 종료"]
-    FIRE -->|"발동 없음"| ITER
-    ITER -->|"없음(끝까지 미발동)"| NONE["None — 이 캔들 트리거 없음"]
-    TF --> OUT
-    TF --> NONE
+    START["step_open(t): 포지션 보유 중"] --> FEED{"trigger_feed"}
+    FEED -->|"tf_candle"| TF["resolve_triggers(position, [t], …)<br/>손절·익절·강제청산 보수 판정"]
+    FEED -->|"m1_subcandle"| REJECT["NotImplementedError<br/>RunConfig와 Engine이 거부"]
+    TF --> FIRE{"발동?"}
+    FIRE -->|"손절·익절 동시 → 손절 우선"| OUT["전체 포지션 exit Fill"]
+    FIRE -->|"없음"| NONE["None"]
+    TRAIL["TRAILING_STOP_MARKET 주문"] --> TFAIL["matcher가 NotImplementedError로 거부"]
 ```
 
-읽는 법: 트리거 검사에는 두 세밀도가 있다. 기본은 전략 TF 캔들 하나로 손절·익절·청산을 보수적으로 판정하는 길이고,
-`trigger_feed = m1_subcandle`이며 그것을 소비하는 전략이 활성일 때만 `t` 구간의 1분 하위 캔들을 시간 오름차순으로
-훑는 길이다. 두 세밀도의 차이는 오직 발동을 어느 캔들 고저로 보느냐(TF 캔들 하나냐 1분 하위 캔들 열이냐)일 뿐,
-어느 길이든 손절·익절·청산을 함께 판정하고 발동 판정 자체는 `execution.matcher.resolve_triggers`(§4.3.1)가 소유하며
-같은 캔들 안 손절·익절 동시 도달은 손절 우선이다. `Engine`은 캔들(또는 하위 캔들 열)을 순서대로 넣어 첫 발동을
-찾는 walk만 구동한다. 포지션의 체결 하위 캔들 및 그 이전은 대상에서 빠져 소급 검사가 없다. 1분 길은 첫 발동 하위
-캔들의 `Fill`에서 멈춘다.
-
-**트레일링·1분 집행 파리티 허용 편차 (확정).** 라이브는 매분 하위 캔들 폴링으로 트레일링 워터마크·stage와 손절·
-청산 출구를 갱신하는데, 캔들 단위 백테스트가 이를 TF 캔들 고저로만 근사하면 출구 가격이 계통적으로 달라진다 —
-트레일링이 유일 출구인 전략에서는 이 격차가 노이즈가 아니라 1차 항이다. 그래서 백테스트의 1분 트리거 walk는
-라이브의 매분 폴링과 같은 경로(같은 1분 하위 캔들, 같은 손절·트레일링·청산 판정, 같은 손절-우선 우선순위)를
-지나며, 두 경로의 출구 가격이 동일 구간에서 아래 허용 편차 안에 들어야 한다.
-
-- **판정 기준** — 같은 1분 데이터·같은 전략 파라미터로 라이브 경로와 백테스트 1분 walk를 돌렸을 때, 거래별 출구
-  가격의 상대 편차가 `max(1 price tick, 0.05% = 5bp)` 이하다. 두 경로가 같은 하위 캔들과 같은 판정을 쓰므로 남는
-  차이는 부동소수점 반올림 오차와 1분 데이터 정렬 오차뿐이라 이 한계 안이어야 한다.
-- **계통 편향 금지** — 거래 집합에 걸친 부호 있는 평균 편차의 절댓값이 `1bp` 이하다(한쪽으로 치우친 편향이 없어야
-  한다 — 양쪽 다 1분 경로라 계통 격차가 0에 수렴해야 하기 때문이다).
-- **초과 시 처리** — 이 편차를 넘으면 파리티 실패로 보고 run을 공식 평가에서 제외하며(무결성 문제로 취급), 편차의
-  분포를 Evidence에 남겨 원인(데이터 정렬·판정 경로 불일치)을 규명한다.
-- **활성 조건과 재유보** — 이 규약은 트레일링·1분 경로를 소비하는 전략이 들어올 때 활성화된다. 첫 검증 스코프는
-  트레일링 단독 출구 전략을 두지 않아 `trigger_feed` 기본이 보수적 TF 판정이고, 이 파리티 규약은 확정된 채 유보
-  상태로 대기한다(구조·허용 편차는 지금 고정하고, 소비 전략이 생기면 그대로 켠다). 활성 시 두 가지를 함께 켠다 —
-  트레일링 워터마크·stage 상태는 하위 캔들 사이를 `TrailingState`(§4.2, 유보)로 들고 가고, 펀딩 정산은 walk 밖
-  캔들 말미가 아니라 정산 경계를 포함하는 하위 캔들에서 트리거 판정과 같은 시간 순서로 처리해 경계 직전 청산이
-  펀딩을 건너뛰지 않게 한다.
+현재 트리거 판정은 전략 TF 캔들 하나의 고가·저가만 사용한다. 손절·익절·강제청산의 판정은
+`execution.matcher.resolve_triggers`가 소유하고 Engine은 그 함수를 한 번 호출한다. `m1_subcandle`과 trailing은
+설정 또는 matcher 경계에서 명시적으로 거부되므로 이 문서에 실행 시퀀스나 파리티 수치를 두지 않는다.
 
 ### §4.4.2 입력·실행 포트 어댑터 (`DataFeed`·`Broker`·`Clock`·`CostModel`·`StrategyRegistry` 구현)
 
@@ -3169,16 +3701,17 @@ classDiagram
 
 - **개요** — `DataFeed`(§4.3.4)의 backtest 구현. 과거 확정 시장 데이터를 그 시점 기준으로 공급한다.
 - **책임** — `crypto_data`에서 과거 확정 OHLCV·펀딩 실측·마크 가격을 읽어 전략 TF 캔들로 공급하고, `up_to` 이후
-  캔들은 절대 내주지 않는다(look-ahead 구조 배제). 같은 메서드에 `tf = "1m"`을 주면 1분 하위 캔들도 공급하므로,
-  1분 집행 피드는 포트 표면을 바꾸지 않고 이 어댑터가 그대로 낸다 — 다만 첫 검증 스코프는 소비 전략이 없어 표면을
-  전략 TF 캔들 기준으로 쓴다(재유보). backtest는 읽기만 하고 `crypto_data`에 쓰지 않는다.
+  캔들은 절대 내주지 않는다(look-ahead 구조 배제). 같은 메서드는 `tf = "1m"` 원천·펀딩 근거와 turtle 정책의
+  별도 `1d` N 계산에도 쓰이지만, Engine의 캔들 내 trigger는 전략 TF 캔들만 소비한다. `m1_subcandle`은 설정과 Engine
+  경계에서 거부된다. backtest는 읽기만 하고 `crypto_data`에 쓰지 않는다.
   상위 주기 리샘플링은 해당 버킷의 1분 원천이 모두 있을 때만 캔들을 만들며, 일부만 있는 버킷은 정상 원천 부재와
   구별해 부분 버킷으로 기록한다. 어느 경우에도 값을 채우거나 보간하지 않는다.
 - **상속관계** — `DataFeed`(§4.3.4 ABC)를 실현한다.
 - **필드** — `crypto_data`는 과거 OHLCV·펀딩을 읽는 읽기 전용 연결이다(쓰기 없음).
 - **메서드**
-    - `candles(symbol, tf, up_to)` : `up_to` 이후 캔들을 반환하지 않는다. `tf`가 전략 TF면 판단용 캔들, `"1m"`이면
-      트리거 walk용 하위 캔들을 낸다. 완전하지 않은 상위 주기 버킷은 반환하지 않는다.
+    - `candles(symbol, tf, up_to)` : `up_to` 이후 캔들을 반환하지 않는다. 전략 판단과 정책 계산에 요청된 TF의 확정
+      캔들을 내며, 완전하지 않은 상위 주기 버킷은 반환하지 않는다. `"1m"` 결과는 원천 검증·펀딩 근거에 쓰일 수
+      있지만 현재 trigger walk에는 쓰이지 않는다.
     - `source_candles(symbol, range_start, range_end)` : 1분 캔들 목록을 만드는 경로와 독립된 원천 질의로 범위 안의
       실제 1분 캔들을 돌려준다(여는 시각만이 아니라 캔들 값 자체). Evidence에 선언한 1분 원천 부재가 우리 기록
       누락이 아님을 검증하는 대조 기준이다.
@@ -3264,8 +3797,9 @@ classDiagram
 
 ### §4.4.3 `ConfigLayer` 컴포넌트 (`RunConfig`)
 
-백테스트 run 설정의 스키마·검증. 전략 파라미터 스키마·검증은 소유하지 않고(그건 `core-lib`의 `StrategyConfig`
-§4.2 소관) 선택값만 담아 넘긴다 — 같은 config가 backtest·라이브에서 같은 검증을 받게 하기 위해서다.
+백테스트 run 전용 설정의 스키마·검증이다. 전략 파라미터 스키마·검증은 소유하지 않고(그건 `core-lib`의
+`StrategyConfig` §4.2 소관) 선택값만 담아 넘긴다. signal-service는 별도 `SignalGenerationConfig`를 쓰지만 전략
+파라미터는 두 실행면 모두 같은 `StrategyConfig` 경로에서 검증된다.
 
 ```mermaid
 classDiagram
@@ -3293,17 +3827,39 @@ classDiagram
         +str trigger_feed
         +str fill_timing
         +str profile_ref
+        +MoneyManagementConfig money_management
         +Optional~dict~ sweep
         +revalidate() None
         +selection() dict
     }
+    class ManualMoneyManagementConfig {
+        <<pydantic, extra forbid>>
+        +Literal~manual~ mode
+        +int leverage
+        +float reward_risk
+        +float atr_stop_multiple
+    }
+    class TurtleMoneyManagementConfig {
+        <<pydantic, extra forbid>>
+        +Literal~turtle~ mode
+        +int n_period
+        +Literal~1d~ n_timeframe
+        +float stop_n_multiple
+        +int leverage_cap
+    }
+    class MoneyManagementConfig {
+        <<discriminated union by mode>>
+    }
+    RunConfig *-- MoneyManagementConfig
+    MoneyManagementConfig <|-- ManualMoneyManagementConfig
+    MoneyManagementConfig <|-- TurtleMoneyManagementConfig
 ```
 
 #### `RunConfig`
 
 - **개요** — 백테스트 run 하나의 설정을 담는 검증 스키마(pydantic).
-- **책임** — OHLCV·펀딩 소스와 구간, `CostModel` 값, 거래소 규칙, 실행·리스크 설정, 파라미터 스윕, 지표 계산 모드,
-  트리거 세밀도, 체결 시점, 프로파일 선택을 검증한 뒤 `Engine`에 주입한다. 전략 파라미터의 스키마 선언·해석·검증은
+- **책임** — OHLCV·펀딩 소스와 구간, `CostModel` 값, 거래소 규칙, 실행·리스크 설정, 파라미터 스윕, 계열 계산 모드,
+  자금관리 mode, 트리거 세밀도, 체결 시점, 프로파일 선택을 검증한 뒤 `Engine`에 주입한다. 전략 파라미터의 스키마 선언·해석·검증은
   소유하지 않고 `strategy_id`·`params`로 담아 `Adapter Manager`에 넘긴다 — 해석·검증은 `StrategyConfig`가 하며 그래야
   같은 config가 backtest와 라이브에서 동일하게 검증된다.
 - **상속관계** — 없음(pydantic 설정 스키마).
@@ -3318,21 +3874,26 @@ classDiagram
     - `sizing_method`·`risk_per_trade`·`position_size_pct` — 수량 산출 방식(`risk_based` 기본, `pct`는 호환)과 그
       방식의 비율 값. 위험 기반이면 `risk_per_trade`(0.01 이하)만 채우고, 비율 방식이면 `position_size_pct`만 채운다.
     - `cost_values` — `CostModel` 시작 기본값을 덮어쓰는 run별 비용 값(수수료·mmr·펀딩 fallback·슬리피지 등).
-    - `indicator_mode` — 지표 계산 대상. `{auto, explicit, all}` 중이며 기본은 `auto`(활성 전략 필요 지표만).
-    - `explicit_indicators` — `indicator_mode = explicit`일 때 계산할 지표를 이름·파라미터 쌍의 목록으로 지정한다.
+    - `indicator_mode` — 지표와 패턴 계산 대상의 해석 방식. `{auto, explicit, all}` 중이며 기본은 `auto`다. 필드명은
+      호환 때문에 indicator로 남아 있지만 `series_resolution`이 두 레지스트리를 함께 해석한다.
+    - `explicit_indicators` — `indicator_mode = explicit`일 때 계산할 지표 또는 패턴을 이름·파라미터 쌍의 목록으로 지정한다.
       explicit 모드에서는 비어 있을 수 없고 그 밖의 모드에서는 비어 있어야 하며, 각 항목은 `name`과 `params` 둘만
       담는다.
-    - `trigger_feed` — 캔들 내 트리거 세밀도. `{tf_candle, m1_subcandle}` 중이며 기본은 `tf_candle`(첫 검증 스코프의
-      보수적 판정). `m1_subcandle`은 트레일링·1분 경로를 소비하는 전략이 활성일 때 켠다.
-    - `fill_timing` — 체결 시점. `{immediate, next_bar}` 중이며 백테스트 기본은 `next_bar`(`decision_ts <
-      execution_ts`).
+    - `trigger_feed` — 스키마 값은 `{tf_candle, m1_subcandle}`이지만 현재 허용되는 실행값은 `tf_candle`뿐이다.
+      `m1_subcandle`은 validator가 `NotImplementedError`로 거부한다.
+    - `fill_timing` — 스키마 열거에는 `{immediate, next_bar}`가 남아 있지만 현재 `RunConfig` 검증은 `next_bar`만
+      허용한다(`decision_ts < execution_ts`).
     - `profile_ref` — 전략 프로파일(§4.2 `StrategyProfile`) 선택.
+    - `money_management` — `mode` discriminator로 manual 또는 turtle 설정을 고른다. 기본은 manual이다. manual은
+      `leverage`·`reward_risk`·`atr_stop_multiple`, turtle은 `n_period`·고정 `n_timeframe="1d"`·
+      `stop_n_multiple`·`leverage_cap`만 허용하며 잉여 키를 거부한다. `money_management`가 없는
+      `vessel-reference` legacy 입력은 평면 전략 파라미터의 세 값을 manual 설정으로 정규화한다.
     - `sweep` — 파라미터 스윕 설정. 없으면 단일 run이다.
 - **메서드**
-    - `revalidate()` : 이미 만들어진 인스턴스에 대해 필드 타입·범위·상호 정합(예: `start < end`, `trigger_feed =
-      m1_subcandle`이면 1분 데이터 구간 가용)을 다시 검증하고, 백테스트는 `fill_timing = next_bar`만 허용해 `immediate`를 거부한다(캔들 두 순간 구조는
-      next-bar 전용이며 `immediate`는 페이퍼의 라이브 정합 전 호환 값이다). 전략 파라미터 값 검증은 여기서 하지 않고
-      `StrategyConfig`에 위임한다.
+    - `revalidate()` : 이미 만들어진 인스턴스에 대해 필드 타입·범위·상호 정합을 다시 검증한다. `start < end`,
+      `fill_timing="next_bar"`, 실행 가능한 `trigger_feed="tf_candle"`를 강제한다. `risk_based`는
+      `risk_per_trade`만, `pct`는 `position_size_pct`만 허용하고 turtle은 `risk_based`와만 조합된다. 전략 파라미터
+      값 검증은 `StrategyConfig`에 위임한다.
     - `selection()` : 전략 선택값(`strategy_id`·`params`·`symbol`·`timeframe`)만 추려 `Adapter Manager`에 넘길
       묶음을 만든다.
 - **불변식** — 전략 파라미터 스키마·검증을 재정의하지 않는다(단일 소유는 `StrategyConfig`). `fill_timing` 기본은
@@ -3414,22 +3975,47 @@ classDiagram
     class EvidenceSink { <<abstract>> }
     class CatalogStore { <<abstract>> }
     class BacktestEvidenceSink {
-        -str path
-        -Connection sqlite
-        +bind(str) str
-        +record(object) None
-        +finalize(str) str
+        -Path root
+        -Path|None path
+        -Connection|None connection
+        +bind(run_id: str) str
+        +record(entity: object) None
+        +audit(require_eval_decision: bool) dict~str,bool~
+        +source_data_hash() str
+        +finalize(run_id: str) str
     }
     class BacktestCatalogStore {
         -Connection backtest_db
         +save_prereg(object) None
         +register(object) str
-        +determinism_reference(str, str, str) object
+        +determinism_reference(run_id: str, config_hash: str, source_data_hash: str, evidence_schema_version: str) DeterminismReference
         +upsert_summary(object) None
-        +reconcile_orphaned() None
+        +reconcile_orphaned() int
+    }
+    class EvidenceSQLite {
+        <<SQLite STRICT schema>>
+        +evidence_schema_version 1.5.0
+        +basic_tables 14
+        +extension_tables 7
+    }
+    class INDICATOR_DEFINITION {
+        <<table>>
+        +indicator_key TEXT
+        +indicator_name TEXT
+        +params_json TEXT
+        +impl_version TEXT
+        +pinned_impl INTEGER
+        +series_kind TEXT
+        +category TEXT
+        +impl_note TEXT
+        +min_history INTEGER
+        +computation_mode TEXT
+        +enabled_reason TEXT
     }
     BacktestEvidenceSink ..|> EvidenceSink
     BacktestCatalogStore ..|> CatalogStore
+    BacktestEvidenceSink *-- EvidenceSQLite
+    EvidenceSQLite *-- INDICATOR_DEFINITION
 ```
 
 #### `BacktestEvidenceSink`
@@ -3447,6 +4033,13 @@ classDiagram
       Source Data Snapshot은 전략 주기 OHLCV 계약과, 전략 주기가 1분이 아니면 그 근거가 되는 1분 OHLCV 계약을
       각각 정확히 한 건 기록한다. 정상 원천 부재·부분 버킷·독립 원천 대조 결과와 결측이 삼킨 도달 불가 펀딩 경계
       수를 함께 남긴다.
+      현재 Evidence 스키마 판은 `1.5.0`이며 기본 테이블 14개와 확장 테이블 7개, 합계 21개다.
+      `INDICATOR_DEFINITION`은 지표와 패턴을 같은 snapshot 경로에 기록하기 위해 `series_kind`(`indicator` 또는
+      `pattern`), `category`, `impl_note`를 필수로 갖는다. 지표는 `IndicatorSpec.category`와 `pinned_impl`을,
+      패턴은 `category="candlestick"`와 TA-Lib 판·함수명을 `impl_note`에 기록한다.
+      `BACKTEST_RUN_LOCAL`은 `submitted_money_management_json`, 해석된 `money_management_json`, 전략과 정책의
+      합성 계열 목록을 보관하고, `params_json._money_management`에도 해석된 정책 신원을 포함한다. 정책이 진입마다
+      계산한 변동성·요청 수량·요청 leverage·최초 위험액은 `SIGNAL.metadata_json.money_management`에 기록한다.
     - **finalize(결정적 파생)** — Chart Summary·Drawdown/Runup Episode·Outcome Bucket·(run 설정에 표준 조건 어휘
       판이 주어진 경우) Condition Signature·Conditional Expectancy·Integrity Check. 고정 규칙으로 원본 기록에서
       다시 만들 수 있는 값만 적고 해석은 넣지 않는다.
@@ -3465,6 +4058,8 @@ classDiagram
       경로 자체는 `run_id`의 순수 함수라 `register`가 발급과 동시에 이미 run 인덱스에 채웠고, `bind`는 그 이름으로
       파일을 연다(크래시 잔여도 파일 위치가 남는다).
     - `record(entity)` : 시점별 Entity 하나를 run SQLite에 적는다. run 진행 중 여러 번 호출된다.
+    - `audit(require_eval_decision=False)` : FK·시점·비용·격자·정의 완전성을 검사해 check 이름별 bool을 돌려준다.
+    - `source_data_hash()` : 원천 snapshot만으로 결정적 비교 지문을 낸다.
     - `finalize(run_id)` : 결정적 파생(차트 요약·손실/급등 구간·결과 유형 분류·조건 서명·조건별 기대값)과 무결성
       검사를 만들고 정규화 Evidence 해시를 산출해 돌려준다.
 - **불변식**
@@ -3473,6 +4068,8 @@ classDiagram
       제외 집합·수치 표기 같은 컬럼 단위 직렬화 형식 규칙은 스키마와 함께 바뀌므로 데이터베이스 설계(§5)가 단독으로
       소유한다 — 두 곳에 나눠 적으면 반드시 어긋난다. 금액은 저장 시점에 이미 소수 자릿수가 확정된 값이라 직렬화가
       표현을 바꾸지 않고, 실측 펀딩 rate처럼 정해진 소수 자릿수로 반올림하지 않는 값의 표기도 §5 규약을 따른다.
+      `submitted_money_management_json`은 제출 축약 형태가 달라도 해석된 설정이 같으면 논리 해시가 같도록 해시에서
+      제외된다. 해석된 정책 id·판·설정은 해시에 포함된다.
     - **자기완결 파일** — run 신원을 SQLite 안에도 복제해(Backtest Run 로컬 사본) 파일 하나로 검산할 수 있게 한다.
     - **크래시 미확정 처리** — 해시가 확정되지 못한 SQLite는 다음 기동에서 크래시 잔여로 마킹되어 공식 평가에서
       제외된다(그 상태 전이는 `CatalogStore`가 메타에 남긴다).
@@ -3497,11 +4094,10 @@ classDiagram
       버전(`engine_version`·`core_lib_version`), 그리고 Engine이 재현 입력을 카탈로그 규칙(§5.2.2)으로 직렬화해 낸
       `config_hash`. **그래서 config 해석은 register보다 먼저다.** Evidence 경로는 `run_id`의 순수 함수
       (`<run_id>.sqlite` 상대 경로)라 발급과 동시에 register가 채운다.
-    - `determinism_reference(run_id, config_hash, source_data_hash)` : 현재 run에 원천 데이터 해시를 저장하고,
-      완료·평가된 과거 run 중 두 해시가 모두 같은 가장 최근 run만 결정성 비교 대상으로 돌려준다. 같은 설정이라도
-      원천 해시가 다르면 비교 대상에서 제외한다. 상세 상태는 같은 설정의 선행 run 자체가 없으면
-      `no_prior_config_run`, 같은 설정은 있으나 원천 지문이 다르면 `source_changed`, 같은 설정·원천의 해시가
-      일치하면 `matched`로 구분한다. 같은 설정·원천인데 Evidence 해시가 다르면 `mismatched`로 기록하고 결정성
+    - `determinism_reference(run_id, config_hash, source_data_hash, evidence_schema_version)` : 현재 run에 원천 데이터
+      해시를 저장하고, 설정·원천·Evidence 스키마 판이 비교 가능한 가장 최근 run을 결정성 대조 대상으로 돌려준다.
+      같은 설정이라도 원천 해시가 다르면 `source_changed`, 같은 설정·원천이라도 스키마 판이 다르면
+      `evidence_schema_changed`로 구분한다. 같은 조건에서 Evidence 해시가 다르면 `mismatched`로 기록하고 결정성
       검사를 실패시킨다.
     - `upsert_summary(summary)` : 성과·판정 요약을 run 인덱스·요약·태그에 upsert한다(+ Evidence 해시·무결성 상태.
       경로는 `bind` 직후 이미 기록돼 있다). run을 열지 않고 순위·필터·집계에 쓰도록 SQLite 상세에서 산출한 값을
@@ -4144,6 +4740,36 @@ flowchart TD
 3. **확인.** 채택·구축 기간의 커밋 리뷰에서 "커밋되는 파일에 새 비밀 리터럴 없음"을 점검 항목으로 둔다(간단한
    비밀 패턴 grep이면 충분하다 — 이 확인은 새 유입을 막는 것이고, 기존 커밋 값은 결정 ①의 대상이다).
 
+## 부록.7 전략 플랫폼 as-built 갱신 이력
+
+```mermaid
+flowchart LR
+    OLD["갱신 전 원본<br/>TradingSignal 전용 analyze<br/>자금관리·패턴·계열 해석 누락<br/>Evidence 필드 구판"]
+    CODE["2026-08-07 코드 대조<br/>core-lib · backtest-service · signal-service"]
+    NOW["현재 원본<br/>DecisionIntent 목표 계약<br/>MoneyManagementPolicy 조합<br/>패턴·계열·실행면 차이·Evidence 1.5.0"]
+    OLD -->|낡은 구조 식별| CODE
+    CODE -->|as-built로 통합| NOW
+```
+
+2026년 8월 7일에 별도 조사 문서였던 `strategy_platform_asbuilt_design.md`의 확인 내용을 이 원본에 통합하고 그
+파일을 제거했다. 상세 행위 규칙은 복제하지 않았으며 `docs/strategy-authoring-contract.md`가 계속 단독으로
+소유한다. 이 절은 원본이 왜 바뀌었는지와 어느 부분을 코드에 맞췄는지만 기록한다.
+
+| 갱신한 절 | 낡았던 원인 | 반영한 현재 구현 |
+|---|---|---|
+| §2.1 코드 트리 | `money_management/`·`patterns/`·`series/contracts.py`·`series_resolution.py`가 없었다 | 실제 패키지와 `VesselReference`·예약 trailing 모듈까지 트리에 추가했다 |
+| §3.1 core-lib 컴포넌트 | 지표와 전략만 보여 패턴·공통 계열 해석·자금관리 의존을 설명하지 못했다 | 별도 패턴 레지스트리, `SeriesSpec` Protocol과 해석 모듈, 자금관리 정책 및 runtime 조합을 추가했다 |
+| §4.1.1 타입 | `TradingSignal`만 전략 판단 타입으로 설명했다 | 목표 `DecisionIntent`, legacy 및 내부 구체화 `TradingSignal`, signal-service의 `PersistedSignal.signal_type` 경계를 분리했다 |
+| §4.1.2 지표·패턴·계열 | 패턴 레지스트리와 두 실행면의 계열 선택 경로가 없었다 | `PatternSpec`·`PatternState`·`PatternRegistry`, 네 출력, `resolve_series_specs`의 auto·explicit·all 의미를 추가했다 |
+| §4.2.1 전략 | `analyze`가 `TradingSignal`만 반환하고 전략이 보호가격까지 정하는 것으로 적혀 있었다 | Protocol의 과도기 합집합과 `VesselReference`의 `DecisionIntent | None`, `MoneyManagementSupport`, `StrategyRuntime`을 반영했다 |
+| §4.2.2 자금관리 | 계층 전체가 원본에 없었다 | 전략과 실행 사이에 현재 위치한 manual·turtle 정책, 값 타입, Factory, 정책 전용 일봉, 실행면별 조합 차이를 새 하위 절로 세웠다 |
+| §4.3.1·§4.3.3 실행·사이징 | 단계별 부분 익절과 trailing 계산이 구현된 것처럼 읽힐 여지가 있었고 자금관리와 sizing의 관계가 없었다 | 단계별 익절 계획은 없지만 `PositionBook`이 임의 축소 체결을 처리하는 경계, trailing matcher 거부, 정책 계획과 기존 sizing·체결가 상한의 층위를 분리했다 |
+| §4.4 Engine·설정·피드 | 판단 시퀀스가 `TradingSignal` 전용이고 1분 trigger walk가 실행 가능한 것으로 적혀 있었다 | `DecisionIntent` 정책 적용과 legacy 우회, manual·turtle 설정, 전략 TF trigger만 실행하며 `m1_subcandle`을 거부하는 현재 흐름을 반영했다 |
+| §4.5 Evidence | 스키마 판과 지표 정의 필드가 구판이었다 | 스키마 `1.5.0`, 기본 열네 테이블과 확장 일곱 테이블, `INDICATOR_DEFINITION.series_kind`·`category`·`impl_note`, 자금관리 제출·해석 기록 경계를 반영했다 |
+
+현재 전략 계약은 이행 중간 상태다. 새 전략의 목표 경로는 `DecisionIntent`와 `MoneyManagementPolicy`이며,
+`TradingSignal`은 legacy 전략 수용, 정책 적용 뒤 엔진 내부 구체화, signal-service 지속 변환 경계에만 남는다.
+
 ---
 
 # Traceability (설계 표준 요구 ↔ 이 문서의 절)
@@ -4160,11 +4786,11 @@ flowchart TD
 | §1.2 `core-lib` 변경 거버넌스, §2.1 `tests/test_no_reduplication.py` | 재드리프트 방지 3규칙(변경 리뷰 게이트·재복제 가드 테스트·실거래 고정 버전 릴리스) |
 | 제약사항·방향 6, §1.2 `backtest_db`·Evidence SQLite | 연구 데이터·운영 DB 분리(전용 meta DB + run별 SQLite + 읽기 전용 역할) |
 | 제약사항·방향 7~11, §2 `execution`·`ports/broker`·`eval` | 시점 순서·Decimal 단일 변환 관문·net 손익·1R≤1%·결정성(뒤 절에서 강제될 위치를 뼈대에 배치) |
-| 제약사항·방향(확정된 범위 조정), §2.1 `strategy/trailing/` | 트레일링·1분 집행 피드 유보를 구조에 반영하되 표준 위치는 보존(재도입·파리티는 §4에서 확정) |
+| 제약사항·방향(확정된 범위 조정), §2.1 `strategy/trailing/` | 트레일링은 열거형만 존재하고 matcher가 거부하며, `m1_subcandle`은 설정과 Engine이 거부하는 현재 예약 경계를 구조에 반영 |
 | §1.2 `signal-service`·`wallet-service` | 유지 서비스는 채택으로 core_lib 소비(동작 불변, 프로덕션은 이 설계 단계에서 불변) |
 | §1.1 전략 sub-block, §1.2 `signal_db` 레지스트리 | 전략(Adaptee)은 core-lib에 상주하고 실행할 전략 목록은 signal_db 레지스트리로 DB 관리(현행 코드 상주 목록 승격, 주입 포트 경유, 현행 `trading_strategies` 구조 차용) |
 | §1.2 `OHLCV 수집기` | 외부 collector 내부화(적재만, 지표 역할 폐지) |
-| §3.1 컴포넌트·다이어그램 화살표 | 단일 표준 구현(열 컴포넌트를 한 곳에 정의, 세 모드 공유) · 의존은 한 방향(내부 types 바닥, 역참조 없음) |
+| §3.1 컴포넌트·다이어그램 화살표 | 단일 표준 구현(열세 컴포넌트를 한 곳에 정의, 세 모드 공유) · 의존은 한 방향(내부 types 바닥, 역참조 없음) |
 | §3.1 `execution` 컴포넌트 | Decimal 단일 변환 관문(모든 Broker가 `normalizer` 통과) · net 손익·회계 항등식·비용 1회 차감 |
 | §3.2 포트 목록·어댑터 표 | 환경 차이는 포트로만 주입(7 ABC의 backtest 구현 확정, 순수 결정 로직은 포트 밖) |
 | §3.2 DataFeed 어댑터 | look-ahead 구조적 배제(`up_to` 경계, 확정 캔들만) |
@@ -4172,20 +4798,21 @@ flowchart TD
 | §3.3 signal-service 채택 | 유지 서비스의 지표·전략 인소싱(동작 보존, core_lib 소비) · 외부 collector 내부화 |
 | §3.3 wallet-service 채택 | 유지 서비스의 실행·비용·사이징 치환(회계 정확도 교정·골든 재수립) · 체결 시점 통일(`decision_ts < execution_ts`) |
 | §3.3 두 서비스 shim·포트 | 채택은 무중단 re-export shim · live/paper는 같은 포트 계약의 반대편 구현 |
-| §3.1·§3.2·§3.3 트레일링·1분 피드 표기 | 트레일링·1분 집행 피드 유보를 구조에 반영(표준 위치 보존, 재도입·파리티는 §4에서) |
+| §3.1·§3.2·§3.3 트레일링·1분 피드 표기 | 열거형·데이터 공급과 실제 실행 능력을 분리해 기록하고, trailing과 `m1_subcandle`의 명시적 거부 경계를 반영 |
 | 문서 구성(읽기 지도) | top-down 단일 문서(구조→행위, DB는 ERD로 분리, 정의 우선) |
 | §4 서문, §4.1 float·Decimal 경계 | Decimal 단일 변환 관문(판단 경로 float·체결 경로 Decimal의 경계를 타입에 각인) |
-| §4.1 `types` | 단일 표준 값 타입·금액 정밀도(단일 정의처) · 캔들 검증(한 캔들 내부 `close_time=open_time+timeframe`·`high≥max(o,c)`·`low≤min(o,c)`·`price>0`·`volume≥0`은 타입 계층, 시계열 단조 `open_time` 엄격 증가는 적재 층이 강제) · 신호 판단 전용(방향·수량 필드 없음) |
-| §4.1 `indicators` | 지표는 공유 라이브러리에서 공통 방식으로 단 한 번 구현·DRY(계약은 관리 방식이며 개수가 아님 — 목록 증감은 registry 항목 증감) · look-ahead 구조적 배제(확정 캔들 전용 계약 `close_time ≤ T`) · 벡터화·증분 일치 · 시장폭 조건부 활성 · 워밍업 seed 규약 |
-| §4.2 전략 클래스 | 전략 판단 계약(`StrategyAdapter` — Adaptee는 판단 전용·stateless, look-ahead는 Engine이 통제) · 책임 분리(스키마 선언은 Adaptee, 해석은 `StrategyConfig`, 생성은 `Adapter Manager`) · config 불변·무순환 · 전략 프로파일 스키마 |
+| §4.1 `types` | 단일 표준 값 타입·금액 정밀도(단일 정의처) · 캔들 검증(한 캔들 내부 `close_time=open_time+timeframe`·`high≥max(o,c)`·`low≤min(o,c)`·`price>0`·`volume≥0`은 타입 계층, 시계열 단조 `open_time` 엄격 증가는 적재 층이 강제) · 목표 판단 `DecisionIntent`와 legacy·내부 구체화 `TradingSignal` 경계 분리 |
+| §4.1 `indicators`·`patterns`·`series` | 지표와 패턴의 계산 신원을 별도 레지스트리로 유지하면서 공통 `SeriesSpec` 소비 계약과 `series_resolution` 단일 해석 경로를 사용 · look-ahead 구조적 배제(확정 캔들 전용 계약 `close_time ≤ T`) · 벡터화·증분 일치 · 패턴 네 출력·워밍업 seed 규약 |
+| §4.2.1 전략 클래스 | 전략 판단 계약(`StrategyAdapter` — 목표 `DecisionIntent`, legacy `TradingSignal` 호환) · 책임 분리(스키마 선언은 Adaptee, 해석은 `StrategyConfig`, 생성과 정책 조합은 `Adapter Manager`) · config 불변·무순환 · 전략 프로파일 스키마 |
+| §4.2.2 자금관리 계층 | `DecisionIntent` 진입을 보호가격·요청 수량·요청 leverage가 있는 `MoneyManagementPlan`으로 변환 · manual/turtle 정책 분리 · 전략 edge와 실행 승인 사이의 소유 경계 · backtest의 manual/turtle 지원과 signal-service의 manual 고정 차이 |
 | §4.3 `execution` | Decimal 단일 변환 관문(`normalizer` 한 곳, 모든 Broker `submit` 통과) · 시점 순서(next-bar, `decision_ts < execution_ts`, 체결 지연 한 주기 이하) · 결측 횡단 주문 금지 · 진입 지급 능력 예약(마진·진입 수수료·청산 수수료 1회, 미래 펀딩 제외) · 동시 도달 손절 우선(OHLC-locked) · 회계 항등식 `cash+position=equity`·비용 1회 차감 |
 | §4.3 `costs` | 모든 손익 net(4비용 수식) · 이산 펀딩·과거 실측 rate 주입 · 격리 마진 펀딩 한도와 소진 시 청산 · 청산 Isolated 보수 방향 |
 | §4.3 `sizing` | 생존 사이징 1R≤1% · Kelly 상한(Quarter~Half) · 노출·상관·방향 한도 · pct 경로 framework 비준수 플래그 |
 | §4.3 `ports` | 환경 차이는 포트로만 주입(7 ABC, 구현은 서비스) · look-ahead(`up_to` 경계) · wall-clock 금지 |
 | §4.3 `eval` | 성과 수식 표준 1곳·연율화 규약(일간 리샘플 후 √365) · 판정 3단계(무결성→Hard Gate→Decision) · 통과선 정본(형태 무관 구속/형태 의존)·프로파일 성숙도 |
-| §4.4 `Engine`·캔들 루프·1분 트리거 walk | 캔들 두 순간의 고정 순서가 look-ahead 방지(시가=지난 캔들 정산·트리거, 종가=이번 캔들 판단) · 시점 순서 `decision_ts < execution_ts`(종가 신호·다음 시가 체결, `pending` 한 칸 지연) · 결측 직전 주문 건너뜀과 `DATA_GAP` 청산 · 커버리지와 최장 결측의 Gate A 입력화 · 캔들 내 트리거는 1분 집행 피드를 시간 순서로(동시 도달 손절 우선, 소급 금지) · 트레일링·1분 파리티 허용 편차 확정(거래별 상대 편차 `max(1 tick, 5bp)`·부호 평균 편차 `1bp`·소비 전략 없어 재유보) · 워밍업 preload 후 신호 discard · 결정성(Clock 주입·wall-clock 금지·동일 설정·원천·seed→동일 Evidence) |
+| §4.4 `Engine`·캔들 루프 | 캔들 두 순간의 고정 순서가 look-ahead 방지(시가=지난 캔들 정산·전략 TF trigger, 종가=이번 캔들 판단) · 시점 순서 `decision_ts < execution_ts`(종가 신호·다음 시가 체결, `pending` 한 칸 지연) · `DecisionIntent` 진입에 정책 적용·legacy 신호 우회 · 결측 직전 주문 건너뜀과 `DATA_GAP` 청산 · 동시 도달 손절 우선·소급 금지 · `m1_subcandle`과 trailing 명시적 거부 · 워밍업 preload 후 신호 discard · 결정성(Clock 주입·wall-clock 금지·동일 설정·원천·seed→동일 Evidence) |
 | §4.4 입력·실행 포트 어댑터(`BacktestDataFeed`·`BacktestBroker`·`BacktestClock`·`BacktestCostModel`·`BacktestStrategyRegistry`) | 환경 차이는 포트로만 주입(5 입력·실행 포트 ABC의 backtest 구현) · look-ahead 구조적 배제(`DataFeed` `up_to` 경계) · 정상 원천 부재와 부분 버킷 분리·1분 원천 독립 대조·무보간 · 실제 캔들 여는·닫는 시각 합집합의 Clock 스케줄 · 펀딩 조회 포함 창·심볼 정규화·미발견 기록 · Decimal 단일 변환 관문(`Broker.submit`이 `execution.normalizer` 통과, 어댑터 캐스팅 금지) · wall-clock 금지(`Clock`) · 비용은 값만 주입(수식은 `costs`, 실측 펀딩은 `DataFeed`) · 전략 목록 접근은 주입 포트(backtest 읽기 전용) |
-| §4.4 `ConfigLayer`(`RunConfig`) | 같은 config가 backtest·라이브에서 동일 검증(전략 파라미터 스키마·검증은 `StrategyConfig` 단일 소유, 여기서 재정의 금지) · `fill_timing` 기본 `next_bar` · 지표 계산 모드(auto/explicit/all)·트리거 세밀도(tf_candle/m1_subcandle) run 설정화 |
+| §4.4 `ConfigLayer`(`RunConfig`) | 전략 파라미터 스키마·검증은 `StrategyConfig`가 소유 · `fill_timing` 기본 `next_bar` · 계열 계산 모드(auto/explicit/all) · `MoneyManagementConfig`의 manual/turtle 판별 합집합 · `m1_subcandle` 검증 단계 거부 |
 | §4.4 `Harness` | 과최적화 방어를 여러 run으로 산출(표본 내/외 분리·워크포워드·몬테카를로·확률적 샤프·파라미터 스윕) — 단일 run `eval`이 아니라 Harness가 산출·적용(단일 run `eval.HardGate`는 이 증거를 받지 않음) · 고정 seed(결정성) · 스윕 `run_id`는 Engine이 카탈로그 시퀀스로 단독 발급 |
 | §4.5 `BacktestEvidenceSink` | 연구 데이터·운영 DB 분리(무거운 시점별 상세는 run별 SQLite, 파일 하나로 자기완결) · 전략 주기와 1분 OHLCV 결측 계약 기록 · 결정성 해시=정렬 행의 정규화 직렬화(파일 바이트 아님·wall-clock 제외) · 스키마는 데이터베이스 설계(§5)가 확정, 이 절은 쓰기 계약만 |
 | §4.5 `BacktestCatalogStore` | 연구 데이터·운영 DB 분리(가벼운 메타만 전용 `backtest_db`) · `run_id` 단독 발급(run_id 발급 경합·파일명 충돌 차단) · 결정성 대조는 설정 해시와 원천 데이터 해시가 모두 같은 run만 선정 · 백테스트 전용(라이브·페이퍼 미사용) · 서비스 경계는 값 ID 참조(FK 미강제) · 스키마는 데이터베이스 설계(§5)가 확정, 이 절은 쓰기 계약만 |
