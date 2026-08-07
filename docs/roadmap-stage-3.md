@@ -94,7 +94,7 @@ Agent를 만든다. 산출물은 문서와 skill과 Agent 정의이며 생산 �
   깊게 다룬다 — 필요한 timeframe을 정하는 근거, 각 지표가 값을 내기까지 참조해야 하는 선행
   값의 범위 산정, 그 결과를 `min_history`·`required_indicators_json`·`supported_timeframes`로
   옮겨 `signal_db.strategy_registry`에 등록하는 절차, 지표 조합 선등록의 순서, 코드 선언과
-  등록이 어긋나면 `AdapterManager`가 실행을 거부한다는 사실의 사전 확인. 계약 §3.5~§3.7이
+  등록이 어긋나면 `AdapterManager`가 실행을 거부한다는 사실의 사전 확인. 규범 §4.5~§4.7이
   규칙은 정했으나 절차는 비어 있다.
 - **G-3. 기반 방침 유지 + 계산 검증 추가.** 판정 수치는 기존 표준(`core_lib/eval/thresholds.py`,
   `docs/fullspec/50_metrics_reference.md`)에서 인용하고, 새로 정하는 값은 그렇다고 명시한다.
