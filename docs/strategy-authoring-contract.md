@@ -118,8 +118,19 @@ leverage 셋을 담는다. 자금관리 정책이 계획을 세울 때 그 값�
 
 ### 4.1 전략은 판단 전용이어야 한다
 
-전략은 확정된 캔들과 Engine이 전달한 사전 계산 지표만 사용해야 한다. 전략은
-stateless이고 같은 입력과 설정에서 같은 판단을 반환해야 한다.
+전략은 Engine이 전달한 입력만 사용해야 한다. 전략은 stateless이고 같은 입력과
+설정에서 같은 판단을 반환해야 한다.
+
+Engine이 전달하는 것은 다음 여섯이며 이 밖의 값을 구해 오면 안 된다.
+
+| 열쇠 | 담는 것 |
+| --- | --- |
+| `candles` | 지금 봉까지의 확정 캔들 전체. 진행 중이거나 미래인 봉은 들어 있지 않다 |
+| `candle` | 지금 판단하는 확정 봉 |
+| `symbol` | 실행 종목 |
+| `timeframe` | 실행 timeframe |
+| `market_type` | 현물인지 무기한 선물인지 |
+| `indicators` | 선언한 계열의 이번 봉 값. 열쇠 규칙은 §4.4에 있다 |
 
 전략 코드에서는 다음 작업을 금지한다.
 
@@ -153,6 +164,118 @@ class DecisionIntent:
 `TradingSignal`을 사용해야 하는 변경은 legacy 경계임을 코드와 테스트에
 명시하고, 새로운 자금관리 수식을 전략에 추가하지 않는다.
 
+아래는 이 규범을 모두 지키는 최소 전략이다. 추세는 두 EMA의 위치로 보고 진입은
+장악형 캔들로 확정하며, 보호가격과 수량은 전혀 다루지 않는다.
+
+```python
+from collections.abc import Mapping
+
+from core_lib.strategy import StrategyBase
+from core_lib.types import Candle, DecisionAction, DecisionIntent, Position, PositionSide
+
+STRATEGY_ID = "ema-engulfing-example"
+
+_FAST = "ema:period=21"
+_SLOW = "ema:period=55"
+_PATTERN = "pat_engulfing"
+
+
+class EmaEngulfingExample(StrategyBase):
+    """추세 방향으로 장악형이 나올 때만 진입하고 추세가 꺾이면 청산한다."""
+
+    VERSION = "1.0.0"
+
+    def __init__(self, config: ResolvedConfig) -> None:
+        self.config = config
+
+    @classmethod
+    def get_metadata(cls) -> StrategyMetadata:
+        return StrategyMetadata(
+            required_indicators=[
+                {"name": "EMA", "params": {"period": 21}},
+                {"name": "EMA", "params": {"period": 55}},
+                {"name": "pat_engulfing", "params": {}},
+            ],
+            min_history=55,
+            supported_timeframes=["1h"],
+            profile=...,          # StrategyProfile. 아래 설명 참고
+            money_management=MoneyManagementSupport(
+                supported=("manual",),
+                default="manual",
+                supports_external_stop=True,
+                supports_external_take_profit=True,
+                supports_signal_exit=True,
+                supports_pyramiding=False,
+            ),
+        )
+
+    @classmethod
+    def get_parameter_schema(cls) -> ParameterSchema:
+        # 진입 판단을 바꾸는 값만 둔다. 자금관리 소유 이름은 §4.2에서 금지한다.
+        return ParameterSchema(
+            fields={
+                "min_strength": FieldSpec(type="number", default=1.0, range=(0.5, 1.0)),
+            }
+        )
+
+    def analyze(
+        self,
+        market_data: dict[str, object],
+        current_position: Position | None,
+    ) -> DecisionIntent | None:
+        candle = market_data["candle"]
+        values = market_data["indicators"]
+        assert isinstance(candle, Candle) and isinstance(values, Mapping)
+
+        fast = float(values[_FAST])
+        slow = float(values[_SLOW])
+
+        if current_position is not None:
+            trend_broke = (current_position.side is PositionSide.LONG and fast <= slow) or (
+                current_position.side is PositionSide.SHORT and fast >= slow
+            )
+            if not trend_broke:
+                return None
+            return self._intent(candle, DecisionAction.EXIT, "trend-broke")
+
+        matched = float(values[_PATTERN])
+        direction = float(values[f"{_PATTERN}_dir"])
+        strength = float(values[f"{_PATTERN}_strength"])
+        if matched != 1.0 or strength < float(self.config.params["min_strength"]):
+            return None
+
+        if fast > slow and direction > 0:
+            return self._intent(candle, DecisionAction.ENTER_LONG, "uptrend-engulfing")
+        if fast < slow and direction < 0:
+            return self._intent(candle, DecisionAction.ENTER_SHORT, "downtrend-engulfing")
+        return None
+
+    @staticmethod
+    def _intent(candle: Candle, action: DecisionAction, reason: str) -> DecisionIntent:
+        return DecisionIntent(
+            action=action,
+            symbol=candle.symbol,
+            timestamp=candle.close_time,
+            reference_price=float(candle.close),
+            confidence=1.0,
+            reason=reason,
+            metadata={"adaptee": STRATEGY_ID},
+        )
+```
+
+`min_history`가 55인 것은 선언한 계열 가운데 `ema:period=55`의 warm-up이 가장
+길기 때문이다. `pat_engulfing`은 3봉이면 값을 낸다. 산정 규칙은 §4.5에 있다.
+
+`profile`에 들어가는 `StrategyProfile`은 전략의 성격과 기대 성적 범위를 담는
+필수 항목이며 열두 필드를 모두 채워야 한다. **이 규범은 아직 그 열둘을 어떻게
+정하는지 설명하지 않는다.** 지금은 `core_lib/strategy/profile.py`의 정의를 보고
+채워야 하며, 작성 규칙을 이 문서에 세우는 것은 남은 일이다.
+
+**지금 저장소에 있는 `VesselReference`를 예시로 삼지 않는다.** 그 전략의
+파라미터 스키마에는 §4.2가 금지한 이름 셋이 그대로 들어 있다. 과거 설정을 읽기
+위해 마이그레이션 기간 동안만 허용된 예외이며, 새 전략이 그 모양을 따라 하면
+규범을 어기게 된다.
+
 ### 4.2 전략 파라미터와 자금관리 파라미터를 분리한다
 
 전략 파라미터에는 진입·청산 edge를 바꾸는 값만 둔다. 다음 이름은
@@ -168,6 +291,11 @@ class DecisionIntent:
 
 과거 전략의 동일 이름은 마이그레이션 기간에만 허용한다. 호환 normalizer가
 이를 `manual` 정책 설정으로 옮긴 뒤, 정규화된 설정을 Evidence에 기록해야 한다.
+
+**지금 그 예외에 해당하는 전략은 `VesselReference` 하나다.** 그 파라미터
+스키마에 `atr_stop_multiple`과 `reward_risk`와 `leverage`가 남아 있다. 저장소에
+전략이 그것뿐이므로 새로 쓰는 사람이 그 파일을 열어 그대로 따라 하기 쉬운데,
+그러면 이 절을 어기게 된다. 따라 할 모양은 §4.1의 예시다.
 
 ### 4.3 지원 자금관리 정책을 선언한다
 
@@ -192,9 +320,28 @@ Turtle 정책은 고정 take-profit을 사용하지 않고 전략의 청산 신�
 없다. 피라미딩을 지원하지 않는 실행 경로에서는 피라미딩을 조용히 흉내 내지
 않고, 지원하지 않는 capability로 명시한다.
 
-### 4.4 지표 요구사항은 조합한다
+### 4.4 계열 요구사항은 조합한다
 
-전략과 자금관리 정책은 각자 필요한 지표를 선언한다. Engine은 두 목록을
+전략이 선언할 수 있는 것은 지표만이 아니다. **지표 조합과 캔들 패턴을 같은
+`required_indicators` 목록에 함께 적는다.** 두 레지스트리의 이름이 서로 겹치지
+않으므로 이름만으로 어느 쪽인지 갈린다. 필드 이름이 지표만 가리키는 것은 역사적
+사정이며, 실제로는 계열 전반을 담는다. 실행 설정의 `indicator_mode`와
+`explicit_indicators`도 마찬가지다.
+
+`indicators`에서 값을 꺼낼 때 쓰는 열쇠는 선언한 이름이 아니라 **실행 열쇠**다.
+지표는 이름 뒤에 파라미터가 붙어 `ema:period=21`이 되고, 패턴은 이름 그대로
+`pat_engulfing`이다.
+
+**패턴은 값 하나가 아니라 네 키를 낸다.** `pat_engulfing`은 성립 여부,
+`pat_engulfing_dir`은 방향, `pat_engulfing_strength`는 강도,
+`pat_engulfing_confirm`은 뒤 봉에서의 확인이다. 강도는 경계 성립이면 0.5이고
+온전한 성립이면 1.0이다.
+
+**방향 값을 매매 방향으로 그대로 쓰지 않는다.** 그 부호는 원본 구현이 내는
+값이며 모든 패턴에서 매수와 매도로 일반화되지 않는다. 어떤 뜻인지는 패턴 계산
+표준을 보고 판단한다.
+
+전략과 자금관리 정책은 각자 필요한 계열을 선언한다. Engine은 두 목록을
 합치고 identifier 기준으로 중복을 제거한 뒤 가장 긴 warm-up을 적용한다.
 
 ```text
@@ -240,7 +387,13 @@ warm-up을 채우지 못하면 구현은 구간 제한을 풀고 다시 읽어�
 어긋나면 실행을 거부한다. 어느 쪽이 낡았는지 구현이 판단할 수 없으므로 조용히
 한쪽을 택하지 않는다.
 
-지표 목록은 순서와 키 순서를 무시하고 이름과 파라미터로만 비교한다. 등록의
+**대조가 보는 것은 다섯이다.** 클래스 이름과 모듈 경로와 `min_history`와
+`supported_timeframes`와 `required_indicators_json`이다. **보지 않는 것도
+알아 두어야 한다.** 전략 판과 파라미터 기본값과 프로파일은 대조 대상이 아니므로
+그 셋이 어긋나도 실행이 막히지 않는다. §2.1이 그것을 스스로 지켜야 할 것으로
+적어 둔 이유다.
+
+계열 목록은 순서와 키 순서를 무시하고 이름과 파라미터로만 비교한다. 등록의
 표현 방식이 달라도 같은 요구면 통과한다.
 
 전략을 바꿀 때는 코드와 등록을 같은 변경으로 함께 옮긴다. 자금관리 정책으로
@@ -248,11 +401,17 @@ warm-up을 채우지 못하면 구현은 구간 제한을 풀고 다시 읽어�
 정책 소유가 되었다면 전략의 `required_indicators`에서 ATR이 사라지고, 등록도
 그에 맞춰 갱신되어야 한다.
 
-### 4.7 지표는 등록된 조합만 선언할 수 있다
+### 4.7 등록된 계열만 선언할 수 있다
 
-지표는 이름과 파라미터의 조합 단위로 레지스트리에 등록되어 있다. 등록되지 않은
-조합은 선언할 수 없고 조회 시점에 거부된다. 새 조합이 필요하면 전략 작업과
-같은 변경에서 지표 레지스트리에 먼저 추가한다.
+지표는 이름과 파라미터의 조합 단위로, 캔들 패턴은 이름 단위로 레지스트리에
+등록되어 있다. 등록되지 않은 것은 선언할 수 없고 계열 해석 시점에 거부된다.
+
+새 지표 조합이나 새 패턴이 필요하면 **전략 작업과 같은 변경에서 레지스트리에
+먼저 추가한다.** 계산이 아직 구현되어 있지 않다면 그것은 전략 작업이 아니라
+계산 표준과 구현을 먼저 갖추는 일이므로, 전략을 우회 구현으로 흉내 내지 않는다.
+
+전략 안에서 지표나 패턴을 다시 계산하지 않는다. 같은 계산이 두 곳에 생기면
+값이 갈리고, 어느 쪽이 맞는지 판정할 근거가 없어진다.
 
 ## 5. 자금관리 정책
 
