@@ -64,7 +64,7 @@ harness·테스트는 구분 1로 소멸(2절).
   Engine·ConfigLayer·Harness로 새로 선다(구 CLI 카탈로그·스키마는 참조만 하되 서비스 자체는 폐기 — 실행·비용·사이징
   인벤토리 분류와 정합).
 - **구 전략 코드·구조 전부** (베이스 클래스·레지스트리·팩토리·파라미터 상속 체인) **→ Protocol + Adaptee, 신규 Adapter
-  Manager.** 구 구조를 폐기하고 신규 전략 판단 정책으로 교체한다. 레지스트리·팩토리 기능은 신규 `Adapter Manager`가
+  Manager.** 구 구조를 폐기하고 신규 전략 선택 정책으로 교체한다. 레지스트리·팩토리 기능은 신규 `Adapter Manager`가
   구현 Adaptee 목록을 `signal_db`에 등록·조회하는 것으로 다시 선다(레지스트리 DB 접근은 주입 포트 경유, backtest
   Engine과 signal-service 엔진 공용). 구 레지스트리를 참조해 이식할 필요가 없다.
 - **backtest 지표 복제본** (`services/backtest/`) **→ 공유 코어 단일 표준.** 지표 복제본을 폐기하고 82종 지표를

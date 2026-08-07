@@ -55,7 +55,7 @@ ATR 기반 고정 SL/TP)는 검증 기준으로 요약하되, 정확한 임계�
 
 ---
 
-## 3. Adaptee 판단 정책 형태 (정책 설계 입력)
+## 3. Adaptee 전략 선택 정책 형태 (정책 설계 입력)
 
 플랫폼이 Adaptee Protocol을 설계하려면 판단 **내부 로직**이 아니라 판단의 **정책 형태**를 알아야 한다.
 - **시그니처**: `async analyze(market_data: Dict[str, Any], current_position: Optional[Dict]=None) ->
@@ -68,7 +68,7 @@ ATR 기반 고정 SL/TP)는 검증 기준으로 요약하되, 정확한 임계�
   `take_profit`. **판단만**(수량·방향 결정은 sizing/execution 소관).
 - **순수성·예외 접점**: precomputed 분기는 판단 전용(DB·루프·저장 없음). 예외 접점 = 시계 읽기
   (`time_provider.now()`)와 OHLCV 분기의 `calculate_indicators`(라이브 비활성). 이식 시 시각은 시계 포트,
-  지표는 Engine push로 외부화되고 판단 정책 형태만 남는다.
+  지표는 Engine push로 외부화되고 전략 선택 정책 형태만 남는다.
 - **포지션 입력**: 현행 드라이버는 `analyze(market_data=...)`만 호출하고 `current_position`을 넘기지 않는다
   (`strategy_executor.py:1040`). 포지션 입력 정책은 플랫폼 설계에서 확정.
 
@@ -109,7 +109,7 @@ ATR 기반 고정 SL/TP)는 검증 기준으로 요약하되, 정확한 임계�
 라벨 대체). 전략 프로파일 선언(family·기대 승률/손익비 범위·tail_shape·holding_horizon·primary_metric 등)과
 소비 규칙. **첫 검증 Adaptee = VesselFluxGen2 개념(트레일링 제외)의 신규 구현.**
 
-**참조 전용(이식 아님):** 판단 정책 형태(3)·호출 소비 구조(4)·config 스키마 패턴(아래 7)·전략 유니버스(7).
+**참조 전용(이식 아님):** 전략 선택 정책 형태(3)·호출 소비 구조(4)·config 스키마 패턴(아래 7)·전략 유니버스(7).
 각 전략의 판단 내부와 파라미터 값은 전략 작성자 소유.
 
 **유보:** 트레일링 기계장치(5).
@@ -150,6 +150,6 @@ ATR 기반 고정 SL/TP)는 검증 기준으로 요약하되, 정확한 임계�
 | 5 | 트레일링은 core_lib 공유 순수 함수를 호출(상속 아님) — 소비자 없어 유보, 재도입 시 단일 표준 통합 |
 | 3 | 판단 출력 정책=TradingSignal(수량·방향 없음, 판단만) |
 
-**정합성 확인 대상:** 정책 설계 입력이 "Adaptee=판단 전용" 원칙에 부합하는지 — 판단 정책 형태·호출 구조·config
+**정합성 확인 대상:** 정책 설계 입력이 "Adaptee=판단 전용" 원칙에 부합하는지 — 전략 선택 정책 형태·호출 구조·config
 패턴은 참조로, 판단 내부·파라미터 값은 작성자 소유로, Protocol·Manager·Config·프로파일은 신규로, 트레일링은
 유보로 갈랐다. 이 노트는 이후 전략 설계 단계가 재인벤토리 없이 Adaptee 정책·Manager·Config를 설계하도록 한다.
