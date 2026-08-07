@@ -10,9 +10,7 @@ from collections.abc import Callable
 from threading import Event
 from types import FrameType
 
-from core_lib.strategy import AdapterManager, InProcessStrategyRegistry
-from core_lib.strategy.adaptees import STRATEGY_ID as VESSEL_STRATEGY_ID
-from core_lib.strategy.adaptees import VesselReference
+from core_lib.strategy import AdapterManager, build_strategy_registry
 from service_commons.observability import configure_logging
 
 from signal_service.application import (
@@ -39,11 +37,9 @@ def build_signal_generator(
     queue: SignalQueue | None = None,
 ) -> SignalGenerationService:
     """Wire the v2 core path while leaving connection policy to the operator."""
-    plugins = InProcessStrategyRegistry()
-    plugins.register(VESSEL_STRATEGY_ID, VesselReference)
     manager = AdapterManager(
         SignalStrategyRegistry(registry_reader),
-        plugins,
+        build_strategy_registry(),
     )
     return SignalGenerationService(
         CryptoDataFeed(crypto_reader),

@@ -9,6 +9,7 @@ from core_lib.ports import StrategyRegistry
 from .base import StrategyAdapter, StrategyRuntime
 from .config import StrategyConfig
 from .factory import AdapterFactory
+from .reconciliation import StrategyReconciliation, reconcile_strategy_registries
 from .registry import InProcessStrategyRegistry
 
 
@@ -178,6 +179,13 @@ class AdapterManager:
                 raise ValueError("external catalog row has no valid strategy_id")
             strategy_ids.append(strategy_id)
         return sorted(strategy_ids)
+
+    def reconcile_catalog(self) -> tuple[StrategyReconciliation, ...]:
+        """Return whole-catalog findings without changing the single-create path."""
+        return reconcile_strategy_registries(
+            self._catalog_registry,
+            self._adapter_registry,
+        )
 
     def register(self, strategy_id: str, meta: dict[str, object]) -> None:
         """Delegate external catalog registration after confirming the plugin exists."""

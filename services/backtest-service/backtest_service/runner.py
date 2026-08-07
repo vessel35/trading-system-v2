@@ -9,9 +9,7 @@ from typing import cast
 
 import psycopg
 from core_lib.ports import DataFeed
-from core_lib.strategy import AdapterManager, InProcessStrategyRegistry
-from core_lib.strategy.adaptees import STRATEGY_ID as VESSEL_STRATEGY_ID
-from core_lib.strategy.adaptees import VesselReference
+from core_lib.strategy import AdapterManager, build_strategy_registry
 from core_lib.types import MarketType
 
 from backtest_service.adapters.broker import BacktestBroker
@@ -63,11 +61,9 @@ def _connection(
 
 
 def _manager(signal_connection: ReadConnection) -> AdapterManager:
-    plugins = InProcessStrategyRegistry()
-    plugins.register(VESSEL_STRATEGY_ID, VesselReference)
     return AdapterManager(
         BacktestStrategyRegistry(signal_connection),
-        plugins,
+        build_strategy_registry(),
     )
 
 

@@ -65,7 +65,14 @@ def test_core_lib_dependencies_follow_the_one_way_component_graph() -> None:
         "costs": {"ports", "types"},
         "eval": {"types"},
         "ports": {"types"},
-        "strategy": {"indicators", "money_management", "ports", "types"},
+        "strategy": {
+            "indicators",
+            "money_management",
+            "ports",
+            "series",
+            "series_resolution",
+            "types",
+        },
         "execution": {"costs", "ports", "types"},
     }
     violations: list[str] = []

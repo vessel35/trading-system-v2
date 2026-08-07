@@ -78,6 +78,9 @@ stateless이고 같은 입력과 설정에서 같은 판단을 반환해야 한�
 전략은 진입과 청산 판단을 명시적인 `DecisionIntent`로 반환하는 목표 계약을
 따른다. 방향을 보호가격의 상대 위치로 추론하게 만들지 않는다.
 
+`StrategyAdapter` Protocol이 규범 계약이며 `StrategyBase`는 그 계약을 만족하도록
+제공하는 선택적 편의 기반 클래스다.
+
 ```python
 @dataclass(frozen=True, slots=True)
 class DecisionIntent:

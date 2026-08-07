@@ -13,8 +13,10 @@ from core_lib.strategy import (
     ParameterSchema,
     ResolvedConfig,
     StrategyAdapter,
+    StrategyImplementationIdentity,
     StrategyMetadata,
     StrategyProfile,
+    StrategyReconciliationState,
 )
 from core_lib.types import Position, TradingSignal
 
@@ -271,3 +273,65 @@ def test_a_registration_that_agrees_with_the_adaptee_is_accepted() -> None:
     )
 
     assert adapter.get_metadata().min_history == 55
+
+
+def test_catalog_reconciliation_returns_five_distinct_states() -> None:
+    plugins = InProcessStrategyRegistry()
+    for strategy_id in (
+        "allowlist-only",
+        "deprecated",
+        "healthy",
+        "identity-mismatch",
+        "inactive",
+    ):
+        plugins.register(strategy_id, FakeAdaptee)
+
+    catalog = FakeCatalog([])
+    for strategy_id in (
+        "catalog-only",
+        "deprecated",
+        "healthy",
+        "identity-mismatch",
+        "inactive",
+    ):
+        catalog.rows[strategy_id] = {
+            "strategy_id": strategy_id,
+            "class_name": FakeAdaptee.__name__,
+            "module_path": FakeAdaptee.__module__,
+            "is_active": True,
+            "is_deprecated": False,
+        }
+    catalog.rows["catalog-only"].update(
+        {"class_name": "CatalogOnly", "module_path": "strategies.catalog_only"}
+    )
+    catalog.rows["identity-mismatch"]["module_path"] = "strategies.stale"
+    catalog.rows["inactive"]["is_active"] = False
+    catalog.rows["deprecated"].update({"is_active": False, "is_deprecated": True})
+
+    findings = AdapterManager(catalog, plugins).reconcile_catalog()
+
+    assert [finding.strategy_id for finding in findings] == [
+        "allowlist-only",
+        "catalog-only",
+        "deprecated",
+        "identity-mismatch",
+        "inactive",
+    ]
+    assert {finding.strategy_id: finding.state for finding in findings} == {
+        "allowlist-only": StrategyReconciliationState.ALLOWLIST_ONLY,
+        "catalog-only": StrategyReconciliationState.CATALOG_ONLY,
+        "deprecated": StrategyReconciliationState.DEPRECATED,
+        "identity-mismatch": StrategyReconciliationState.IDENTITY_MISMATCH,
+        "inactive": StrategyReconciliationState.INACTIVE,
+    }
+    assert "healthy" not in {finding.strategy_id for finding in findings}
+
+    mismatch = next(finding for finding in findings if finding.strategy_id == "identity-mismatch")
+    assert mismatch.catalog_identity == StrategyImplementationIdentity(
+        class_name=FakeAdaptee.__name__,
+        module_path="strategies.stale",
+    )
+    assert mismatch.allowlist_identity == StrategyImplementationIdentity(
+        class_name=FakeAdaptee.__name__,
+        module_path=FakeAdaptee.__module__,
+    )

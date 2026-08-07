@@ -1,9 +1,13 @@
 """Define the StrategyAdapter decision protocol."""
 
+from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
 from core_lib.money_management import MoneyManagementPolicy
+from core_lib.series import SeriesSpec
+from core_lib.series_resolution import series_key
 from core_lib.types import DecisionIntent, Position, TradingSignal
 
 from .config import ParameterSchema
@@ -68,6 +72,45 @@ class StrategyAdapter(Protocol):
     ) -> DecisionIntent | TradingSignal | None:
         """Return a decision signal, or None for HOLD."""
         ...
+
+
+class StrategyBase(ABC):
+    """Optional stateless convenience base that satisfies ``StrategyAdapter``."""
+
+    __slots__ = ()
+
+    @classmethod
+    @abstractmethod
+    def get_metadata(cls) -> StrategyMetadata:
+        """Return the strategy-owned execution requirements."""
+
+    @classmethod
+    @abstractmethod
+    def get_parameter_schema(cls) -> ParameterSchema:
+        """Return the strategy-owned parameter declaration."""
+
+    @abstractmethod
+    def analyze(
+        self,
+        market_data: dict[str, object],
+        current_position: Position | None,
+    ) -> DecisionIntent | None:
+        """Return a decision signal, or None for HOLD."""
+
+    @staticmethod
+    def series_value(
+        market_data: Mapping[str, object],
+        spec: SeriesSpec,
+    ) -> object:
+        """Read one precomputed series value by its shared execution key."""
+        values = market_data.get("indicators")
+        if not isinstance(values, Mapping):
+            raise TypeError("market_data.indicators must be a mapping")
+        key = series_key(spec)
+        try:
+            return values[key]
+        except KeyError as error:
+            raise KeyError(f"market_data has no value for declared series: {key}") from error
 
 
 @dataclass(frozen=True, slots=True)

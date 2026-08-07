@@ -38,6 +38,3 @@ class InProcessStrategyRegistry:
             del self._adaptees[strategy_id]
         except KeyError as error:
             raise KeyError(f"strategy is not registered in-process: {strategy_id}") from error
-
-
-DEFAULT_STRATEGY_REGISTRY = InProcessStrategyRegistry()
