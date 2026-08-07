@@ -1,7 +1,7 @@
 # WebUI 정보구조·UI/UX 설계
 
 이 문서는 WebUI의 정보 구조와 화면·상호작용을 개발 착수 전에 설계한다. 방향은 `docs/webui-direction.md`,
-API 계약은 `docs/webui-api-design.md`, 교차 정합은 `docs/webui-predev-plan.md`에 있다. 화면마다
+API 정책은 `docs/webui-api-design.md`, 교차 정합은 `docs/webui-predev-plan.md`에 있다. 화면마다
 "필요한 데이터"를 카탈로그 컬럼·Evidence 엔티티에 직접 묶어, API가 그 화면을 채울 수 있는지 대조 가능한
 체크리스트로 남긴다.
 
@@ -100,7 +100,7 @@ DateRangePicker·Command 다중선택, 열/밀도는 DropdownMenu, 상태는 Bad
 필요한 데이터: `backtest_run`(run_id·run_name·strategy_id·strategy_name·symbol·timeframe·period·
 status·created_at·config_hash·source_data_hash·sweep_id), `backtest_summary`(pf·sortino·calmar_or_mar·
 sqn·mdd·ror·sharpe·psr·win_rate·payoff·expectancy_r·ulcer·kelly·trade_count·net_pnl_total·gate_verdict·
-decision_route·integrity_status·data_coverage_ratio), 서버측 페이지네이션 계약, `backtest_tag` 필터 패싯.
+decision_route·integrity_status·data_coverage_ratio), 서버측 페이지네이션 정책, `backtest_tag` 필터 패싯.
 
 ### 4.2 실행 요약 (상세의 개요 탭)
 
@@ -404,7 +404,7 @@ oos_degradation, 스윕 축 정의.
 
 전략 목록은 `strategy_registry`(display_name·strategy_id·version·supported_timeframes·required_
 indicators_json·min_history·is_active·is_deprecated), 단건은 description·default_params_json·module_
-path·class_name과 이 전략 실행 목록(`backtest_run` strategy_id 필터). 지표 개수는 계약이 아니라 "현재
+path·class_name과 이 전략 실행 목록(`backtest_run` strategy_id 필터). 지표 개수는 정책이 아니라 "현재
 등록분"임을 표현으로 밝힌다.
 
 ## 8. P3·P4 개념 — 라이브(안전 프레이밍)

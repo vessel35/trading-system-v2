@@ -1,16 +1,16 @@
 # 3-1 실행 계획: 신규 전략 개발 기반과 Agent 워크플로
 
-이 문서는 3-1 단계의 최종 실행 계획이며, 전략 기반 클래스와 허용 목록과 카탈로그 맞춰 보기는 구현되었지만 계약 정합, 등록 사전 점검, 공통 계약 검사, 실행 능력 목록과 Agent 워크플로는 아직 완료되지 않았다.
+이 문서는 3-1 단계의 최종 실행 계획이며, 전략 기반 클래스와 허용 목록과 카탈로그 맞춰 보기는 구현되었지만 정책 정합, 등록 사전 점검, 공통 계약 검사, 실행 능력 목록과 Agent 워크플로는 아직 완료되지 않았다.
 
 ## 1. 단계의 목표
 
-3-1은 특정 전략을 출시하는 단계가 아니다. 사람이 쓴 전략 기술 문서를 플랫폼 계약을 지키는
+3-1은 특정 전략을 출시하는 단계가 아니다. 사람이 쓴 전략 기술 문서를 플랫폼 정책을 지키는
 전략으로 옮기고, 등록하고, 화면에서 실행하고, 계산을 독립 검증하는 반복 가능한 개발 기반을
 만드는 단계다.
 
 단계의 최종 산출물은 다음과 같다.
 
-1. canonical contract와 전략 개발 skill이 지표와 패턴을 포함하는 계열 계약을 정확히 설명해야
+1. canonical contract와 전략 개발 skill이 지표와 패턴을 포함하는 계열 정책을 정확히 설명해야
    한다.
 2. 신규 전략을 두 실행 서비스가 적재하고 Web API와 화면이 실행 가능 상태를 보여야 한다.
 3. 전략 등록 절차와 실행 전 사전 점검이 있어야 한다.
@@ -24,16 +24,16 @@
 이름이 있다. 패턴은 `required_indicators`라는 역사적 이름의 선언에 지표와 함께 들어가지만,
 실행 시에는 지표 레지스트리와 패턴 레지스트리로 분리해 해석된다.
 
-현재 `VesselReference`는 목표 계약인 `DecisionIntent`를 반환하고 Engine은
+현재 `VesselReference`는 목표 방식인 `DecisionIntent`를 반환하고 Engine은
 `MoneyManagementPolicy`를 조합한다. `StrategyAdapter`와 Engine은 이행 기간의 legacy
-`TradingSignal`도 계속 수용한다. 3-1에서 만드는 신규 전략은 목표 계약을 사용하며, manual
+`TradingSignal`도 계속 수용한다. 3-1에서 만드는 신규 전략은 목표 방식을 사용하며, manual
 호환 기본값과 legacy 해석은 변경하지 않는다.
 
 `e1fd478`에서 선택적 `StrategyBase`, 명시적 `STRATEGY_ALLOWLIST`, 두 실행 서비스의 공통
 레지스트리 조립과 카탈로그 다섯 상태 맞춰 보기가 구현되었다. 반면 Web API는 아직
 `VesselReference`를 직접 참조하고, 실행 가능 여부와 맞춰 보기 사유를 응답하지 않는다.
 
-계열 계약을 canonical contract와 skill 전반에 반영한 `a542ecb`는 별도 브랜치에 존재하지만
+계열 정책을 canonical contract와 skill 전반에 반영한 `a542ecb`는 별도 브랜치에 존재하지만
 현재 `feat/strategy-authoring-change`의 이력에는 포함되지 않았다. 따라서 이 계획에서는 통합이
 끝난 것으로 간주하지 않는다.
 
@@ -57,11 +57,11 @@ Agent 인수 시험 문서 두 편을 저장한 `0dd26a2`도 같은 별도 브�
 4. 패턴 값은 `pattern_detected`, `pattern_strength`, `pattern_direction`과
    `pattern_reliability`의 네 값을 가진다.
 5. `indicator_mode`의 `all`은 모든 지표를 켜지만 패턴은 전략이 선언한 것만 켠다.
-6. 일반 패턴 계약의 warm-up 근거는 `PatternSpec.min_history`다. 현재 TA-Lib 이식 패턴에서
-   `lookback + 1`로 유도된 값과 일반 계약을 같은 규칙으로 쓰지 않는다.
-7. 신규 전략은 `DecisionIntent`와 `MoneyManagementPolicy` 목표 계약을 사용한다.
+6. 일반 패턴 정책의 warm-up 근거는 `PatternSpec.min_history`다. 현재 TA-Lib 이식 패턴에서
+   `lookback + 1`로 유도된 값과 일반 정책을 같은 규칙으로 쓰지 않는다.
+7. 신규 전략은 `DecisionIntent`와 `MoneyManagementPolicy` 목표 방식을 사용한다.
 
-skill의 필수 조사 경로에는 `series_resolution.py`, 공통 series 계약과 패턴 레지스트리 경로를
+skill의 필수 조사 경로에는 `series_resolution.py`, 공통 series 정책과 패턴 레지스트리 경로를
 포함한다. skill은 canonical contract를 다시 서술하지 않고 구현 절차에서 정본을 참조해야 한다.
 
 ## 4. 실행 능력 목록
@@ -130,7 +130,7 @@ signal-service의 공통 레지스트리 조립, `AdapterManager`의 단건 검�
 `docs/fullspec/strategy_contract_suite_design.md`를 따른다.
 
 검사는 결정성과 불변성, 정책 독립성, 시간 무결성, 금지된 의존, 선언과 접근의 일치, 방향별
-진입과 청산 대응, 메서드 시그니처와 capability 정합을 다룬다. 허용 목록과 정확히 같은 계약
+진입과 청산 대응, 메서드 시그니처와 capability 정합을 다룬다. 허용 목록과 정확히 같은 방식
 사례표를 요구하고, 테스트용 결함 전략으로 각 검사 장치가 실제로 실패하는지 증명한다.
 
 공통 계약 검사 전체를 한 changeset에서 구현할지 검증 층별로 나눌지는 아직 결정되지 않았다.
@@ -138,7 +138,7 @@ signal-service의 공통 레지스트리 조립, `AdapterManager`의 단건 검�
 
 ## 8. 계산 검증 방침
 
-여섯 번째 갈래는 계약 준수와 별도로 전략 계산이 맞는지를 검증하는 방침을 문서화하는 작업이다.
+여섯 번째 갈래는 정책 준수와 별도로 전략 계산이 맞는지를 검증하는 방침을 문서화하는 작업이다.
 
 기존 평가 임계값은 `core_lib/eval/thresholds.py`와
 `docs/fullspec/50_metrics_reference.md`에서 인용하고, 신규 판단값을 도입하면 새 결정임을
@@ -173,7 +173,7 @@ author는 문서의 빈값, 계산 재료 부재와 실행 능력 부재를 구�
 
 작업 순서는 다음과 같다.
 
-1. 계열 계약과 skill 정합을 현재 브랜치에 통합한다.
+1. 계열 정책과 skill 정합을 현재 브랜치에 통합한다.
 2. 실행 능력 목록과 드리프트 검사를 구현한다.
 3. 런타임 조립의 남은 Web API와 화면 연계, 빈 전략 계열 조합 지원을 완료한다.
 4. 등록 절차와 읽기 전용 사전 점검을 완성한다.
@@ -196,7 +196,7 @@ mode나 기본 정책을 바꾸지 않는다. 전략 구현체의 별도 패키�
 
 ## 12. 완료 기준
 
-- canonical contract와 skill이 지표와 패턴을 포함하는 계열 계약으로 일관되어야 한다.
+- canonical contract와 skill이 지표와 패턴을 포함하는 계열 정책으로 일관되어야 한다.
 - 실행 능력 목록이 조회 가능하고 실제 코드와 어긋나면 검사가 실패해야 한다.
 - 신규 Adaptee가 두 실행 서비스에서 적재되고 Web API와 화면에서 실행 가능한 상태로 보여야
   한다.

@@ -7,8 +7,8 @@
 따라야 하며, 플랫폼 구현자는 등록·설정 해석·실행·Evidence 단계에서 계약을
 검증해야 한다.
 
-이 문서에는 아직 코드로 완성되지 않은 목표 계약도 포함된다. 현재 구현과 목표
-계약이 다를 때는 아래의 마이그레이션 순서를 따르며, 미구현 동작을 이미 제공되는
+이 문서에는 아직 코드로 완성되지 않은 목표 방식도 포함된다. 현재 구현과 목표
+방식이 다를 때는 아래의 마이그레이션 순서를 따르며, 미구현 동작을 이미 제공되는
 것처럼 가정해서는 안 된다.
 
 현재 `VesselReference`는 `DecisionIntent`로 진입·청산 판단만 반환하고 Engine은
@@ -75,10 +75,10 @@ stateless이고 같은 입력과 설정에서 같은 판단을 반환해야 한�
 - 주문을 만들거나 Broker 또는 서비스 구현을 호출한다.
 - `backtest_service`, `web_api` 또는 다른 서비스 패키지를 import한다.
 
-전략은 진입과 청산 판단을 명시적인 `DecisionIntent`로 반환하는 목표 계약을
+전략은 진입과 청산 판단을 명시적인 `DecisionIntent`로 반환하는 목표 방식을
 따른다. 방향을 보호가격의 상대 위치로 추론하게 만들지 않는다.
 
-`StrategyAdapter` Protocol이 규범 계약이며 `StrategyBase`는 그 계약을 만족하도록
+`StrategyAdapter` Protocol이 규범 정책이며 `StrategyBase`는 그 정책을 만족하도록
 제공하는 선택적 편의 기반 클래스다.
 
 ```python
@@ -94,7 +94,7 @@ class DecisionIntent:
 ```
 
 신규 전략은 `DecisionIntent`에 `quantity`, `stop_loss`, `take_profit`,
-`leverage` 또는 계좌 상태를 넣지 않는다. 목표 계약이 구현되기 전까지 기존
+`leverage` 또는 계좌 상태를 넣지 않는다. 목표 방식이 구현되기 전까지 기존
 `TradingSignal`을 사용해야 하는 변경은 legacy 경계임을 코드와 테스트에
 명시하고, 새로운 자금관리 수식을 전략에 추가하지 않는다.
 
@@ -148,7 +148,7 @@ required warm-up = max(strategy history, every indicator history)
 ```
 
 정책이 1일 timeframe의 `N`을 요구하고 전략이 1시간 timeframe에서 실행되는
-경우에는 명시적인 multi-timeframe 입력 계약이 필요하다. 단순히 1시간 ATR을
+경우에는 명시적인 multi-timeframe 입력 정책이 필요하다. 단순히 1시간 ATR을
 사용하면서 역사적 Turtle 규칙과 동일하다고 표시하면 안 된다.
 
 ### 3.5 선언이 곧 확보할 과거 데이터의 양이다
@@ -199,7 +199,7 @@ warm-up을 채우지 못하면 구현은 구간 제한을 풀고 다시 읽어�
 조합은 선언할 수 없고 조회 시점에 거부된다. 새 조합이 필요하면 전략 작업과
 같은 변경에서 지표 레지스트리에 먼저 추가한다.
 
-## 4. 자금관리 정책 계약
+## 4. 자금관리 정책
 
 ### 4.1 공통 Protocol
 
@@ -261,7 +261,7 @@ manual과 Turtle 모드에서 동일한 시장 입력을 사용하면 전략이 
 `DecisionIntent`는 동일해야 한다. 정책이 만든 보호가격, 수량 및 leverage만
 달라질 수 있다.
 
-## 5. 설정 계약
+## 5. 설정 정책
 
 `money_management`는 느슨한 dictionary가 아니라 `mode`로 구분되는
 discriminated union으로 검증한다.
@@ -431,7 +431,7 @@ entry 후보와 실제 거래 수준 Evidence에는 다음 값을 기록한다.
 
 ## 10. 구현 순서
 
-계약 변경은 아래 순서를 지킨다.
+정책 변경은 아래 순서를 지킨다.
 
 1. `DecisionIntent`, policy Protocol, policy 설정 union 및 capability metadata를
    테스트와 함께 추가한다.

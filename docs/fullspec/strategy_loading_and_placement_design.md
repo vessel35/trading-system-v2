@@ -8,10 +8,10 @@
 어떻게 드러내며, 앞으로 늘어날 전략 구현체를 어디에 둘지를 정한다. 전략의 진입과 청산 edge,
 자금관리 수식, 주문 실행 방식은 바꾸지 않는다.
 
-현재 `VesselReference`는 목표 계약인 `DecisionIntent`를 반환하고 Engine은
+현재 `VesselReference`는 목표 방식인 `DecisionIntent`를 반환하고 Engine은
 `MoneyManagementPolicy`를 조합한다. 다만 규범 Protocol인 `StrategyAdapter`는 이행 기간의
-legacy `TradingSignal`도 계속 허용한다. 이 설계의 적재 경로는 두 계약을 모두 수용하되, 신규
-전략은 `DecisionIntent` 계약을 따라야 한다.
+legacy `TradingSignal`도 계속 허용한다. 이 설계의 적재 경로는 두 방식을 모두 수용하되, 신규
+전략은 `DecisionIntent` 방식을 따라야 한다.
 
 ## 2. 적재의 보안 경계
 
@@ -56,7 +56,7 @@ in-process 레지스트리에서 허용된 클래스를 찾은 뒤 다음 사실
 
 ## 4. 선택적 전략 기반 클래스
 
-`StrategyAdapter` Protocol이 규범 계약이다. `StrategyBase`는 Protocol을 만족하기 쉽게 만든
+`StrategyAdapter` Protocol이 규범 정책이다. `StrategyBase`는 Protocol을 만족하기 쉽게 만든
 선택적 추상 기반 클래스이며, 모든 전략이 이를 상속해야 하는 것은 아니다.
 
 기반 클래스는 `get_metadata()`, `get_parameter_schema()`, `analyze()`를 추상 메서드로 두고,
@@ -108,7 +108,7 @@ Web API는 허용 목록과 카탈로그 맞춰 보기 결과를 사용해 다�
 ## 7. 전략 구현체의 배치
 
 현재 전략 구현체는 `services/core-lib/core_lib/strategy/adaptees/`에 있다. 안정적인 플랫폼
-계약과 계속 늘어나는 전략 구현체를 다른 배포 단위로 나누는 책임 경계에는 이점이 있지만,
+정책과 계속 늘어나는 전략 구현체를 다른 배포 단위로 나누는 책임 경계에는 이점이 있지만,
 별도 패키지로 옮길지는 아직 사용자 판단이 남아 있다.
 
 별도 패키지를 선택하면 `StrategyAdapter`, 설정 해석, in-process 레지스트리,

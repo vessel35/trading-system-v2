@@ -11,7 +11,7 @@
 코드 작성이나 카탈로그 등록만으로 완료로 보지 않는다. 전략 구현, 등록, 실행과 계산 검증이
 모두 끝나야 한다.
 
-현재 신규 전략이 따라야 할 계약은 `DecisionIntent`와 `MoneyManagementPolicy`의 목표 계약이다.
+현재 신규 전략이 따라야 할 방식은 `DecisionIntent`와 `MoneyManagementPolicy`의 목표 방식이다.
 기존 Engine과 `StrategyAdapter`가 legacy `TradingSignal`을 수용하는 것은 호환 경계이며, Agent가
 신규 전략에 legacy 보호가격과 leverage 필드를 추가할 근거가 아니다.
 
@@ -122,7 +122,7 @@ Agent는 기존 Evidence 저장 경로와 Engine 조립을 사용한다. 자기 
 
 ## 7. `strategy-verifier`의 책임
 
-`strategy-verifier`는 구현 산출물을 읽고 계산이 문서와 플랫폼 계약에 맞는지 독립적으로
+`strategy-verifier`는 구현 산출물을 읽고 계산이 문서와 플랫폼 정책에 맞는지 독립적으로
 검증한다. 구현 파일을 수정하지 않는다.
 
 verifier는 다음 계산을 확인한다.
@@ -179,7 +179,7 @@ Agent 워크플로를 구현하기 전에 같은 원본을 현재 이력에 통�
 ## 11. 검토에서 바로잡힌 사실
 
 - 현재 `RunConfig`는 실행당 전략 timeframe 하나와 symbol 하나를 받는다. 멀티 timeframe 전략과
-  다종목 전략을 표현하는 일반 실행 계약은 없다.
+  다종목 전략을 표현하는 일반 실행 정책은 없다.
 - 자금관리 정책이 요구할 수 있는 현재 timeframe은 strategy timeframe과 일봉이다. Turtle의
   일봉 `N`은 전략 입력이 아니라 정책 입력이다.
 - `DecisionIntent`에는 손절, 익절, 수량과 leverage 필드가 없다. 보호가격과 수량과 요청

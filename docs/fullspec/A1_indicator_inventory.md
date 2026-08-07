@@ -55,8 +55,8 @@ signal-service의 지표 계산·소비는 두 경로로 갈린다.
 "iloc ordering bug"). 즉 라이브가 실제로 돌리는 지표 값은 in-code 계산식이 아니라 collector 산출물이다.
 
 **채택(라이브 인소싱) 변경 지점.** 외부 collector 사전계산 + `technical_indicators` 읽기 경로를 폐지하고,
-**캔들 마감마다 `core_lib.indicators`로 증분(O(1)) 직접 계산**해 같은 dict 계약으로 `analyze`에 push하도록
-바꾼다. 코드뿐 아니라 호출 계약(확정 캔들 트리거·매 캔들·OHLCV 순수 함수)까지 같아야 백테스트와 라이브 값이
+**캔들 마감마다 `core_lib.indicators`로 증분(O(1)) 직접 계산**해 같은 dict 정책으로 `analyze`에 push하도록
+바꾼다. 코드뿐 아니라 호출 정책(확정 캔들 트리거·매 캔들·OHLCV 순수 함수)까지 같아야 백테스트와 라이브 값이
 갈리지 않는다. collector의 사전계산 로직 자체(폐지 대상)와 폐지 경계는 collector 내부화 인벤토리 소관.
 
 ---

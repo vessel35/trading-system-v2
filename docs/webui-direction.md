@@ -17,7 +17,7 @@ WebUI는 종합 내부 콘솔이다. 백테스트 결과와 Evidence(실행별 �
 WebUI의 API 서비스를 `services/web-api`(Python 형제 패키지)로, 웹 앱을 최상위 `apps/web`으로 이
 저장소 트리 안에 둔다. 바이브코딩에서 저장소 경계의 실질 효과는 AI 에이전트가 한 번에 볼 수 있는
 컨텍스트의 범위와, 하나의 논리적 변경이 몇 개의 저장소·리뷰로 쪼개지는가이다. WebUI가 화면에 올리는
-계약은 `core_lib`의 값 타입·지표 정의에서 시작해 카탈로그(`backtest_db`)와 Evidence 스키마를 거쳐 API
+정책은 `core_lib`의 값 타입·지표 정의에서 시작해 카탈로그(`backtest_db`)와 Evidence 스키마를 거쳐 API
 응답 모델을 지나 프런트엔드 타입까지 이어지는 하나의 사슬이며, 이 사슬 전체가 한 트리에 있으면
 "지표에 필드 하나 추가"가 한 커밋·한 리뷰로 끝난다. 또한 API 서비스는 반드시 Python이며 `core_lib`을
 import해야 하므로(결정 2), 기존 `backtest-service`가 그러하듯 `core_lib`을 editable로 링크하는 또
@@ -45,10 +45,10 @@ FastAPI backend-for-frontend로 두고 `core_lib`을 직접 import해 재사용�
 따라서 FastAPI 서비스가 `backtest-service`와 똑같이 `core_lib`을 editable로 링크해 지표·회계·판정
 로직과 `RunConfig`·`config_hash`를 그 하나의 구현에서 가져오고, 카탈로그(읽기 전용 역할)와 Evidence를
 읽어 타입 있는 REST/JSON으로 노출하며, 라이브 모니터링에는 Server-Sent Events 스트림을 얹는다. 백테스트
-트리거는 기존 `run_backtest`를 재사용하므로 실행 로직도 복제하지 않는다. 타입 계약은 FastAPI가 pydantic
+트리거는 기존 `run_backtest`를 재사용하므로 실행 로직도 복제하지 않는다. 타입 정책은 FastAPI가 pydantic
 응답 모델에서 OpenAPI 문서를 자동으로 내고, 그 문서에서 TypeScript 클라이언트를 생성해(예를 들어
 `openapi-typescript`나 `orval`) 프런트엔드가 손으로 쓴 타입이 아니라 생성된 타입만 소비하게 흐른다.
-그 결과 서버는 pydantic 응답 모델, 클라이언트는 생성된 TypeScript 타입으로 양쪽이 같은 계약에 묶여
+그 결과 서버는 pydantic 응답 모델, 클라이언트는 생성된 TypeScript 타입으로 양쪽이 같은 정책에 묶여
 바이브코딩에서 형태를 틀릴 여지가 줄어든다. 한 가지 규약을 못박아 둔다. Decimal 금액은 JSON에서
 문자열로 직렬화한다. 프런트엔드는 표시만 하고 금액 산술을 하지 않으므로 정확성을 문자열로 보존한다.
 

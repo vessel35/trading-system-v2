@@ -126,7 +126,7 @@ slippage − funding − liquidation_penalty`, 비용 1회 차감); Decimal 단�
 
 **값 harvest(코드 아님):** 위 2의 기본 수치값을 config 기본값/시작값으로.
 
-**유보:** 트레일링 기계장치(6)·1분 하위 집행 피드(집행은 캔들 수준 보수 판정). 재도입 시 계약·파리티 확정.
+**유보:** 트레일링 기계장치(6)·1분 하위 집행 피드(집행은 캔들 수준 보수 판정). 재도입 시 정책·파리티 확정.
 
 **폐지(재구현으로 대체):** wallet 현행 체결·비용·사이징·트레일링 코드 전부(`futures_paper_trading_service`·
 `paper_trading_service`·`sl_tp_monitor_service`·`futures_calculator`·`slippage_calculator`·

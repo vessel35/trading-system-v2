@@ -1,6 +1,6 @@
 # WebUI 백엔드 API 설계 (`services/web-api`)
 
-이 문서는 WebUI에 붙일 백엔드 API 계약을 개발 착수 전에 확정한다. 방향은 `docs/webui-direction.md`,
+이 문서는 WebUI에 붙일 백엔드 API 정책을 개발 착수 전에 확정한다. 방향은 `docs/webui-direction.md`,
 화면 설계는 `docs/webui-ux-design.md`, 교차 정합과 보완은 `docs/webui-predev-plan.md`에 있다. 설계는
 실제 데이터 모델(카탈로그 `backtest_db`, 21개 엔티티 Evidence, `RunConfig`, `strategy_registry`,
 `core_lib.eval`, `runner.run_backtest`)에 근거한다.
@@ -84,7 +84,7 @@ SQLite(상세 근거), `run_backtest`/`Harness` 호출(새 run 생성). 전략 �
 | `data-sources/{ds}/coverage` `tags/facets` | `crypto_data`·`backtest_tag` | 읽기 |
 | `live/*`(P3) `live-control/*`(P4) | `wallet_db` 읽기·별도 서비스 | 게이트 |
 
-## 3. 횡단 계약
+## 3. 횡단 정책
 
 **URL·봉투.** 모든 엔드포인트는 `/api/v1` 아래. 목록 응답은 `data`(항목 배열)와 `page`(`limit`·
 `offset`·`total`·`has_more`) 봉투로 감싸고, 단일 리소스는 봉투 없이 DTO를 그대로 낸다.
