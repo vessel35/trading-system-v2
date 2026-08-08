@@ -401,7 +401,12 @@ class Engine:
                     "explicit_indicators missing strategy-required indicators: "
                     + ", ".join(missing_required)
                 )
-        longest_indicator_history = max(spec.min_history for spec in self._indicator_specs)
+        # A strategy may declare no series at all, in which case its own bar
+        # requirement is the only floor.
+        longest_indicator_history = max(
+            (spec.min_history for spec in self._indicator_specs),
+            default=0,
+        )
         required_warmup = max(metadata.min_history, longest_indicator_history)
 
         self._history, available_preload = self._load_history(config, required_warmup)

@@ -738,7 +738,10 @@ class BacktestEvidenceSink(EvidenceSink):
             ).fetchall()
         ]
         if not keys:
-            return ["missing_indicator_definitions"]
+            # No rows is complete when nothing was declared. A strategy that reads
+            # only candles has no series, so demanding a definition here would fail
+            # every one of its runs for a reason unrelated to its evidence.
+            return []
         grid = self._portfolio_bar_grid()
         failures: list[str] = []
         for key in keys:

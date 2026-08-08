@@ -2345,3 +2345,88 @@ def test_hold_leaves_its_reason_in_evidence_and_none_leaves_nothing(tmp_path: Pa
 
     assert sorted(reason for reason, _ in rows) == expected
     assert all(signal_id is None for _, signal_id in rows)
+
+
+class _CandleOnlyStrategy:
+    """Read candles, declare no series, and never trade.
+
+    Nothing in the registry gives this strategy what it needs, so its declaration
+    is empty. Demanding one series it never reads would put a false requirement in
+    the registration and in the warm-up span.
+    """
+
+    VERSION: ClassVar[str] = "1.0.0"
+    observed_bars: ClassVar[list[int]] = []
+
+    def __init__(self, config: ResolvedConfig) -> None:
+        self.config = config
+
+    @classmethod
+    def get_metadata(cls) -> StrategyMetadata:
+        metadata = _Strategy.get_metadata()
+        metadata.required_indicators = []
+        metadata.min_history = 3
+        return metadata
+
+    @classmethod
+    def get_parameter_schema(cls) -> ParameterSchema:
+        return ParameterSchema(fields={})
+
+    def analyze(
+        self,
+        market_data: dict[str, object],
+        current_position: Position | None,
+    ) -> DecisionIntent | None:
+        del current_position
+        candles = market_data["candles"]
+        indicators = market_data["indicators"]
+        assert isinstance(candles, list)
+        assert isinstance(indicators, Mapping)
+        assert not indicators, "nothing was declared, so nothing should arrive"
+        type(self).observed_bars.append(len(candles))
+        return None
+
+
+class _CandleOnlyCatalog(StrategyRegistry):
+    def get(self, strategy_id: str) -> dict[str, object]:
+        assert strategy_id == "candle-only-fixture"
+        return {
+            "strategy_id": strategy_id,
+            "class_name": _CandleOnlyStrategy.__name__,
+            "module_path": _CandleOnlyStrategy.__module__,
+            "is_active": True,
+            "is_deprecated": False,
+        }
+
+    def list(self) -> list[dict[str, object]]:
+        return [self.get("candle-only-fixture")]
+
+    def register(self, strategy_id: str, meta: dict[str, object]) -> None:
+        del strategy_id, meta
+        raise PermissionError("read-only fixture")
+
+
+def test_a_strategy_that_declares_no_series_runs_and_passes_integrity(tmp_path: Path) -> None:
+    _CandleOnlyStrategy.observed_bars.clear()
+    candles = _candles()
+    costs = BacktestCostModel(_config().cost_values)
+    plugins = InProcessStrategyRegistry()
+    plugins.register("candle-only-fixture", _CandleOnlyStrategy)
+    result = Engine(
+        _Feed(candles),
+        _Broker(costs),
+        BacktestClock.from_candles(candles),
+        costs,
+        BacktestEvidenceSink(tmp_path),
+        _Catalog(),
+        AdapterManager(_CandleOnlyCatalog(), plugins),
+        prereg=_prereg(),
+    ).run(_config().model_copy(update={"strategy_id": "candle-only-fixture"}))
+
+    assert result.integrity_status == "passed"
+    # min_history alone decided the warm-up, so the first judged bar already has it.
+    assert _CandleOnlyStrategy.observed_bars
+    assert min(_CandleOnlyStrategy.observed_bars) >= 3
+    with sqlite3.connect(result.evidence_path) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM INDICATOR_DEFINITION").fetchone()[0] == 0
+        assert connection.execute("SELECT COUNT(*) FROM INDICATOR_SNAPSHOT").fetchone()[0] == 0

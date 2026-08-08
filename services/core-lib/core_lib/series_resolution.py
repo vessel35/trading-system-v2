@@ -97,6 +97,10 @@ def resolve_series_specs(
 
     ``all`` keeps its historical indicator meaning: every registered indicator.
     Patterns are enabled only when the strategy declared them.
+
+    An empty selection resolves to no specs rather than an error. A strategy that
+    reads only candles has nothing to declare, and demanding one series it never
+    reads would make the declaration disagree with the code on purpose.
     """
     if mode not in {"auto", "explicit", "all"}:
         raise ValueError("indicator mode must be auto, explicit, or all")
@@ -114,8 +118,6 @@ def resolve_series_specs(
         specs.extend(indicators.list())
         specs.extend(patterns.specs_from_descriptors(declared_split.patterns))
 
-    if not specs:
-        raise ValueError("a series selection must resolve at least one spec")
     return specs
 
 

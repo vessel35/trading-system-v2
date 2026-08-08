@@ -127,7 +127,7 @@ def test_resolve_series_specs_applies_the_mode_table(
     assert _ids(resolve_series_specs(mode, declared, explicit, indicators, patterns)) == expected
 
 
-def test_resolve_series_specs_allows_one_empty_side_but_not_empty_union() -> None:
+def test_resolve_series_specs_allows_an_empty_side_and_an_empty_union() -> None:
     indicators, patterns = _registries()
 
     assert _ids(
@@ -148,8 +148,8 @@ def test_resolve_series_specs_allows_one_empty_side_but_not_empty_union() -> Non
             patterns,
         )
     ) == ["EMA(period=9)"]
-    with pytest.raises(ValueError, match="series selection must resolve at least one spec"):
-        resolve_series_specs("auto", (), (), indicators, patterns)
+    # A strategy that reads only candles declares nothing and still runs.
+    assert resolve_series_specs("auto", (), (), indicators, patterns) == []
 
 
 def test_resolve_series_specs_reports_an_unknown_name_once() -> None:
