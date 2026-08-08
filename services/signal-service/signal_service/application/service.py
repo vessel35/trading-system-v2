@@ -22,7 +22,7 @@ from core_lib.money_management import (
     RiskLimits,
 )
 from core_lib.patterns import DEFAULT_PATTERN_REGISTRY, PatternRegistry
-from core_lib.series import SeriesSpec, SeriesState
+from core_lib.series import SeriesSpec, SeriesState, series_key_of
 from core_lib.series_resolution import resolve_series_specs, series_key
 from core_lib.strategy import AdapterManager, StrategyAdapter, StrategyConfig
 from core_lib.types import (
@@ -345,15 +345,21 @@ class SignalGenerationService:
         policy = self._money_management
         if not isinstance(policy, ManualMoneyManagement):
             raise ValueError("signal generation currently requires manual money management")
-        atr = indicators.get("atr:period=14")
-        if isinstance(atr, bool) or not isinstance(atr, float | int):
-            raise ValueError("manual money management requires current ATR(14)")
+        # Read what the policy declared rather than a key written here, so the
+        # lookup cannot drift from the declaration that produced the value.
+        requirements = policy.required_indicators()
+        if len(requirements) != 1 or requirements[0].timeframe != "strategy":
+            raise ValueError("signal generation requires one strategy-timeframe policy input")
+        key = series_key_of(requirements[0].name, requirements[0].params)
+        volatility = indicators.get(key)
+        if isinstance(volatility, bool) or not isinstance(volatility, float | int):
+            raise ValueError(f"money management requires current {key}")
         plan = policy.plan_entry(
             decision,
             MarketSnapshot(
                 reference_price=decision.reference_price,
-                volatility=float(atr),
-                volatility_name="ATR(14)",
+                volatility=float(volatility),
+                volatility_name=key,
                 volatility_timestamp=candle.close_time,
             ),
             # Signal generation has no account or order authority. The manual
@@ -386,7 +392,8 @@ class SignalGenerationService:
                     "policy_id": policy.id,
                     "policy_version": policy.version,
                     "resolved_config": dict(policy.resolved_config()),
-                    "volatility": float(atr),
+                    "volatility_name": key,
+                    "volatility": float(volatility),
                     "volatility_timestamp": candle.close_time.isoformat(),
                 },
             },

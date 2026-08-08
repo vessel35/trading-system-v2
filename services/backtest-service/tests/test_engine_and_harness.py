@@ -25,6 +25,15 @@ from backtest_service.harness import Harness
 from core_lib.eval import MetricSet
 from core_lib.eval import thresholds as evaluation_thresholds
 from core_lib.indicators import DEFAULT_REGISTRY
+from core_lib.money_management import (
+    AccountRiskSnapshot,
+    MarketSnapshot,
+    MoneyManagementBase,
+    MoneyManagementError,
+    MoneyManagementPlan,
+    PolicyIndicatorRequirement,
+    RiskLimits,
+)
 from core_lib.patterns import TALIB_FUNCTIONS, TALIB_SOURCE_VERSION
 from core_lib.ports import CatalogStore, DataFeed, StrategyRegistry
 from core_lib.strategy import (
@@ -2498,3 +2507,54 @@ def test_declared_series_whose_definition_is_missing_fails_completeness(tmp_path
     assert sink._indicator_failures() == [  # noqa: SLF001
         "indicator_definition_mismatch:missing=ema:period=9:extra=-"
     ]
+
+
+class _EmaVolatilityPolicy(MoneyManagementBase):
+    """A third policy the engine has never heard of, declaring its own input."""
+
+    id: ClassVar[str] = "ema-volatility"
+    version: ClassVar[str] = "1.0.0"
+
+    def required_indicators(self) -> tuple[PolicyIndicatorRequirement, ...]:
+        return (
+            PolicyIndicatorRequirement(
+                name="EMA",
+                params={"period": 9},
+                timeframe="strategy",
+                min_history=9,
+            ),
+        )
+
+    def resolved_config(self) -> Mapping[str, object]:
+        return {"mode": self.id}
+
+    def plan_entry(
+        self,
+        decision: DecisionIntent,
+        market: MarketSnapshot,
+        account: AccountRiskSnapshot,
+        global_limits: RiskLimits,
+    ) -> MoneyManagementPlan:
+        raise NotImplementedError("this fixture only exercises the volatility lookup")
+
+
+def test_policy_volatility_comes_from_the_declaration_not_the_policy_id(tmp_path: Path) -> None:
+    engine = _engine(tmp_path, _Catalog(), [])
+    engine._indicator_values = {"ema:period=9": 12.5}  # noqa: SLF001
+    candle = _candles()[-1]
+
+    value, label, when = engine._money_management_volatility(  # noqa: SLF001
+        candle, _EmaVolatilityPolicy()
+    )
+
+    assert (value, label, when) == (12.5, "ema:period=9", candle.close_time)
+
+
+def test_a_declared_policy_input_that_is_missing_is_refused_by_name(tmp_path: Path) -> None:
+    engine = _engine(tmp_path, _Catalog(), [])
+    engine._indicator_values = {}  # noqa: SLF001
+
+    with pytest.raises(MoneyManagementError, match="requires current ema:period=9"):
+        engine._money_management_volatility(  # noqa: SLF001
+            _candles()[-1], _EmaVolatilityPolicy()
+        )

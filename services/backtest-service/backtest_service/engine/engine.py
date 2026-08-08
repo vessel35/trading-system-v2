@@ -53,7 +53,7 @@ from core_lib.patterns import (
     PatternSpec,
 )
 from core_lib.ports import Broker, CatalogStore, Clock, CostModel, DataFeed, EvidenceSink
-from core_lib.series import SeriesSpec, SeriesState
+from core_lib.series import SeriesSpec, SeriesState, series_key_of
 from core_lib.series_resolution import (
     resolve_series_specs,
     series_key,
@@ -1105,18 +1105,37 @@ class Engine:
         candle: Candle,
         policy: MoneyManagementPolicy,
     ) -> tuple[float, str, datetime]:
-        if policy.id == "manual":
-            value = self._indicator_values.get("atr:period=14")
+        """Read the value the policy declared, without knowing which policy it is.
+
+        A policy already states what it needs through ``required_indicators()``, so
+        the key is derived from that declaration rather than written here. Keying
+        off the policy id instead would mean every new policy needs a branch in the
+        engine before it can run at all.
+        """
+        requirements = policy.required_indicators()
+        if len(requirements) != 1:
+            raise MoneyManagementError(
+                f"policy {policy.id!r} must declare exactly one volatility input, "
+                f"got {len(requirements)}"
+            )
+        requirement = requirements[0]
+        # The label names the value the same way the lookup key does, so both come
+        # from the one declaration instead of a literal per policy.
+        label = series_key_of(requirement.name, requirement.params)
+        if requirement.timeframe == "strategy":
+            value = self._indicator_values.get(label)
             if isinstance(value, bool) or not isinstance(value, float | int):
-                raise MoneyManagementError("manual policy requires current ATR(14)")
-            return float(value), "ATR(14)", candle.close_time
-        if policy.id == "turtle":
-            available = [item for item in self._turtle_n_values if item[0] <= candle.close_time]
-            if not available:
-                raise MoneyManagementError("turtle policy requires finalized daily N")
-            timestamp, value = available[-1]
-            return value, "TURTLE_N", timestamp
-        raise MoneyManagementError(f"unsupported policy runtime: {policy.id!r}")
+                raise MoneyManagementError(f"policy {policy.id!r} requires current {label}")
+            return float(value), label, candle.close_time
+        # Requirements finalized on another timeframe are prepared outside the bar
+        # loop, so they are read on their own schedule rather than this bar's.
+        available = [item for item in self._turtle_n_values if item[0] <= candle.close_time]
+        if not available:
+            raise MoneyManagementError(
+                f"policy {policy.id!r} requires a finalized {requirement.timeframe} {label}"
+            )
+        timestamp, value = available[-1]
+        return value, label, timestamp
 
     def _entry_request(
         self,

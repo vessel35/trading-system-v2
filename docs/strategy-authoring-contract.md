@@ -1232,21 +1232,17 @@ class SignalExitAtrPolicy(MoneyManagementBase):
 
 #### 5.3.2 지금은 새 정책을 실제로 굴릴 수 없다
 
-**위 정책은 Protocol을 만족하지만 그것만으로는 실행되지 않는다.** 두 자리가
-정책 id를 코드에 박아 두고 있기 때문이다.
+**Engine은 더 이상 정책 id를 보지 않는다.** 정책이 `required_indicators()`로
+선언한 요구에서 execution key를 만들어 값을 찾으므로, **실행 timeframe의 값을
+쓰는 정책은 Engine을 고치지 않아도 값을 받는다.** 정책이 넘겨받는
+`MarketSnapshot.volatility_name`도 같은 key다.
 
-- `MoneyManagementFactory`가 `manual`과 `turtle` 밖의 mode를 거부한다.
-- Engine이 정책에 넘길 변동성을 **정책 id로 갈라서 고른다.** `manual`이면
-  `atr:period=14`를, `turtle`이면 준비해 둔 일간 `N`을 쓰고, **그 밖의 id에는
-  `unsupported policy runtime`을 올린다.**
+**그래도 아직 하나가 남아 있다.** `MoneyManagementFactory`가 `manual`과
+`turtle` 밖의 mode를 거부하므로, 위 정책은 설정에서 만들어지지 않는다. 그 자리를
+여는 것은 §6.5가 다루며 이 규범이 아니라 플랫폼 쪽 작업이다.
 
-**둘째가 특히 어긋나 있다.** 정책은 `required_indicators()`로 무엇이 필요한지
-이미 선언하는데, Engine이 그 선언을 **계산에는 쓰면서 조회에는 쓰지 않고**
-key를 박아 둔 것이다. 선언에서 key를 만들어 조회하면 **실행 timeframe의 값을
-쓰는 정책은 Engine을 고치지 않고도 늘어난다.**
-
-그러므로 새 정책을 들이는 일은 **정책 클래스를 쓰는 것과, 위 두 자리를 여는
-것의 둘**이다. 후자는 이 규범이 아니라 플랫폼 쪽 작업이다.
+**요구를 둘 이상 선언하는 정책도 아직 안 된다.** Engine이 변동성 하나를 넘기는
+모양이라 요구가 정확히 하나여야 하고, 아니면 그 자리에서 거부한다.
 
 ### 5.4 갖춰진 정책 둘과 그 설정
 
