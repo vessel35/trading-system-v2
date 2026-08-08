@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import sqlite3
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
@@ -17,6 +19,11 @@ from backtest_service.adapters.catalog_store import (
 from backtest_service.adapters.evidence_schema import EVIDENCE_SCHEMA_VERSION, encode_eval_decision
 from backtest_service.adapters.evidence_sink import BacktestEvidenceSink, EvidenceRecord
 from backtest_service.adapters.ohlcv_gaps import OhlcvGapContract
+from backtest_service.config.run_config import (
+    ManualMoneyManagementConfig,
+    TurtleMoneyManagementConfig,
+)
+from core_lib.money_management import MONEY_MANAGEMENT_SCHEMA_VERSION
 from core_lib.ports import CatalogStore, EvidenceSink
 
 
@@ -595,3 +602,49 @@ def test_catalog_tag_mutations_are_parameterized_and_idempotent() -> None:
     assert "ON CONFLICT (run_id, tag_type, tag_value) DO NOTHING" in connection.calls[0][0]
     assert connection.commits == 4
     assert connection.rollbacks == 0
+
+
+# Keyed by MONEY_MANAGEMENT_SCHEMA_VERSION and append-only, like the Evidence pins.
+_MONEY_CONFIG_SURFACE: dict[str, str] = {
+    "1.0.0": "fb89fc1be12e54134c8027f997b6801f6e3e454fed6944087903ddb442bf0f56",
+}
+
+
+def _money_config_fingerprint() -> str:
+    """Fingerprint every name, default, and range a submitted config is read with."""
+    surface = {
+        mode: {
+            name: {
+                "default": repr(field.default),
+                "constraints": sorted(repr(item) for item in field.metadata),
+            }
+            for name, field in model.model_fields.items()
+        }
+        for mode, model in (
+            ("manual", ManualMoneyManagementConfig),
+            ("turtle", TurtleMoneyManagementConfig),
+        )
+    }
+    blob = json.dumps(surface, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(blob.encode()).hexdigest()
+
+
+def test_money_config_interpretation_is_pinned_to_its_schema_version() -> None:
+    """Catch an interpretation change that the factory's own version would miss.
+
+    A submitted ``money_management`` mapping is read by two layers: these Pydantic
+    models fill defaults and enforce ranges first, and only the normalized result
+    reaches ``MoneyManagementFactory``. Changing a default here alters what an
+    unchanged stored configuration means, while the factory version stays put. The
+    version has to name both layers or it names nothing useful.
+    """
+    expected = _MONEY_CONFIG_SURFACE.get(MONEY_MANAGEMENT_SCHEMA_VERSION)
+    assert expected is not None, (
+        f"no pinned surface for MONEY_MANAGEMENT_SCHEMA_VERSION "
+        f"{MONEY_MANAGEMENT_SCHEMA_VERSION}; add a new entry, do not edit an old one"
+    )
+    assert _money_config_fingerprint() == expected, (
+        "how a submitted money_management config is read changed; bump "
+        f"MONEY_MANAGEMENT_SCHEMA_VERSION (now {MONEY_MANAGEMENT_SCHEMA_VERSION}) "
+        "and add a new pin entry for it"
+    )

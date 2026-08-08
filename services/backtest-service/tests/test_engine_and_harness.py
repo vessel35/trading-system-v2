@@ -19,6 +19,7 @@ from backtest_service.adapters.clock import BacktestClock
 from backtest_service.adapters.cost_model import BacktestCostModel
 from backtest_service.adapters.evidence_schema import (
     EVIDENCE_SCHEMA_VERSION,
+    HASH_TABLES,
     canonical_json,
 )
 from backtest_service.adapters.evidence_sink import BacktestEvidenceSink
@@ -2564,11 +2565,24 @@ def test_a_declared_policy_input_that_is_missing_is_refused_by_name(tmp_path: Pa
         )
 
 
-# Pinned alongside EVIDENCE_SCHEMA_VERSION. Hashed Evidence content and the
-# version that names it must move together, so this fixture hash is the tripwire.
-_EVIDENCE_GOLDEN_HASH_LEGACY = "8e27b6e3c54acf76243a47ec429ee50a14878f1fe02982c714b65ecd764bded0"
-_EVIDENCE_GOLDEN_HASH_MANAGED = "967207d158ab562e1698467b08d2bc49f1e0b8041f3d70c83e02db76abafa694"
-_EVIDENCE_GOLDEN_HASH_HOLD = "c72de5733f10a67d39e6d218e18bd59cddb2db5e6ba9aaf048968dba39fb4bd5"
+# Keyed by EVIDENCE_SCHEMA_VERSION and append-only. Editing an existing version's
+# entry is how the guard gets defeated: a writer changes hashed content, swaps the
+# four strings, and leaves the version alone. Add a new key instead, so the diff
+# shows the version moving with the content it names.
+_EVIDENCE_GOLDEN_HASHES: dict[str, dict[str, str]] = {
+    "1.6.0": {
+        "legacy": "8e27b6e3c54acf76243a47ec429ee50a14878f1fe02982c714b65ecd764bded0",
+        "managed": "967207d158ab562e1698467b08d2bc49f1e0b8041f3d70c83e02db76abafa694",
+        "funding": "65c94c17c7fadaddf0d703bf42ec805e49c1b1cfcf08a99e91b88b97b77efcc6",
+        "hold": "c72de5733f10a67d39e6d218e18bd59cddb2db5e6ba9aaf048968dba39fb4bd5",
+    },
+}
+
+# The three analysis extension tables stay empty because the engine does not write
+# them yet; nothing can pin what nothing produces. Shrink this set as they fill.
+_EVIDENCE_PINS_DO_NOT_REACH = frozenset(
+    {"CONDITION_SIGNATURE", "CONDITIONAL_EXPECTANCY", "MISSED_OPPORTUNITY"}
+)
 
 
 def test_hashed_evidence_content_is_pinned_to_its_schema_version(tmp_path: Path) -> None:
@@ -2611,6 +2625,10 @@ def test_hashed_evidence_content_is_pinned_to_its_schema_version(tmp_path: Path)
         prereg=_prereg(),
     ).run(managed_config)
 
+    funding_sinks: list[BacktestEvidenceSink] = []
+    funding_engine, funding_config = _daily_engine(tmp_path, _Catalog(), funding_sinks)
+    funded = funding_engine.run(funding_config)
+
     hold_plugins = InProcessStrategyRegistry()
     hold_plugins.register("hold-fixture", _HoldStrategy)
     held = Engine(
@@ -2624,15 +2642,31 @@ def test_hashed_evidence_content_is_pinned_to_its_schema_version(tmp_path: Path)
         prereg=_prereg(),
     ).run(_config().model_copy(update={"strategy_id": "hold-fixture", "run_name": "hold-pin"}))
 
+    expected = _EVIDENCE_GOLDEN_HASHES.get(EVIDENCE_SCHEMA_VERSION)
+    assert expected is not None, (
+        f"no pinned hashes for EVIDENCE_SCHEMA_VERSION {EVIDENCE_SCHEMA_VERSION}; "
+        "add a new entry rather than editing an existing one"
+    )
     hint = (
         "hashed Evidence content changed; bump EVIDENCE_SCHEMA_VERSION "
-        f"(now {EVIDENCE_SCHEMA_VERSION}) and update these pins together"
+        f"(now {EVIDENCE_SCHEMA_VERSION}) and add a new pin entry for it"
     )
-    assert (legacy.evidence_hash, managed.evidence_hash, held.evidence_hash) == (
-        _EVIDENCE_GOLDEN_HASH_LEGACY,
-        _EVIDENCE_GOLDEN_HASH_MANAGED,
-        _EVIDENCE_GOLDEN_HASH_HOLD,
-    ), hint
+    assert {
+        "legacy": legacy.evidence_hash,
+        "managed": managed.evidence_hash,
+        "funding": funded.evidence_hash,
+        "hold": held.evidence_hash,
+    } == expected, hint
+
+    # A pin only guards a table it actually writes to. Name the tables no fixture
+    # reaches so the gap is a recorded decision rather than an accident.
+    reached: set[str] = set()
+    for run in (legacy, managed, funded, held):
+        with sqlite3.connect(run.evidence_path) as connection:
+            for table in HASH_TABLES:
+                if connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]:
+                    reached.add(table)
+    assert set(HASH_TABLES) - reached == _EVIDENCE_PINS_DO_NOT_REACH
 
 
 def test_recorded_config_schema_version_comes_from_the_resolver(tmp_path: Path) -> None:
