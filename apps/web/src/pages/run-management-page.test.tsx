@@ -457,6 +457,126 @@ describe("실행 관리 보강", () => {
     });
   });
 
+  it("전략이 배포 정책을 기본으로 선언하면 그 정책으로 열린다", async () => {
+    server.use(
+      ...managementHandlers(["1h"], {
+        supported: ["manual", "atr-only"],
+        default: { mode: "atr-only", atr_stop_multiple: 3 },
+      }),
+    );
+    renderWithQuery(
+      <RunJobsProvider>
+        <RunManagementPage />
+      </RunJobsProvider>,
+    );
+
+    const mode = await screen.findByLabelText("자금 관리 방법");
+    await waitFor(() => expect(mode).toHaveValue("atr-only"));
+    expect(screen.getByLabelText("배포 정책 설정")).toHaveValue(
+      JSON.stringify({ atr_stop_multiple: 3 }, null, 2),
+    );
+  });
+
+  it("mode를 오갔다 돌아와도 배포 정책에 적은 설정이 남는다", async () => {
+    const user = userEvent.setup();
+    server.use(
+      ...managementHandlers(["1h"], {
+        supported: ["manual", "atr-only"],
+        default: { mode: "atr-only", atr_stop_multiple: 3 },
+      }),
+    );
+    renderWithQuery(
+      <RunJobsProvider>
+        <RunManagementPage />
+      </RunJobsProvider>,
+    );
+
+    const mode = await screen.findByLabelText("자금 관리 방법");
+    await waitFor(() => expect(mode).toHaveValue("atr-only"));
+    const box = screen.getByLabelText("배포 정책 설정");
+    await user.clear(box);
+    await user.type(box, '{{"atr_stop_multiple": 9}');
+
+    await user.selectOptions(mode, "manual");
+    await user.selectOptions(mode, "atr-only");
+
+    expect(screen.getByLabelText("배포 정책 설정")).toHaveValue(
+      '{"atr_stop_multiple": 9}',
+    );
+  });
+
+  it("설정 JSON의 mode는 고른 정책을 덮지 못한다", async () => {
+    const user = userEvent.setup();
+    let submitted: unknown;
+    server.use(
+      ...managementHandlers(["1h"], {
+        supported: ["manual", "atr-only"],
+        default: { mode: "atr-only", atr_stop_multiple: 3 },
+      }),
+      http.post("http://localhost/api/v1/runs", async ({ request }) => {
+        submitted = await request.json();
+        return HttpResponse.json({
+          job_id: "job-mode-key",
+          status: "QUEUED",
+          events_url: "/api/v1/runs/jobs/job-mode-key/events",
+          status_url: "/api/v1/runs/jobs/job-mode-key",
+        });
+      }),
+    );
+    renderWithQuery(
+      <RunJobsProvider>
+        <RunManagementPage />
+      </RunJobsProvider>,
+    );
+
+    const mode = await screen.findByLabelText("자금 관리 방법");
+    await waitFor(() => expect(mode).toHaveValue("atr-only"));
+    const box = screen.getByLabelText("배포 정책 설정");
+    await user.clear(box);
+    await user.type(box, '{{"mode": "manual"}');
+
+    await user.click(screen.getByRole("button", { name: "백테스트 실행" }));
+    await waitFor(() => expect(submitted).toBeDefined());
+    expect(submitted).toMatchObject({
+      config: { money_management: { mode: "atr-only" } },
+    });
+  });
+
+  it("설정을 비우면 정책 기본값으로 제출한다", async () => {
+    const user = userEvent.setup();
+    let submitted: unknown;
+    server.use(
+      ...managementHandlers(["1h"], {
+        supported: ["manual", "atr-only"],
+        default: { mode: "atr-only", atr_stop_multiple: 3 },
+      }),
+      http.post("http://localhost/api/v1/runs", async ({ request }) => {
+        submitted = await request.json();
+        return HttpResponse.json({
+          job_id: "job-empty-json",
+          status: "QUEUED",
+          events_url: "/api/v1/runs/jobs/job-empty-json/events",
+          status_url: "/api/v1/runs/jobs/job-empty-json",
+        });
+      }),
+    );
+    renderWithQuery(
+      <RunJobsProvider>
+        <RunManagementPage />
+      </RunJobsProvider>,
+    );
+
+    const mode = await screen.findByLabelText("자금 관리 방법");
+    await waitFor(() => expect(mode).toHaveValue("atr-only"));
+    await user.clear(screen.getByLabelText("배포 정책 설정"));
+
+    await user.click(screen.getByRole("button", { name: "백테스트 실행" }));
+    await waitFor(() => expect(submitted).toBeDefined());
+    expect(submitted).toMatchObject({
+      config: { money_management: { mode: "atr-only" } },
+    });
+  });
+
   it("수치가 없는 RUNNING 상태를 완료율 없는 무기한 표시자로 렌더한다", () => {
     const tracked = {
       accepted: {

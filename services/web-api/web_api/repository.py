@@ -1,10 +1,12 @@
 """SQL repository for P0 catalog reads."""
 
-from collections.abc import Mapping
+import logging
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, Literal, cast
 
+from backtest_service.config.run_config import SELECTABLE_MONEY_MANAGEMENT_MODES
 from core_lib.eval import thresholds
 from core_lib.money_management import ManualMoneyManagement, MoneyManagementFactory
 from core_lib.strategy import StrategyConfig
@@ -84,6 +86,8 @@ RUN_SUMMARY_COLUMNS = """
     data_gap_exit_count
 """
 
+_LOGGER = logging.getLogger(__name__)
+
 DeletedFilter = Literal["exclude", "only", "include"]
 
 
@@ -148,6 +152,16 @@ def _decimal_strings(row: dict[str, Any]) -> dict[str, Any]:
     return clean
 
 
+def _selectable_modes(supported: Sequence[str]) -> list[str]:
+    """Keep only the modes a run would actually accept.
+
+    A policy can be registered and still be left out of the run configuration
+    union, because its settings do not form a schema. Offering such a mode would
+    show a choice that is refused the moment it is submitted.
+    """
+    return [mode for mode in supported if mode in SELECTABLE_MONEY_MANAGEMENT_MODES]
+
+
 def _default_money_management(mode: str | None) -> dict[str, object]:
     """Return the named policy's own defaults, for the run form to start from.
 
@@ -156,13 +170,18 @@ def _default_money_management(mode: str | None) -> dict[str, object]:
     knows what settings such a policy has. Asking the policy keeps this correct
     for every mode. A mode that cannot be built with defaults alone still yields
     its name, which is enough for the client to select it and fill the rest in.
+
+    Building the policy runs code a deployed file wrote, and that happens while a
+    request is being answered. Any failure is confined to this one mode so a
+    single bad deployment cannot take the whole strategy list with it.
     """
     selected = mode or ManualMoneyManagement.id
     try:
         policy = MoneyManagementFactory.create({"mode": selected}, registered_money_management())
-    except (TypeError, ValueError):
+        return dict(policy.resolved_config())
+    except (Exception, SystemExit):  # noqa: BLE001 - one policy must not break the list
+        _LOGGER.exception("money-management mode %s could not be built with its defaults", selected)
         return {"mode": selected}
-    return dict(policy.resolved_config())
 
 
 def _summary_status(run_status: str, summary_present: bool) -> SummaryStatus:
@@ -560,7 +579,9 @@ class StrategyRepository:
                 metadata.min_history if metadata is not None else int(cast(int, row["min_history"]))
             ),
             default_params=dict(cast(dict[str, object], row["default_params_json"])),
-            supported_money_management=([] if support is None else list(support.supported)),
+            supported_money_management=(
+                [] if support is None else _selectable_modes(support.supported)
+            ),
             default_money_management=(
                 {} if support is None else _default_money_management(support.default)
             ),
@@ -586,7 +607,9 @@ class StrategyRepository:
                     required_indicators=metadata.required_indicators,
                     min_history=metadata.min_history,
                     default_params=dict(resolved.params),
-                    supported_money_management=list(metadata.money_management.supported),
+                    supported_money_management=_selectable_modes(
+                        metadata.money_management.supported
+                    ),
                     default_money_management=_default_money_management(
                         metadata.money_management.default
                     ),

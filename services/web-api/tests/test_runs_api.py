@@ -12,12 +12,17 @@ from typing import Any, cast
 import pytest
 import web_api.jobs as jobs
 from backtest_service.config import RunConfig
+from backtest_service.config.run_config import SELECTABLE_MONEY_MANAGEMENT_MODES
 from core_lib.money_management import MoneyManagementFactory
 from fastapi.testclient import TestClient
 from web_api.database import SignalConnection
 from web_api.main import app
 from web_api.models import StrategyOption
-from web_api.repository import StrategyRepository, _default_money_management
+from web_api.repository import (
+    StrategyRepository,
+    _default_money_management,
+    _selectable_modes,
+)
 
 
 @pytest.fixture
@@ -368,3 +373,25 @@ def test_a_mode_default_comes_from_the_policy_rather_than_a_manual_shaped_dict()
     assert _default_money_management("turtle") == dict(
         MoneyManagementFactory.create({"mode": "turtle"}).resolved_config()
     )
+
+
+def test_a_mode_the_run_config_would_refuse_is_not_offered() -> None:
+    """A policy can be registered and still be missing from the run configuration.
+
+    Offering it showed a choice that was rejected the moment it was submitted.
+    """
+    assert _selectable_modes(["manual", "turtle", "never-registered"]) == ["manual", "turtle"]
+    assert set(_selectable_modes(["manual", "turtle"])) <= SELECTABLE_MONEY_MANAGEMENT_MODES
+
+
+def test_one_policy_that_fails_to_build_does_not_break_the_strategy_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Building a policy runs code a deployed file wrote, while answering a request."""
+
+    def explode(*args: object, **kwargs: object) -> object:
+        raise RuntimeError("a deployed policy raised while being built")
+
+    monkeypatch.setattr("web_api.repository.MoneyManagementFactory.create", staticmethod(explode))
+
+    assert _default_money_management("turtle") == {"mode": "turtle"}

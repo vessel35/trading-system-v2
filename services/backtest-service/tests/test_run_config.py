@@ -1,5 +1,6 @@
 """Verify RunConfig owns run settings but not strategy parameter semantics."""
 
+import logging
 import subprocess
 import sys
 from collections.abc import Mapping
@@ -7,11 +8,14 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar, cast
 
 import pytest
 from backtest_service.config import RunConfig
-from backtest_service.config.run_config import _deployed_money_management_models
+from backtest_service.config.run_config import (
+    SELECTABLE_MONEY_MANAGEMENT_MODES,
+    _deployed_money_management_models,
+)
 from core_lib.money_management import (
     AccountRiskSnapshot,
     MarketSnapshot,
@@ -250,27 +254,14 @@ def test_a_policy_with_no_expressible_schema_is_skipped_not_raised() -> None:
     assert [model.model_fields["mode"].default for model in models] == ["factory-default"]
 
 
-def test_the_checked_union_is_no_narrower_than_the_one_built_at_import(
-    tmp_path: Path,
-) -> None:
-    """A type checker must not approve an attribute a deployed policy lacks.
-
-    The union is assembled at import time from what is deployed, so a checker
-    cannot see it. While it named only the two built-in models, it narrowed
-    ``mode != "manual"`` to Turtle and approved ``n_period``, which a deployed
-    policy does not carry. This is checked by running the checker, because the
-    defect exists only in its view and leaves no trace at run time.
-    """
+def _check_with_mypy(tmp_path: Path, name: str, body: str) -> str:
+    """Run the service's own checker over one probe function and return its output."""
     service = Path(__file__).resolve().parents[1]
-    probe = tmp_path / "probe_narrowing.py"
+    probe = tmp_path / f"probe_{name}.py"
     probe.write_text(
         "from backtest_service.config import RunConfig\n\n\n"
-        "def read(config: RunConfig) -> int:\n"
-        '    if config.money_management.mode == "manual":\n'
-        "        return 0\n"
-        "    return config.money_management.n_period\n"
+        "def read(config: RunConfig) -> int:\n" + body
     )
-
     result = subprocess.run(
         [
             sys.executable,
@@ -285,5 +276,129 @@ def test_the_checked_union_is_no_narrower_than_the_one_built_at_import(
         cwd=service,
         check=False,
     )
+    return result.stdout
 
-    assert "has no attribute" in result.stdout, result.stdout
+
+def test_the_checked_union_is_no_narrower_than_the_one_built_at_import(
+    tmp_path: Path,
+) -> None:
+    """A type checker must not approve an attribute a deployed policy lacks.
+
+    The union is assembled at import time from what is deployed, so a checker
+    cannot see it. While it named only the two built-in models, it narrowed
+    ``mode != "manual"`` to Turtle and approved ``n_period``, which a deployed
+    policy does not carry. This is checked by running the checker, because the
+    defect exists only in its view and leaves no trace at run time.
+    """
+    refused = _check_with_mypy(
+        tmp_path,
+        "unsafe",
+        '    if config.money_management.mode == "manual":\n'
+        "        return 0\n"
+        "    return config.money_management.n_period\n",
+    )
+
+    assert "has no attribute" in refused, refused
+
+
+def test_the_checked_union_still_narrows_to_each_built_in_shape(tmp_path: Path) -> None:
+    """Widening the checker's view must not cost the settings the built-ins do carry.
+
+    The stand-in arm first carried ``mode: str``, which overlaps both built-in
+    names. That stopped the checker narrowing ``mode == "manual"`` to the manual
+    shape, so reading ``leverage`` — a setting that shape really has — was
+    refused. The arm carries a placeholder literal instead.
+    """
+    accepted = _check_with_mypy(
+        tmp_path,
+        "safe",
+        '    if config.money_management.mode == "manual":\n'
+        "        return config.money_management.leverage\n"
+        '    if config.money_management.mode == "turtle":\n'
+        "        return config.money_management.n_period\n"
+        "    return 0\n",
+    )
+
+    assert "no issues found" in accepted, accepted
+
+
+@dataclass(frozen=True, slots=True)
+class _ModeNamingPolicy(MoneyManagementBase):
+    """A policy whose setting collides with the union's discriminator."""
+
+    mode: str = "oops"
+
+    id: ClassVar[str] = "mode-naming"
+    version: ClassVar[str] = "1.0.0"
+
+    def required_indicators(self) -> tuple[PolicyIndicatorRequirement, ...]:
+        return ()
+
+    def resolved_config(self) -> Mapping[str, object]:
+        return {"mode": self.id}
+
+    def plan_entry(
+        self,
+        decision: DecisionIntent,
+        market: MarketSnapshot,
+        account: AccountRiskSnapshot,
+        global_limits: RiskLimits,
+    ) -> MoneyManagementPlan:
+        raise NotImplementedError
+
+
+def test_a_policy_that_names_a_setting_mode_is_skipped_not_left_to_break_the_union(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The generated arm passed its own schema and then refused to join the union.
+
+    That failure landed while RunConfig itself was being assembled, outside the
+    isolation, so one deployment took manual validation and the OpenAPI document
+    with it. The reason says which setting caused it, because the union's own
+    complaint names only a field the author did not write.
+    """
+    with caplog.at_level(logging.ERROR):
+        assert _deployed_money_management_models({"mode-naming": _ModeNamingPolicy}) == ()
+
+    assert "may not declare a setting named 'mode'" in caplog.text
+
+
+def test_the_selectable_modes_are_the_ones_the_union_accepts() -> None:
+    """Anything that offers a choice reads this, so a shown mode is a valid mode."""
+    assert SELECTABLE_MONEY_MANAGEMENT_MODES >= {"manual", "turtle"}
+    for mode in SELECTABLE_MONEY_MANAGEMENT_MODES:
+        assert RunConfig.model_validate(
+            {**_raw_config(), "sizing_method": "risk_based", "money_management": {"mode": mode}}
+        )
+
+
+def _policy_with_annotation(mode: str, annotation: str) -> type[MoneyManagementBase]:
+    """Build a policy whose one setting carries the given annotation.
+
+    The class is assembled here rather than written out so the annotation stays
+    data. Written as source, a type checker reads it too and refuses the file,
+    which would take this test's own service out of the checked build.
+    """
+    namespace: dict[str, Any] = {
+        "__annotations__": {"tag": annotation},
+        "tag": 0,
+        "id": mode,
+        "version": "1.0.0",
+        "required_indicators": lambda self: (),
+        "resolved_config": lambda self: {"mode": mode},
+        "plan_entry": lambda self, *args: None,
+    }
+    created = type(f"Policy{mode.title().replace('-', '')}", (MoneyManagementBase,), namespace)
+    return cast("type[MoneyManagementBase]", dataclass(frozen=True)(created))
+
+
+def test_an_annotation_that_ends_the_process_is_caught_like_any_other_fault() -> None:
+    """Resolving annotations runs code the deployed file wrote.
+
+    Catching only ``Exception`` let a file exit from its own annotation and end
+    the process that imported this module, going around the isolation that the
+    plugin discovery step already had.
+    """
+    policy = _policy_with_annotation("exiting-annotation", "__import__('sys').exit(7)")
+
+    assert _deployed_money_management_models({"exiting-annotation": policy}) == ()

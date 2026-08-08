@@ -13,7 +13,15 @@ from typing import TYPE_CHECKING, Annotated, Any, Final, Literal, Union, cast, g
 
 from core_lib.money_management import MoneyManagementBase, policy_settings
 from core_lib.types import MarketType
-from pydantic import BaseModel, ConfigDict, Field, create_model, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    create_model,
+    field_validator,
+    model_validator,
+)
 from trading_plugins import registered_money_management
 
 from backtest_service.adapters.cost_model import BacktestCostModel
@@ -60,6 +68,11 @@ def _config_model_for(mode: str, policy_class: type[MoneyManagementBase]) -> typ
     that caused it.
     """
     settings = policy_settings(policy_class)
+    if "mode" in settings:
+        # ``mode`` is the discriminator the union is keyed on. A setting by that
+        # name would overwrite it with the setting's own type, and the union then
+        # refuses to assemble at all rather than dropping this one policy.
+        raise ValueError(f"money-management policy {mode!r} may not declare a setting named 'mode'")
     hints = get_type_hints(policy_class)
     definitions: dict[str, Any] = {"mode": (Literal[mode], mode)}
     for field in dataclass_fields(cast("Any", policy_class)):
@@ -80,10 +93,18 @@ def _config_model_for(mode: str, policy_class: type[MoneyManagementBase]) -> typ
         __config__=ConfigDict(extra="forbid"),
         **definitions,
     )
-    # Ask for the schema here. Pydantic defers that work, so a type it cannot
-    # express would otherwise surface as an unfinished RunConfig much later, and
-    # take manual validation and OpenAPI generation down with it.
+    # Ask for the schema here, and prove the model can also stand in the union.
+    # Pydantic defers both, so a type it cannot express, or a shape a
+    # discriminated union will not accept, would otherwise surface while RunConfig
+    # itself is being assembled — outside the isolation below, where it takes
+    # manual validation and the OpenAPI document down with it.
     model.model_json_schema()
+    TypeAdapter(
+        Annotated[
+            Union[ManualMoneyManagementConfig, model],  # noqa: UP007 - built, not written out
+            Field(discriminator="mode"),
+        ]
+    )
     return model
 
 
@@ -108,7 +129,10 @@ def _deployed_money_management_models(
             continue
         try:
             generated.append(_config_model_for(mode, policy_class))
-        except Exception:  # noqa: BLE001 - one bad policy must not break the rest
+        except (Exception, SystemExit):  # noqa: BLE001 - one policy must not break the rest
+            # ``SystemExit`` belongs here as much as an ordinary error: resolving
+            # the annotations runs code the deployed file wrote, so a file that
+            # exits from an annotation would end the process that imported it.
             _LOGGER.exception(
                 "money-management mode %s cannot be selected in a run: its settings "
                 "do not form a configuration schema",
@@ -133,9 +157,14 @@ if TYPE_CHECKING:
         checker's view narrower than run time: it read ``mode != "manual"`` as
         Turtle and approved an attribute a deployed policy does not have. This
         third arm carries only the discriminator, so such an access is refused.
+
+        Its discriminator is a placeholder literal rather than ``str``. A plain
+        ``str`` overlaps the two built-in names, which stopped the checker from
+        narrowing ``mode == "manual"`` to the manual shape and refused the
+        settings that shape really does carry.
         """
 
-        mode: str
+        mode: Literal["<deployed>"]
 
     MoneyManagementConfig = Annotated[
         ManualMoneyManagementConfig | TurtleMoneyManagementConfig | DeployedMoneyManagementConfig,
@@ -146,6 +175,19 @@ else:
         Union[_MONEY_MANAGEMENT_MODELS],  # noqa: UP007 - assembled, not written out
         Field(discriminator="mode"),
     ]
+
+
+SELECTABLE_MONEY_MANAGEMENT_MODES: Final[frozenset[str]] = frozenset(
+    str(cast("type[BaseModel]", model).model_fields["mode"].default)
+    for model in _MONEY_MANAGEMENT_MODELS
+)
+"""The modes a run may actually name.
+
+A policy that is registered but whose settings do not form a configuration schema
+is left out of the union above, and a run naming it is refused. Anything that
+offers a choice reads this set, so a mode cannot be shown as selectable and then
+rejected on submission.
+"""
 
 
 class RunConfig(BaseModel):

@@ -77,8 +77,10 @@ interface FormState {
   turtleNPeriod: string;
   turtleStopNMultiple: string;
   turtleLeverageCap: string;
-  // Settings for a mode this page has no hand-written form for, edited as JSON.
-  deployedMoneyManagement: string;
+  // Settings for modes this page has no hand-written form for, edited as JSON
+  // and kept per mode. One shared value carried one policy's settings into the
+  // next policy, whose field names are entirely different.
+  deployedMoneyManagement: Record<string, string>;
   symbol: string;
   exchange: string;
   timeframe: string;
@@ -117,7 +119,7 @@ const initialForm: FormState = {
   turtleNPeriod: "20",
   turtleStopNMultiple: "2",
   turtleLeverageCap: "10",
-  deployedMoneyManagement: "{}",
+  deployedMoneyManagement: {},
   symbol: "BTC/USDT:USDT",
   exchange: "binance",
   timeframe: "1h",
@@ -355,9 +357,12 @@ function buildMoneyManagement(
   // generated union lists only the modes present when the schema was generated,
   // while the backend accepts whatever it has registered, and it validates this
   // object against the real policy.
+  const typed = form.deployedMoneyManagement[form.moneyManagementMode] ?? "";
   return {
+    // Spread first so the mode the select shows wins. The other order let a
+    // "mode" key typed into the box submit a policy nobody chose.
+    ...(typed.trim() ? parseObject(typed, "자금 관리 설정") : {}),
     mode: form.moneyManagementMode,
-    ...parseObject(form.deployedMoneyManagement, "자금 관리 설정"),
   } as NonNullable<RunConfigInput["money_management"]>;
 }
 
@@ -635,17 +640,22 @@ export function RunManagementPage() {
       ...Object.keys(
         strategyOnlyParams(selectedStrategy?.default_params ?? {}),
       ),
+      // Only the two built-in policies have field names this page knows. A
+      // deployed policy's settings are whatever it declares, so offering
+      // Turtle's axes for it would sweep parameters that do not exist.
       ...(form.moneyManagementMode === "manual"
         ? [
             "money_management.leverage",
             "money_management.reward_risk",
             "money_management.atr_stop_multiple",
           ]
-        : [
-            "money_management.n_period",
-            "money_management.stop_n_multiple",
-            "money_management.leverage_cap",
-          ]),
+        : form.moneyManagementMode === "turtle"
+          ? [
+              "money_management.n_period",
+              "money_management.stop_n_multiple",
+              "money_management.leverage_cap",
+            ]
+          : []),
     ],
     [form.moneyManagementMode, selectedStrategy],
   );
@@ -694,9 +704,10 @@ export function RunManagementPage() {
         declaredDefault && supported.includes(declaredDefault)
           ? declaredDefault
           : (supported[0] ?? "manual");
-      const mode = supported.includes(current.moneyManagementMode)
-        ? current.moneyManagementMode
-        : defaultMode;
+      // The strategy's own default wins over whatever the previous strategy
+      // left selected. Keeping the carried-over value meant a strategy that
+      // declares a deployed policy as its default never actually opened on it.
+      const mode = defaultMode;
       return {
         ...current,
         params:
@@ -719,9 +730,12 @@ export function RunManagementPage() {
             current.manualAtrStopMultiple,
         ),
         deployedMoneyManagement:
-          mode === "manual" || mode === "turtle"
+          isBuiltInMoneyManagement(mode) || declaredDefault !== mode
             ? current.deployedMoneyManagement
-            : settingsJson(defaultMoneyManagement),
+            : {
+                ...current.deployedMoneyManagement,
+                [mode]: settingsJson(defaultMoneyManagement),
+              },
         timeframe: supportedTimeframes.includes(current.timeframe)
           ? current.timeframe
           : (supportedTimeframes[0] ?? current.timeframe),
@@ -954,7 +968,12 @@ export function RunManagementPage() {
       ),
       deployedMoneyManagement:
         moneyManagement && !isBuiltInMoneyManagement(moneyManagement.mode)
-          ? settingsJson(moneyManagement as Record<string, unknown>)
+          ? {
+              ...current.deployedMoneyManagement,
+              [moneyManagement.mode]: settingsJson(
+                moneyManagement as Record<string, unknown>,
+              ),
+            }
           : current.deployedMoneyManagement,
       symbol: config.symbol,
       exchange: config.exchange,
@@ -1198,14 +1217,19 @@ export function RunManagementPage() {
                               mode === "turtle"
                                 ? "risk_based"
                                 : current.sizingMethod,
-                            // Prefill only from the default the strategy declared
-                            // for this very mode. Another mode's settings would
-                            // be the wrong names entirely.
+                            // Prefill only from the default the strategy
+                            // declared for this very mode, and only the first
+                            // time. Refilling would discard what was typed the
+                            // moment the operator looked at another mode.
                             deployedMoneyManagement:
                               isBuiltInMoneyManagement(mode) ||
-                              declared.mode !== mode
+                              declared.mode !== mode ||
+                              current.deployedMoneyManagement[mode] !== undefined
                                 ? current.deployedMoneyManagement
-                                : settingsJson(declared),
+                                : {
+                                    ...current.deployedMoneyManagement,
+                                    [mode]: settingsJson(declared),
+                                  },
                           }));
                         }}
                       >
@@ -1365,9 +1389,16 @@ export function RunManagementPage() {
                           id="deployed-money-management"
                           aria-label="배포 정책 설정"
                           className={textareaClass}
-                          value={form.deployedMoneyManagement}
+                          value={
+                            form.deployedMoneyManagement[
+                              form.moneyManagementMode
+                            ] ?? ""
+                          }
                           onChange={(event) =>
-                            update("deployedMoneyManagement", event.target.value)
+                            update("deployedMoneyManagement", {
+                              ...form.deployedMoneyManagement,
+                              [form.moneyManagementMode]: event.target.value,
+                            })
                           }
                           spellCheck={false}
                         />
