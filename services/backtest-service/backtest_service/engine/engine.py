@@ -591,11 +591,14 @@ class Engine:
             return
         if isinstance(signal, DecisionIntent):
             decision = signal
+            # Check the timestamp before acting on the action. A HOLD carries a
+            # timestamp too, and recording one from the future would put a claim
+            # about a bar that has not closed into Evidence.
+            if decision.timestamp > candle.close_time:
+                raise ValueError("strategy decision cannot be later than the confirmed candle")
             if decision.action is DecisionAction.HOLD:
                 self._record_hold_decision(candle, decision)
                 return
-            if decision.timestamp > candle.close_time:
-                raise ValueError("strategy decision cannot be later than the confirmed candle")
             try:
                 signal = self._managed_signal(candle, decision)
             except MoneyManagementError:

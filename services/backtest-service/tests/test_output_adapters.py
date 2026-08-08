@@ -422,7 +422,7 @@ def _run_meta() -> dict[str, object]:
         "seed": 0,
         "engine_version": "1.0.0",
         "core_lib_version": "0.1.0",
-        "evidence_schema_version": "1.5.0",
+        "evidence_schema_version": EVIDENCE_SCHEMA_VERSION,
         "config_hash": "",
         "profile_ref": "fake-profile",
         "strategy_profile_json": {"family": "breakout"},

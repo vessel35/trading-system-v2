@@ -2299,12 +2299,15 @@ class _HoldStrategy:
 
 
 class _HoldStrategyCatalog(StrategyRegistry):
+    def __init__(self, adaptee: type = _HoldStrategy) -> None:
+        self._adaptee = adaptee
+
     def get(self, strategy_id: str) -> dict[str, object]:
         assert strategy_id == "hold-fixture"
         return {
             "strategy_id": strategy_id,
-            "class_name": _HoldStrategy.__name__,
-            "module_path": _HoldStrategy.__module__,
+            "class_name": self._adaptee.__name__,
+            "module_path": self._adaptee.__module__,
             "is_active": True,
             "is_deprecated": False,
         }
@@ -2430,3 +2433,68 @@ def test_a_strategy_that_declares_no_series_runs_and_passes_integrity(tmp_path: 
     with sqlite3.connect(result.evidence_path) as connection:
         assert connection.execute("SELECT COUNT(*) FROM INDICATOR_DEFINITION").fetchone()[0] == 0
         assert connection.execute("SELECT COUNT(*) FROM INDICATOR_SNAPSHOT").fetchone()[0] == 0
+
+
+class _FutureHoldStrategy(_HoldStrategy):
+    """Claim a HOLD about a bar that has not closed yet."""
+
+    def analyze(
+        self,
+        market_data: dict[str, object],
+        current_position: Position | None,
+    ) -> DecisionIntent | None:
+        del current_position
+        candle = market_data["candle"]
+        assert isinstance(candle, Candle)
+        return DecisionIntent(
+            action=DecisionAction.HOLD,
+            symbol=candle.symbol,
+            timestamp=candle.close_time + timedelta(hours=1),
+            reference_price=float(candle.close),
+            confidence=0.8,
+            reason="from-the-future",
+            metadata={},
+        )
+
+
+def test_a_hold_about_a_future_bar_is_refused_like_any_other_decision(tmp_path: Path) -> None:
+    candles = _candles()
+    costs = BacktestCostModel(_config().cost_values)
+    plugins = InProcessStrategyRegistry()
+    plugins.register("hold-fixture", _FutureHoldStrategy)
+    engine = Engine(
+        _Feed(candles),
+        _Broker(costs),
+        BacktestClock.from_candles(candles),
+        costs,
+        BacktestEvidenceSink(tmp_path),
+        _Catalog(),
+        AdapterManager(_HoldStrategyCatalog(_FutureHoldStrategy), plugins),
+        prereg=_prereg(),
+    )
+    with pytest.raises(ValueError, match="later than the confirmed candle"):
+        engine.run(_config().model_copy(update={"strategy_id": "hold-fixture"}))
+
+
+def test_declared_series_whose_definition_is_missing_fails_completeness(tmp_path: Path) -> None:
+    """Allowing zero rows must not also excuse losing rows that were declared."""
+    candles = _candles()
+    result = _engine(tmp_path, _Catalog(), [], candles=candles).run(_config())
+    assert result.integrity_status == "passed"
+
+    with sqlite3.connect(result.evidence_path) as connection:
+        declared = connection.execute(
+            "SELECT resolved_indicators_json FROM BACKTEST_RUN_LOCAL"
+        ).fetchone()[0]
+        assert "EMA" in declared
+        connection.execute("PRAGMA foreign_keys = OFF")
+        connection.execute("DELETE FROM INDICATOR_SNAPSHOT")
+        connection.execute("DELETE FROM INDICATOR_DEFINITION")
+        connection.commit()
+
+    sink = BacktestEvidenceSink(tmp_path)
+    sink._connection = sqlite3.connect(result.evidence_path)  # noqa: SLF001
+    sink._run_id = Path(result.evidence_path).stem  # noqa: SLF001
+    assert sink._indicator_failures() == [  # noqa: SLF001
+        "indicator_definition_mismatch:missing=ema:period=9:extra=-"
+    ]

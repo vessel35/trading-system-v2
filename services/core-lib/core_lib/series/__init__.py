@@ -1,6 +1,7 @@
 """Provide the execution contract shared by indicators and candlestick patterns."""
 
 import re
+from collections.abc import Mapping
 
 from .contracts import SeriesParam, SeriesSpec, SeriesState, SeriesValue
 
@@ -14,9 +15,19 @@ def normalize_series_name(name: str) -> str:
 
 def series_key(spec: SeriesSpec) -> str:
     """Return the stable key used in indicator snapshots and strategy inputs."""
-    params = ",".join(f"{key}={_series_param(value)}" for key, value in sorted(spec.params.items()))
-    name = normalize_series_name(spec.name)
-    return name if not params else f"{name}:{params}"
+    return series_key_of(spec.name, spec.params)
+
+
+def series_key_of(name: str, params: Mapping[str, object]) -> str:
+    """Build the same key from a name and parameters alone.
+
+    Evidence stores the declaration, not the spec, so a reader that reconstructs
+    a key has no spec to pass. Both callers go through this one function so the
+    rule cannot drift between writing a key and reading it back.
+    """
+    rendered = ",".join(f"{key}={_series_param(value)}" for key, value in sorted(params.items()))
+    normalized = normalize_series_name(name)
+    return normalized if not rendered else f"{normalized}:{rendered}"
 
 
 def _series_param(value: object) -> str:
@@ -34,4 +45,5 @@ __all__ = [
     "SeriesValue",
     "normalize_series_name",
     "series_key",
+    "series_key_of",
 ]

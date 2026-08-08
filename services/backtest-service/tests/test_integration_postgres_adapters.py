@@ -24,6 +24,7 @@ from backtest_service.adapters.catalog_store import (
 from backtest_service.adapters.clock import BacktestClock
 from backtest_service.adapters.cost_model import BacktestCostModel
 from backtest_service.adapters.data_feed import BacktestDataFeed, ReadConnection
+from backtest_service.adapters.evidence_schema import EVIDENCE_SCHEMA_VERSION
 from backtest_service.adapters.evidence_sink import BacktestEvidenceSink
 from backtest_service.adapters.strategy_registry import BacktestStrategyRegistry
 from backtest_service.config import RunConfig
@@ -395,7 +396,7 @@ def test_catalog_issues_run_id_then_records_prereg_and_evaluated_metadata() -> N
         "seed": 0,
         "engine_version": "1.0.0",
         "core_lib_version": "0.1.0",
-        "evidence_schema_version": "1.5.0",
+        "evidence_schema_version": EVIDENCE_SCHEMA_VERSION,
         "config_hash": "",
         "profile_ref": "m9-profile",
         "strategy_profile_json": {"family": "fixture"},
@@ -412,7 +413,7 @@ def test_catalog_issues_run_id_then_records_prereg_and_evaluated_metadata() -> N
             run_id,
             str(run_meta["config_hash"]),
             source_data_hash,
-            "1.5.0",
+            EVIDENCE_SCHEMA_VERSION,
         )
         assert reference.catalog_config_matches is True
         assert reference.catalog_source_matches is True
@@ -448,7 +449,7 @@ def test_catalog_issues_run_id_then_records_prereg_and_evaluated_metadata() -> N
             same_source_run_id,
             str(run_meta["config_hash"]),
             source_data_hash,
-            "1.5.0",
+            EVIDENCE_SCHEMA_VERSION,
         )
         assert same_source_reference.comparison_run_id == run_id
         assert same_source_reference.comparison_hash == "b" * 64
@@ -460,7 +461,7 @@ def test_catalog_issues_run_id_then_records_prereg_and_evaluated_metadata() -> N
             different_source_run_id,
             str(run_meta["config_hash"]),
             different_source_hash,
-            "1.5.0",
+            EVIDENCE_SCHEMA_VERSION,
         )
         assert different_source_reference.comparison_run_id is None
         assert different_source_reference.comparison_hash is None
@@ -540,7 +541,7 @@ def _orphan_sweep_run_meta() -> dict[str, object]:
         "seed": 0,
         "engine_version": "1.0.0",
         "core_lib_version": "0.1.0",
-        "evidence_schema_version": "1.5.0",
+        "evidence_schema_version": EVIDENCE_SCHEMA_VERSION,
         "config_hash": "",
         "profile_ref": "orphan-sweep-profile",
         "strategy_profile_json": {"family": "fixture"},
@@ -614,7 +615,7 @@ def test_catalog_determinism_reference_executes_evidence_schema_filter() -> None
 
         selection_fixture = uuid4().hex
         selection_source_hash = hashlib.sha256(f"{selection_fixture}:source".encode()).hexdigest()
-        same_schema_meta = run_meta(selection_fixture, "1.5.0")
+        same_schema_meta = run_meta(selection_fixture, EVIDENCE_SCHEMA_VERSION)
         different_schema_meta = run_meta(selection_fixture, "1.4.0")
         assert same_schema_meta["config_hash"] == different_schema_meta["config_hash"]
 
@@ -636,7 +637,7 @@ def test_catalog_determinism_reference_executes_evidence_schema_filter() -> None
             current_run_id,
             str(same_schema_meta["config_hash"]),
             selection_source_hash,
-            "1.5.0",
+            EVIDENCE_SCHEMA_VERSION,
         )
 
         assert reference.comparison_run_id == same_schema_run_id
@@ -651,7 +652,7 @@ def test_catalog_determinism_reference_executes_evidence_schema_filter() -> None
             f"{different_only_fixture}:source".encode()
         ).hexdigest()
         different_only_meta = run_meta(different_only_fixture, "1.4.0")
-        requested_schema_meta = run_meta(different_only_fixture, "1.5.0")
+        requested_schema_meta = run_meta(different_only_fixture, EVIDENCE_SCHEMA_VERSION)
         assert different_only_meta["config_hash"] == requested_schema_meta["config_hash"]
         register_completed(
             catalog,
@@ -665,7 +666,7 @@ def test_catalog_determinism_reference_executes_evidence_schema_filter() -> None
             requested_schema_run_id,
             str(requested_schema_meta["config_hash"]),
             different_only_source_hash,
-            "1.5.0",
+            EVIDENCE_SCHEMA_VERSION,
         )
 
         assert different_only_reference.comparison_run_id is None
@@ -679,7 +680,7 @@ def test_catalog_determinism_reference_executes_evidence_schema_filter() -> None
             f"{unknown_only_fixture}:source".encode()
         ).hexdigest()
         unknown_meta = run_meta(unknown_only_fixture, "unknown")
-        known_meta = run_meta(unknown_only_fixture, "1.5.0")
+        known_meta = run_meta(unknown_only_fixture, EVIDENCE_SCHEMA_VERSION)
         assert unknown_meta["config_hash"] == known_meta["config_hash"]
         register_completed(
             catalog,
@@ -693,7 +694,7 @@ def test_catalog_determinism_reference_executes_evidence_schema_filter() -> None
             known_run_id,
             str(known_meta["config_hash"]),
             unknown_only_source_hash,
-            "1.5.0",
+            EVIDENCE_SCHEMA_VERSION,
         )
 
         assert unknown_only_reference.comparison_run_id is None

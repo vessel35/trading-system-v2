@@ -16,6 +16,7 @@ from typing import Final
 
 from core_lib.costs import funding_boundaries_between
 from core_lib.ports import EvidenceSink
+from core_lib.series import series_key_of
 
 from .evidence_schema import (
     ENTITY_SORT_KEYS,
@@ -737,10 +738,18 @@ class BacktestEvidenceSink(EvidenceSink):
                 "SELECT indicator_key FROM INDICATOR_DEFINITION ORDER BY indicator_key"
             ).fetchall()
         ]
+        # Zero rows is only complete when the run resolved no series. Treating it
+        # as complete unconditionally would let a run that declared a series and
+        # then failed to record it pass as sound evidence.
+        expected = self._expected_indicator_keys()
+        if sorted(expected) != sorted(keys):
+            missing = sorted(set(expected) - set(keys))
+            extra = sorted(set(keys) - set(expected))
+            return [
+                f"indicator_definition_mismatch:missing={','.join(missing) or '-'}"
+                f":extra={','.join(extra) or '-'}"
+            ]
         if not keys:
-            # No rows is complete when nothing was declared. A strategy that reads
-            # only candles has no series, so demanding a definition here would fail
-            # every one of its runs for a reason unrelated to its evidence.
             return []
         grid = self._portfolio_bar_grid()
         failures: list[str] = []
@@ -760,6 +769,28 @@ class BacktestEvidenceSink(EvidenceSink):
                     f"indicator_grid_mismatch:{key}:expected={len(grid)}:actual={len(actual)}"
                 )
         return failures
+
+    def _expected_indicator_keys(self) -> list[str]:
+        """Return the execution keys this run declared it would compute.
+
+        The run header records every resolved series. Requirements finalized on
+        another timeframe carry that timeframe in their params; the engine derives
+        those outside the per-bar loop and records no definition for them, so they
+        are not expected here.
+        """
+        row = self.connection.execute(
+            "SELECT resolved_indicators_json FROM BACKTEST_RUN_LOCAL"
+        ).fetchone()
+        if row is None or not row[0]:
+            return []
+        declared = json.loads(row[0])
+        keys: list[str] = []
+        for entry in declared:
+            params = dict(entry.get("params") or {})
+            if "timeframe" in params:
+                continue
+            keys.append(series_key_of(str(entry["name"]), params))
+        return keys
 
     def _source_snapshot_failures(self) -> list[str]:
         local = self.connection.execute(
