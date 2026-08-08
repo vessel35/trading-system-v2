@@ -11,9 +11,22 @@ from .policies import (
     TurtleMoneyManagement,
 )
 
+MONEY_MANAGEMENT_SCHEMA_VERSION: Final = "1.0.0"
+"""How a submitted ``money_management`` mapping is interpreted.
+
+Raise this whenever the accepted names, their defaults, or their ranges change,
+so a stored configuration can be replayed the way it was originally read instead
+of being reinterpreted under whatever the current defaults happen to be.
+"""
+
 
 class MoneyManagementFactory:
     """Validate one mode-specific configuration and construct its policy."""
+
+    @staticmethod
+    def version() -> str:
+        """Return the schema version this factory resolves configurations under."""
+        return MONEY_MANAGEMENT_SCHEMA_VERSION
 
     @staticmethod
     def create(raw_config: Mapping[str, object]) -> MoneyManagementPolicy:

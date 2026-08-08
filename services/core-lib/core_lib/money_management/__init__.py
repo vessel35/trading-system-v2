@@ -15,10 +15,15 @@ from .policies import (
     TurtleMoneyManagement,
     turtle_n_series,
 )
-from .registry import MONEY_MANAGEMENT_MODES, MoneyManagementFactory
+from .registry import (
+    MONEY_MANAGEMENT_MODES,
+    MONEY_MANAGEMENT_SCHEMA_VERSION,
+    MoneyManagementFactory,
+)
 
 __all__ = [
     "MONEY_MANAGEMENT_MODES",
+    "MONEY_MANAGEMENT_SCHEMA_VERSION",
     "AccountRiskSnapshot",
     "ManualMoneyManagement",
     "MarketSnapshot",

@@ -42,6 +42,7 @@ from core_lib.money_management import (
     AccountRiskSnapshot,
     MarketSnapshot,
     MoneyManagementError,
+    MoneyManagementFactory,
     MoneyManagementPolicy,
     RiskLimits,
     turtle_n_series,
@@ -1824,18 +1825,25 @@ class Engine:
         return turtle_n_series(daily, period=period)
 
     def _money_management_evidence(self) -> dict[str, object]:
+        """Record who resolved the money-management config and under which version.
+
+        The version is asked of the factory that did the resolving rather than
+        written here. A literal would stay put while the interpretation moved, and
+        a stored run would then be replayed under rules it was never read with.
+        """
         policy = self._money_management
+        schema_version = MoneyManagementFactory.version()
         if policy is None:
             return {
                 "policy_id": "legacy_signal",
                 "policy_version": "1.0.0",
-                "config_schema_version": "1.0.0",
+                "config_schema_version": schema_version,
                 "resolved_config": {},
             }
         return {
             "policy_id": policy.id,
             "policy_version": policy.version,
-            "config_schema_version": "1.0.0",
+            "config_schema_version": schema_version,
             "resolved_config": dict(policy.resolved_config()),
         }
 

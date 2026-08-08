@@ -33,6 +33,7 @@ from core_lib.money_management import (
     MarketSnapshot,
     MoneyManagementBase,
     MoneyManagementError,
+    MoneyManagementFactory,
     MoneyManagementPlan,
     PolicyIndicatorRequirement,
     RiskLimits,
@@ -2632,3 +2633,20 @@ def test_hashed_evidence_content_is_pinned_to_its_schema_version(tmp_path: Path)
         _EVIDENCE_GOLDEN_HASH_MANAGED,
         _EVIDENCE_GOLDEN_HASH_HOLD,
     ), hint
+
+
+def test_recorded_config_schema_version_comes_from_the_resolver(tmp_path: Path) -> None:
+    """The recorded version must move with the factory, not be written twice.
+
+    A literal in the engine would keep saying 1.0.0 after the factory changed how
+    a stored configuration is read, and a replay would then be interpreted under
+    rules the original run never used.
+    """
+    result = _engine(tmp_path, _Catalog(), []).run(_config())
+
+    with sqlite3.connect(result.evidence_path) as connection:
+        recorded = json.loads(
+            connection.execute("SELECT money_management_json FROM BACKTEST_RUN_LOCAL").fetchone()[0]
+        )
+
+    assert recorded["config_schema_version"] == MoneyManagementFactory.version()
