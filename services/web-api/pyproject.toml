@@ -60,7 +60,7 @@ select = ["B", "E", "F", "I", "UP"]
 
 [tool.mypy]
 files = ["web_api", "tests", "scripts"]
-mypy_path = "$MYPY_CONFIG_FILE_DIR/../core-lib:$MYPY_CONFIG_FILE_DIR/../backtest-service"
+mypy_path = "$MYPY_CONFIG_FILE_DIR/../core-lib:$MYPY_CONFIG_FILE_DIR/../backtest-service:$MYPY_CONFIG_FILE_DIR/../trading-plugins"
 python_version = "3.12"
 strict = true
 warn_unreachable = true

@@ -9,8 +9,9 @@ from typing import cast
 
 import psycopg
 from core_lib.ports import DataFeed
-from core_lib.strategy import AdapterManager, build_strategy_registry
+from core_lib.strategy import AdapterManager
 from core_lib.types import MarketType
+from trading_plugins import build_strategy_registry
 
 from backtest_service.adapters.broker import BacktestBroker
 from backtest_service.adapters.catalog_store import BacktestCatalogStore, WriteConnection

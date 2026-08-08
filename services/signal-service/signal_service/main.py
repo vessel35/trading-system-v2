@@ -10,8 +10,9 @@ from collections.abc import Callable
 from threading import Event
 from types import FrameType
 
-from core_lib.strategy import AdapterManager, build_strategy_registry
+from core_lib.strategy import AdapterManager
 from service_commons.observability import configure_logging
+from trading_plugins import build_strategy_registry
 
 from signal_service.application import (
     SignalGenerationService,

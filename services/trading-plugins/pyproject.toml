@@ -3,15 +3,12 @@ requires = ["setuptools>=75"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "signal-service"
+name = "trading-plugins"
 version = "0.1.0"
-description = "Finalized-candle signal generation driver for paper and live modes."
+description = "Drop-in strategies and money-management policies discovered at import time."
 requires-python = ">=3.12"
 dependencies = [
     "core-lib==0.2.0",
-    "trading-plugins==0.1.0",
-    "psycopg[binary]>=3.2",
-    "service-commons==0.1.0",
 ]
 
 [project.optional-dependencies]
@@ -23,40 +20,32 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["signal_service*"]
+include = ["trading_plugins*"]
 
 [tool.setuptools.package-data]
-signal_service = ["py.typed"]
+trading_plugins = ["py.typed"]
 
 [tool.uv.sources]
 core-lib = { path = "../core-lib", editable = true }
-trading-plugins = { path = "../trading-plugins", editable = true }
-service-commons = { path = "../service-commons", editable = true }
 
 [tool.pytest.ini_options]
 addopts = [
     "--import-mode=importlib",
     "--strict-config",
     "--strict-markers",
-    "-m",
-    "not integration",
 ]
-markers = [
-    "integration: uses an explicitly disposable local PostgreSQL schema",
-]
-testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100
-src = ["signal_service", "tests"]
+src = ["trading_plugins", "tests"]
 target-version = "py312"
 
 [tool.ruff.lint]
 select = ["B", "E", "F", "I", "UP"]
 
 [tool.mypy]
-files = ["signal_service", "tests"]
-mypy_path = "$MYPY_CONFIG_FILE_DIR/../core-lib:$MYPY_CONFIG_FILE_DIR/../service-commons:$MYPY_CONFIG_FILE_DIR/../trading-plugins"
+files = ["trading_plugins", "tests"]
+mypy_path = "$MYPY_CONFIG_FILE_DIR/../core-lib"
 python_version = "3.12"
 strict = true
 warn_unreachable = true
