@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -46,33 +47,74 @@ class MoneyManagementPolicy(Protocol):
         ...
 
 
-def _entry_side(decision: DecisionIntent) -> int:
-    if decision.action is DecisionAction.ENTER_LONG:
-        return 1
-    if decision.action is DecisionAction.ENTER_SHORT:
-        return -1
-    raise MoneyManagementError("money management accepts entry decisions only")
+class MoneyManagementBase(ABC):
+    """Optional stateless convenience base that satisfies ``MoneyManagementPolicy``.
 
+    The protocol is structural, so it only checks that the three members exist.
+    A policy whose ``plan_entry`` takes the wrong arguments still satisfies it and
+    fails at run time instead. Inheriting here refuses the instance up front, and
+    supplies the two calculations both shipped policies share so a new policy does
+    not restate the global risk cap and get it wrong.
+    """
 
-def _risk_inputs(
-    market: MarketSnapshot,
-    account: AccountRiskSnapshot,
-    limits: RiskLimits,
-    stop_distance: float,
-) -> tuple[float, float]:
-    if stop_distance <= 0.0 or not math.isfinite(stop_distance):
-        raise MoneyManagementError("stop distance must be finite and positive")
-    risk_budget = account.equity * limits.risk_per_trade
-    quantity = risk_budget / stop_distance
-    if not math.isfinite(quantity) or quantity <= 0.0:
-        raise MoneyManagementError("requested quantity must be finite and positive")
-    if market.reference_price * quantity <= 0.0:
-        raise MoneyManagementError("requested notional must be positive")
-    return risk_budget, quantity
+    __slots__ = ()
+
+    id: ClassVar[str]
+    version: ClassVar[str]
+
+    @abstractmethod
+    def required_indicators(self) -> tuple[PolicyIndicatorRequirement, ...]:
+        """Return the policy-owned finalized market inputs."""
+
+    @abstractmethod
+    def resolved_config(self) -> Mapping[str, object]:
+        """Return the normalized, non-secret policy configuration."""
+
+    @abstractmethod
+    def plan_entry(
+        self,
+        decision: DecisionIntent,
+        market: MarketSnapshot,
+        account: AccountRiskSnapshot,
+        global_limits: RiskLimits,
+    ) -> MoneyManagementPlan:
+        """Return a proposed protection, quantity, and leverage plan."""
+
+    @staticmethod
+    def entry_side(decision: DecisionIntent) -> int:
+        """Return 1 for a long entry and -1 for a short, refusing anything else."""
+        if decision.action is DecisionAction.ENTER_LONG:
+            return 1
+        if decision.action is DecisionAction.ENTER_SHORT:
+            return -1
+        raise MoneyManagementError("money management accepts entry decisions only")
+
+    @staticmethod
+    def risk_inputs(
+        market: MarketSnapshot,
+        account: AccountRiskSnapshot,
+        limits: RiskLimits,
+        stop_distance: float,
+    ) -> tuple[float, float]:
+        """Return the globally capped risk budget and the quantity it buys.
+
+        The budget comes from ``RiskLimits`` alone. A policy that recomputed it
+        from its own configuration could exceed the per-trade cap, so the one
+        derivation lives here rather than in each policy.
+        """
+        if stop_distance <= 0.0 or not math.isfinite(stop_distance):
+            raise MoneyManagementError("stop distance must be finite and positive")
+        risk_budget = account.equity * limits.risk_per_trade
+        quantity = risk_budget / stop_distance
+        if not math.isfinite(quantity) or quantity <= 0.0:
+            raise MoneyManagementError("requested quantity must be finite and positive")
+        if market.reference_price * quantity <= 0.0:
+            raise MoneyManagementError("requested notional must be positive")
+        return risk_budget, quantity
 
 
 @dataclass(frozen=True, slots=True)
-class ManualMoneyManagement:
+class ManualMoneyManagement(MoneyManagementBase):
     """Reproduce the legacy Vessel ATR stop, fixed target, and leverage."""
 
     leverage: int = 1
@@ -124,9 +166,9 @@ class ManualMoneyManagement:
         account: AccountRiskSnapshot,
         global_limits: RiskLimits,
     ) -> MoneyManagementPlan:
-        side = _entry_side(decision)
+        side = self.entry_side(decision)
         stop_distance = market.volatility * float(self.atr_stop_multiple)
-        risk_budget, quantity = _risk_inputs(market, account, global_limits, stop_distance)
+        risk_budget, quantity = self.risk_inputs(market, account, global_limits, stop_distance)
         stop_loss = market.reference_price - side * stop_distance
         take_profit = market.reference_price + side * stop_distance * float(self.reward_risk)
         if stop_loss <= 0.0 or take_profit <= 0.0:
@@ -154,7 +196,7 @@ class ManualMoneyManagement:
 
 
 @dataclass(frozen=True, slots=True)
-class TurtleMoneyManagement:
+class TurtleMoneyManagement(MoneyManagementBase):
     """Apply Turtle-derived daily N sizing under the platform 1% risk cap."""
 
     n_period: int = 20
@@ -214,9 +256,9 @@ class TurtleMoneyManagement:
         account: AccountRiskSnapshot,
         global_limits: RiskLimits,
     ) -> MoneyManagementPlan:
-        side = _entry_side(decision)
+        side = self.entry_side(decision)
         stop_distance = market.volatility * float(self.stop_n_multiple)
-        risk_budget, quantity = _risk_inputs(market, account, global_limits, stop_distance)
+        risk_budget, quantity = self.risk_inputs(market, account, global_limits, stop_distance)
         stop_loss = market.reference_price - side * stop_distance
         if stop_loss <= 0.0:
             raise MoneyManagementError("turtle stop price must remain positive")

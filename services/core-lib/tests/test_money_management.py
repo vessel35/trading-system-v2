@@ -1,5 +1,6 @@
 """Verify common manual and Turtle money-management calculations."""
 
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -7,8 +8,11 @@ from core_lib.money_management import (
     AccountRiskSnapshot,
     ManualMoneyManagement,
     MarketSnapshot,
+    MoneyManagementBase,
     MoneyManagementError,
     MoneyManagementFactory,
+    MoneyManagementPolicy,
+    PolicyIndicatorRequirement,
     RiskLimits,
     TurtleMoneyManagement,
     turtle_n_series,
@@ -195,3 +199,50 @@ def test_factory_rejects_unknown_or_extra_policy_fields() -> None:
         MoneyManagementFactory.create({"mode": "kelly"})
     with pytest.raises(ValueError, match="unexpected"):
         MoneyManagementFactory.create({"mode": "manual", "api_key": "forbidden"})
+
+
+def test_base_refuses_a_policy_that_leaves_a_member_unimplemented() -> None:
+    """The protocol accepts a wrong signature; the base refuses the instance up front."""
+
+    class Incomplete(MoneyManagementBase):
+        id = "incomplete"
+        version = "1.0.0"
+
+        def required_indicators(self) -> tuple[PolicyIndicatorRequirement, ...]:
+            return ()
+
+        def resolved_config(self) -> Mapping[str, object]:
+            return {"mode": self.id}
+
+    with pytest.raises(TypeError, match="plan_entry"):
+        Incomplete()  # type: ignore[abstract]
+
+
+def test_shipped_policies_inherit_the_base_and_still_satisfy_the_protocol() -> None:
+    for policy in (ManualMoneyManagement(), TurtleMoneyManagement()):
+        assert isinstance(policy, MoneyManagementBase)
+        assert isinstance(policy, MoneyManagementPolicy)
+
+
+def test_base_risk_budget_comes_only_from_the_global_cap() -> None:
+    """A policy cannot widen the per-trade risk by choosing its own fraction."""
+    budget, quantity = MoneyManagementBase.risk_inputs(
+        MarketSnapshot(
+            reference_price=101.0,
+            volatility=2.0,
+            volatility_name="ATR(14)",
+            volatility_timestamp=_NOW,
+        ),
+        _account(equity=10_000.0),
+        _limits(),
+        stop_distance=5.0,
+    )
+    assert budget == pytest.approx(10_000.0 * 0.01)
+    assert quantity == pytest.approx(budget / 5.0)
+
+
+def test_base_entry_side_refuses_a_decision_that_is_not_an_entry() -> None:
+    assert MoneyManagementBase.entry_side(_decision(DecisionAction.ENTER_LONG)) == 1
+    assert MoneyManagementBase.entry_side(_decision(DecisionAction.ENTER_SHORT)) == -1
+    with pytest.raises(MoneyManagementError, match="entry decisions only"):
+        MoneyManagementBase.entry_side(_decision(DecisionAction.EXIT))

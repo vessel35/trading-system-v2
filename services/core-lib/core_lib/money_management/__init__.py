@@ -10,6 +10,7 @@ from .models import (
 )
 from .policies import (
     ManualMoneyManagement,
+    MoneyManagementBase,
     MoneyManagementPolicy,
     TurtleMoneyManagement,
     turtle_n_series,
@@ -21,6 +22,7 @@ __all__ = [
     "AccountRiskSnapshot",
     "ManualMoneyManagement",
     "MarketSnapshot",
+    "MoneyManagementBase",
     "MoneyManagementError",
     "MoneyManagementFactory",
     "MoneyManagementPlan",
