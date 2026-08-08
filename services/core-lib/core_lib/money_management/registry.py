@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import fields
 from types import MappingProxyType
-from typing import Final
+from typing import Any, Final, cast
 
 from .policies import (
     ManualMoneyManagement,
@@ -56,15 +57,27 @@ class MoneyManagementFactory:
         policy_class = policies.get(mode)
         if policy_class is None:
             raise ValueError(f"unsupported money-management mode: {mode!r}")
-        declared = getattr(policy_class, "__dataclass_fields__", None)
-        if declared is None:
-            raise TypeError(
-                f"money-management policy {mode!r} must be a dataclass so its settings, "
-                "names, and defaults are declared in one place"
-            )
-        settings = set(declared)
+        settings = policy_settings(policy_class)
         _reject_extra(raw_config, {"mode", *settings})
         return policy_class(**{name: raw_config[name] for name in settings if name in raw_config})
+
+
+def policy_settings(policy_class: type[MoneyManagementBase]) -> frozenset[str]:
+    """Return the configuration names a policy accepts.
+
+    ``__dataclass_fields__`` also carries ``id`` and ``version``, which name the
+    policy rather than configure it; passing them to the constructor fails with a
+    message about an unexpected argument instead of an unknown setting.
+    """
+    if not hasattr(policy_class, "__dataclass_fields__"):
+        raise TypeError(
+            f"money-management policy {policy_class.__name__!r} must be a dataclass so its "
+            "settings, names, and defaults are declared in one place"
+        )
+    # ``fields`` is what drops the ClassVar entries that ``__dataclass_fields__``
+    # still carries, and those are the naming attributes rather than settings.
+    declared = cast("Any", policy_class)
+    return frozenset(field.name for field in fields(declared) if field.init)
 
 
 def money_management_modes(

@@ -14,8 +14,10 @@ import pytest
 import trading_plugins
 from core_lib.money_management import (
     BUILTIN_POLICIES,
+    ManualMoneyManagement,
     MoneyManagementFactory,
     money_management_modes,
+    policy_settings,
 )
 from trading_plugins import discovery
 
@@ -288,3 +290,33 @@ def test_an_unknown_mode_is_refused_by_name() -> None:
 def test_a_setting_the_policy_does_not_declare_is_refused() -> None:
     with pytest.raises(ValueError, match="unexpected money-management parameters"):
         MoneyManagementFactory.create({"mode": "manual", "invented": 1})
+
+
+def test_a_policy_that_is_not_a_dataclass_is_refused_at_discovery(
+    plugin_dir: ModuleType,
+) -> None:
+    """A broken deployment must surface on deploy, not on the first request."""
+    _write(
+        plugin_dir,
+        "plain",
+        _POLICY_BODY.format(class_name="Plain", mode="plain").replace(
+            "    @dataclass(frozen=True, slots=True)\n", ""
+        ),
+    )
+
+    found, faults = discovery.discover_money_management(plugin_dir)
+
+    assert found == {}
+    assert any("must be a dataclass" in fault.reason for fault in faults)
+
+
+def test_naming_fields_are_not_treated_as_settings() -> None:
+    """``id`` and ``version`` name a policy; they do not configure it."""
+    assert policy_settings(ManualMoneyManagement) == {
+        "leverage",
+        "reward_risk",
+        "atr_stop_multiple",
+    }
+
+    with pytest.raises(ValueError, match="unexpected money-management parameters"):
+        MoneyManagementFactory.create({"mode": "manual", "id": "spoofed"})

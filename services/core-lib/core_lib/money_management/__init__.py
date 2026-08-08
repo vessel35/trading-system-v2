@@ -21,6 +21,7 @@ from .registry import (
     MONEY_MANAGEMENT_SCHEMA_VERSION,
     MoneyManagementFactory,
     money_management_modes,
+    policy_settings,
 )
 
 __all__ = [
@@ -39,5 +40,6 @@ __all__ = [
     "RiskLimits",
     "TurtleMoneyManagement",
     "money_management_modes",
+    "policy_settings",
     "turtle_n_series",
 ]

@@ -95,8 +95,8 @@ class AdapterManager:
             raise ValueError(
                 f"strategy {strategy_id!r} does not support money-management mode {policy.id!r}"
             )
-        if policy.id == "turtle" and not support.supports_signal_exit:
-            raise ValueError("turtle money management requires strategy signal exits")
+        if getattr(policy, "requires_signal_exit", False) and not support.supports_signal_exit:
+            raise ValueError(f"{policy.id} money management requires strategy signal exits")
         return StrategyRuntime(strategy=strategy, money_management=policy)
 
     @staticmethod

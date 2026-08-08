@@ -62,6 +62,15 @@ class MoneyManagementBase(ABC):
     id: ClassVar[str]
     version: ClassVar[str]
 
+    requires_signal_exit: ClassVar[bool] = False
+    """Whether this policy leaves the exit to the strategy.
+
+    A policy that never sets ``take_profit`` has no way out of a position on its
+    own. Pairing it with a strategy that cannot emit an exit would open a trade
+    with nothing to close it, so the composition is refused up front. Declaring it
+    here keeps the check off the policy's name.
+    """
+
     @abstractmethod
     def required_indicators(self) -> tuple[PolicyIndicatorRequirement, ...]:
         """Return the policy-owned finalized market inputs."""
@@ -206,6 +215,7 @@ class TurtleMoneyManagement(MoneyManagementBase):
 
     id: ClassVar[str] = "turtle"
     version: ClassVar[str] = "1.0.0"
+    requires_signal_exit: ClassVar[bool] = True
 
     def __post_init__(self) -> None:
         if (

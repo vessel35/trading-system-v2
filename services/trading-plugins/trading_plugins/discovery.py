@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from types import ModuleType
 from typing import Final
 
-from core_lib.money_management import MoneyManagementBase
+from core_lib.money_management import MoneyManagementBase, policy_settings
 from core_lib.strategy import AdapterClass, InProcessStrategyRegistry, StrategyBase
 
 from . import money_management as money_management_package
@@ -132,6 +132,13 @@ def discover_money_management(
                         f"{previous.__module__}.{previous.__name__}",
                     )
                 )
+                continue
+            # Read the configuration surface now. Waiting until a run names this
+            # mode would hide a broken deployment until the first request.
+            try:
+                policy_settings(candidate)
+            except TypeError as error:
+                faults.append(PluginFault(name, str(error)))
                 continue
             found[mode] = candidate
     return found, tuple(faults)
