@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import logging
 import pkgutil
 from collections.abc import Iterator, Mapping
+from dataclasses import dataclass
 from types import ModuleType
 from typing import Final
 
@@ -24,14 +26,33 @@ from . import strategies as strategies_package
 
 STRATEGY_PACKAGE: Final = strategies_package
 MONEY_MANAGEMENT_PACKAGE: Final = money_management_package
+_LOGGER = logging.getLogger(__name__)
 """The only two places a deployed file is looked for. Both are fixed in code."""
 
 
-def _modules_in(package: ModuleType) -> Iterator[ModuleType]:
+def _modules_in(package: ModuleType) -> Iterator[tuple[str, ModuleType | Exception]]:
+    """Import each module, handing back the failure instead of raising it.
+
+    One unloadable file must not take the others down with it. A strategy the
+    database still points at simply will not be found, and the manager refuses it
+    by name at creation, which says far more than a failed process start.
+    """
     for info in pkgutil.iter_modules(package.__path__):
         if info.name.startswith("_"):
             continue
-        yield importlib.import_module(f"{package.__name__}.{info.name}")
+        name = f"{package.__name__}.{info.name}"
+        try:
+            yield name, importlib.import_module(name)
+        except Exception as error:  # noqa: BLE001 - the fault is the return value
+            yield name, error
+
+
+@dataclass(frozen=True, slots=True)
+class PluginFault:
+    """One deployed file that could not be loaded, and why."""
+
+    module: str
+    reason: str
 
 
 def _concrete_subclasses(module: ModuleType, base: type) -> Iterator[type]:
@@ -47,52 +68,73 @@ def _concrete_subclasses(module: ModuleType, base: type) -> Iterator[type]:
         yield member
 
 
-def discover_strategies() -> Mapping[str, AdapterClass]:
+def discover_strategies(
+    package: ModuleType = strategies_package,
+) -> tuple[Mapping[str, AdapterClass], tuple[PluginFault, ...]]:
     """Return every deployed strategy keyed by the id its class declares.
 
-    The id lives on the class rather than in a separate table so a file cannot be
-    deployed under a name it does not itself claim.
+    The id must be written on the class itself, not inherited, so a file cannot be
+    deployed under a name it never claimed.
     """
     found: dict[str, AdapterClass] = {}
-    for module in _modules_in(strategies_package):
+    faults: list[PluginFault] = []
+    for name, module in _modules_in(package):
+        if isinstance(module, Exception):
+            faults.append(PluginFault(name, f"{type(module).__name__}: {module}"))
+            continue
         for candidate in _concrete_subclasses(module, StrategyBase):
-            strategy_id = getattr(candidate, "STRATEGY_ID", None)
+            strategy_id = vars(candidate).get("STRATEGY_ID")
             if not isinstance(strategy_id, str) or not strategy_id:
-                raise ValueError(
-                    f"{module.__name__}.{candidate.__name__} must declare a non-empty "
-                    "STRATEGY_ID to be deployed"
+                faults.append(
+                    PluginFault(
+                        name,
+                        f"{candidate.__name__} must declare its own non-empty STRATEGY_ID",
+                    )
                 )
+                continue
             previous = found.get(strategy_id)
             if previous is not None:
-                raise ValueError(
-                    f"strategy id {strategy_id!r} is claimed by both "
-                    f"{previous.__module__}.{previous.__name__} and "
-                    f"{candidate.__module__}.{candidate.__name__}"
+                faults.append(
+                    PluginFault(
+                        name,
+                        f"strategy id {strategy_id!r} is already claimed by "
+                        f"{previous.__module__}.{previous.__name__}",
+                    )
                 )
+                continue
             found[strategy_id] = candidate
-    return found
+    return found, tuple(faults)
 
 
-def discover_money_management() -> Mapping[str, type[MoneyManagementBase]]:
+def discover_money_management(
+    package: ModuleType = money_management_package,
+) -> tuple[Mapping[str, type[MoneyManagementBase]], tuple[PluginFault, ...]]:
     """Return every deployed policy keyed by the mode its class declares."""
     found: dict[str, type[MoneyManagementBase]] = {}
-    for module in _modules_in(money_management_package):
+    faults: list[PluginFault] = []
+    for name, module in _modules_in(package):
+        if isinstance(module, Exception):
+            faults.append(PluginFault(name, f"{type(module).__name__}: {module}"))
+            continue
         for candidate in _concrete_subclasses(module, MoneyManagementBase):
-            mode = getattr(candidate, "id", None)
+            mode = vars(candidate).get("id")
             if not isinstance(mode, str) or not mode:
-                raise ValueError(
-                    f"{module.__name__}.{candidate.__name__} must declare a non-empty "
-                    "id to be deployed"
+                faults.append(
+                    PluginFault(name, f"{candidate.__name__} must declare its own non-empty id")
                 )
+                continue
             previous = found.get(mode)
             if previous is not None:
-                raise ValueError(
-                    f"money-management mode {mode!r} is claimed by both "
-                    f"{previous.__module__}.{previous.__name__} and "
-                    f"{candidate.__module__}.{candidate.__name__}"
+                faults.append(
+                    PluginFault(
+                        name,
+                        f"money-management mode {mode!r} is already claimed by "
+                        f"{previous.__module__}.{previous.__name__}",
+                    )
                 )
+                continue
             found[mode] = candidate
-    return found
+    return found, tuple(faults)
 
 
 def build_strategy_registry() -> InProcessStrategyRegistry:
@@ -106,13 +148,22 @@ def build_strategy_registry() -> InProcessStrategyRegistry:
     from core_lib.strategy import build_strategy_registry as build_builtin_registry
 
     registry = build_builtin_registry()
-    for strategy_id, adaptee_class in discover_strategies().items():
-        registry.register(strategy_id, adaptee_class)
+    found, faults = discover_strategies()
+    for fault in faults:
+        _LOGGER.error("deployed strategy was not loaded: %s (%s)", fault.module, fault.reason)
+    for strategy_id, adaptee_class in found.items():
+        try:
+            registry.register(strategy_id, adaptee_class)
+        except ValueError as error:
+            # A built-in already holds this id. Refusing keeps a shipped strategy
+            # from being replaced without a trace.
+            _LOGGER.error("deployed strategy %s was not registered: %s", strategy_id, error)
     return registry
 
 
 __all__ = [
     "MONEY_MANAGEMENT_PACKAGE",
+    "PluginFault",
     "STRATEGY_PACKAGE",
     "build_strategy_registry",
     "discover_money_management",

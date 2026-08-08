@@ -2,6 +2,7 @@
 # transaction guarantees that backtest-service resolves core-lib from this
 # workspace rather than from a package index.
 -e ./services/core-lib[dev]
+-e ./services/trading-plugins[dev]
 -e ./services/service-commons[dev]
 -e ./services/collector[dev]
 -e ./services/backtest-service[dev]

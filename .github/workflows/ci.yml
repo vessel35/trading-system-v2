@@ -49,6 +49,7 @@ jobs:
           set -euo pipefail
           for service in \
             core-lib \
+            trading-plugins \
             service-commons \
             collector \
             backtest-service \
