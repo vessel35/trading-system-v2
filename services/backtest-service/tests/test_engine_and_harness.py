@@ -17,7 +17,10 @@ from backtest_service.adapters.broker import BacktestBroker
 from backtest_service.adapters.catalog_store import DeterminismReference
 from backtest_service.adapters.clock import BacktestClock
 from backtest_service.adapters.cost_model import BacktestCostModel
-from backtest_service.adapters.evidence_schema import canonical_json
+from backtest_service.adapters.evidence_schema import (
+    EVIDENCE_SCHEMA_VERSION,
+    canonical_json,
+)
 from backtest_service.adapters.evidence_sink import BacktestEvidenceSink
 from backtest_service.config import RunConfig
 from backtest_service.engine import Engine, RunResult
@@ -2558,3 +2561,74 @@ def test_a_declared_policy_input_that_is_missing_is_refused_by_name(tmp_path: Pa
         engine._money_management_volatility(  # noqa: SLF001
             _candles()[-1], _EmaVolatilityPolicy()
         )
+
+
+# Pinned alongside EVIDENCE_SCHEMA_VERSION. Hashed Evidence content and the
+# version that names it must move together, so this fixture hash is the tripwire.
+_EVIDENCE_GOLDEN_HASH_LEGACY = "8e27b6e3c54acf76243a47ec429ee50a14878f1fe02982c714b65ecd764bded0"
+_EVIDENCE_GOLDEN_HASH_MANAGED = "967207d158ab562e1698467b08d2bc49f1e0b8041f3d70c83e02db76abafa694"
+_EVIDENCE_GOLDEN_HASH_HOLD = "c72de5733f10a67d39e6d218e18bd59cddb2db5e6ba9aaf048968dba39fb4bd5"
+
+
+def test_hashed_evidence_content_is_pinned_to_its_schema_version(tmp_path: Path) -> None:
+    """Fail when hashed Evidence changes, so the version cannot silently lag it.
+
+    Runs recorded under one ``evidence_schema_version`` are compared against each
+    other for determinism. If two commits under the same version write different
+    hashed content, a rerun of an older run reports a mismatch that looks like
+    nondeterminism but is really a contract change. Changing either hash below
+    therefore requires bumping ``EVIDENCE_SCHEMA_VERSION`` in the same change.
+
+    Two fixtures are pinned because one run does not touch everything hashed. The
+    legacy-signal run never builds a money-management plan, the managed run does
+    not decline a bar, and neither covers what the other writes.
+    """
+    legacy = _engine(tmp_path, _Catalog(), []).run(_config())
+
+    managed_config = RunConfig.model_validate(
+        {
+            **_vessel_config(run_name="vessel-turtle-pin").model_dump(),
+            "money_management": {
+                "mode": "turtle",
+                "n_period": 20,
+                "n_timeframe": "1d",
+                "stop_n_multiple": 2.0,
+                "leverage_cap": 10,
+            },
+        }
+    )
+    candles = _vessel_candles()
+    costs = BacktestCostModel(managed_config.cost_values)
+    managed = Engine(
+        _VesselTurtleFeed(candles, _turtle_daily_candles()),
+        BacktestBroker(costs),
+        BacktestClock.from_candles(candles),
+        costs,
+        BacktestEvidenceSink(tmp_path),
+        _Catalog(),
+        _vessel_manager(),
+        prereg=_prereg(),
+    ).run(managed_config)
+
+    hold_plugins = InProcessStrategyRegistry()
+    hold_plugins.register("hold-fixture", _HoldStrategy)
+    held = Engine(
+        _Feed(_candles()),
+        _Broker(BacktestCostModel(_config().cost_values)),
+        BacktestClock.from_candles(_candles()),
+        BacktestCostModel(_config().cost_values),
+        BacktestEvidenceSink(tmp_path),
+        _Catalog(),
+        AdapterManager(_HoldStrategyCatalog(), hold_plugins),
+        prereg=_prereg(),
+    ).run(_config().model_copy(update={"strategy_id": "hold-fixture", "run_name": "hold-pin"}))
+
+    hint = (
+        "hashed Evidence content changed; bump EVIDENCE_SCHEMA_VERSION "
+        f"(now {EVIDENCE_SCHEMA_VERSION}) and update these pins together"
+    )
+    assert (legacy.evidence_hash, managed.evidence_hash, held.evidence_hash) == (
+        _EVIDENCE_GOLDEN_HASH_LEGACY,
+        _EVIDENCE_GOLDEN_HASH_MANAGED,
+        _EVIDENCE_GOLDEN_HASH_HOLD,
+    ), hint
