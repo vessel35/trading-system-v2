@@ -354,11 +354,13 @@ class DecisionIntent:
 성적 뒤에 있는 이유이며, `None`은 그것을 담을 자리가 없다. `DecisionIntent`가
 빈 `reason`을 거부하는 것도 같은 이유다.
 
-**이 구분은 아직 밖에서 보이지 않는다.** Engine은 지금 `None`과 `HOLD`를 같은
-자리에서 버리고 Evidence에 아무것도 남기지 않는다. `HOLD`가 기록되도록 Engine을
-고치는 것은 남은 일이며, 그때까지 `HOLD`를 반환한 전략의 동작은 `None`과 같다.
-**규범을 먼저 지켜도 손해가 없고, 기록이 들어오는 시점에 전략을 고칠 필요가
-없다.**
+**이 구분은 Evidence에 그대로 남는다.** `HOLD`를 받으면 Engine이 `DECISION`에
+행 하나를 `action='skip'`으로 쓰고 `skip_reason`에 전략이 담은 `reason`을
+남긴다. 앞선 신호가 없으므로 그 행에는 `signal_id`가 없다. **`None`은 아무것도
+남기지 않으며, 그것이 두 값을 가르는 실제 차이다.**
+
+거래가 만들어지지 않으므로 손익과 지표 값은 달라지지 않는다. **미실행 봉의
+사유를 세어 무엇이 진입을 가장 많이 걸렀는지 보는 것이 이 기록의 쓰임이다.**
 
 신규 전략은 `DecisionIntent`에 `quantity`, `stop_loss`, `take_profit`,
 `leverage` 또는 계좌 상태를 넣지 않는다. 목표 방식이 구현되기 전까지 기존

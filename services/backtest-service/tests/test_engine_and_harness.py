@@ -39,6 +39,8 @@ from core_lib.strategy.adaptees import STRATEGY_ID as VESSEL_STRATEGY_ID
 from core_lib.strategy.adaptees import VesselReference
 from core_lib.types import (
     Candle,
+    DecisionAction,
+    DecisionIntent,
     Fill,
     MarketType,
     OrderRequest,
@@ -2252,3 +2254,94 @@ def test_engine_accepts_a_standard_undefined_indicator_output_and_records_null()
     recordable = Engine._recordable_indicator_value({"middle": 100.0, "percent_b": float("nan")})
     assert recordable == {"middle": 100.0, "percent_b": None}
     assert canonical_json(recordable) == '{"middle":100,"percent_b":null}'
+
+
+class _HoldStrategy:
+    """Say why on even bars, stay silent on odd ones.
+
+    The two answers are what the norm distinguishes: ``HOLD`` means the strategy
+    evaluated and declined, ``None`` means it had nothing to say. Alternating
+    them in one run shows that only the first leaves a trace.
+    """
+
+    VERSION: ClassVar[str] = "1.0.0"
+
+    def __init__(self, config: ResolvedConfig) -> None:
+        self.config = config
+
+    @classmethod
+    def get_metadata(cls) -> StrategyMetadata:
+        return _Strategy.get_metadata()
+
+    @classmethod
+    def get_parameter_schema(cls) -> ParameterSchema:
+        return ParameterSchema(fields={})
+
+    def analyze(
+        self,
+        market_data: dict[str, object],
+        current_position: Position | None,
+    ) -> DecisionIntent | None:
+        del current_position
+        candle = market_data["candle"]
+        assert isinstance(candle, Candle)
+        if candle.open_time.hour % 2:
+            return None
+        return DecisionIntent(
+            action=DecisionAction.HOLD,
+            symbol=candle.symbol,
+            timestamp=candle.close_time,
+            reference_price=float(candle.close),
+            confidence=0.8,
+            reason=f"no-setup-{candle.open_time.hour}",
+            metadata={"fixture": True},
+        )
+
+
+class _HoldStrategyCatalog(StrategyRegistry):
+    def get(self, strategy_id: str) -> dict[str, object]:
+        assert strategy_id == "hold-fixture"
+        return {
+            "strategy_id": strategy_id,
+            "class_name": _HoldStrategy.__name__,
+            "module_path": _HoldStrategy.__module__,
+            "is_active": True,
+            "is_deprecated": False,
+        }
+
+    def list(self) -> list[dict[str, object]]:
+        return [self.get("hold-fixture")]
+
+    def register(self, strategy_id: str, meta: dict[str, object]) -> None:
+        del strategy_id, meta
+        raise PermissionError("read-only fixture")
+
+
+def test_hold_leaves_its_reason_in_evidence_and_none_leaves_nothing(tmp_path: Path) -> None:
+    candles = _candles()
+    costs = BacktestCostModel(_config().cost_values)
+    plugins = InProcessStrategyRegistry()
+    plugins.register("hold-fixture", _HoldStrategy)
+    result = Engine(
+        _Feed(candles),
+        _Broker(costs),
+        BacktestClock.from_candles(candles),
+        costs,
+        BacktestEvidenceSink(tmp_path),
+        _Catalog(),
+        AdapterManager(_HoldStrategyCatalog(), plugins),
+        prereg=_prereg(),
+    ).run(_config().model_copy(update={"strategy_id": "hold-fixture"}))
+
+    assert result.integrity_status == "passed"
+    evaluated = [candle for candle in candles if _BASE <= candle.open_time]
+    expected = sorted(
+        f"no-setup-{candle.open_time.hour}" for candle in evaluated if not candle.open_time.hour % 2
+    )
+    with sqlite3.connect(result.evidence_path) as connection:
+        rows = connection.execute(
+            "SELECT skip_reason, signal_id FROM DECISION WHERE action = 'skip' ORDER BY decision_id"
+        ).fetchall()
+
+    assert sorted(reason for reason, _ in rows) == expected
+    assert all(signal_id is None for _, signal_id in rows)

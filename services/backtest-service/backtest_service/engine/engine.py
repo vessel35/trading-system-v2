@@ -587,6 +587,7 @@ class Engine:
         if isinstance(signal, DecisionIntent):
             decision = signal
             if decision.action is DecisionAction.HOLD:
+                self._record_hold_decision(candle, decision)
                 return
             if decision.timestamp > candle.close_time:
                 raise ValueError("strategy decision cannot be later than the confirmed candle")
@@ -2341,7 +2342,7 @@ class Engine:
     def _record_skip_decision(
         self,
         decision_id: int,
-        signal_id: int,
+        signal_id: int | None,
         candle: Candle,
         reason: str,
     ) -> None:
@@ -2357,6 +2358,22 @@ class Engine:
                     "framework_compliant": self._config().sizing_method == "risk_based",
                 },
             )
+        )
+
+    def _record_hold_decision(self, candle: Candle, decision: DecisionIntent) -> None:
+        """Record why the strategy looked at this bar and chose to do nothing.
+
+        A strategy that evaluated and declined carries a reason; ``None`` carries
+        nothing. Keeping the reason is what makes the two answers different from
+        outside, and it is the material the analysis stage reads to say which
+        condition held entries back. No SIGNAL precedes it, so the row has no
+        ``signal_id``.
+        """
+        self._record_skip_decision(
+            self._next("decision"),
+            None,
+            candle,
+            decision.reason,
         )
 
     def _record_blocked_candidate(
