@@ -1,7 +1,8 @@
 """Verify fake-Adaptee registration, creation sequence, and lifecycle."""
 
 from collections.abc import Mapping
-from typing import ClassVar
+from dataclasses import dataclass
+from typing import Any, ClassVar, cast
 
 import pytest
 from core_lib.ports import StrategyRegistry
@@ -335,3 +336,68 @@ def test_catalog_reconciliation_returns_five_distinct_states() -> None:
         class_name=FakeAdaptee.__name__,
         module_path=FakeAdaptee.__module__,
     )
+
+
+@dataclass(frozen=True, slots=True)
+class UndeclaredExitPolicy:
+    """A policy that satisfies the protocol's shape but not its exit declaration.
+
+    The protocol is structural, so a class that never mentions
+    ``requires_signal_exit`` still looked like a policy. It plans no take-profit,
+    which is exactly the case the declaration exists to catch.
+    """
+
+    id: ClassVar[str] = "undeclared"
+    version: ClassVar[str] = "1.0.0"
+
+    def required_indicators(self) -> tuple[object, ...]:
+        return ()
+
+    def resolved_config(self) -> Mapping[str, object]:
+        return {"mode": self.id}
+
+    def plan_entry(self, *args: object, **kwargs: object) -> object:
+        raise NotImplementedError
+
+
+class UndeclaredSupportAdaptee(FakeAdaptee):
+    """A strategy that cannot close a position on its own signal."""
+
+    @classmethod
+    def get_metadata(cls) -> StrategyMetadata:
+        metadata = super().get_metadata()
+        metadata.money_management = MoneyManagementSupport(
+            supported=("undeclared",),
+            default="undeclared",
+            supports_external_stop=True,
+            supports_external_take_profit=True,
+            supports_signal_exit=False,
+        )
+        return metadata
+
+
+def test_a_policy_that_does_not_declare_its_exit_need_is_refused() -> None:
+    """Reading a missing declaration as false opened trades nothing could close."""
+    events: list[str] = []
+    plugins = InProcessStrategyRegistry()
+    plugins.register("money-breakout", UndeclaredSupportAdaptee)
+    catalog = FakeCatalog(events)
+    catalog.rows["money-breakout"] = {
+        "strategy_id": "money-breakout",
+        "class_name": UndeclaredSupportAdaptee.__name__,
+        "module_path": UndeclaredSupportAdaptee.__module__,
+        "is_active": True,
+        "is_deprecated": False,
+    }
+    manager = AdapterManager(
+        catalog,
+        plugins,
+        money_management_policies={"undeclared": cast("Any", UndeclaredExitPolicy)},
+    )
+
+    with pytest.raises(ValueError, match="does not declare requires_signal_exit"):
+        manager.create_runtime(
+            "money-breakout",
+            {"strategy_id": "money-breakout", "params": {"fast": 10}},
+            {"mode": "undeclared"},
+        )

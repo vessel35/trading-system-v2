@@ -1,10 +1,26 @@
 """Verify RunConfig owns run settings but not strategy parameter semantics."""
 
+import subprocess
+import sys
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal
+from pathlib import Path
+from typing import ClassVar
 
 import pytest
 from backtest_service.config import RunConfig
+from backtest_service.config.run_config import _deployed_money_management_models
+from core_lib.money_management import (
+    AccountRiskSnapshot,
+    MarketSnapshot,
+    MoneyManagementBase,
+    MoneyManagementPlan,
+    PolicyIndicatorRequirement,
+    RiskLimits,
+)
+from core_lib.types import DecisionIntent
 from pydantic import ValidationError
 
 
@@ -160,3 +176,114 @@ def test_turtle_policy_is_discriminated_and_requires_global_risk_sizing() -> Non
                 "money_management": {"mode": "manual", "api_key": "forbidden"},
             }
         )
+
+
+@dataclass(frozen=True, slots=True)
+class _FactoryDefaultPolicy(MoneyManagementBase):
+    """A policy whose only setting carries a factory default."""
+
+    tags: tuple[str, ...] = field(default_factory=tuple)
+
+    id: ClassVar[str] = "factory-default"
+    version: ClassVar[str] = "1.0.0"
+
+    def required_indicators(self) -> tuple[PolicyIndicatorRequirement, ...]:
+        return ()
+
+    def resolved_config(self) -> Mapping[str, object]:
+        return {"mode": self.id}
+
+    def plan_entry(
+        self,
+        decision: DecisionIntent,
+        market: MarketSnapshot,
+        account: AccountRiskSnapshot,
+        global_limits: RiskLimits,
+    ) -> MoneyManagementPlan:
+        raise NotImplementedError
+
+
+class _Unexpressible:
+    """A type Pydantic cannot build a schema for."""
+
+
+@dataclass(frozen=True, slots=True)
+class _UnexpressiblePolicy(MoneyManagementBase):
+    """A policy whose setting has no schema, so it cannot be configured."""
+
+    flavor: _Unexpressible = field(default_factory=_Unexpressible)
+
+    id: ClassVar[str] = "unexpressible"
+    version: ClassVar[str] = "1.0.0"
+
+    def required_indicators(self) -> tuple[PolicyIndicatorRequirement, ...]:
+        return ()
+
+    def resolved_config(self) -> Mapping[str, object]:
+        return {"mode": self.id}
+
+    def plan_entry(
+        self,
+        decision: DecisionIntent,
+        market: MarketSnapshot,
+        account: AccountRiskSnapshot,
+        global_limits: RiskLimits,
+    ) -> MoneyManagementPlan:
+        raise NotImplementedError
+
+
+def test_a_factory_default_stays_optional_in_the_generated_model() -> None:
+    """Reading only ``field.default`` turned a factory default into a required field."""
+    (model,) = _deployed_money_management_models({"factory-default": _FactoryDefaultPolicy})
+
+    value = model.model_validate({"mode": "factory-default"})
+
+    assert value.model_dump() == {"mode": "factory-default", "tags": ()}
+
+
+def test_a_policy_with_no_expressible_schema_is_skipped_not_raised() -> None:
+    """One bad deployment must not fail this module's import for every run."""
+    models = _deployed_money_management_models(
+        {"unexpressible": _UnexpressiblePolicy, "factory-default": _FactoryDefaultPolicy}
+    )
+
+    assert [model.model_fields["mode"].default for model in models] == ["factory-default"]
+
+
+def test_the_checked_union_is_no_narrower_than_the_one_built_at_import(
+    tmp_path: Path,
+) -> None:
+    """A type checker must not approve an attribute a deployed policy lacks.
+
+    The union is assembled at import time from what is deployed, so a checker
+    cannot see it. While it named only the two built-in models, it narrowed
+    ``mode != "manual"`` to Turtle and approved ``n_period``, which a deployed
+    policy does not carry. This is checked by running the checker, because the
+    defect exists only in its view and leaves no trace at run time.
+    """
+    service = Path(__file__).resolve().parents[1]
+    probe = tmp_path / "probe_narrowing.py"
+    probe.write_text(
+        "from backtest_service.config import RunConfig\n\n\n"
+        "def read(config: RunConfig) -> int:\n"
+        '    if config.money_management.mode == "manual":\n'
+        "        return 0\n"
+        "    return config.money_management.n_period\n"
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "mypy",
+            "--config-file",
+            str(service / "pyproject.toml"),
+            str(probe),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=service,
+        check=False,
+    )
+
+    assert "has no attribute" in result.stdout, result.stdout

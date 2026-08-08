@@ -6,9 +6,11 @@ from decimal import Decimal
 from typing import Any, Literal, cast
 
 from core_lib.eval import thresholds
+from core_lib.money_management import ManualMoneyManagement, MoneyManagementFactory
 from core_lib.strategy import StrategyConfig
 from core_lib.strategy.adaptees import STRATEGY_ID, VesselReference
 from pydantic import BaseModel
+from trading_plugins import registered_money_management
 
 from web_api.database import CatalogConnection, CryptoConnection, SignalConnection, get_settings
 from web_api.models import (
@@ -84,6 +86,7 @@ RUN_SUMMARY_COLUMNS = """
 
 DeletedFilter = Literal["exclude", "only", "include"]
 
+
 DELETED_FILTER_SQL: dict[DeletedFilter, str | None] = {
     "exclude": "r.deleted_at IS NULL",
     "only": "r.deleted_at IS NOT NULL",
@@ -143,6 +146,23 @@ def _decimal_strings(row: dict[str, Any]) -> dict[str, Any]:
         if isinstance(value, Decimal):
             clean[column] = format(value, "f")
     return clean
+
+
+def _default_money_management(mode: str | None) -> dict[str, object]:
+    """Return the named policy's own defaults, for the run form to start from.
+
+    The values used to be a fixed manual-shaped dictionary, which was wrong for
+    Turtle and meaningless for a policy deployed as a file, since nothing here
+    knows what settings such a policy has. Asking the policy keeps this correct
+    for every mode. A mode that cannot be built with defaults alone still yields
+    its name, which is enough for the client to select it and fill the rest in.
+    """
+    selected = mode or ManualMoneyManagement.id
+    try:
+        policy = MoneyManagementFactory.create({"mode": selected}, registered_money_management())
+    except (TypeError, ValueError):
+        return {"mode": selected}
+    return dict(policy.resolved_config())
 
 
 def _summary_status(run_status: str, summary_present: bool) -> SummaryStatus:
@@ -540,23 +560,9 @@ class StrategyRepository:
                 metadata.min_history if metadata is not None else int(cast(int, row["min_history"]))
             ),
             default_params=dict(cast(dict[str, object], row["default_params_json"])),
-            supported_money_management=(
-                []
-                if support is None
-                else cast(
-                    list[Literal["manual", "turtle"]],
-                    list(support.supported),
-                )
-            ),
+            supported_money_management=([] if support is None else list(support.supported)),
             default_money_management=(
-                {}
-                if support is None
-                else {
-                    "mode": support.default or "manual",
-                    "leverage": 1,
-                    "reward_risk": 2.0,
-                    "atr_stop_multiple": 2.0,
-                }
+                {} if support is None else _default_money_management(support.default)
             ),
             is_active=bool(row["is_active"]),
             is_deprecated=bool(row["is_deprecated"]),
@@ -580,18 +586,10 @@ class StrategyRepository:
                     required_indicators=metadata.required_indicators,
                     min_history=metadata.min_history,
                     default_params=dict(resolved.params),
-                    supported_money_management=list(
-                        cast(
-                            tuple[Literal["manual", "turtle"], ...],
-                            metadata.money_management.supported,
-                        )
+                    supported_money_management=list(metadata.money_management.supported),
+                    default_money_management=_default_money_management(
+                        metadata.money_management.default
                     ),
-                    default_money_management={
-                        "mode": metadata.money_management.default or "manual",
-                        "leverage": 1,
-                        "reward_risk": 2.0,
-                        "atr_stop_multiple": 2.0,
-                    },
                     is_active=True,
                     is_deprecated=False,
                     source="code_registry",

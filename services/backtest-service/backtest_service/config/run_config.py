@@ -2,21 +2,23 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Mapping
 from dataclasses import MISSING as DATACLASS_MISSING
 from dataclasses import fields as dataclass_fields
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING, Annotated, Any, Final, Literal, Union, cast
+from typing import TYPE_CHECKING, Annotated, Any, Final, Literal, Union, cast, get_type_hints
 
-from core_lib.money_management import policy_settings
+from core_lib.money_management import MoneyManagementBase, policy_settings
 from core_lib.types import MarketType
 from pydantic import BaseModel, ConfigDict, Field, create_model, field_validator, model_validator
 from trading_plugins import registered_money_management
 
 from backtest_service.adapters.cost_model import BacktestCostModel
 
+_LOGGER = logging.getLogger(__name__)
 _RUN_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _STRATEGY_ID_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _TIMEFRAME_PATTERN = re.compile(r"^[1-9]\d*[mhd]$")
@@ -45,35 +47,73 @@ class TurtleMoneyManagementConfig(BaseModel):
     leverage_cap: int = Field(default=10, ge=1, le=100)
 
 
-def _deployed_money_management_models() -> tuple[type[BaseModel], ...]:
-    """Build one config model per deployed policy, from the policy's own fields.
+def _config_model_for(mode: str, policy_class: type[MoneyManagementBase]) -> type[BaseModel]:
+    """Build one config model from a deployed policy's own dataclass fields.
+
+    Only names, defaults, and types come from the dataclass. Range checks stay in
+    the policy's ``__post_init__`` so one place owns what a value may be.
+
+    The annotations are resolved through ``get_type_hints`` rather than read off
+    ``field.type``. A plugin written with ``from __future__ import annotations``
+    stores its types as strings, and handing a string to Pydantic leaves the model
+    unfinished until something asks for its schema, which is far from the file
+    that caused it.
+    """
+    settings = policy_settings(policy_class)
+    hints = get_type_hints(policy_class)
+    definitions: dict[str, Any] = {"mode": (Literal[mode], mode)}
+    for field in dataclass_fields(cast("Any", policy_class)):
+        if field.name not in settings:
+            continue
+        annotation = hints[field.name]
+        if field.default is not DATACLASS_MISSING:
+            definitions[field.name] = (annotation, field.default)
+        elif field.default_factory is not DATACLASS_MISSING:
+            # A factory default is still a default. Reading only ``field.default``
+            # turned these into required fields, so a configuration the policy
+            # factory accepts was refused by the run config and the API schema.
+            definitions[field.name] = (annotation, Field(default_factory=field.default_factory))
+        else:
+            definitions[field.name] = (annotation, ...)
+    model: type[BaseModel] = create_model(
+        f"{policy_class.__name__}Config",
+        __config__=ConfigDict(extra="forbid"),
+        **definitions,
+    )
+    # Ask for the schema here. Pydantic defers that work, so a type it cannot
+    # express would otherwise surface as an unfinished RunConfig much later, and
+    # take manual validation and OpenAPI generation down with it.
+    model.model_json_schema()
+    return model
+
+
+def _deployed_money_management_models(
+    policies: Mapping[str, type[MoneyManagementBase]] | None = None,
+) -> tuple[type[BaseModel], ...]:
+    """Build a config model per deployed policy, skipping any that cannot form one.
 
     The two built-in models above are written by hand and stay that way, so the
     schema and error messages a client already sees do not move. A deployed policy
     gets a generated model instead of an edit here, which is what lets a new policy
     be configurable without touching this file.
 
-    Only names, defaults, and types come from the dataclass. Range checks stay in
-    the policy's ``__post_init__`` so one place owns what a value may be.
+    One policy is isolated from the rest. Letting a single bad deployment raise
+    here would fail the import of this module, and with it manual validation and
+    the OpenAPI document, for every run in the system.
     """
+    registered = registered_money_management() if policies is None else policies
     generated: list[type[BaseModel]] = []
-    for mode, policy_class in sorted(registered_money_management().items()):
+    for mode, policy_class in sorted(registered.items()):
         if mode in {"manual", "turtle"}:
             continue
-        settings = policy_settings(policy_class)
-        definitions: dict[str, Any] = {"mode": (Literal[mode], mode)}
-        for field in dataclass_fields(cast("Any", policy_class)):
-            if field.name not in settings:
-                continue
-            has_default = field.default is not DATACLASS_MISSING
-            definitions[field.name] = (field.type, field.default if has_default else ...)
-        generated.append(
-            create_model(
-                f"{policy_class.__name__}Config",
-                __config__=ConfigDict(extra="forbid"),
-                **definitions,
+        try:
+            generated.append(_config_model_for(mode, policy_class))
+        except Exception:  # noqa: BLE001 - one bad policy must not break the rest
+            _LOGGER.exception(
+                "money-management mode %s cannot be selected in a run: its settings "
+                "do not form a configuration schema",
+                mode,
             )
-        )
     return tuple(generated)
 
 
@@ -84,11 +124,21 @@ _MONEY_MANAGEMENT_MODELS: Final = (
 )
 
 if TYPE_CHECKING:
-    # A type checker cannot see a union assembled at import time. It reads the two
-    # built-in shapes, which is what the rest of the service is written against;
-    # the runtime alias below is the one that also accepts deployed policies.
+
+    class DeployedMoneyManagementConfig(BaseModel):
+        """The shape a checker sees for any policy deployed as a file.
+
+        The real union is assembled at import time from what is deployed, and a
+        checker cannot see it. Naming only the two built-in shapes made the
+        checker's view narrower than run time: it read ``mode != "manual"`` as
+        Turtle and approved an attribute a deployed policy does not have. This
+        third arm carries only the discriminator, so such an access is refused.
+        """
+
+        mode: str
+
     MoneyManagementConfig = Annotated[
-        ManualMoneyManagementConfig | TurtleMoneyManagementConfig,
+        ManualMoneyManagementConfig | TurtleMoneyManagementConfig | DeployedMoneyManagementConfig,
         Field(discriminator="mode"),
     ]
 else:

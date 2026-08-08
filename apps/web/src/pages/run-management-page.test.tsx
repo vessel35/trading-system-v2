@@ -19,7 +19,21 @@ vi.mock("../components/sweep-results", () => ({
   ),
 }));
 
-function managementHandlers(supportedTimeframes = ["1h"]) {
+function managementHandlers(
+  supportedTimeframes = ["1h"],
+  moneyManagement: {
+    supported: string[];
+    default: Record<string, unknown>;
+  } = {
+    supported: ["manual", "turtle"],
+    default: {
+      mode: "manual",
+      leverage: 1,
+      reward_risk: 2,
+      atr_stop_multiple: 1.5,
+    },
+  },
+) {
   return [
     http.get("http://localhost/api/v1/strategies", () =>
       HttpResponse.json({
@@ -35,13 +49,8 @@ function managementHandlers(supportedTimeframes = ["1h"]) {
               reward_risk: 2,
               atr_stop_multiple: 1.5,
             },
-            supported_money_management: ["manual", "turtle"],
-            default_money_management: {
-              mode: "manual",
-              leverage: 1,
-              reward_risk: 2,
-              atr_stop_multiple: 1.5,
-            },
+            supported_money_management: moneyManagement.supported,
+            default_money_management: moneyManagement.default,
             is_active: true,
             is_deprecated: false,
             source: "strategy_registry",
@@ -400,6 +409,50 @@ describe("실행 관리 보강", () => {
           stop_n_multiple: 2,
           leverage_cap: 10,
         },
+      },
+    });
+  });
+
+  it("파일로 배포된 정책을 고르고 그 정책의 설정 그대로 제출한다", async () => {
+    const user = userEvent.setup();
+    let submitted: unknown;
+    server.use(
+      ...managementHandlers(["1h"], {
+        supported: ["manual", "atr-only"],
+        default: { mode: "atr-only", atr_stop_multiple: 3 },
+      }),
+      http.post("http://localhost/api/v1/runs", async ({ request }) => {
+        submitted = await request.json();
+        return HttpResponse.json({
+          job_id: "job-deployed-policy",
+          status: "QUEUED",
+          events_url: "/api/v1/runs/jobs/job-deployed-policy/events",
+          status_url: "/api/v1/runs/jobs/job-deployed-policy",
+        });
+      }),
+    );
+    renderWithQuery(
+      <RunJobsProvider>
+        <RunManagementPage />
+      </RunJobsProvider>,
+    );
+
+    const mode = await screen.findByLabelText("자금 관리 방법");
+    expect(
+      within(mode).getByRole("option", { name: "atr-only" }),
+    ).toBeInTheDocument();
+    await user.selectOptions(mode, "atr-only");
+    await waitFor(() =>
+      expect(screen.getByLabelText("배포 정책 설정")).toHaveValue(
+        JSON.stringify({ atr_stop_multiple: 3 }, null, 2),
+      ),
+    );
+
+    await user.click(screen.getByRole("button", { name: "백테스트 실행" }));
+    await waitFor(() => expect(submitted).toBeDefined());
+    expect(submitted).toMatchObject({
+      config: {
+        money_management: { mode: "atr-only", atr_stop_multiple: 3 },
       },
     });
   });

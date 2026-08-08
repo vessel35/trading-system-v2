@@ -30,12 +30,21 @@ _LOGGER = logging.getLogger(__name__)
 """The only two places a deployed file is looked for. Both are fixed in code."""
 
 
-def _modules_in(package: ModuleType) -> Iterator[tuple[str, ModuleType | Exception]]:
+def _modules_in(package: ModuleType) -> Iterator[tuple[str, ModuleType | BaseException]]:
     """Import each module, handing back the failure instead of raising it.
 
     One unloadable file must not take the others down with it. A strategy the
     database still points at simply will not be found, and the manager refuses it
     by name at creation, which says far more than a failed process start.
+
+    ``SystemExit`` is caught alongside ordinary errors because a deployed file
+    that calls ``sys.exit`` at import time would otherwise end the process that
+    imported it, which is exactly the blast radius this isolation exists to stop.
+    ``KeyboardInterrupt`` is left to propagate so the operator keeps control.
+
+    A file that hangs at import time is not covered. Import runs on this thread
+    and cannot be interrupted from outside it, so a deployment that blocks at the
+    top level blocks the service that loads it.
     """
     for info in pkgutil.iter_modules(package.__path__):
         if info.name.startswith("_"):
@@ -43,7 +52,7 @@ def _modules_in(package: ModuleType) -> Iterator[tuple[str, ModuleType | Excepti
         name = f"{package.__name__}.{info.name}"
         try:
             yield name, importlib.import_module(name)
-        except Exception as error:  # noqa: BLE001 - the fault is the return value
+        except (Exception, SystemExit) as error:  # noqa: BLE001 - the fault is the return value
             yield name, error
 
 
@@ -79,7 +88,7 @@ def discover_strategies(
     found: dict[str, AdapterClass] = {}
     faults: list[PluginFault] = []
     for name, module in _modules_in(package):
-        if isinstance(module, Exception):
+        if isinstance(module, BaseException):
             faults.append(PluginFault(name, f"{type(module).__name__}: {module}"))
             continue
         for candidate in _concrete_subclasses(module, StrategyBase):
@@ -113,7 +122,7 @@ def discover_money_management(
     found: dict[str, type[MoneyManagementBase]] = {}
     faults: list[PluginFault] = []
     for name, module in _modules_in(package):
-        if isinstance(module, Exception):
+        if isinstance(module, BaseException):
             faults.append(PluginFault(name, f"{type(module).__name__}: {module}"))
             continue
         for candidate in _concrete_subclasses(module, MoneyManagementBase):
@@ -139,6 +148,14 @@ def discover_money_management(
                 policy_settings(candidate)
             except TypeError as error:
                 faults.append(PluginFault(name, str(error)))
+                continue
+            if not isinstance(getattr(candidate, "requires_signal_exit", None), bool):
+                faults.append(
+                    PluginFault(
+                        name,
+                        f"{candidate.__name__} must declare requires_signal_exit",
+                    )
+                )
                 continue
             found[mode] = candidate
     return found, tuple(faults)

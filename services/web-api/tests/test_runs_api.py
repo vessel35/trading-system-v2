@@ -12,10 +12,12 @@ from typing import Any, cast
 import pytest
 import web_api.jobs as jobs
 from backtest_service.config import RunConfig
+from core_lib.money_management import MoneyManagementFactory
 from fastapi.testclient import TestClient
 from web_api.database import SignalConnection
 from web_api.main import app
-from web_api.repository import StrategyRepository
+from web_api.models import StrategyOption
+from web_api.repository import StrategyRepository, _default_money_management
 
 
 @pytest.fixture
@@ -341,3 +343,28 @@ def test_strategy_repository_falls_back_to_code_registry() -> None:
     assert strategy.supported_money_management == ["manual", "turtle"]
     assert strategy.default_money_management["mode"] == "manual"
     assert strategy.source == "code_registry"
+
+
+def test_the_strategy_list_does_not_restrict_the_money_management_modes() -> None:
+    """A policy is deployed as a file, so two names cannot be baked into the schema.
+
+    While the field was a closed pair of literals, a deployed policy could never
+    reach the client: the response model dropped it and the generated client type
+    had no name for it.
+    """
+    field = StrategyOption.model_json_schema()["properties"]["supported_money_management"]
+
+    assert "enum" not in field["items"]
+
+
+def test_a_mode_default_comes_from_the_policy_rather_than_a_manual_shaped_dict() -> None:
+    """The prefilled settings used to be manual's fields regardless of the mode."""
+    connection = cast(SignalConnection, _MissingTableConnection())
+    strategy = StrategyRepository(connection).list().data[0]
+
+    assert strategy.default_money_management == dict(
+        MoneyManagementFactory.create({"mode": "manual"}).resolved_config()
+    )
+    assert _default_money_management("turtle") == dict(
+        MoneyManagementFactory.create({"mode": "turtle"}).resolved_config()
+    )

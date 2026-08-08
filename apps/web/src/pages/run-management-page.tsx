@@ -60,9 +60,11 @@ type PrimaryMetric = NonNullable<PreregistrationInput["primary_metric"]>;
 type SizingMethod = NonNullable<RunConfigInput["sizing_method"]>;
 type IndicatorMode = NonNullable<RunConfigInput["indicator_mode"]>;
 type MarketType = RunConfigInput["market_type"];
-type MoneyManagementMode = NonNullable<
-  RunConfigInput["money_management"]
->["mode"];
+// Not the generated union. A money-management policy is deployed as a file, so
+// the modes a backend accepts are whatever it has registered; the generated
+// schema only records the ones that were deployed when it was generated. The
+// selectable list comes from the strategy's supported_money_management instead.
+type MoneyManagementMode = string;
 type SweepType = SweepSubmission["type"];
 
 interface FormState {
@@ -75,6 +77,8 @@ interface FormState {
   turtleNPeriod: string;
   turtleStopNMultiple: string;
   turtleLeverageCap: string;
+  // Settings for a mode this page has no hand-written form for, edited as JSON.
+  deployedMoneyManagement: string;
   symbol: string;
   exchange: string;
   timeframe: string;
@@ -113,6 +117,7 @@ const initialForm: FormState = {
   turtleNPeriod: "20",
   turtleStopNMultiple: "2",
   turtleLeverageCap: "10",
+  deployedMoneyManagement: "{}",
   symbol: "BTC/USDT:USDT",
   exchange: "binance",
   timeframe: "1h",
@@ -297,6 +302,27 @@ function alignedDefaultSplit(
   return ((boundary - start) / (end - start)).toString();
 }
 
+function isBuiltInMoneyManagement(mode: MoneyManagementMode): boolean {
+  return mode === "manual" || mode === "turtle";
+}
+
+function settingsJson(source: Record<string, unknown>): string {
+  // The mode itself is chosen by the select above, so it is not part of what the
+  // operator edits; leaving it in would let the two disagree.
+  const rest = Object.fromEntries(
+    Object.entries(source).filter(([key]) => key !== "mode"),
+  );
+  return JSON.stringify(rest, null, 2);
+}
+
+function moneyManagementLabel(mode: MoneyManagementMode): string {
+  // The two built-in policies have names an operator recognizes. A deployed
+  // policy is shown by its registered mode, which is the only name it has here.
+  if (mode === "manual") return "직접 설정";
+  if (mode === "turtle") return "Turtle 자동 관리";
+  return mode;
+}
+
 function optionalNumber(value: string): number | undefined {
   if (!value.trim()) return undefined;
   const parsed = Number(value);
@@ -304,22 +330,39 @@ function optionalNumber(value: string): number | undefined {
   return parsed;
 }
 
+function buildMoneyManagement(
+  form: FormState,
+): NonNullable<RunConfigInput["money_management"]> {
+  if (form.moneyManagementMode === "manual") {
+    return {
+      mode: "manual",
+      leverage: Number(form.manualLeverage),
+      reward_risk: Number(form.manualRewardRisk),
+      atr_stop_multiple: Number(form.manualAtrStopMultiple),
+    };
+  }
+  if (form.moneyManagementMode === "turtle") {
+    return {
+      mode: "turtle",
+      n_period: Number(form.turtleNPeriod),
+      n_timeframe: "1d",
+      stop_n_multiple: Number(form.turtleStopNMultiple),
+      leverage_cap: Number(form.turtleLeverageCap),
+    };
+  }
+  // A deployed policy has settings this page cannot know the names of, so they
+  // are submitted as the operator typed them. The cast is the boundary: the
+  // generated union lists only the modes present when the schema was generated,
+  // while the backend accepts whatever it has registered, and it validates this
+  // object against the real policy.
+  return {
+    mode: form.moneyManagementMode,
+    ...parseObject(form.deployedMoneyManagement, "자금 관리 설정"),
+  } as NonNullable<RunConfigInput["money_management"]>;
+}
+
 function buildSubmission(form: FormState): RunSubmission {
-  const moneyManagement: NonNullable<RunConfigInput["money_management"]> =
-    form.moneyManagementMode === "manual"
-      ? {
-          mode: "manual",
-          leverage: Number(form.manualLeverage),
-          reward_risk: Number(form.manualRewardRisk),
-          atr_stop_multiple: Number(form.manualAtrStopMultiple),
-        }
-      : {
-          mode: "turtle",
-          n_period: Number(form.turtleNPeriod),
-          n_timeframe: "1d",
-          stop_n_multiple: Number(form.turtleStopNMultiple),
-          leverage_cap: Number(form.turtleLeverageCap),
-        };
+  const moneyManagement = buildMoneyManagement(form);
   const config: RunSubmission["config"] = {
     run_name: automaticRunName(form.strategyId, form.symbol),
     strategy_id: form.strategyId,
@@ -640,11 +683,18 @@ export function RunManagementPage() {
       const supportedTimeframes = selectedStrategy.supported_timeframes;
       const defaultMoneyManagement =
         selectedStrategy.default_money_management ?? {};
+      // The strategy names its own default. Collapsing anything that was not
+      // "turtle" to "manual" would silently drop a deployed policy's default.
+      const declaredDefault =
+        typeof defaultMoneyManagement.mode === "string"
+          ? defaultMoneyManagement.mode
+          : undefined;
+      const supported = selectedStrategy.supported_money_management ?? [];
       const defaultMode =
-        defaultMoneyManagement.mode === "turtle" ? "turtle" : "manual";
-      const mode = selectedStrategy.supported_money_management?.includes(
-        current.moneyManagementMode,
-      )
+        declaredDefault && supported.includes(declaredDefault)
+          ? declaredDefault
+          : (supported[0] ?? "manual");
+      const mode = supported.includes(current.moneyManagementMode)
         ? current.moneyManagementMode
         : defaultMode;
       return {
@@ -668,6 +718,10 @@ export function RunManagementPage() {
           defaultMoneyManagement.atr_stop_multiple ??
             current.manualAtrStopMultiple,
         ),
+        deployedMoneyManagement:
+          mode === "manual" || mode === "turtle"
+            ? current.deployedMoneyManagement
+            : settingsJson(defaultMoneyManagement),
         timeframe: supportedTimeframes.includes(current.timeframe)
           ? current.timeframe
           : (supportedTimeframes[0] ?? current.timeframe),
@@ -898,6 +952,10 @@ export function RunManagementPage() {
           ? moneyManagement.leverage_cap
           : current.turtleLeverageCap,
       ),
+      deployedMoneyManagement:
+        moneyManagement && !isBuiltInMoneyManagement(moneyManagement.mode)
+          ? settingsJson(moneyManagement as Record<string, unknown>)
+          : current.deployedMoneyManagement,
       symbol: config.symbol,
       exchange: config.exchange,
       timeframe: config.timeframe,
@@ -1131,6 +1189,8 @@ export function RunManagementPage() {
                         onChange={(event) => {
                           const mode = event.target
                             .value as MoneyManagementMode;
+                          const declared =
+                            selectedStrategy?.default_money_management ?? {};
                           setForm((current) => ({
                             ...current,
                             moneyManagementMode: mode,
@@ -1138,22 +1198,27 @@ export function RunManagementPage() {
                               mode === "turtle"
                                 ? "risk_based"
                                 : current.sizingMethod,
+                            // Prefill only from the default the strategy declared
+                            // for this very mode. Another mode's settings would
+                            // be the wrong names entirely.
+                            deployedMoneyManagement:
+                              isBuiltInMoneyManagement(mode) ||
+                              declared.mode !== mode
+                                ? current.deployedMoneyManagement
+                                : settingsJson(declared),
                           }));
                         }}
                       >
-                        {supportedMoneyManagement.includes("manual") && (
-                          <option value="manual">직접 설정</option>
-                        )}
-                        {supportedMoneyManagement.includes("turtle") && (
-                          <option value="turtle">Turtle 자동 관리</option>
-                        )}
+                        {supportedMoneyManagement.map((mode) => (
+                          <option key={mode} value={mode}>
+                            {moneyManagementLabel(mode)}
+                          </option>
+                        ))}
                       </select>
                     </Label>
                   ) : (
                     <p className="rounded border bg-background/40 p-2 text-xs">
-                      {form.moneyManagementMode === "turtle"
-                        ? "Turtle 자동 관리"
-                        : "직접 설정"}
+                      {moneyManagementLabel(form.moneyManagementMode)}
                     </p>
                   )}
                   {form.moneyManagementMode === "manual" ? (
@@ -1210,7 +1275,7 @@ export function RunManagementPage() {
                         />
                       </Label>
                     </div>
-                  ) : (
+                  ) : form.moneyManagementMode === "turtle" ? (
                     <div className="rounded-lg border bg-background/40 p-3 text-xs">
                       <p className="font-medium text-teal-100">
                         확정 일봉 N으로 거래당 위험 1% 이내 자동 계산
@@ -1280,6 +1345,33 @@ export function RunManagementPage() {
                           </Label>
                         </div>
                       </details>
+                    </div>
+                  ) : (
+                    <div className="grid gap-2 rounded-lg border bg-background/40 p-3 text-xs">
+                      <p className="font-medium text-teal-100">
+                        {form.moneyManagementMode} 정책 설정
+                      </p>
+                      <p className="leading-relaxed text-muted-foreground">
+                        이 정책은 파일로 배포되어 이 화면에 전용 입력란이 없습니다.
+                        설정을 JSON으로 적으면 서버가 그 정책의 정의로 검증합니다.
+                        비워 두면 정책의 기본값이 쓰입니다.
+                      </p>
+                      <label
+                        htmlFor="deployed-money-management"
+                        className="grid gap-1.5 font-medium"
+                      >
+                        자금 관리 설정 JSON
+                        <textarea
+                          id="deployed-money-management"
+                          aria-label="배포 정책 설정"
+                          className={textareaClass}
+                          value={form.deployedMoneyManagement}
+                          onChange={(event) =>
+                            update("deployedMoneyManagement", event.target.value)
+                          }
+                          spellCheck={false}
+                        />
+                      </label>
                     </div>
                   )}
                 </div>

@@ -28,6 +28,16 @@ class MoneyManagementPolicy(Protocol):
     id: ClassVar[str]
     version: ClassVar[str]
 
+    requires_signal_exit: ClassVar[bool]
+    """Whether this policy leaves the exit to the strategy.
+
+    Declared here rather than only on the base class because the protocol is what
+    a policy has to satisfy. Leaving it off the protocol let a policy that never
+    sets ``take_profit`` pair with a strategy that cannot emit an exit, which
+    opens a trade with nothing to close it. There is no safe default to fall back
+    on, so every policy states it.
+    """
+
     def required_indicators(self) -> tuple[PolicyIndicatorRequirement, ...]:
         """Return the policy-owned finalized market inputs."""
         ...
@@ -63,12 +73,11 @@ class MoneyManagementBase(ABC):
     version: ClassVar[str]
 
     requires_signal_exit: ClassVar[bool] = False
-    """Whether this policy leaves the exit to the strategy.
+    """Supply the protocol's declaration for a policy that sets ``take_profit``.
 
-    A policy that never sets ``take_profit`` has no way out of a position on its
-    own. Pairing it with a strategy that cannot emit an exit would open a trade
-    with nothing to close it, so the composition is refused up front. Declaring it
-    here keeps the check off the policy's name.
+    Inheriting the false value is still a declaration: a policy that plans its own
+    exit says so by not overriding it. A policy that leaves the exit to the
+    strategy overrides it to true. Nothing reads a missing value as false.
     """
 
     @abstractmethod

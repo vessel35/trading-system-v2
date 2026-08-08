@@ -8893,11 +8893,7 @@
           },
           "supported_money_management": {
             "items": {
-              "type": "string",
-              "enum": [
-                "manual",
-                "turtle"
-              ]
+              "type": "string"
             },
             "type": "array",
             "title": "Supported Money Management"

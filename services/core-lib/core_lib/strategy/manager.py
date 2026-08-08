@@ -95,7 +95,13 @@ class AdapterManager:
             raise ValueError(
                 f"strategy {strategy_id!r} does not support money-management mode {policy.id!r}"
             )
-        if getattr(policy, "requires_signal_exit", False) and not support.supports_signal_exit:
+        requires_signal_exit = getattr(policy, "requires_signal_exit", None)
+        if not isinstance(requires_signal_exit, bool):
+            # Reading a missing declaration as false pairs a policy that never
+            # plans an exit with a strategy that cannot emit one, and the trade
+            # then has nothing to close it.
+            raise ValueError(f"{policy.id} money management does not declare requires_signal_exit")
+        if requires_signal_exit and not support.supports_signal_exit:
             raise ValueError(f"{policy.id} money management requires strategy signal exits")
         return StrategyRuntime(strategy=strategy, money_management=policy)
 

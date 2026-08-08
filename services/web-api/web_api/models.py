@@ -906,7 +906,10 @@ class StrategyOption(BaseModel):
     required_indicators: list[dict[str, object]]
     min_history: int
     default_params: dict[str, object]
-    supported_money_management: list[Literal["manual", "turtle"]]
+    # Not a closed literal. A money-management policy is deployed as a file, so
+    # the set of modes is whatever is registered in the running process; naming
+    # two of them here hid every deployed policy from the client.
+    supported_money_management: list[str]
     default_money_management: dict[str, object]
     is_active: bool
     is_deprecated: bool

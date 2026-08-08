@@ -195,6 +195,9 @@ _POLICY_BODY = """
 
         id: ClassVar[str] = "{mode}"
         version: ClassVar[str] = "1.0.0"
+        # This policy never sets take_profit, so the strategy has to close the
+        # position. Inheriting the false default would have claimed otherwise.
+        requires_signal_exit: ClassVar[bool] = True
 
         def required_indicators(self) -> tuple[PolicyIndicatorRequirement, ...]:
             return (
@@ -320,3 +323,33 @@ def test_naming_fields_are_not_treated_as_settings() -> None:
 
     with pytest.raises(ValueError, match="unexpected money-management parameters"):
         MoneyManagementFactory.create({"mode": "manual", "id": "spoofed"})
+
+
+def test_a_file_that_exits_at_import_does_not_end_the_process(plugin_dir: ModuleType) -> None:
+    """``except Exception`` did not cover ``SystemExit``, so one file ended the service."""
+    _write(plugin_dir, "quits", "import sys\n\nsys.exit(3)\n")
+    _write(plugin_dir, "sound", _POLICY_BODY.format(class_name="Sound", mode="sound"))
+
+    found, faults = discovery.discover_money_management(plugin_dir)
+
+    assert "sound" in found
+    assert [fault.reason for fault in faults] == ["SystemExit: 3"]
+
+
+def test_a_policy_that_does_not_declare_its_exit_need_is_refused_at_deploy(
+    plugin_dir: ModuleType,
+) -> None:
+    """The declaration decides whether a strategy must be able to close the trade."""
+    _write(
+        plugin_dir,
+        "silent",
+        _POLICY_BODY.format(class_name="Silent", mode="silent").replace(
+            "        requires_signal_exit: ClassVar[bool] = True\n",
+            "        requires_signal_exit = None  # type: ignore[assignment]\n",
+        ),
+    )
+
+    found, faults = discovery.discover_money_management(plugin_dir)
+
+    assert found == {}
+    assert any("must declare requires_signal_exit" in fault.reason for fault in faults)

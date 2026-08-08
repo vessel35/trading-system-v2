@@ -2469,7 +2469,7 @@ export interface components {
                 [key: string]: unknown;
             };
             /** Supported Money Management */
-            supported_money_management: ("manual" | "turtle")[];
+            supported_money_management: string[];
             /** Default Money Management */
             default_money_management: {
                 [key: string]: unknown;
