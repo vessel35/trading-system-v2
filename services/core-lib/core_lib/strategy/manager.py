@@ -3,7 +3,11 @@
 from collections.abc import Mapping, Sequence
 from typing import cast
 
-from core_lib.money_management import MoneyManagementFactory
+from core_lib.money_management import (
+    BUILTIN_POLICIES,
+    MoneyManagementBase,
+    MoneyManagementFactory,
+)
 from core_lib.ports import StrategyRegistry
 
 from .base import StrategyAdapter, StrategyRuntime
@@ -38,11 +42,15 @@ class AdapterManager:
         *,
         config: type[StrategyConfig] = StrategyConfig,
         factory: type[AdapterFactory] = AdapterFactory,
+        money_management_policies: Mapping[str, type[MoneyManagementBase]] = BUILTIN_POLICIES,
     ) -> None:
         self._catalog_registry = catalog_registry
         self._adapter_registry = adapter_registry
         self._config = config
         self._factory = factory
+        # Passed in rather than imported, because the deployed policies live outside
+        # core_lib and core_lib must not reach into a service to find them.
+        self._money_management_policies = money_management_policies
         self._instances: dict[str, StrategyAdapter] = {}
         self._active: set[str] = set()
 
@@ -80,7 +88,9 @@ class AdapterManager:
         support = strategy.get_metadata().money_management
         if not support.supported:
             return StrategyRuntime(strategy=strategy, money_management=None)
-        policy = MoneyManagementFactory.create(money_management_config)
+        policy = MoneyManagementFactory.create(
+            money_management_config, self._money_management_policies
+        )
         if policy.id not in support.supported:
             raise ValueError(
                 f"strategy {strategy_id!r} does not support money-management mode {policy.id!r}"

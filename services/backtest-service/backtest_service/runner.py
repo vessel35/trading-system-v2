@@ -11,7 +11,7 @@ import psycopg
 from core_lib.ports import DataFeed
 from core_lib.strategy import AdapterManager
 from core_lib.types import MarketType
-from trading_plugins import build_strategy_registry
+from trading_plugins import build_strategy_registry, registered_money_management
 
 from backtest_service.adapters.broker import BacktestBroker
 from backtest_service.adapters.catalog_store import BacktestCatalogStore, WriteConnection
@@ -65,6 +65,7 @@ def _manager(signal_connection: ReadConnection) -> AdapterManager:
     return AdapterManager(
         BacktestStrategyRegistry(signal_connection),
         build_strategy_registry(),
+        money_management_policies=registered_money_management(),
     )
 
 

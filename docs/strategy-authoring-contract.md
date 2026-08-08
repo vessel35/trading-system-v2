@@ -1238,9 +1238,16 @@ class SignalExitAtrPolicy(MoneyManagementBase):
 쓰는 정책은 Engine을 고치지 않아도 값을 받는다.** 정책이 넘겨받는
 `MarketSnapshot.volatility_name`도 같은 key다.
 
-**그래도 아직 하나가 남아 있다.** `MoneyManagementFactory`가 `manual`과
-`turtle` 밖의 mode를 거부하므로, 위 정책은 설정에서 만들어지지 않는다. 그 자리를
-여는 것은 §6.5가 다루며 이 규범이 아니라 플랫폼 쪽 작업이다.
+**설정에서 만들어지는 것도 이제 된다.** `MoneyManagementFactory`는 mode로 정책을
+찾아 **그 클래스가 선언한 필드를 설정 이름으로 삼는다.** 분기를 더할 필요가 없다.
+
+**그래서 정책은 `dataclass`여야 한다.** 받는 이름과 기본값이 필드 하나에 모여
+있어야 Factory가 그것을 읽을 수 있고, 값 검증은 `__post_init__`이 맡는다.
+`dataclass`가 아니면 그 자리에서 거부된다.
+
+**기본 제공 mode를 가져갈 수는 없다.** `manual`이나 `turtle`을 주장하는 정책은
+등록되지 않는다. 바꿔 치우면 그 mode를 쓰는 모든 실행이 달라지고도 흔적이 남지
+않는다.
 
 **요구를 둘 이상 선언하는 정책도 아직 안 된다.** Engine이 변동성 하나를 넘기는
 모양이라 요구가 정확히 하나여야 하고, 아니면 그 자리에서 거부한다.

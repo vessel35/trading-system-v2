@@ -161,6 +161,27 @@ def build_strategy_registry() -> InProcessStrategyRegistry:
     return registry
 
 
+def registered_money_management() -> Mapping[str, type[MoneyManagementBase]]:
+    """Compose the platform's built-in policies with everything deployed here.
+
+    A deployed policy that claims a built-in mode is refused rather than allowed to
+    replace it, for the same reason a strategy cannot take a built-in id: replacing
+    a shipped policy changes every run that names that mode, with no trace.
+    """
+    from core_lib.money_management import BUILTIN_POLICIES
+
+    registered = dict(BUILTIN_POLICIES)
+    found, faults = discover_money_management()
+    for fault in faults:
+        _LOGGER.error("deployed policy was not loaded: %s (%s)", fault.module, fault.reason)
+    for mode, policy_class in found.items():
+        if mode in registered:
+            _LOGGER.error("deployed policy %s was not registered: mode is already built in", mode)
+            continue
+        registered[mode] = policy_class
+    return registered
+
+
 __all__ = [
     "MONEY_MANAGEMENT_PACKAGE",
     "PluginFault",
@@ -168,4 +189,5 @@ __all__ = [
     "build_strategy_registry",
     "discover_money_management",
     "discover_strategies",
+    "registered_money_management",
 ]

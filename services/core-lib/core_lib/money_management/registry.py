@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from types import MappingProxyType
 from typing import Final
 
 from .policies import (
     ManualMoneyManagement,
+    MoneyManagementBase,
     MoneyManagementPolicy,
     TurtleMoneyManagement,
 )
@@ -20,6 +22,15 @@ of being reinterpreted under whatever the current defaults happen to be.
 """
 
 
+BUILTIN_POLICIES: Final[Mapping[str, type[MoneyManagementBase]]] = MappingProxyType(
+    {
+        ManualMoneyManagement.id: ManualMoneyManagement,
+        TurtleMoneyManagement.id: TurtleMoneyManagement,
+    }
+)
+"""The policies the platform ships. Deployed ones are passed in, never added here."""
+
+
 class MoneyManagementFactory:
     """Validate one mode-specific configuration and construct its policy."""
 
@@ -29,44 +40,38 @@ class MoneyManagementFactory:
         return MONEY_MANAGEMENT_SCHEMA_VERSION
 
     @staticmethod
-    def create(raw_config: Mapping[str, object]) -> MoneyManagementPolicy:
-        mode = raw_config.get("mode", "manual")
-        if mode == "manual":
-            allowed = {"mode", "leverage", "reward_risk", "atr_stop_multiple"}
-            _reject_extra(raw_config, allowed)
-            return ManualMoneyManagement(
-                leverage=_integer(raw_config.get("leverage", 1), "leverage"),
-                reward_risk=_number(raw_config.get("reward_risk", 2.0), "reward_risk"),
-                atr_stop_multiple=_number(
-                    raw_config.get("atr_stop_multiple", 2.0),
-                    "atr_stop_multiple",
-                ),
+    def create(
+        raw_config: Mapping[str, object],
+        policies: Mapping[str, type[MoneyManagementBase]] = BUILTIN_POLICIES,
+    ) -> MoneyManagementPolicy:
+        """Build the policy the configuration names, from whatever is registered.
+
+        The accepted names and their defaults come from the policy class itself
+        rather than a branch here, so a deployed policy needs no edit in this file
+        to be configurable. The class validates its own values on construction.
+        """
+        mode = raw_config.get("mode", ManualMoneyManagement.id)
+        if not isinstance(mode, str):
+            raise TypeError("money-management mode must be a string")
+        policy_class = policies.get(mode)
+        if policy_class is None:
+            raise ValueError(f"unsupported money-management mode: {mode!r}")
+        declared = getattr(policy_class, "__dataclass_fields__", None)
+        if declared is None:
+            raise TypeError(
+                f"money-management policy {mode!r} must be a dataclass so its settings, "
+                "names, and defaults are declared in one place"
             )
-        if mode == "turtle":
-            allowed = {
-                "mode",
-                "n_period",
-                "n_timeframe",
-                "stop_n_multiple",
-                "leverage_cap",
-            }
-            _reject_extra(raw_config, allowed)
-            timeframe = raw_config.get("n_timeframe", "1d")
-            if not isinstance(timeframe, str):
-                raise TypeError("n_timeframe must be a string")
-            return TurtleMoneyManagement(
-                n_period=_integer(raw_config.get("n_period", 20), "n_period"),
-                n_timeframe=timeframe,
-                stop_n_multiple=_number(
-                    raw_config.get("stop_n_multiple", 2.0),
-                    "stop_n_multiple",
-                ),
-                leverage_cap=_integer(
-                    raw_config.get("leverage_cap", 10),
-                    "leverage_cap",
-                ),
-            )
-        raise ValueError(f"unsupported money-management mode: {mode!r}")
+        settings = set(declared)
+        _reject_extra(raw_config, {"mode", *settings})
+        return policy_class(**{name: raw_config[name] for name in settings if name in raw_config})
+
+
+def money_management_modes(
+    policies: Mapping[str, type[MoneyManagementBase]] = BUILTIN_POLICIES,
+) -> tuple[str, ...]:
+    """Return the modes a configuration may name, in a stable order."""
+    return tuple(sorted(policies))
 
 
 def _reject_extra(raw: Mapping[str, object], allowed: set[str]) -> None:
@@ -75,16 +80,4 @@ def _reject_extra(raw: Mapping[str, object], allowed: set[str]) -> None:
         raise ValueError(f"unexpected money-management parameters: {sorted(extra)}")
 
 
-def _integer(value: object, name: str) -> int:
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise TypeError(f"{name} must be an integer")
-    return value
-
-
-def _number(value: object, name: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, float | int):
-        raise TypeError(f"{name} must be numeric")
-    return float(value)
-
-
-MONEY_MANAGEMENT_MODES: Final = ("manual", "turtle")
+MONEY_MANAGEMENT_MODES: Final = money_management_modes()

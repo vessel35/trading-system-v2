@@ -12,7 +12,7 @@ from types import FrameType
 
 from core_lib.strategy import AdapterManager
 from service_commons.observability import configure_logging
-from trading_plugins import build_strategy_registry
+from trading_plugins import build_strategy_registry, registered_money_management
 
 from signal_service.application import (
     SignalGenerationService,
@@ -41,6 +41,7 @@ def build_signal_generator(
     manager = AdapterManager(
         SignalStrategyRegistry(registry_reader),
         build_strategy_registry(),
+        money_management_policies=registered_money_management(),
     )
     return SignalGenerationService(
         CryptoDataFeed(crypto_reader),

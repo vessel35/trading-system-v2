@@ -12,6 +12,11 @@ from types import ModuleType
 
 import pytest
 import trading_plugins
+from core_lib.money_management import (
+    BUILTIN_POLICIES,
+    MoneyManagementFactory,
+    money_management_modes,
+)
 from trading_plugins import discovery
 
 
@@ -168,6 +173,7 @@ def test_a_broken_plugin_leaves_the_built_in_strategies_usable() -> None:
 
 _POLICY_BODY = """
     from collections.abc import Mapping
+    from dataclasses import dataclass
     from typing import ClassVar
 
     from core_lib.money_management import (
@@ -181,7 +187,10 @@ _POLICY_BODY = """
     from core_lib.types import DecisionIntent, MarketType
 
 
+    @dataclass(frozen=True, slots=True)
     class {class_name}(MoneyManagementBase):
+        atr_stop_multiple: float = 2.0
+
         id: ClassVar[str] = "{mode}"
         version: ClassVar[str] = "1.0.0"
 
@@ -203,7 +212,7 @@ _POLICY_BODY = """
             global_limits: RiskLimits,
         ) -> MoneyManagementPlan:
             side = self.entry_side(decision)
-            stop_distance = market.volatility * 2.0
+            stop_distance = market.volatility * float(self.atr_stop_multiple)
             budget, quantity = self.risk_inputs(market, account, global_limits, stop_distance)
             return MoneyManagementPlan(
                 stop_loss=market.reference_price - side * stop_distance,
@@ -244,4 +253,38 @@ def test_the_package_exposes_only_the_discovery_surface() -> None:
         "build_strategy_registry",
         "discover_money_management",
         "discover_strategies",
+        "registered_money_management",
     }
+
+
+def test_a_deployed_policy_becomes_configurable_without_touching_the_factory(
+    plugin_dir: ModuleType,
+) -> None:
+    """The factory reads the policy's own fields, so no branch is added for it."""
+    _write(plugin_dir, "atr_only", _POLICY_BODY.format(class_name="AtrOnly", mode="atr-only"))
+    found, faults = discovery.discover_money_management(plugin_dir)
+    assert faults == ()
+
+    registered = {**dict(BUILTIN_POLICIES), **dict(found)}
+    policy = MoneyManagementFactory.create({"mode": "atr-only"}, registered)
+
+    assert policy.id == "atr-only"
+    assert money_management_modes(registered) == ("atr-only", "manual", "turtle")
+
+
+def test_a_deployed_policy_may_not_take_a_built_in_mode(plugin_dir: ModuleType) -> None:
+    _write(plugin_dir, "shadow", _POLICY_BODY.format(class_name="Shadow", mode="manual"))
+    found, _ = discovery.discover_money_management(plugin_dir)
+    assert "manual" in found
+
+    assert discovery.registered_money_management()["manual"] is not found["manual"]
+
+
+def test_an_unknown_mode_is_refused_by_name() -> None:
+    with pytest.raises(ValueError, match="unsupported money-management mode: 'nope'"):
+        MoneyManagementFactory.create({"mode": "nope"})
+
+
+def test_a_setting_the_policy_does_not_declare_is_refused() -> None:
+    with pytest.raises(ValueError, match="unexpected money-management parameters"):
+        MoneyManagementFactory.create({"mode": "manual", "invented": 1})
