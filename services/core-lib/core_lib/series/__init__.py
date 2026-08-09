@@ -41,14 +41,14 @@ def series_descriptor_parts(
 
 
 def resolve_series_timeframe(declared: str, execution: str) -> str:
-    """Resolve a declaration for the single-stream first implementation bundle."""
+    """Resolve a declaration to the concrete candle timeframe it names."""
     if _TIMEFRAME_PATTERN.fullmatch(execution) is None:
         raise ValueError("execution timeframe must be a positive minute, hour, or day interval")
     if declared == "strategy":
         return execution
     if declared == execution:
         raise ValueError("execution timeframe must be declared as 'strategy'")
-    raise ValueError(f"series timeframe {declared!r} is not supported yet")
+    return declared
 
 
 def series_key(spec: SeriesSpec, timeframe: str) -> str:

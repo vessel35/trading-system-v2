@@ -228,15 +228,15 @@ def test_series_descriptor_timeframe_defaults_and_rejections_are_explicit() -> N
             patterns,
             execution_timeframe="1h",
         )
-    with pytest.raises(ValueError, match="series timeframe '4h' is not supported yet"):
-        resolve_series_specs(
-            "auto",
-            [{"name": "EMA", "params": {"period": 9}, "timeframe": "4h"}],
-            (),
-            indicators,
-            patterns,
-            execution_timeframe="1h",
-        )
+    resolved = resolve_series_specs(
+        "auto",
+        [{"name": "EMA", "params": {"period": 9}, "timeframe": "4h"}],
+        (),
+        indicators,
+        patterns,
+        execution_timeframe="1h",
+    )
+    assert [(item.identifier, item.timeframe) for item in resolved] == [("EMA(period=9)", "4h")]
     with pytest.raises(ValueError, match="exactly name, params, and optional timeframe"):
         resolve_series_specs(
             "auto",
@@ -246,6 +246,27 @@ def test_series_descriptor_timeframe_defaults_and_rejections_are_explicit() -> N
             patterns,
             execution_timeframe="1h",
         )
+
+
+def test_resolution_deduplicates_only_the_same_registry_identity_and_timeframe() -> None:
+    indicators, patterns = _registries()
+    resolved = resolve_series_specs(
+        "auto",
+        [
+            {"name": "EMA", "params": {"period": 9}},
+            {"name": "EMA", "params": {"period": 9}, "timeframe": "strategy"},
+            {"name": "EMA", "params": {"period": 9}, "timeframe": "4h"},
+        ],
+        (),
+        indicators,
+        patterns,
+        execution_timeframe="1h",
+    )
+
+    assert [(item.identifier, item.timeframe) for item in resolved] == [
+        ("EMA(period=9)", "1h"),
+        ("EMA(period=9)", "4h"),
+    ]
 
 
 def test_decision_g_is_enforced_after_execution_key_normalization() -> None:

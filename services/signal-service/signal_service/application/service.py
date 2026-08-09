@@ -22,8 +22,8 @@ from core_lib.money_management import (
     RiskLimits,
 )
 from core_lib.patterns import DEFAULT_PATTERN_REGISTRY, PatternRegistry
-from core_lib.series import SeriesSpec, SeriesState, series_key_of
-from core_lib.series_resolution import resolve_series_specs, series_key
+from core_lib.series import SeriesState, series_key_of
+from core_lib.series_resolution import ResolvedSeriesSpec, resolve_series_specs, series_key
 from core_lib.strategy import (
     AdapterManager,
     StrategyAdapter,
@@ -83,8 +83,10 @@ class SignalGenerationService:
         self._config: SignalGenerationConfig | None = None
         self._strategy: StrategyAdapter | None = None
         self._money_management: MoneyManagementBase | None = None
-        self._specs: list[SeriesSpec] = []
+        self._specs: list[ResolvedSeriesSpec] = []
         self._states: dict[str, SeriesState] = {}
+        self._series_values: dict[str, object] = {}
+        self._series_last_close: dict[str, datetime] = {}
         self._confirmed: list[Candle] = []
         self._last_close: datetime | None = None
         self._resolved_params: dict[str, object] = {}
@@ -144,10 +146,21 @@ class SignalGenerationService:
             self._patterns,
             execution_timeframe=config.timeframe,
         )
-        required_warmup = max(
-            metadata.min_history,
-            max(spec.min_history for spec in specs),
-        )
+        required_warmups = {config.timeframe: metadata.min_history}
+        for spec in specs:
+            required_warmups[spec.timeframe] = max(
+                required_warmups.get(spec.timeframe, 0), spec.min_history
+            )
+        if runtime.money_management is not None:
+            for requirement in runtime.money_management.required_indicators():
+                timeframe = (
+                    config.timeframe
+                    if requirement.timeframe == "strategy"
+                    else requirement.timeframe
+                )
+                required_warmups[timeframe] = max(
+                    required_warmups.get(timeframe, 0), requirement.min_history
+                )
         resolved = StrategyConfig.resolve(
             strategy.get_parameter_schema(),
             {"strategy_id": config.strategy_id, "params": dict(config.params)},
@@ -156,6 +169,7 @@ class SignalGenerationService:
         if not isinstance(serialized_params, dict):
             raise TypeError("core_lib resolved strategy params must serialize to a dict")
         history = self._confirmed_history(config, boundary)
+        required_warmup = required_warmups[config.timeframe]
         if len(history) < required_warmup + 1:
             raise ValueError(
                 "insufficient finalized history: "
@@ -166,13 +180,31 @@ class SignalGenerationService:
         self._strategy = strategy
         self._money_management = runtime.money_management
         self._specs = specs
-        self._states = {spec.identifier: spec.make_state() for spec in specs}
+        self._states = {series_key(spec.spec, spec.timeframe): spec.make_state() for spec in specs}
+        self._series_values = {}
+        self._series_last_close = {}
         self._resolved_params = dict(serialized_params)
         decision_window = history[-(required_warmup + 1) :]
         gaps = self._report_series_gaps(decision_window, boundary)
         self._confirmed = decision_window[:-1]
-        for state in self._states.values():
-            state.seed(self._confirmed)
+        for spec in specs:
+            key = series_key(spec.spec, spec.timeframe)
+            state = self._states[key]
+            if spec.timeframe == config.timeframe:
+                state.seed(self._confirmed)
+            else:
+                series_history = self._series_history(config, spec.timeframe, boundary)
+                required = required_warmups[spec.timeframe]
+                if len(series_history) < required:
+                    raise ValueError(
+                        "insufficient finalized history: "
+                        f"{spec.timeframe} requires {required}, got {len(series_history)}"
+                    )
+                state.seed(series_history[:-1])
+                value = state.update(series_history[-1])
+                self._assert_finite_indicator(value, spec.identifier)
+                self._series_values[key] = value
+                self._series_last_close[spec.timeframe] = series_history[-1].close_time
             if not state.warmed_up:
                 raise ValueError("indicator state did not warm up after required preload")
         persisted = self._process(decision_window[-1], boundary, current_position)
@@ -192,6 +224,8 @@ class SignalGenerationService:
         self._money_management = None
         self._specs = []
         self._states = {}
+        self._series_values = {}
+        self._series_last_close = {}
         self._confirmed = []
         self._last_close = None
         self._resolved_params = {}
@@ -237,6 +271,24 @@ class SignalGenerationService:
         self._validate_sequence(history, boundary, config)
         return history
 
+    def _series_history(
+        self,
+        config: SignalGenerationConfig,
+        timeframe: str,
+        boundary: datetime,
+    ) -> list[Candle]:
+        history = sorted(
+            self._feed.candles(config.symbol, timeframe, boundary),
+            key=lambda candle: candle.open_time,
+        )
+        self._validate_series_sequence(
+            history,
+            boundary,
+            symbol=config.symbol,
+            timeframe=timeframe,
+        )
+        return history
+
     def _confirmed_increment(
         self,
         config: SignalGenerationConfig,
@@ -278,6 +330,29 @@ class SignalGenerationService:
             if candle.symbol != config.symbol or candle.timeframe != config.timeframe:
                 raise ValueError("DataFeed returned a candle outside the configured series")
 
+    @staticmethod
+    def _validate_series_sequence(
+        candles: list[Candle],
+        boundary: datetime,
+        *,
+        symbol: str,
+        timeframe: str,
+    ) -> None:
+        if any(
+            right.open_time <= left.open_time
+            for left, right in zip(candles, candles[1:], strict=False)
+        ):
+            raise ValueError("DataFeed candles must have strictly increasing open_time")
+        if any(
+            right.open_time < left.close_time
+            for left, right in zip(candles, candles[1:], strict=False)
+        ):
+            raise ValueError("DataFeed candles must not overlap")
+        for candle in candles:
+            assert_finalized(candle, boundary)
+            if candle.symbol != symbol or candle.timeframe != timeframe:
+                raise ValueError("DataFeed returned a candle outside the requested series")
+
     def _process(
         self,
         candle: Candle,
@@ -286,11 +361,17 @@ class SignalGenerationService:
     ) -> PersistedSignal | None:
         assert_finalized(candle, boundary)
         self._confirmed.append(candle)
-        indicator_values: dict[str, object] = {}
+        indicator_values = dict(self._series_values)
+        self._advance_non_execution_series(candle.close_time)
+        indicator_values.update(self._series_values)
         for spec in self._specs:
-            value = self._states[spec.identifier].update(candle)
+            if spec.timeframe != self._require_config().timeframe:
+                continue
+            key = series_key(spec.spec, spec.timeframe)
+            value = self._states[key].update(candle)
             self._assert_finite_indicator(value, spec.identifier)
-            indicator_values[series_key(spec, self._require_config().timeframe)] = value
+            indicator_values[key] = value
+            self._series_values[key] = value
 
         config = self._require_config()
         signal = self._require_strategy().analyze(
@@ -326,6 +407,34 @@ class SignalGenerationService:
         if self._sink.store(persisted) and self._queue is not None:
             self._queue.publish(persisted)
         return persisted
+
+    def _advance_non_execution_series(self, boundary: datetime) -> None:
+        config = self._require_config()
+        for timeframe, after in tuple(self._series_last_close.items()):
+            fresh = sorted(
+                self._feed.candles_after(
+                    config.symbol,
+                    timeframe,
+                    after,
+                    boundary,
+                ),
+                key=lambda candle: candle.open_time,
+            )
+            self._validate_series_sequence(
+                fresh,
+                boundary,
+                symbol=config.symbol,
+                timeframe=timeframe,
+            )
+            for source_candle in fresh:
+                for spec in self._specs:
+                    if spec.timeframe != timeframe:
+                        continue
+                    key = series_key(spec.spec, timeframe)
+                    value = self._states[key].update(source_candle)
+                    self._assert_finite_indicator(value, spec.identifier)
+                    self._series_values[key] = value
+                self._series_last_close[timeframe] = source_candle.close_time
 
     def _materialize_decision(
         self,

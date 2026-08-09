@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Final
 
 from core_lib.costs import funding_boundaries_between
+from core_lib.indicators import DEFAULT_REGISTRY
+from core_lib.patterns import DEFAULT_PATTERN_REGISTRY
 from core_lib.ports import EvidenceSink
 from core_lib.series import series_key_of
 
@@ -752,6 +754,10 @@ class BacktestEvidenceSink(EvidenceSink):
         if not keys:
             return []
         grid = self._portfolio_bar_grid()
+        timeframe_by_key = self._indicator_timeframes()
+        execution_timeframe = self.connection.execute(
+            "SELECT timeframe FROM BACKTEST_RUN_LOCAL"
+        ).fetchone()[0]
         failures: list[str] = []
         for key in keys:
             rows = self.connection.execute(
@@ -764,11 +770,34 @@ class BacktestEvidenceSink(EvidenceSink):
                 (key,),
             ).fetchall()
             actual = [row[0] for row in rows]
-            if actual != grid:
+            timeframe = timeframe_by_key[key]
+            valid = (
+                actual == grid
+                if timeframe == execution_timeframe
+                else len(actual) == len(grid)
+                and all(
+                    feature_ts <= bar_ts for feature_ts, bar_ts in zip(actual, grid, strict=True)
+                )
+                and all(right >= left for left, right in zip(actual, actual[1:], strict=False))
+            )
+            if not valid:
                 failures.append(
                     f"indicator_grid_mismatch:{key}:expected={len(grid)}:actual={len(actual)}"
                 )
         return failures
+
+    def _indicator_timeframes(self) -> dict[str, str]:
+        row = self.connection.execute(
+            "SELECT resolved_indicators_json FROM BACKTEST_RUN_LOCAL"
+        ).fetchone()
+        if row is None or not row[0]:
+            return {}
+        result: dict[str, str] = {}
+        for entry in json.loads(row[0]):
+            params = dict(entry.get("params") or {})
+            timeframe = str(entry["timeframe"])
+            result[series_key_of(str(entry["name"]), params, timeframe)] = timeframe
+        return result
 
     def _expected_indicator_keys(self) -> list[str]:
         """Return the execution keys this run declared it would compute.
@@ -783,13 +812,16 @@ class BacktestEvidenceSink(EvidenceSink):
         if row is None or not row[0]:
             return []
         declared = json.loads(row[0])
-        execution_timeframe = str(row[1])
         keys: list[str] = []
+        registered_names = {
+            *(spec.name.casefold() for spec in DEFAULT_REGISTRY.list()),
+            *(name.casefold() for name in DEFAULT_PATTERN_REGISTRY.names()),
+        }
         for entry in declared:
+            if str(entry["name"]).casefold() not in registered_names:
+                continue
             params = dict(entry.get("params") or {})
             timeframe = str(entry["timeframe"])
-            if timeframe != execution_timeframe:
-                continue
             keys.append(series_key_of(str(entry["name"]), params, timeframe))
         return keys
 
@@ -860,7 +892,14 @@ class BacktestEvidenceSink(EvidenceSink):
                 continue
             if row_count + gap_count != span // duration:
                 failures.append(f"ohlcv_snapshot_count_identity:{snapshot_id}")
-            if not (range_start <= period_start and period_end <= range_end):
+            if row_timeframe == timeframe or row_timeframe == "1m":
+                if not (range_start <= period_start and period_end <= range_end):
+                    failures.append(f"ohlcv_snapshot_evaluation_coverage:{snapshot_id}")
+            elif not (
+                range_start <= period_start
+                and range_end <= period_end
+                and period_end - range_end < duration
+            ):
                 failures.append(f"ohlcv_snapshot_evaluation_coverage:{snapshot_id}")
             if note is None:
                 failures.append(f"ohlcv_gap_contract_missing:{snapshot_id}")

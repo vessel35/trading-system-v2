@@ -227,6 +227,53 @@ class _PatternProbeStrategy(_ProbeStrategy):
         return super().analyze(market_data, current_position)
 
 
+class _MultiTimeframeProbeStrategy(_ProbeStrategy):
+    observed_market_data: ClassVar[list[dict[str, object]]] = []
+
+    @classmethod
+    def get_metadata(cls) -> StrategyMetadata:
+        metadata = super().get_metadata()
+        metadata.required_indicators = [{"name": "EMA", "params": {"period": 9}, "timeframe": "4h"}]
+        return metadata
+
+    def analyze(
+        self,
+        market_data: dict[str, object],
+        current_position: Position | None,
+    ) -> None:
+        del current_position
+        type(self).observed_market_data.append(dict(market_data))
+        return None
+
+
+class _MultiTimeframeFeed(_Feed):
+    def __init__(self, candles: list[Candle], upper: list[Candle]) -> None:
+        super().__init__(candles)
+        self.upper = upper
+
+    def candles(self, symbol: str, tf: str, up_to: datetime) -> list[Candle]:
+        if tf == "4h":
+            assert symbol == "BTCUSDT"
+            return [candle for candle in self.upper if candle.close_time <= up_to]
+        return super().candles(symbol, tf, up_to)
+
+    def candles_after(
+        self,
+        symbol: str,
+        tf: str,
+        after: datetime,
+        up_to: datetime,
+    ) -> list[Candle]:
+        if tf == "4h":
+            assert symbol == "BTCUSDT"
+            return [
+                candle
+                for candle in self.upper
+                if candle.open_time >= after and candle.close_time <= up_to
+            ]
+        return super().candles_after(symbol, tf, after, up_to)
+
+
 class _TargetLegacyProbeStrategy(_ProbeStrategy):
     """Break a target declaration by returning the legacy value."""
 
@@ -354,6 +401,54 @@ def test_finalized_candle_uses_core_incremental_state_and_adaptee_contract() -> 
     next_market_data, _ = _ProbeStrategy.calls[-1]
     assert isinstance(next_market_data["candles"], list)
     assert len(next_market_data["candles"]) == 11
+
+
+def test_live_multi_timeframe_alignment_uses_the_same_resolved_key() -> None:
+    execution = _candles(40)
+    upper = [
+        Candle(
+            symbol="BTCUSDT",
+            exchange="binance",
+            timeframe="4h",
+            open_time=_BASE + timedelta(hours=4 * index),
+            close_time=_BASE + timedelta(hours=4 * (index + 1)),
+            open=200.0 + index,
+            high=201.0 + index,
+            low=199.0 + index,
+            close=200.5 + index,
+            volume=40.0,
+            quote_volume=None,
+            trade_count=None,
+        )
+        for index in range(10)
+    ]
+    feed = _MultiTimeframeFeed(execution, upper)
+    _MultiTimeframeProbeStrategy.observed_market_data.clear()
+    service = SignalGenerationService(
+        feed,
+        _manager(_MultiTimeframeProbeStrategy),
+        _Sink(),
+    )
+
+    assert service.start(_config(), execution[36].close_time).signal is None
+    assert service.poll(execution[37].close_time).signal is None
+    assert service.poll(execution[38].close_time).signal is None
+    assert service.poll(execution[39].close_time).signal is None
+
+    observed = _MultiTimeframeProbeStrategy.observed_market_data
+    values = [
+        cast(Mapping[str, object], item["indicators"])["ema:period=9@4h"] for item in observed
+    ]
+    assert values[:3] == [values[0]] * 3
+    assert values[3] != values[2]
+    assert all(
+        set(cast(Mapping[str, object], item["indicators"])) == {"ema:period=9@4h"}
+        for item in observed
+    )
+    assert all(
+        all(candle.timeframe == "1h" for candle in cast(list[Candle], item["candles"]))
+        for item in observed
+    )
 
 
 def test_target_contract_rejects_a_legacy_signal_before_signal_service_uses_it() -> None:

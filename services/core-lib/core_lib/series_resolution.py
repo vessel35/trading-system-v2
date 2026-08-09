@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
+from typing import cast
 
 from core_lib.indicators.registry import IndicatorRegistry
 from core_lib.patterns.registry import PatternRegistry
 from core_lib.series import (
+    SeriesParam,
     SeriesSpec,
+    SeriesState,
     normalize_series_name,
     resolve_series_timeframe,
     series_descriptor_parts,
@@ -22,6 +25,41 @@ class SplitSeriesDescriptors:
 
     indicators: tuple[Mapping[str, object], ...]
     patterns: tuple[Mapping[str, object], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedSeriesSpec:
+    """Bind one registry calculation to the concrete timeframe it runs on."""
+
+    spec: SeriesSpec
+    timeframe: str
+
+    @property
+    def identifier(self) -> str:
+        return self.spec.identifier
+
+    @property
+    def name(self) -> str:
+        return self.spec.name
+
+    @property
+    def params(self) -> Mapping[str, SeriesParam]:
+        return self.spec.params
+
+    @property
+    def version(self) -> str:
+        return self.spec.version
+
+    @property
+    def min_history(self) -> int:
+        return self.spec.min_history
+
+    @property
+    def undefined_outputs(self) -> tuple[str, ...]:
+        return self.spec.undefined_outputs
+
+    def make_state(self) -> SeriesState:
+        return self.spec.make_state()
 
 
 def assert_disjoint_series_registry_names(
@@ -88,18 +126,45 @@ def series_specs_from_descriptors(
     patterns: PatternRegistry,
     *,
     execution_timeframe: str,
-) -> list[SeriesSpec]:
+) -> list[ResolvedSeriesSpec]:
     """Resolve descriptors from both registries without requiring a non-empty result."""
-    split = split_series_descriptors(
-        descriptors,
-        indicators,
-        patterns,
-        execution_timeframe=execution_timeframe,
+    resolved: list[ResolvedSeriesSpec] = []
+    for descriptor in descriptors:
+        name, params, declared_timeframe = series_descriptor_parts(descriptor)
+        timeframe = resolve_series_timeframe(declared_timeframe, execution_timeframe)
+        split = split_series_descriptors(
+            ({"name": name, "params": dict(params), "timeframe": declared_timeframe},),
+            indicators,
+            patterns,
+            execution_timeframe=execution_timeframe,
+        )
+        specs = [
+            *indicators.specs_from_descriptors(split.indicators),
+            *patterns.specs_from_descriptors(split.patterns),
+        ]
+        if len(specs) != 1:
+            raise RuntimeError("one series descriptor must resolve to exactly one registry spec")
+        resolved.append(ResolvedSeriesSpec(cast(SeriesSpec, specs[0]), timeframe))
+    indicator_order = {spec.identifier: index for index, spec in enumerate(indicators.list())}
+    resolved.sort(
+        key=lambda item: (
+            (
+                0,
+                indicator_order[item.identifier],
+                item.timeframe,
+            )
+            if item.identifier in indicator_order
+            else (1, item.name.casefold(), item.timeframe)
+        )
     )
-    return [
-        *indicators.specs_from_descriptors(split.indicators),
-        *patterns.specs_from_descriptors(split.patterns),
-    ]
+    unique: list[ResolvedSeriesSpec] = []
+    seen: set[tuple[str, str]] = set()
+    for item in resolved:
+        identity = (item.identifier, item.timeframe)
+        if identity not in seen:
+            seen.add(identity)
+            unique.append(item)
+    return unique
 
 
 def resolve_series_specs(
@@ -110,7 +175,7 @@ def resolve_series_specs(
     patterns: PatternRegistry,
     *,
     execution_timeframe: str,
-) -> list[SeriesSpec]:
+) -> list[ResolvedSeriesSpec]:
     """Resolve auto, explicit, or all selections across both registries.
 
     ``all`` keeps its historical indicator meaning: every registered indicator.
@@ -122,31 +187,48 @@ def resolve_series_specs(
     """
     if mode not in {"auto", "explicit", "all"}:
         raise ValueError("indicator mode must be auto, explicit, or all")
-
-    declared_split = split_series_descriptors(
+    split_series_descriptors(
         declared,
         indicators,
         patterns,
         execution_timeframe=execution_timeframe,
     )
-    explicit_split = split_series_descriptors(
+    split_series_descriptors(
         explicit,
         indicators,
         patterns,
         execution_timeframe=execution_timeframe,
     )
-    specs: list[SeriesSpec] = []
-    if mode == "auto":
-        specs.extend(indicators.specs_from_descriptors(declared_split.indicators))
-        specs.extend(patterns.specs_from_descriptors(declared_split.patterns))
-    elif mode == "explicit":
-        specs.extend(indicators.specs_from_descriptors(explicit_split.indicators))
-        specs.extend(patterns.specs_from_descriptors(explicit_split.patterns))
-    else:
-        specs.extend(indicators.list())
-        specs.extend(patterns.specs_from_descriptors(declared_split.patterns))
 
-    return specs
+    if mode == "auto":
+        return series_specs_from_descriptors(
+            declared,
+            indicators,
+            patterns,
+            execution_timeframe=execution_timeframe,
+        )
+    if mode == "explicit":
+        return series_specs_from_descriptors(
+            explicit,
+            indicators,
+            patterns,
+            execution_timeframe=execution_timeframe,
+        )
+    pattern_names = {name.casefold() for name in patterns.names()}
+    declared_patterns = [
+        descriptor
+        for descriptor in declared
+        if str(descriptor.get("name", "")).casefold() in pattern_names
+    ]
+    return [
+        *(ResolvedSeriesSpec(spec, execution_timeframe) for spec in indicators.list()),
+        *series_specs_from_descriptors(
+            declared_patterns,
+            indicators,
+            patterns,
+            execution_timeframe=execution_timeframe,
+        ),
+    ]
 
 
 def _name_key_map(names: Collection[str]) -> dict[str, str]:

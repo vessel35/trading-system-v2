@@ -518,10 +518,13 @@ def test_the_history_floor_covers_a_policy_declared_daily_requirement() -> None:
     """
     config = _config()
     engine = Engine.__new__(Engine)
+    engine.config = config
+    engine._indicator_specs = []
     engine._money_management = cast(MoneyManagementBase, _TurtlePolicyStub())
+    engine._required_warmups = Engine._warmups_by_timeframe(engine, strategy_min_history=9)
 
     # Nine 1h bars of warm-up span barely over a day; twenty daily bars span twenty.
-    span = Engine._warmup_span(engine, config, required_warmup=9)
+    span = Engine._warmup_span(engine)
 
     assert span >= timedelta(days=20), "the daily requirement must widen the floor"
 

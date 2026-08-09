@@ -42,6 +42,7 @@ from core_lib.money_management import (
 )
 from core_lib.patterns import TALIB_FUNCTIONS, TALIB_SOURCE_VERSION
 from core_lib.ports import CatalogStore, DataFeed, StrategyRegistry
+from core_lib.series_resolution import ResolvedSeriesSpec
 from core_lib.strategy import (
     AdapterManager,
     InProcessStrategyRegistry,
@@ -318,6 +319,57 @@ class _PatternStrategy(_Strategy):
         return super().analyze(market_data, current_position)
 
 
+class _MultiTimeframeStrategy(_Strategy):
+    observed_market_data: ClassVar[list[dict[str, object]]] = []
+
+    @classmethod
+    def get_metadata(cls) -> StrategyMetadata:
+        metadata = super().get_metadata()
+        metadata.required_indicators = [{"name": "EMA", "params": {"period": 9}, "timeframe": "4h"}]
+        return metadata
+
+    def analyze(
+        self,
+        market_data: dict[str, object],
+        current_position: Position | None,
+    ) -> None:
+        del current_position
+        type(self).observed_market_data.append(dict(market_data))
+        return None
+
+
+class _MultiTimeframeStrategyCatalog(StrategyRegistry):
+    def get(self, strategy_id: str) -> dict[str, object]:
+        assert strategy_id == "multi-timeframe-fixture"
+        return {
+            "strategy_id": strategy_id,
+            "class_name": _MultiTimeframeStrategy.__name__,
+            "module_path": _MultiTimeframeStrategy.__module__,
+            "is_active": True,
+            "is_deprecated": False,
+        }
+
+    def list(self) -> list[dict[str, object]]:
+        return [self.get("multi-timeframe-fixture")]
+
+    def register(self, strategy_id: str, meta: dict[str, object]) -> None:
+        del strategy_id, meta
+        raise PermissionError("read-only fixture")
+
+
+class _MultiTimeframeFeed(_Feed):
+    def __init__(self, execution: list[Candle], upper: list[Candle]) -> None:
+        super().__init__(execution)
+        self._upper = upper
+
+    def candles(self, symbol: str, tf: str, up_to: datetime) -> list[Candle]:
+        if tf == "4h":
+            assert symbol == "BTCUSDT"
+            self.candle_calls += 1
+            return [candle for candle in self._upper if candle.close_time <= up_to]
+        return super().candles(symbol, tf, up_to)
+
+
 class _StrategyCatalog(StrategyRegistry):
     def get(self, strategy_id: str) -> dict[str, object]:
         assert strategy_id == "engine-fixture"
@@ -494,6 +546,12 @@ def _pattern_manager() -> AdapterManager:
     plugins = InProcessStrategyRegistry()
     plugins.register("pattern-fixture", _PatternStrategy)
     return AdapterManager(_PatternStrategyCatalog(), plugins)
+
+
+def _multi_timeframe_manager() -> AdapterManager:
+    plugins = InProcessStrategyRegistry()
+    plugins.register("multi-timeframe-fixture", _MultiTimeframeStrategy)
+    return AdapterManager(_MultiTimeframeStrategyCatalog(), plugins)
 
 
 def _reversal_manager() -> AdapterManager:
@@ -2804,6 +2862,182 @@ def test_a_declared_policy_input_that_is_missing_is_refused_by_name(tmp_path: Pa
 # entry is how the guard gets defeated: a writer changes hashed content, swaps the
 # four strings, and leaves the version alone. Add a new key instead, so the diff
 # shows the version moving with the content it names.
+def _multi_timeframe_candles(*, changed_tail: bool) -> tuple[list[Candle], list[Candle]]:
+    start = datetime(2026, 1, 3, tzinfo=UTC)
+    history_start = start - timedelta(hours=36)
+    execution = [
+        Candle(
+            symbol="BTCUSDT",
+            exchange="binance",
+            timeframe="1h",
+            open_time=history_start + timedelta(hours=index),
+            close_time=history_start + timedelta(hours=index + 1),
+            open=100.0 + index,
+            high=101.0 + index,
+            low=99.0 + index,
+            close=100.5 + index,
+            volume=100.0,
+            quote_volume=None,
+            trade_count=None,
+        )
+        for index in range(44)
+    ]
+    upper = []
+    for index in range(11):
+        opened = history_start + timedelta(hours=4 * index)
+        close = 200.0 + index
+        if changed_tail and index == 9:
+            close += 80.0
+        upper.append(
+            Candle(
+                symbol="BTCUSDT",
+                exchange="binance",
+                timeframe="4h",
+                open_time=opened,
+                close_time=opened + timedelta(hours=4),
+                open=200.0 + index,
+                high=max(201.0 + index, close),
+                low=199.0 + index,
+                close=close,
+                volume=400.0,
+                quote_volume=None,
+                trade_count=None,
+            )
+        )
+    return execution, upper
+
+
+def _run_multi_timeframe_fixture(tmp_path: Path, *, changed_tail: bool) -> RunResult:
+    execution, upper = _multi_timeframe_candles(changed_tail=changed_tail)
+    start = datetime(2026, 1, 3, tzinfo=UTC)
+    config = _config(run_name="multi-changed" if changed_tail else "multi-base").model_copy(
+        update={
+            "strategy_id": "multi-timeframe-fixture",
+            "start": start,
+            "end": start + timedelta(hours=8),
+        }
+    )
+    costs = BacktestCostModel(config.cost_values)
+    _MultiTimeframeStrategy.observed_market_data.clear()
+    return Engine(
+        _MultiTimeframeFeed(execution, upper),
+        _Broker(costs),
+        BacktestClock.from_candles(execution),
+        costs,
+        BacktestEvidenceSink(tmp_path),
+        _Catalog(),
+        _multi_timeframe_manager(),
+        prereg=_prereg(),
+    ).run(config)
+
+
+def test_multi_timeframe_series_aligns_without_future_values_and_records_its_source(
+    tmp_path: Path,
+) -> None:
+    unchanged = _run_multi_timeframe_fixture(tmp_path / "unchanged", changed_tail=False)
+    first_values = [
+        cast(Mapping[str, object], item["indicators"])["ema:period=9@4h"]
+        for item in _MultiTimeframeStrategy.observed_market_data
+    ]
+    first_market_data = list(_MultiTimeframeStrategy.observed_market_data)
+
+    changed = _run_multi_timeframe_fixture(tmp_path / "changed", changed_tail=True)
+    second_values = [
+        cast(Mapping[str, object], item["indicators"])["ema:period=9@4h"]
+        for item in _MultiTimeframeStrategy.observed_market_data
+    ]
+
+    assert first_values[:3] == second_values[:3]
+    assert first_values[3] != second_values[3]
+    assert first_values[:3] == [first_values[0]] * 3
+    assert all(item["timeframe"] == "1h" for item in first_market_data)
+    assert all(
+        all(candle.timeframe == "1h" for candle in cast(list[Candle], item["candles"]))
+        for item in first_market_data
+    )
+    assert unchanged.integrity_status == changed.integrity_status == "passed"
+    with sqlite3.connect(unchanged.evidence_path) as connection:
+        unchanged_source_hash = connection.execute(
+            """
+            SELECT content_hash
+            FROM SOURCE_DATA_SNAPSHOT
+            WHERE source_kind = 'ohlcv' AND timeframe = '4h'
+            """
+        ).fetchone()[0]
+
+    start = datetime(2026, 1, 3, tzinfo=UTC)
+    with sqlite3.connect(changed.evidence_path) as connection:
+        assert connection.execute(
+            """
+            SELECT feature_ts, candle_open_time, candle_close_time
+            FROM INDICATOR_SNAPSHOT
+            WHERE indicator_key = 'ema:period=9@4h'
+            ORDER BY snapshot_seq
+            LIMIT 4
+            """
+        ).fetchall() == [
+            (
+                int(start.timestamp() * 1_000),
+                int((start - timedelta(hours=4)).timestamp() * 1_000),
+                int(start.timestamp() * 1_000),
+            ),
+            (
+                int(start.timestamp() * 1_000),
+                int((start - timedelta(hours=4)).timestamp() * 1_000),
+                int(start.timestamp() * 1_000),
+            ),
+            (
+                int(start.timestamp() * 1_000),
+                int((start - timedelta(hours=4)).timestamp() * 1_000),
+                int(start.timestamp() * 1_000),
+            ),
+            (
+                int((start + timedelta(hours=4)).timestamp() * 1_000),
+                int(start.timestamp() * 1_000),
+                int((start + timedelta(hours=4)).timestamp() * 1_000),
+            ),
+        ]
+        source = connection.execute(
+            """
+            SELECT range_start, range_end, gap_count, content_hash
+            FROM SOURCE_DATA_SNAPSHOT
+            WHERE source_kind = 'ohlcv' AND timeframe = '4h'
+            """
+        ).fetchone()
+        assert source is not None
+        assert source[0] < source[1]
+        assert source[2] == 0
+        assert isinstance(source[3], str) and len(source[3]) == 64
+        assert source[3] != unchanged_source_hash
+
+
+def test_warmup_counts_are_kept_per_timeframe_and_policy_minimum_wins() -> None:
+    engine = Engine.__new__(Engine)
+    config = _config().model_copy(update={"timeframe": "5m"})
+    engine.config = config
+
+    class _LongerPolicy:
+        def required_indicators(self) -> tuple[PolicyIndicatorRequirement, ...]:
+            return (
+                PolicyIndicatorRequirement(
+                    name="ATR",
+                    params={"period": 14},
+                    timeframe="strategy",
+                    min_history=50,
+                ),
+            )
+
+    engine._indicator_specs = [
+        ResolvedSeriesSpec(DEFAULT_REGISTRY.get("ATR", {"period": 14}), "5m"),
+        ResolvedSeriesSpec(DEFAULT_REGISTRY.get("EMA", {"period": 55}), "4h"),
+    ]
+    engine._money_management = cast(MoneyManagementBase, _LongerPolicy())
+    engine._required_warmups = Engine._warmups_by_timeframe(engine, strategy_min_history=1)
+
+    assert engine._required_warmups == {"5m": 50, "4h": 55}
+    assert Engine._warmup_span(engine) == timedelta(hours=4 * 55 * 4)
+
+
 _EVIDENCE_GOLDEN_HASHES: dict[str, dict[str, str]] = {
     "1.6.0": {
         "legacy": "8e27b6e3c54acf76243a47ec429ee50a14878f1fe02982c714b65ecd764bded0",
