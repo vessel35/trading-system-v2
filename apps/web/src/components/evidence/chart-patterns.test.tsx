@@ -15,7 +15,7 @@ import {
 const OPEN_TIME = "2025-01-01T00:00:00Z";
 
 function patternSnapshot({
-  key = "pat_doji",
+  key = "pat_doji@1h",
   strength = 1,
   direction = 1,
   confirmation = false,
@@ -46,10 +46,10 @@ function patternSnapshot({
     candle_close_time: "2025-01-01T01:00:00Z",
     value: null,
     value_json: {
-      [key]: confirmation ? 0 : 1,
-      [`${key}_confirm`]: confirmation ? 1 : 0,
-      [`${key}_dir`]: direction,
-      [`${key}_strength`]: confirmation ? 0 : strength,
+      occurred: confirmation ? 0 : 1,
+      confirmed: confirmation ? 1 : 0,
+      direction,
+      strength: confirmation ? 0 : strength,
     },
     is_warmup: false,
   };
@@ -89,8 +89,8 @@ describe("차트 패턴 표식", () => {
     )).toContain("강도 해당 없음");
 
     const mixed = buildPatternMarkerGroups([
-      patternSnapshot({ key: "pat_doji" }),
-      patternSnapshot({ key: "pat_hammer", confirmation: true }),
+      patternSnapshot({ key: "pat_doji@1h" }),
+      patternSnapshot({ key: "pat_hammer@1h", confirmation: true }),
     ])[0].marker;
     expect(mixed.shape).toBe("square");
     expect(mixed.text).toContain("성립·확인");
@@ -118,17 +118,17 @@ describe("차트 패턴 표식", () => {
 
   it("같은 봉의 여러 패턴을 개수가 보이는 표식 하나와 상세 목록으로 묶는다", () => {
     const groups = buildPatternMarkerGroups([
-      patternSnapshot({ key: "pat_doji" }),
-      patternSnapshot({ key: "pat_gravestone_doji" }),
+      patternSnapshot({ key: "pat_doji@1h" }),
+      patternSnapshot({ key: "pat_gravestone_doji@1h" }),
     ]);
 
     expect(groups).toHaveLength(1);
     expect(groups[0].marker.text).toBe("패턴 2 · 성립");
     render(<PatternGroupDetails group={groups[0]} />);
     expect(screen.getByText("이 봉에서 기록된 패턴 2개")).toBeInTheDocument();
-    expect(screen.getByText(/pat_doji \(2\.0\.0\+talib\.0\.7\.1\)/)).toBeInTheDocument();
+    expect(screen.getByText(/pat_doji@1h \(2\.0\.0\+talib\.0\.7\.1\)/)).toBeInTheDocument();
     expect(
-      screen.getByText(/pat_gravestone_doji \(2\.0\.0\+talib\.0\.7\.1\)/),
+      screen.getByText(/pat_gravestone_doji@1h \(2\.0\.0\+talib\.0\.7\.1\)/),
     ).toBeInTheDocument();
   });
 
@@ -141,7 +141,7 @@ describe("차트 패턴 표식", () => {
         impl_version: "1.0.0",
       },
       {
-        indicator_key: "pat_doji",
+        indicator_key: "pat_doji@1h",
         indicator_name: "pat_doji",
         series_kind: "pattern",
         impl_version: "2.0.0+talib.0.7.1",
@@ -157,7 +157,7 @@ describe("차트 패턴 표식", () => {
         evidence={{
           rows: [],
           truncated: true,
-          truncatedKeys: ["pat_doji"],
+          truncatedKeys: ["pat_doji@1h"],
           limit: 5_000,
           pageLimit: 25,
         }}
@@ -166,7 +166,7 @@ describe("차트 패턴 표식", () => {
 
     const notice = screen.getByRole("status");
     expect(notice).toHaveTextContent("잘렸습니다");
-    expect(notice).toHaveTextContent("pat_doji");
+    expect(notice).toHaveTextContent("pat_doji@1h");
     expect(notice).toHaveTextContent("구간 전체가 표시된 것으로 해석하면 안 됩니다");
   });
 });

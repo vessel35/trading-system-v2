@@ -108,10 +108,24 @@ def test_explicit_indicator_mode_requires_a_well_formed_nonempty_selection() -> 
         {
             **_raw_config(),
             "indicator_mode": "explicit",
-            "explicit_indicators": [{"name": "EMA", "params": {"period": 9}}],
+            "explicit_indicators": [
+                {"name": "EMA", "params": {"period": 9}, "timeframe": "strategy"}
+            ],
         }
     )
-    assert config.explicit_indicators == [{"name": "EMA", "params": {"period": 9}}]
+    assert config.explicit_indicators == [
+        {"name": "EMA", "params": {"period": 9}, "timeframe": "strategy"}
+    ]
+    with pytest.raises(ValidationError, match="positive minute, hour, or day interval"):
+        RunConfig.model_validate(
+            {
+                **_raw_config(),
+                "indicator_mode": "explicit",
+                "explicit_indicators": [
+                    {"name": "EMA", "params": {"period": 9}, "timeframe": "weekly"}
+                ],
+            }
+        )
 
 
 def test_extra_run_keys_are_forbidden() -> None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from core_lib.series import series_key_of
 from core_lib.types import (
     Candle,
     DecisionAction,
@@ -19,8 +20,8 @@ from ..profile import StrategyProfile
 
 STRATEGY_ID = "vessel-reference"
 
-_FAST_EMA = "ema:period=9"
-_SLOW_EMA = "ema:period=21"
+_FAST_EMA_PARAMS = {"period": 9}
+_SLOW_EMA_PARAMS = {"period": 21}
 
 
 class VesselReference:
@@ -99,16 +100,25 @@ class VesselReference:
         """Emit explicit EMA-regime entry and exit decisions without sizing fields."""
         candle = market_data.get("candle")
         indicators = market_data.get("indicators")
+        timeframe = market_data.get("timeframe")
         market_type_value = market_data.get("market_type")
         if not isinstance(candle, Candle):
             raise TypeError("market_data.candle must be Candle")
         if not isinstance(indicators, Mapping):
             raise TypeError("market_data.indicators must be a mapping")
+        if not isinstance(timeframe, str):
+            raise TypeError("market_data.timeframe must be a string")
         if not isinstance(market_type_value, str):
             raise TypeError("market_data.market_type must be a string")
 
-        fast = self._indicator(indicators, _FAST_EMA)
-        slow = self._indicator(indicators, _SLOW_EMA)
+        fast = self._indicator(
+            indicators,
+            series_key_of("EMA", _FAST_EMA_PARAMS, timeframe),
+        )
+        slow = self._indicator(
+            indicators,
+            series_key_of("EMA", _SLOW_EMA_PARAMS, timeframe),
+        )
         market_type = MarketType(market_type_value)
 
         if current_position is not None:

@@ -28,10 +28,6 @@ import re
 NAME_PREFIX = "pat_"
 """§5.1, from decision G: a pattern name never collides with an indicator name."""
 
-DIRECTION_SUFFIX = "_dir"
-STRENGTH_SUFFIX = "_strength"
-CONFIRM_SUFFIX = "_confirm"
-
 BULLISH = 1.0
 BEARISH = -1.0
 DIRECTIONLESS = 0.0
@@ -54,37 +50,23 @@ NOT_MATCHED = 0.0
 MATCHED = 1.0
 
 _NAME_PATTERN = re.compile(r"^pat_[a-z0-9]+(?:_[a-z0-9]+)*$")
-_RESERVED_SUFFIXES = (DIRECTION_SUFFIX, STRENGTH_SUFFIX, CONFIRM_SUFFIX)
 _DIRECTIONS = (BULLISH, BEARISH, DIRECTIONLESS)
 _STRENGTHS = (FULL_STRENGTH, BOUNDARY_STRENGTH)
 
 
 def assert_pattern_name(name: str) -> None:
-    """Reject a name that breaks §5.1's naming rule.
-
-    A name ending in one of the three suffixes is rejected as well, because
-    `pat_x_dir` would produce the same key as the direction output of `pat_x` and
-    the two would silently overwrite each other in one result dictionary.
-    """
+    """Reject a name that breaks §5.1's naming rule."""
     if not _NAME_PATTERN.fullmatch(name):
         raise ValueError(
             f"pattern name must be lowercase words joined by underscores "
             f"and start with {NAME_PREFIX!r}: {name!r}"
         )
-    for suffix in _RESERVED_SUFFIXES:
-        if name.endswith(suffix):
-            raise ValueError(f"pattern name must not end with the reserved {suffix!r}: {name!r}")
 
 
 def output_keys(name: str) -> tuple[str, str, str, str]:
     """Return the match, direction, strength, and confirmation keys for a pattern."""
     assert_pattern_name(name)
-    return (
-        name,
-        f"{name}{DIRECTION_SUFFIX}",
-        f"{name}{STRENGTH_SUFFIX}",
-        f"{name}{CONFIRM_SUFFIX}",
-    )
+    return ("occurred", "direction", "strength", "confirmed")
 
 
 def _build(name: str, values: tuple[float, float, float, float]) -> dict[str, float]:

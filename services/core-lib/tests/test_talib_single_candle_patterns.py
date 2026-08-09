@@ -108,6 +108,6 @@ def test_talib_color_treats_equal_open_close_as_white() -> None:
     pattern = TALIB_SINGLE_CANDLE_BY_NAME["pat_spinning_top"]
     output = pattern.compute_vectorized([*warmup, target])[-1]
 
-    assert output["pat_spinning_top"] == 1.0
-    assert output["pat_spinning_top_dir"] == 1.0
+    assert output["occurred"] == 1.0
+    assert output["direction"] == 1.0
     assert talib_integer_from_outputs("pat_spinning_top", output) == 100

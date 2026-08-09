@@ -36,7 +36,14 @@ def _local_values(run_seq: int) -> dict[str, object]:
         "strategy_name": "FakeBreakout",
         "strategy_version": "1.0.0",
         "params_json": {"period": 20},
-        "resolved_indicators_json": [{"name": "EMA", "params": {"period": 9}, "version": "1.0.0"}],
+        "resolved_indicators_json": [
+            {
+                "name": "EMA",
+                "params": {"period": 9},
+                "timeframe": "1h",
+                "version": "1.0.0",
+            }
+        ],
         "params_schema_version": "1.0.0",
         "symbol": "BTCUSDT",
         "exchange": "binance",
@@ -181,7 +188,7 @@ def _finalize(
         EvidenceRecord(
             "INDICATOR_DEFINITION",
             {
-                "indicator_key": "ema:period=9",
+                "indicator_key": "ema:period=9@1h",
                 "indicator_name": "EMA",
                 "params_json": {"period": 9},
                 "impl_version": "1.0.0",
@@ -200,7 +207,7 @@ def _finalize(
             "INDICATOR_SNAPSHOT",
             {
                 "snapshot_seq": 1,
-                "indicator_key": "ema:period=9",
+                "indicator_key": "ema:period=9@1h",
                 "feature_ts": datetime(2026, 1, 1, 1, tzinfo=UTC),
                 "candle_open_time": datetime(2026, 1, 1, tzinfo=UTC),
                 "candle_close_time": datetime(2026, 1, 1, 1, tzinfo=UTC),
@@ -406,7 +413,14 @@ def _run_meta() -> dict[str, object]:
         "strategy_name": "FakeBreakout",
         "strategy_version": "1.0.0",
         "params_json": {"period": 20},
-        "resolved_indicators_json": [{"name": "EMA", "params": {"period": 9}, "version": "1.0.0"}],
+        "resolved_indicators_json": [
+            {
+                "name": "EMA",
+                "params": {"period": 9},
+                "timeframe": "1h",
+                "version": "1.0.0",
+            }
+        ],
         "params_schema_version": "1.0.0",
         "symbol": "BTCUSDT",
         "exchange": "binance",

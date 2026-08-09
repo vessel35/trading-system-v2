@@ -39,12 +39,12 @@ function patternEvent(snapshot: IndicatorSnapshot): PatternEvent | null {
     return null;
   }
   const values = snapshot.value_json as Record<string, unknown>;
-  const occurred = values[snapshot.indicator_key] === 1;
-  const confirmed = values[`${snapshot.indicator_key}_confirm`] === 1;
+  const occurred = values.occurred === 1;
+  const confirmed = values.confirmed === 1;
   if (occurred === confirmed) return null;
 
-  const rawDirection = values[`${snapshot.indicator_key}_dir`];
-  const strength = values[`${snapshot.indicator_key}_strength`];
+  const rawDirection = values.direction;
+  const strength = values.strength;
   if (rawDirection !== -1 && rawDirection !== 1) return null;
   if (confirmed) {
     if (strength !== 0) return null;

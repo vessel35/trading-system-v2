@@ -704,13 +704,14 @@ Turtle 정책은 고정 take-profit을 사용하지 않고 전략의 청산 신�
 `explicit_indicators`도 마찬가지다.
 
 `indicators`에서 값을 꺼낼 때 쓰는 key는 선언한 이름이 아니라 **execution
-key**다. 지표는 이름 뒤에 parameter가 붙어 `ema:period=21`이 되고, 패턴은 이름
-그대로 `pat_engulfing`이다.
+key**다. 지표는 이름 뒤에 parameter가 붙고 패턴은 이름 그대로이며, **둘 다 뒤에
+어느 timeframe에서 계산했는지가 붙어** `ema:period=21@1h`와 `pat_engulfing@1h`가
+된다. 붙는 규칙은 4.4.1 절에 있다.
 
-**패턴은 언제나 출력 넷을 담은 `dict`를 낸다.** `indicators["pat_engulfing"]`이
-그 `dict`이고, 안쪽 key는 `pat_engulfing`이 성립 여부, `pat_engulfing_dir`이
-방향, `pat_engulfing_strength`가 강도, `pat_engulfing_confirm`이 뒤 봉에서의
-확인이다. 강도는 경계 성립이면 0.5이고 온전한 성립이면 1.0이다.
+**패턴은 언제나 출력 넷을 담은 `dict`를 낸다.** `indicators["pat_engulfing@1h"]`이
+그 `dict`이고, 안쪽 key는 `occurred`가 성립 여부, `direction`이 방향, `strength`가
+강도, `confirmed`가 뒤 봉에서의 확인이다. 강도는 경계 성립이면 0.5이고 온전한
+성립이면 1.0이다.
 
 **네 이름이 `indicators`에 나란히 들어오지 않는다.** `indicators`에 있는 key는
 `pat_engulfing` 하나뿐이며, 나머지 셋은 그 `dict` 안에 있다.
@@ -774,36 +775,49 @@ series다.
 
 ```python
 market_data["indicators"]["pat_engulfing@4h"] == {
-    "pat_engulfing": 1.0,
-    "pat_engulfing_dir": 1.0,
-    "pat_engulfing_strength": 1.0,
-    "pat_engulfing_confirm": 0.0,
+    "occurred": 1.0,
+    "direction": 1.0,
+    "strength": 1.0,
+    "confirmed": 0.0,
 }
 ```
 
-**안쪽 이름이 series 이름을 되풀이하는 것은 구현할 때 함께 정한다.** 위에서 보듯
-바깥이 `pat_engulfing@4h`인데 안쪽이 다시 `pat_engulfing`으로 시작한다. 출력이
-여럿인 지표는 그렇지 않아서, MACD의 안쪽 이름은 `macd`·`signal`·`histogram`으로
-출력 이름만 있다. **패턴만 안쪽에서 자기 이름을 되풀이하며, `@`가 붙으면 더
-도드라진다.**
+**안쪽 이름은 출력이 무엇인지만 말한다.** 성립 여부는 `occurred`, 방향은
+`direction`, 강도는 `strength`, 뒤 봉에서의 확인은 `confirmed`다. 이 넷은 패턴
+계산 표준(`docs/references/candlestick_pattern_calc_spec.md`의 5.1 절)이 소유한다.
 
-**그래도 지금 바꾸지 않기로 했다(2026-08-08 결정).** 이것은 정확성 문제가 아니라
-읽기 문제인데, 안쪽 이름은 패턴 계산 표준
-(`docs/references/candlestick_pattern_calc_spec.md`의 5.1 절)이 소유하고 61종의
-대조 테스트와 증거 차트가 그 이름에 걸려 있다. **바깥 key 형식을 바꿀 때 이미
-증거 기록의 판이 올라가므로, 두 변경을 그 한 번에 함께 흡수한다.** 지금 따로
-하면 차트와 테스트를 두 번 고치게 된다.
+전에는 안쪽 이름이 `pat_engulfing`처럼 series 이름을 되풀이했고, 증거 차트가
+**바깥 key 문자열을 가져다 안쪽 이름을 만들어** 조회했다. 그래서 바깥에 `@`가
+붙는 순간 안쪽에서 아무것도 찾지 못했다. **바깥 key 형식을 바꾸면서 함께
+바꾸었다**(2026-08-08 결정대로). 값은 하나도 바뀌지 않았고 이름만 바뀌었다.
 
-**지금은 이 가운데 무엇도 구현되어 있지 않다.** 선언은 `name`과 `params` 둘만
-받고 그 밖의 key가 있으면 거부하며, `market_data`의 `candles`와 `timeframe`도
-하나씩뿐이고, `series_key`는 timeframe을 붙이지 않는다. **그러므로 이 절은 목표
-상태이며 지금 따라 쓸 수 있는 규칙이 아니다.**
+**실행 timeframe을 선언에 글자로 적지 않는다.** 전략은 `supported_timeframes`로
+여러 timeframe을 지원한다고 밝힐 수 있으므로 선언에 `1h`라고 적어 두면 같은
+전략을 4시간봉으로 돌릴 수 없다. **실행 timeframe을 가리키는 말은 `strategy`
+하나뿐이며**, 구체 timeframe이 그 실행의 timeframe과 같으면 거부한다. 이 규칙
+덕분에 **구체 timeframe은 실행 timeframe과 절대 같아질 수 없고, 서로 다른 두
+선언이 같은 execution key로 겹치는 일이 생기지 않는다.**
 
-**key 모양을 바꾸면 함께 고쳐야 하는 자리가 있다.** Evidence의
-`INDICATOR_DEFINITION`과 `INDICATOR_SNAPSHOT`이 이 key를 그대로 담으므로 새 판의
-실행부터 값이 달라지고, `manual` 정책이 ATR을 찾을 때 쓰는 `atr:period=14`처럼
-**key 문자열을 코드에 박아 둔 자리는 실행 timeframe에서 만들어 쓰도록 바꿔야
-한다.** 박아 둔 채로 두면 값을 찾지 못해 조용히 정책이 실패한다.
+**어디까지 구현되었나.** 선언의 `timeframe` 자리와 위의 key 형식, 그리고 패턴
+안쪽 이름은 구현되어 있다. **아직 캔들 흐름은 하나뿐이다.** 그래서 실행
+timeframe이 아닌 값을 선언하면 아직 지원하지 않는다는 사유로 거부되며,
+`market_data`의 `candles`와 `timeframe`도 실행 timeframe 하나를 가리킨다.
+**여러 흐름을 읽고 위의 정렬 규칙을 지키는 것은 아직 남아 있다.**
+
+**key를 만드는 곳은 하나로 모여 있어야 한다.** 값을 쓸 때와 기록에서 읽어 되만들
+때가 서로 다른 규칙을 쓰면 같은 series를 찾지 못한다. 그래서 서버 쪽은 한 함수가
+key를 만들고, **그 함수는 timeframe을 반드시 받는다** — 받지 않고 만들 수 있는
+길을 두면 붙지 않은 key가 조용히 섞인다. 붙는 timeframe은 언제나 해석된 값이며
+`strategy`라는 말은 key에 들어갈 수 없다.
+
+**화면은 같은 규칙을 한 번 더 갖고 있다.** 실행 비교 화면이 기록된 선언에서 key를
+다시 만들어 견주므로, 서버 쪽만 고치면 화면이 만든 key가 기록된 key와 어긋나
+**같은 series의 서로 다른 두 timeframe이 하나로 겹쳐 보인다.** 두 곳을 함께
+맞춘다.
+
+**Evidence의 `INDICATOR_DEFINITION`과 `INDICATOR_SNAPSHOT`이 이 key를 그대로
+담는다.** 그래서 key 모양을 바꾸면 새 판의 실행부터 기록된 값이 달라지고, 판을
+올리고 새 고정을 더해야 한다.
 
 **자금관리 정책 쪽에는 좁은 경로가 하나 있다.** `PolicyIndicatorRequirement`는
 요구마다 `timeframe`을 가지며 값은 `strategy`와 `1d` 둘뿐이다. `1d`로 적은

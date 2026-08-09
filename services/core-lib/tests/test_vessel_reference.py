@@ -79,11 +79,12 @@ def test_vessel_declares_exact_pipeline_inputs_and_no_trailing() -> None:
     signal = strategy.analyze(
         {
             "candle": _candle(),
+            "timeframe": "1h",
             "market_type": "futures",
             "indicators": {
-                "ema:period=9": 102.0,
-                "ema:period=21": 100.0,
-                "atr:period=14": 2.0,
+                "ema:period=9@1h": 102.0,
+                "ema:period=21@1h": 100.0,
+                "atr:period=14@1h": 2.0,
             },
         },
         None,
@@ -101,11 +102,12 @@ def test_vessel_exits_only_when_ema_regime_reverses() -> None:
     signal = strategy.analyze(
         {
             "candle": _candle(),
+            "timeframe": "1h",
             "market_type": "futures",
             "indicators": {
-                "ema:period=9": 99.0,
-                "ema:period=21": 100.0,
-                "atr:period=14": 2.0,
+                "ema:period=9@1h": 99.0,
+                "ema:period=21@1h": 100.0,
+                "atr:period=14@1h": 2.0,
             },
         },
         _position(),

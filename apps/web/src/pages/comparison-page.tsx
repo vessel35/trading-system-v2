@@ -71,10 +71,14 @@ const METRICS: MetricDefinition[] = [
 type ResolvedSeries = { key: string; version: string };
 
 function seriesParam(value: unknown): string | null {
-  if (typeof value === "string") return `'${value.replaceAll("'", "\\'")}'`;
-  if (typeof value === "boolean") return value ? "True" : "False";
+  if (typeof value === "string") return value;
+  if (typeof value === "boolean") return value ? "true" : "false";
   if (typeof value === "number" && Number.isFinite(value)) return String(value);
   return null;
+}
+
+function seriesName(value: string): string {
+  return value.toLocaleLowerCase("en-US").replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
 }
 
 export function resolvedSeries(value: unknown): ResolvedSeries[] {
@@ -82,7 +86,11 @@ export function resolvedSeries(value: unknown): ResolvedSeries[] {
   return value.flatMap((item) => {
     if (typeof item !== "object" || item === null || Array.isArray(item)) return [];
     const record = item as Record<string, unknown>;
-    if (typeof record.name !== "string" || typeof record.version !== "string") {
+    if (
+      typeof record.name !== "string" ||
+      typeof record.version !== "string" ||
+      typeof record.timeframe !== "string"
+    ) {
       return [];
     }
     if (
@@ -100,7 +108,7 @@ export function resolvedSeries(value: unknown): ResolvedSeries[] {
       });
     return [
       {
-        key: params.length > 0 ? `${record.name}(${params.join(",")})` : record.name,
+        key: `${seriesName(record.name)}${params.length > 0 ? `:${params.join(",")}` : ""}@${record.timeframe}`,
         version: record.version,
       },
     ];

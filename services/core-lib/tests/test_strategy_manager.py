@@ -375,6 +375,34 @@ def test_a_registration_that_agrees_with_the_adaptee_is_accepted() -> None:
     assert adapter.get_metadata().min_history == 55
 
 
+def test_catalog_declaration_identity_includes_the_defaulted_timeframe() -> None:
+    manager, _, catalog = make_manager()
+    catalog.rows["fake-breakout"].update(
+        {
+            "min_history": 55,
+            "supported_timeframes": ["1h"],
+            "required_indicators_json": [
+                {"name": "EMA", "params": {"period": 21}, "timeframe": "4h"}
+            ],
+        }
+    )
+
+    with pytest.raises(ValueError, match="required_indicators"):
+        manager.create(
+            "fake-breakout",
+            {"strategy_id": "fake-breakout", "params": {"fast": 10}},
+        )
+
+    catalog.rows["fake-breakout"]["required_indicators_json"] = [
+        {"name": "EMA", "params": {"period": 21}},
+        {"name": "EMA", "params": {"period": 21}, "timeframe": "strategy"},
+    ]
+    assert manager.create(
+        "fake-breakout",
+        {"strategy_id": "fake-breakout", "params": {"fast": 10}},
+    ).get_metadata().required_indicators == [{"name": "EMA", "params": {"period": 21}}]
+
+
 def test_catalog_reconciliation_returns_five_distinct_states() -> None:
     plugins = InProcessStrategyRegistry()
     for strategy_id in (

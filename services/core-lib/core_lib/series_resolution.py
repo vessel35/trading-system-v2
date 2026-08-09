@@ -7,7 +7,12 @@ from dataclasses import dataclass
 
 from core_lib.indicators.registry import IndicatorRegistry
 from core_lib.patterns.registry import PatternRegistry
-from core_lib.series import SeriesSpec, normalize_series_name
+from core_lib.series import (
+    SeriesSpec,
+    normalize_series_name,
+    resolve_series_timeframe,
+    series_descriptor_parts,
+)
 from core_lib.series import series_key as series_key
 
 
@@ -48,6 +53,8 @@ def split_series_descriptors(
     descriptors: Collection[Mapping[str, object]],
     indicators: IndicatorRegistry,
     patterns: PatternRegistry,
+    *,
+    execution_timeframe: str,
 ) -> SplitSeriesDescriptors:
     """Route descriptors by case-insensitive registry name ownership."""
     assert_disjoint_series_registry_names(indicators, patterns)
@@ -57,16 +64,18 @@ def split_series_descriptors(
     pattern_descriptors: list[Mapping[str, object]] = []
 
     for descriptor in descriptors:
-        name, params = _descriptor_parts(descriptor)
+        name, params, declared_timeframe = series_descriptor_parts(descriptor)
+        resolve_series_timeframe(declared_timeframe, execution_timeframe)
+        normalized = {"name": name, "params": dict(params)}
         folded = name.casefold()
         in_indicators = folded in indicator_names
         in_patterns = folded in pattern_names
         if in_indicators and in_patterns:
             raise ValueError(f"series name is registered in both registries: {name}")
         if in_indicators:
-            indicator_descriptors.append(descriptor)
+            indicator_descriptors.append(normalized)
         elif in_patterns:
-            pattern_descriptors.append(descriptor)
+            pattern_descriptors.append(normalized)
         else:
             raise KeyError(f"series is not registered in either registry: {name} {dict(params)}")
 
@@ -77,9 +86,16 @@ def series_specs_from_descriptors(
     descriptors: Collection[Mapping[str, object]],
     indicators: IndicatorRegistry,
     patterns: PatternRegistry,
+    *,
+    execution_timeframe: str,
 ) -> list[SeriesSpec]:
     """Resolve descriptors from both registries without requiring a non-empty result."""
-    split = split_series_descriptors(descriptors, indicators, patterns)
+    split = split_series_descriptors(
+        descriptors,
+        indicators,
+        patterns,
+        execution_timeframe=execution_timeframe,
+    )
     return [
         *indicators.specs_from_descriptors(split.indicators),
         *patterns.specs_from_descriptors(split.patterns),
@@ -92,6 +108,8 @@ def resolve_series_specs(
     explicit: Collection[Mapping[str, object]],
     indicators: IndicatorRegistry,
     patterns: PatternRegistry,
+    *,
+    execution_timeframe: str,
 ) -> list[SeriesSpec]:
     """Resolve auto, explicit, or all selections across both registries.
 
@@ -105,8 +123,18 @@ def resolve_series_specs(
     if mode not in {"auto", "explicit", "all"}:
         raise ValueError("indicator mode must be auto, explicit, or all")
 
-    declared_split = split_series_descriptors(declared, indicators, patterns)
-    explicit_split = split_series_descriptors(explicit, indicators, patterns)
+    declared_split = split_series_descriptors(
+        declared,
+        indicators,
+        patterns,
+        execution_timeframe=execution_timeframe,
+    )
+    explicit_split = split_series_descriptors(
+        explicit,
+        indicators,
+        patterns,
+        execution_timeframe=execution_timeframe,
+    )
     specs: list[SeriesSpec] = []
     if mode == "auto":
         specs.extend(indicators.specs_from_descriptors(declared_split.indicators))
@@ -119,18 +147,6 @@ def resolve_series_specs(
         specs.extend(patterns.specs_from_descriptors(declared_split.patterns))
 
     return specs
-
-
-def _descriptor_parts(
-    descriptor: Mapping[str, object],
-) -> tuple[str, Mapping[str, object]]:
-    if set(descriptor) != {"name", "params"}:
-        raise ValueError("series descriptor must contain exactly name and params")
-    name = descriptor["name"]
-    params = descriptor["params"]
-    if not isinstance(name, str) or not isinstance(params, Mapping):
-        raise TypeError("series descriptor name/params have invalid types")
-    return name, params
 
 
 def _name_key_map(names: Collection[str]) -> dict[str, str]:

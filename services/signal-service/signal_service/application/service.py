@@ -130,6 +130,7 @@ class SignalGenerationService:
                 {
                     "name": requirement.name,
                     "params": dict(requirement.params),
+                    "timeframe": requirement.timeframe,
                 }
                 for requirement in runtime.money_management.required_indicators()
                 if requirement.timeframe == "strategy"
@@ -141,6 +142,7 @@ class SignalGenerationService:
             (),
             self._indicators,
             self._patterns,
+            execution_timeframe=config.timeframe,
         )
         required_warmup = max(
             metadata.min_history,
@@ -288,7 +290,7 @@ class SignalGenerationService:
         for spec in self._specs:
             value = self._states[spec.identifier].update(candle)
             self._assert_finite_indicator(value, spec.identifier)
-            indicator_values[series_key(spec)] = value
+            indicator_values[series_key(spec, self._require_config().timeframe)] = value
 
         config = self._require_config()
         signal = self._require_strategy().analyze(
@@ -356,7 +358,11 @@ class SignalGenerationService:
         requirements = policy.required_indicators()
         if len(requirements) != 1 or requirements[0].timeframe != "strategy":
             raise ValueError("signal generation requires one strategy-timeframe policy input")
-        key = series_key_of(requirements[0].name, requirements[0].params)
+        key = series_key_of(
+            requirements[0].name,
+            requirements[0].params,
+            config.timeframe,
+        )
         volatility = indicators.get(key)
         if isinstance(volatility, bool) or not isinstance(volatility, float | int):
             raise ValueError(f"money management requires current {key}")

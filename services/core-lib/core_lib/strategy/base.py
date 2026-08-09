@@ -125,7 +125,10 @@ class StrategyBase(ABC):
         values = market_data.get("indicators")
         if not isinstance(values, Mapping):
             raise TypeError("market_data.indicators must be a mapping")
-        key = series_key(spec)
+        timeframe = market_data.get("timeframe")
+        if not isinstance(timeframe, str):
+            raise TypeError("market_data.timeframe must be a string")
+        key = series_key(spec, timeframe)
         try:
             return values[key]
         except KeyError as error:

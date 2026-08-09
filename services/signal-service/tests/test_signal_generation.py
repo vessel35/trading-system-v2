@@ -189,7 +189,7 @@ class _ProbeStrategy:
         indicators = market_data["indicators"]
         assert isinstance(candle, Candle)
         assert isinstance(indicators, Mapping)
-        assert "ema:period=9" in indicators
+        assert "ema:period=9@1h" in indicators
         return TradingSignal(
             symbol=candle.symbol,
             timestamp=candle.close_time,
@@ -342,7 +342,7 @@ def test_finalized_candle_uses_core_incremental_state_and_adaptee_contract() -> 
     state = spec.make_state()
     state.seed(values[:9])
     expected = state.update(values[9])
-    assert observed_indicators == {"ema:period=9": expected}
+    assert observed_indicators == {"ema:period=9@1h": expected}
 
     feed.values.extend(_candles(11)[10:])
     next_cycle = service.poll(feed.values[-1].close_time)
@@ -394,14 +394,14 @@ def test_declared_pattern_reaches_signal_strategy_input() -> None:
     assert pattern_spec.version == "2.0.0+talib.0.7.1"
     assert _PatternProbeStrategy.observed_indicators
     observed = _PatternProbeStrategy.observed_indicators[0]
-    assert set(observed) == {"ema:period=9", "pat_doji"}
-    pattern_value = observed["pat_doji"]
+    assert set(observed) == {"ema:period=9@1h", "pat_doji@1h"}
+    pattern_value = observed["pat_doji@1h"]
     assert isinstance(pattern_value, dict)
     assert set(pattern_value) == {
-        "pat_doji",
-        "pat_doji_confirm",
-        "pat_doji_dir",
-        "pat_doji_strength",
+        "occurred",
+        "direction",
+        "strength",
+        "confirmed",
     }
 
 

@@ -773,23 +773,24 @@ class BacktestEvidenceSink(EvidenceSink):
     def _expected_indicator_keys(self) -> list[str]:
         """Return the execution keys this run declared it would compute.
 
-        The run header records every resolved series. Requirements finalized on
-        another timeframe carry that timeframe in their params; the engine derives
-        those outside the per-bar loop and records no definition for them, so they
-        are not expected here.
+        The run header records every resolved series and its resolved timeframe.
+        Requirements finalized on another timeframe are derived outside the
+        per-bar loop and have no definition here, so they are not expected.
         """
         row = self.connection.execute(
-            "SELECT resolved_indicators_json FROM BACKTEST_RUN_LOCAL"
+            "SELECT resolved_indicators_json, timeframe FROM BACKTEST_RUN_LOCAL"
         ).fetchone()
         if row is None or not row[0]:
             return []
         declared = json.loads(row[0])
+        execution_timeframe = str(row[1])
         keys: list[str] = []
         for entry in declared:
             params = dict(entry.get("params") or {})
-            if "timeframe" in params:
+            timeframe = str(entry["timeframe"])
+            if timeframe != execution_timeframe:
                 continue
-            keys.append(series_key_of(str(entry["name"]), params))
+            keys.append(series_key_of(str(entry["name"]), params, timeframe))
         return keys
 
     def _source_snapshot_failures(self) -> list[str]:

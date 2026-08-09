@@ -319,35 +319,39 @@ def test_degenerate_captured_bar_stays_nan_only_during_warmup_then_finite_and_ca
 
 def test_output_builders_keep_the_four_key_contract() -> None:
     assert output_keys("pat_hammer") == (
-        "pat_hammer",
-        "pat_hammer_dir",
-        "pat_hammer_strength",
-        "pat_hammer_confirm",
+        "occurred",
+        "direction",
+        "strength",
+        "confirmed",
     )
     assert set(undetermined_outputs("pat_hammer")) == set(output_keys("pat_hammer"))
     assert _all_values_nan(undetermined_outputs("pat_hammer"))
     assert no_match_outputs("pat_hammer") == {
-        "pat_hammer": NOT_MATCHED,
-        "pat_hammer_dir": NOT_MATCHED,
-        "pat_hammer_strength": NOT_MATCHED,
-        "pat_hammer_confirm": NOT_MATCHED,
+        "occurred": NOT_MATCHED,
+        "direction": NOT_MATCHED,
+        "strength": NOT_MATCHED,
+        "confirmed": NOT_MATCHED,
     }
     assert match_outputs("pat_hammer", direction=1.0) == {
-        "pat_hammer": MATCHED,
-        "pat_hammer_dir": 1.0,
-        "pat_hammer_strength": FULL_STRENGTH,
-        "pat_hammer_confirm": NOT_MATCHED,
+        "occurred": MATCHED,
+        "direction": 1.0,
+        "strength": FULL_STRENGTH,
+        "confirmed": NOT_MATCHED,
     }
     assert match_outputs("pat_hammer", direction=-1.0, strength=BOUNDARY_STRENGTH) == {
-        "pat_hammer": MATCHED,
-        "pat_hammer_dir": -1.0,
-        "pat_hammer_strength": BOUNDARY_STRENGTH,
-        "pat_hammer_confirm": NOT_MATCHED,
+        "occurred": MATCHED,
+        "direction": -1.0,
+        "strength": BOUNDARY_STRENGTH,
+        "confirmed": NOT_MATCHED,
     }
     with pytest.raises(ValueError):
         assert_pattern_name("hammer")
-    with pytest.raises(ValueError):
-        assert_pattern_name("pat_hammer_dir")
+    assert output_keys("pat_hammer_dir") == (
+        "occurred",
+        "direction",
+        "strength",
+        "confirmed",
+    )
     with pytest.raises(ValueError, match="direction"):
         match_outputs("pat_hammer", direction=2.0)
 

@@ -8,6 +8,7 @@ from enum import StrEnum
 from typing import cast
 
 from core_lib.ports import StrategyRegistry
+from core_lib.series import series_descriptor_parts
 
 from .base import StrategyMetadata
 from .registry import AdapterClass, InProcessStrategyRegistry
@@ -171,17 +172,15 @@ def catalog_declaration_mismatch(
 
 def _indicator_identities(
     requirements: Sequence[Mapping[str, object]],
-) -> tuple[tuple[str, tuple[tuple[str, object], ...]], ...]:
-    """Compare requirements by name and parameters, ignoring order and key order."""
-    return tuple(
-        sorted(
-            (
-                str(requirement["name"]),
-                tuple(sorted(cast(Mapping[str, object], requirement.get("params", {})).items())),
-            )
-            for requirement in requirements
-        )
-    )
+) -> tuple[tuple[str, tuple[tuple[str, object], ...], str], ...]:
+    """Compare requirements by name, parameters, and declared timeframe."""
+    identities: list[tuple[str, tuple[tuple[str, object], ...], str]] = []
+    for requirement in requirements:
+        name, params, timeframe = series_descriptor_parts(requirement)
+        identity = (name, tuple(sorted(params.items())), timeframe)
+        if identity not in identities:
+            identities.append(identity)
+    return tuple(sorted(identities))
 
 
 def _catalog_entries_by_id(

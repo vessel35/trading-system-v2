@@ -109,16 +109,18 @@ TA-Lib `lookback`은 해당 패턴이 쓰는 설정들의 평균 기간 최댓�
 
 ### §5.1 네 키 이름
 
-패턴 이름이 `pat_hammer`이면 네 키는 아래 순서다.
+모든 패턴은 아래 네 키를 같은 순서로 낸다. 패턴 이름은 바깥 series의 execution
+key가 이미 말하므로 안쪽 키에서 되풀이하지 않는다.
 
 | 키 | 뜻 |
 |---|---|
-| `pat_hammer` | 성립 여부 |
-| `pat_hammer_dir` | 방향. `+1.0`은 양, `-1.0`은 음, `0.0`은 없음 |
-| `pat_hammer_strength` | 성립 강도. `1.0`은 full, `0.5`는 boundary |
-| `pat_hammer_confirm` | Hikkake류 확인 여부 |
+| `occurred` | 성립 여부 |
+| `direction` | 방향. `+1.0`은 양, `-1.0`은 음, `0.0`은 없음 |
+| `strength` | 성립 강도. `1.0`은 full, `0.5`는 boundary |
+| `confirmed` | Hikkake류 확인 여부 |
 
-모든 등록 패턴은 자기 이름에 같은 접미사를 붙여 네 키를 만든다.
+`pat_hammer`와 `pat_doji`처럼 서로 다른 패턴도 안쪽 키는 이 넷으로 같고, 어느
+패턴의 값인지는 바깥 execution key로 구분한다.
 
 ### §5.2 raw integer 값
 

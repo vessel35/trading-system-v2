@@ -12,7 +12,9 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Annotated, Any, Final, Literal, Union, cast, get_type_hints
 
+from core_lib.candles import _TIMEFRAME_PATTERN
 from core_lib.money_management import MoneyManagementBase, policy_settings
+from core_lib.series import series_descriptor_parts
 from core_lib.types import MarketType
 from pydantic import (
     BaseModel,
@@ -30,7 +32,6 @@ from backtest_service.adapters.cost_model import BacktestCostModel
 _LOGGER = logging.getLogger(__name__)
 _RUN_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _STRATEGY_ID_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-_TIMEFRAME_PATTERN = re.compile(r"^[1-9]\d*[mhd]$")
 
 
 class ManualMoneyManagementConfig(BaseModel):
@@ -402,19 +403,14 @@ class RunConfig(BaseModel):
     ) -> list[dict[str, object]]:
         normalized: list[dict[str, object]] = []
         for index, item in enumerate(value):
-            if set(item) != {"name", "params"}:
-                raise ValueError(
-                    f"explicit_indicators[{index}] must contain exactly name and params"
-                )
-            name = item["name"]
-            params = item["params"]
-            if not isinstance(name, str) or not name:
-                raise ValueError(f"explicit_indicators[{index}].name must be non-empty")
-            if not isinstance(params, dict) or any(not isinstance(key, str) for key in params):
-                raise ValueError(
-                    f"explicit_indicators[{index}].params must be a string-keyed mapping"
-                )
-            normalized.append({"name": name, "params": dict(params)})
+            try:
+                name, params, timeframe = series_descriptor_parts(item)
+            except (TypeError, ValueError) as error:
+                raise ValueError(f"explicit_indicators[{index}]: {error}") from error
+            descriptor: dict[str, object] = {"name": name, "params": dict(params)}
+            if "timeframe" in item:
+                descriptor["timeframe"] = timeframe
+            normalized.append(descriptor)
         return normalized
 
     @model_validator(mode="after")

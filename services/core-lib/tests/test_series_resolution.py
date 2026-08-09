@@ -96,10 +96,14 @@ def _ids(specs: Sequence[SeriesSpec]) -> list[str]:
     return [spec.identifier for spec in specs]
 
 
-def test_series_key_matches_the_existing_execution_key_contract() -> None:
+def test_series_key_requires_and_includes_the_resolved_timeframe() -> None:
     spec = _indicator("Bollinger Bands", {"period": 20, "multiplier": 2.0})
 
-    assert series_key(spec) == "bollinger_bands:multiplier=2,period=20"
+    assert series_key(spec, "4h") == "bollinger_bands:multiplier=2,period=20@4h"
+    with pytest.raises(ValueError, match="positive minute, hour, or day interval"):
+        series_key(spec, "strategy")
+    with pytest.raises(TypeError):
+        series_key(spec)  # type: ignore[call-arg]
 
 
 @pytest.mark.parametrize(
@@ -124,7 +128,19 @@ def test_resolve_series_specs_applies_the_mode_table(
         {"name": "PAT_HAMMER", "params": {}},
     ]
 
-    assert _ids(resolve_series_specs(mode, declared, explicit, indicators, patterns)) == expected
+    assert (
+        _ids(
+            resolve_series_specs(
+                mode,
+                declared,
+                explicit,
+                indicators,
+                patterns,
+                execution_timeframe="1h",
+            )
+        )
+        == expected
+    )
 
 
 def test_resolve_series_specs_allows_an_empty_side_and_an_empty_union() -> None:
@@ -137,6 +153,7 @@ def test_resolve_series_specs_allows_an_empty_side_and_an_empty_union() -> None:
             (),
             indicators,
             patterns,
+            execution_timeframe="1h",
         )
     ) == ["pat_doji"]
     assert _ids(
@@ -146,10 +163,21 @@ def test_resolve_series_specs_allows_an_empty_side_and_an_empty_union() -> None:
             (),
             indicators,
             patterns,
+            execution_timeframe="1h",
         )
     ) == ["EMA(period=9)"]
     # A strategy that reads only candles declares nothing and still runs.
-    assert resolve_series_specs("auto", (), (), indicators, patterns) == []
+    assert (
+        resolve_series_specs(
+            "auto",
+            (),
+            (),
+            indicators,
+            patterns,
+            execution_timeframe="1h",
+        )
+        == []
+    )
 
 
 def test_resolve_series_specs_reports_an_unknown_name_once() -> None:
@@ -162,6 +190,61 @@ def test_resolve_series_specs_reports_an_unknown_name_once() -> None:
             (),
             indicators,
             patterns,
+            execution_timeframe="1h",
+        )
+
+
+def test_series_descriptor_timeframe_defaults_and_rejections_are_explicit() -> None:
+    indicators, patterns = _registries()
+    defaulted = [{"name": "EMA", "params": {"period": 9}}]
+    explicit_strategy = [{"name": "EMA", "params": {"period": 9}, "timeframe": "strategy"}]
+
+    assert _ids(
+        resolve_series_specs(
+            "auto",
+            defaulted,
+            (),
+            indicators,
+            patterns,
+            execution_timeframe="1h",
+        )
+    ) == _ids(
+        resolve_series_specs(
+            "auto",
+            explicit_strategy,
+            (),
+            indicators,
+            patterns,
+            execution_timeframe="1h",
+        )
+    )
+
+    with pytest.raises(ValueError, match="execution timeframe must be declared as 'strategy'"):
+        resolve_series_specs(
+            "auto",
+            [{"name": "EMA", "params": {"period": 9}, "timeframe": "1h"}],
+            (),
+            indicators,
+            patterns,
+            execution_timeframe="1h",
+        )
+    with pytest.raises(ValueError, match="series timeframe '4h' is not supported yet"):
+        resolve_series_specs(
+            "auto",
+            [{"name": "EMA", "params": {"period": 9}, "timeframe": "4h"}],
+            (),
+            indicators,
+            patterns,
+            execution_timeframe="1h",
+        )
+    with pytest.raises(ValueError, match="exactly name, params, and optional timeframe"):
+        resolve_series_specs(
+            "auto",
+            [{"name": "EMA", "params": {"period": 9}, "unknown": True}],
+            (),
+            indicators,
+            patterns,
+            execution_timeframe="1h",
         )
 
 

@@ -390,6 +390,7 @@ class Engine:
             config.explicit_indicators,
             DEFAULT_REGISTRY,
             DEFAULT_PATTERN_REGISTRY,
+            execution_timeframe=config.timeframe,
         )
         if config.indicator_mode == "explicit":
             required_ids = {
@@ -398,6 +399,7 @@ class Engine:
                     required_indicators,
                     DEFAULT_REGISTRY,
                     DEFAULT_PATTERN_REGISTRY,
+                    execution_timeframe=config.timeframe,
                 )
             }
             explicit_ids = {spec.identifier for spec in self._indicator_specs}
@@ -449,6 +451,7 @@ class Engine:
                 {
                     "name": spec.name,
                     "params": dict(spec.params),
+                    "timeframe": config.timeframe,
                     "version": spec.version,
                 }
                 for spec in self._indicator_specs
@@ -1139,7 +1142,12 @@ class Engine:
         requirement = requirements[0]
         # The label names the value the same way the lookup key does, so both come
         # from the one declaration instead of a literal per policy.
-        label = series_key_of(requirement.name, requirement.params)
+        resolved_timeframe = (
+            self._config().timeframe
+            if requirement.timeframe == "strategy"
+            else requirement.timeframe
+        )
+        label = series_key_of(requirement.name, requirement.params, resolved_timeframe)
         if requirement.timeframe == "strategy":
             value = self._indicator_values.get(label)
             if isinstance(value, bool) or not isinstance(value, float | int):
@@ -1778,7 +1786,11 @@ class Engine:
         if policy is None:
             return []
         return [
-            {"name": requirement.name, "params": dict(requirement.params)}
+            {
+                "name": requirement.name,
+                "params": dict(requirement.params),
+                "timeframe": requirement.timeframe,
+            }
             for requirement in policy.required_indicators()
             if requirement.timeframe == "strategy"
         ]
@@ -1790,10 +1802,8 @@ class Engine:
         return [
             {
                 "name": requirement.name,
-                "params": {
-                    **dict(requirement.params),
-                    "timeframe": requirement.timeframe,
-                },
+                "params": dict(requirement.params),
+                "timeframe": requirement.timeframe,
                 "version": policy.version,
             }
             for requirement in policy.required_indicators()
@@ -1930,7 +1940,7 @@ class Engine:
                 EvidenceRecord(
                     "INDICATOR_DEFINITION",
                     {
-                        "indicator_key": series_key(spec),
+                        "indicator_key": series_key(spec, self._config().timeframe),
                         "indicator_name": spec.name,
                         "params_json": dict(spec.params),
                         "impl_version": spec.version,
@@ -1951,7 +1961,7 @@ class Engine:
             state = self._indicator_states[spec.identifier]
             value = state.update(candle)
             self._assert_finite_indicator(value, spec.identifier, spec.undefined_outputs)
-            key = series_key(spec)
+            key = series_key(spec, self._config().timeframe)
             values[key] = value
             recordable = self._recordable_indicator_value(value)
             self._sequence["indicator_snapshot"] += 1

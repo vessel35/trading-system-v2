@@ -45,8 +45,8 @@ def test_strategy_base_reads_indicator_and_pattern_values_by_series_key() -> Non
     strategy = _ConvenienceStrategy()
     indicator = DEFAULT_REGISTRY.get("EMA", {"period": 9})
     pattern = DEFAULT_PATTERN_REGISTRY.list()[0]
-    indicator_key = series_key(indicator)
-    pattern_key = series_key(pattern)
+    indicator_key = series_key(indicator, "1h")
+    pattern_key = series_key(pattern, "1h")
     pattern_value = {
         "pattern_detected": 1.0,
         "pattern_strength": 100.0,
@@ -57,11 +57,11 @@ def test_strategy_base_reads_indicator_and_pattern_values_by_series_key() -> Non
         indicator_key: 101.25,
         pattern_key: pattern_value,
     }
-    market_data: dict[str, object] = {"indicators": values}
+    market_data: dict[str, object] = {"indicators": values, "timeframe": "1h"}
     original = dict(values)
 
-    assert indicator_key == "ema:period=9"
-    assert pattern_key == normalize_series_name(pattern.name)
+    assert indicator_key == "ema:period=9@1h"
+    assert pattern_key == f"{normalize_series_name(pattern.name)}@1h"
     assert strategy.series_value(market_data, indicator) == 101.25
     assert strategy.series_value(market_data, pattern) is pattern_value
     assert values == original

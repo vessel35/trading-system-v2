@@ -57,7 +57,7 @@ def test_core_lib_dependencies_follow_the_one_way_component_graph() -> None:
     core_package = Path(__file__).resolve().parents[1] / "core_lib"
     allowed_dependencies = {
         "types": set(),
-        "series": {"types"},
+        "series": {"candles", "types"},
         "indicators": {"types"},
         "patterns": {"indicators", "series", "types"},
         "sizing": {"types"},

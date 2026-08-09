@@ -38,6 +38,7 @@ from core_lib.money_management import (
     MoneyManagementPlan,
     PolicyIndicatorRequirement,
     RiskLimits,
+    turtle_n_series,
 )
 from core_lib.patterns import TALIB_FUNCTIONS, TALIB_SOURCE_VERSION
 from core_lib.ports import CatalogStore, DataFeed, StrategyRegistry
@@ -1437,7 +1438,9 @@ def test_vessel_reference_end_to_end_dry_run_is_complete_and_deterministic(
             """
         ).fetchall()
         assert [key for key, _ in snapshots] == [
-            key for _ in range(6) for key in ("atr:period=14", "ema:period=21", "ema:period=9")
+            key
+            for _ in range(6)
+            for key in ("atr:period=14@1h", "ema:period=21@1h", "ema:period=9@1h")
         ]
         assert [value for _, value in snapshots] == pytest.approx(
             [
@@ -1525,8 +1528,26 @@ def test_vessel_turtle_uses_only_prior_finalized_daily_n_and_records_plan(
         assert params["_money_management"]["policy_version"] == "1.0.0"
         assert json.loads(submitted_money_management_json)["mode"] == "turtle"
         assert json.loads(money_management_json) == params["_money_management"]
-        assert '"TURTLE_N"' in indicators_json
-        assert '"ATR"' not in indicators_json
+        assert json.loads(indicators_json) == [
+            {
+                "name": "EMA",
+                "params": {"period": 21},
+                "timeframe": "1h",
+                "version": "1.0.0",
+            },
+            {
+                "name": "EMA",
+                "params": {"period": 9},
+                "timeframe": "1h",
+                "version": "1.0.0",
+            },
+            {
+                "name": "TURTLE_N",
+                "params": {"period": 20},
+                "timeframe": "1d",
+                "version": "1.0.0",
+            },
+        ]
         signal = connection.execute(
             """
             SELECT decision_ts, stop_loss, take_profit, leverage, metadata_json
@@ -1537,17 +1558,19 @@ def test_vessel_turtle_uses_only_prior_finalized_daily_n_and_records_plan(
         assert signal is not None
         decision_ts, stop_loss, take_profit, leverage, metadata_json = signal
         metadata = json.loads(metadata_json)["money_management"]
+        expected_timestamp, expected_n = max(
+            item
+            for item in turtle_n_series(_turtle_daily_candles(), period=20)
+            if int(item[0].timestamp() * 1_000) <= decision_ts
+        )
         assert stop_loss == pytest.approx(117.5)
         assert take_profit is None
         assert leverage == 1
-        assert metadata["volatility"] == 2.0
+        assert metadata["volatility"] == expected_n == 2.0
         assert metadata["stop_distance"] == 4.0
         assert metadata["requested_quantity"] == 25.0
         assert metadata["initial_risk_amount"] == 100.0
-        assert (
-            datetime.fromisoformat(metadata["volatility_timestamp"]).timestamp() * 1_000
-            <= decision_ts
-        )
+        assert datetime.fromisoformat(metadata["volatility_timestamp"]) == expected_timestamp
         assert connection.execute("SELECT COUNT(*) FROM INDICATOR_SNAPSHOT").fetchone() == (12,)
 
 
@@ -1761,8 +1784,8 @@ def test_indicator_mode_changes_selection_and_longest_history_owns_warmup(
             """
         ).fetchone()
         assert json.loads(resolved_json) == [
-            {"name": "EMA", "params": {"period": 21}, "version": "1.0.0"},
-            {"name": "EMA", "params": {"period": 9}, "version": "1.0.0"},
+            {"name": "EMA", "params": {"period": 21}, "timeframe": "1h", "version": "1.0.0"},
+            {"name": "EMA", "params": {"period": 9}, "timeframe": "1h", "version": "1.0.0"},
         ]
         assert warmup_candles == 21
 
@@ -1804,7 +1827,8 @@ def test_patternless_strategy_keeps_resolved_indicators_and_values_unchanged(
             "SELECT resolved_indicators_json FROM BACKTEST_RUN_LOCAL"
         ).fetchone()
         assert (
-            resolved_indicators_json == '[{"name":"EMA","params":{"period":9},"version":"1.0.0"}]'
+            resolved_indicators_json
+            == '[{"name":"EMA","params":{"period":9},"timeframe":"1h","version":"1.0.0"}]'
         )
         definitions = connection.execute(
             """
@@ -1814,7 +1838,7 @@ def test_patternless_strategy_keeps_resolved_indicators_and_values_unchanged(
             """
         ).fetchall()
         assert definitions == [
-            ("ema:period=9", "EMA", '{"period":9}', "1.0.0"),
+            ("ema:period=9@1h", "EMA", '{"period":9}', "1.0.0"),
         ]
         snapshots = connection.execute(
             """
@@ -1823,7 +1847,7 @@ def test_patternless_strategy_keeps_resolved_indicators_and_values_unchanged(
             ORDER BY snapshot_seq
             """
         ).fetchall()
-        assert snapshots == [("ema:period=9", expected, None) for expected in expected_values]
+        assert snapshots == [("ema:period=9@1h", expected, None) for expected in expected_values]
 
 
 def test_declared_pattern_reaches_backtest_strategy_and_evidence(
@@ -1867,14 +1891,14 @@ def test_declared_pattern_reaches_backtest_strategy_and_evidence(
 
     assert _PatternStrategy.observed_indicators
     first_indicators = _PatternStrategy.observed_indicators[0]
-    assert set(first_indicators) == {"ema:period=9", "pat_doji"}
-    pattern_value = first_indicators["pat_doji"]
+    assert set(first_indicators) == {"ema:period=9@1h", "pat_doji@1h"}
+    pattern_value = first_indicators["pat_doji@1h"]
     assert isinstance(pattern_value, dict)
     assert set(pattern_value) == {
-        "pat_doji",
-        "pat_doji_confirm",
-        "pat_doji_dir",
-        "pat_doji_strength",
+        "occurred",
+        "direction",
+        "strength",
+        "confirmed",
     }
     with sqlite3.connect(result.evidence_path) as connection:
         resolved_json, warmup_candles = connection.execute(
@@ -1882,8 +1906,18 @@ def test_declared_pattern_reaches_backtest_strategy_and_evidence(
         ).fetchone()
         assert warmup_candles == 11
         assert json.loads(resolved_json) == [
-            {"name": "EMA", "params": {"period": 9}, "version": "1.0.0"},
-            {"name": "pat_doji", "params": {}, "version": "2.0.0+talib.0.7.1"},
+            {
+                "name": "EMA",
+                "params": {"period": 9},
+                "timeframe": "1h",
+                "version": "1.0.0",
+            },
+            {
+                "name": "pat_doji",
+                "params": {},
+                "timeframe": "1h",
+                "version": "2.0.0+talib.0.7.1",
+            },
         ]
         definitions = connection.execute(
             """
@@ -1894,14 +1928,14 @@ def test_declared_pattern_reaches_backtest_strategy_and_evidence(
         ).fetchall()
         assert definitions == [
             (
-                "ema:period=9",
+                "ema:period=9@1h",
                 1,
                 "indicator",
                 "trend",
                 "technical_indicators_calc_spec.md §0.3 (SMA seed, recursive)",
             ),
             (
-                "pat_doji",
+                "pat_doji@1h",
                 1,
                 "pattern",
                 "candlestick",
@@ -1912,7 +1946,7 @@ def test_declared_pattern_reaches_backtest_strategy_and_evidence(
             """
             SELECT value, value_json
             FROM INDICATOR_SNAPSHOT
-            WHERE indicator_key = 'pat_doji'
+            WHERE indicator_key = 'pat_doji@1h'
             ORDER BY snapshot_seq
             LIMIT 1
             """
@@ -1922,10 +1956,10 @@ def test_declared_pattern_reaches_backtest_strategy_and_evidence(
         assert value is None
         assert isinstance(value_json, str)
         assert set(json.loads(value_json)) == {
-            "pat_doji",
-            "pat_doji_confirm",
-            "pat_doji_dir",
-            "pat_doji_strength",
+            "occurred",
+            "direction",
+            "strength",
+            "confirmed",
         }
 
 
@@ -2709,7 +2743,7 @@ def test_declared_series_whose_definition_is_missing_fails_completeness(tmp_path
     sink._connection = sqlite3.connect(result.evidence_path)  # noqa: SLF001
     sink._run_id = Path(result.evidence_path).stem  # noqa: SLF001
     assert sink._indicator_failures() == [  # noqa: SLF001
-        "indicator_definition_mismatch:missing=ema:period=9:extra=-"
+        "indicator_definition_mismatch:missing=ema:period=9@1h:extra=-"
     ]
 
 
@@ -2744,21 +2778,23 @@ class _EmaVolatilityPolicy(MoneyManagementBase):
 
 def test_policy_volatility_comes_from_the_declaration_not_the_policy_id(tmp_path: Path) -> None:
     engine = _engine(tmp_path, _Catalog(), [])
-    engine._indicator_values = {"ema:period=9": 12.5}  # noqa: SLF001
+    engine.config = _config()
+    engine._indicator_values = {"ema:period=9@1h": 12.5}  # noqa: SLF001
     candle = _candles()[-1]
 
     value, label, when = engine._money_management_volatility(  # noqa: SLF001
         candle, _EmaVolatilityPolicy()
     )
 
-    assert (value, label, when) == (12.5, "ema:period=9", candle.close_time)
+    assert (value, label, when) == (12.5, "ema:period=9@1h", candle.close_time)
 
 
 def test_a_declared_policy_input_that_is_missing_is_refused_by_name(tmp_path: Path) -> None:
     engine = _engine(tmp_path, _Catalog(), [])
+    engine.config = _config()
     engine._indicator_values = {}  # noqa: SLF001
 
-    with pytest.raises(MoneyManagementError, match="requires current ema:period=9"):
+    with pytest.raises(MoneyManagementError, match="requires current ema:period=9@1h"):
         engine._money_management_volatility(  # noqa: SLF001
             _candles()[-1], _EmaVolatilityPolicy()
         )
@@ -2775,6 +2811,12 @@ _EVIDENCE_GOLDEN_HASHES: dict[str, dict[str, str]] = {
         "funding": "65c94c17c7fadaddf0d703bf42ec805e49c1b1cfcf08a99e91b88b97b77efcc6",
         "hold": "c72de5733f10a67d39e6d218e18bd59cddb2db5e6ba9aaf048968dba39fb4bd5",
     },
+    "1.7.0": {
+        "legacy": "bc352a0c9a5114afef289bfc9b8d95459513a126b9bab58c7a50d5f740421076",
+        "managed": "6ab74dd73a3d6851f9c7a76f4954c84e1c4ac9c9843e890c5a171ff914d178c7",
+        "funding": "7d17836164997c3a29c2fd390913c58f62c53633ff538f40735f69bbc739b623",
+        "hold": "fe14ed3c9ef32aec81df3c7217ee4705b9d188347ed680d625d8561c72a4c270",
+    },
 }
 
 # The three analysis extension tables stay empty because the engine does not write
@@ -2782,6 +2824,15 @@ _EVIDENCE_GOLDEN_HASHES: dict[str, dict[str, str]] = {
 _EVIDENCE_PINS_DO_NOT_REACH = frozenset(
     {"CONDITION_SIGNATURE", "CONDITIONAL_EXPECTANCY", "MISSED_OPPORTUNITY"}
 )
+
+
+def test_previous_evidence_schema_hashes_remain_pinned() -> None:
+    assert _EVIDENCE_GOLDEN_HASHES["1.6.0"] == {
+        "legacy": "8e27b6e3c54acf76243a47ec429ee50a14878f1fe02982c714b65ecd764bded0",
+        "managed": "967207d158ab562e1698467b08d2bc49f1e0b8041f3d70c83e02db76abafa694",
+        "funding": "65c94c17c7fadaddf0d703bf42ec805e49c1b1cfcf08a99e91b88b97b77efcc6",
+        "hold": "c72de5733f10a67d39e6d218e18bd59cddb2db5e6ba9aaf048968dba39fb4bd5",
+    }
 
 
 def test_hashed_evidence_content_is_pinned_to_its_schema_version(tmp_path: Path) -> None:

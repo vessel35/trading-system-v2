@@ -373,7 +373,14 @@ def test_catalog_issues_run_id_then_records_prereg_and_evaluated_metadata() -> N
         "strategy_name": "M9Fixture",
         "strategy_version": "1.0.0",
         "params_json": {},
-        "resolved_indicators_json": [{"name": "EMA", "params": {"period": 9}, "version": "1.0.0"}],
+        "resolved_indicators_json": [
+            {
+                "name": "EMA",
+                "params": {"period": 9},
+                "timeframe": "1h",
+                "version": "1.0.0",
+            }
+        ],
         "params_schema_version": "1.0.0",
         "symbol": "BTCUSDT",
         "exchange": "binance",
@@ -518,7 +525,14 @@ def _orphan_sweep_run_meta() -> dict[str, object]:
         "strategy_name": "OrphanSweepFixture",
         "strategy_version": "1.0.0",
         "params_json": {},
-        "resolved_indicators_json": [{"name": "EMA", "params": {"period": 9}, "version": "1.0.0"}],
+        "resolved_indicators_json": [
+            {
+                "name": "EMA",
+                "params": {"period": 9},
+                "timeframe": "1h",
+                "version": "1.0.0",
+            }
+        ],
         "params_schema_version": "1.0.0",
         "symbol": "BTCUSDT",
         "exchange": "binance",
