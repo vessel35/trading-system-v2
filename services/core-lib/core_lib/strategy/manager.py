@@ -1,7 +1,6 @@
 """Coordinate Adaptee creation, configuration, registry access, and lifecycle."""
 
-from collections.abc import Mapping, Sequence
-from typing import cast
+from collections.abc import Mapping
 
 from core_lib.money_management import (
     BUILTIN_POLICIES,
@@ -13,23 +12,12 @@ from core_lib.ports import StrategyRegistry
 from .base import StrategyAdapter, StrategyDecisionContract, StrategyRuntime
 from .config import StrategyConfig
 from .factory import AdapterFactory
-from .reconciliation import StrategyReconciliation, reconcile_strategy_registries
+from .reconciliation import (
+    StrategyReconciliation,
+    catalog_declaration_mismatch,
+    reconcile_strategy_registries,
+)
 from .registry import InProcessStrategyRegistry
-
-
-def _indicator_identities(
-    requirements: Sequence[Mapping[str, object]],
-) -> tuple[tuple[str, tuple[tuple[str, object], ...]], ...]:
-    """Compare requirements by name and parameters, ignoring order and key order."""
-    return tuple(
-        sorted(
-            (
-                str(requirement["name"]),
-                tuple(sorted(cast(Mapping[str, object], requirement.get("params", {})).items())),
-            )
-            for requirement in requirements
-        )
-    )
 
 
 class AdapterManager:
@@ -151,30 +139,9 @@ class AdapterManager:
         because either side could be the stale one.
         """
         metadata = adaptee_class.get_metadata()
-        registered_history = catalog_entry.get("min_history")
-        if registered_history is not None and registered_history != metadata.min_history:
-            raise ValueError(
-                "catalog min_history does not match the Adaptee: "
-                f"{registered_history!r} != {metadata.min_history!r}"
-            )
-        registered_timeframes = catalog_entry.get("supported_timeframes")
-        if registered_timeframes is not None and list(
-            cast(Sequence[str], registered_timeframes)
-        ) != list(metadata.supported_timeframes):
-            raise ValueError(
-                "catalog supported_timeframes do not match the Adaptee: "
-                f"{registered_timeframes!r} != {list(metadata.supported_timeframes)!r}"
-            )
-        registered_indicators = catalog_entry.get("required_indicators_json")
-        if registered_indicators is None:
-            return
-        if _indicator_identities(cast(Sequence[Mapping[str, object]], registered_indicators)) != (
-            _indicator_identities(metadata.required_indicators)
-        ):
-            raise ValueError(
-                "catalog required_indicators do not match the Adaptee: "
-                f"{registered_indicators!r} != {list(metadata.required_indicators)!r}"
-            )
+        mismatch = catalog_declaration_mismatch(catalog_entry, metadata)
+        if mismatch is not None:
+            raise ValueError(mismatch)
 
     def activate(self, strategy_id: str) -> None:
         """Activate a created Adaptee instance."""

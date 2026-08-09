@@ -2478,6 +2478,10 @@ export interface components {
             is_active: boolean;
             /** Is Deprecated */
             is_deprecated: boolean;
+            /** Runnable */
+            runnable: boolean;
+            /** Unrunnable Reason */
+            unrunnable_reason: ("catalog_only" | "allowlist_only" | "identity_mismatch" | "inactive" | "deprecated" | "declaration_mismatch" | "declaration_read_failed") | null;
             /**
              * Source
              * @enum {string}

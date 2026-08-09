@@ -8911,6 +8911,30 @@
             "type": "boolean",
             "title": "Is Deprecated"
           },
+          "runnable": {
+            "type": "boolean",
+            "title": "Runnable"
+          },
+          "unrunnable_reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "catalog_only",
+                  "allowlist_only",
+                  "identity_mismatch",
+                  "inactive",
+                  "deprecated",
+                  "declaration_mismatch",
+                  "declaration_read_failed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unrunnable Reason"
+          },
           "source": {
             "type": "string",
             "enum": [
@@ -8933,6 +8957,8 @@
           "default_money_management",
           "is_active",
           "is_deprecated",
+          "runnable",
+          "unrunnable_reason",
           "source"
         ],
         "title": "StrategyOption"

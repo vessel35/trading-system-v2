@@ -25,7 +25,10 @@ from .reconciliation import (
     StrategyImplementationIdentity,
     StrategyReconciliation,
     StrategyReconciliationState,
+    catalog_declaration_mismatch,
+    reconcile_strategy_entry,
     reconcile_strategy_registries,
+    strategy_identity_matches,
 )
 from .registry import (
     AdapterClass,
@@ -55,6 +58,9 @@ __all__ = [
     "StrategyReconciliationState",
     "StrategyRuntime",
     "build_strategy_registry",
+    "catalog_declaration_mismatch",
+    "reconcile_strategy_entry",
     "reconcile_strategy_registries",
+    "strategy_identity_matches",
     "validate_strategy_result",
 ]

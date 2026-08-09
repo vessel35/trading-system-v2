@@ -14,7 +14,13 @@ from backtest_service.config.run_config import (
 )
 from core_lib.eval import thresholds
 from core_lib.money_management import MoneyManagementBase, MoneyManagementFactory
-from core_lib.strategy import AdapterClass, InProcessStrategyRegistry, StrategyConfig
+from core_lib.strategy import (
+    InProcessStrategyRegistry,
+    ParameterSchema,
+    StrategyConfig,
+    StrategyMetadata,
+    reconcile_strategy_entry,
+)
 from pydantic import BaseModel
 from trading_plugins import registered_money_management
 
@@ -591,7 +597,8 @@ class StrategyRepository:
                 """
                 SELECT strategy_id, display_name, strategy_version,
                        supported_timeframes, required_indicators_json,
-                       min_history, default_params_json, is_active, is_deprecated
+                       min_history, default_params_json, is_active, is_deprecated,
+                       class_name, module_path
                 FROM public.strategy_registry
                 ORDER BY strategy_id
                 """
@@ -606,16 +613,34 @@ class StrategyRepository:
             strategy_class = self._strategy_registry.get(strategy_id)
         except KeyError:
             strategy_class = None
-        metadata = None if strategy_class is None else strategy_class.get_metadata()
-        support = None if metadata is None else metadata.money_management
-        modes, default = (
-            ([], {})
-            if support is None
-            else _money_management_options(
-                support.supported,
-                support.default,
-            )
+        metadata: StrategyMetadata | None = None
+        default_params: dict[str, object] | None = None
+        modes: list[str] = []
+        default: dict[str, object] = {}
+        declaration_read_failed = False
+        if strategy_class is not None:
+            try:
+                metadata = strategy_class.get_metadata()
+                schema = strategy_class.get_parameter_schema()
+                default_params = self._parameter_defaults(schema)
+                modes, default = _money_management_options(
+                    metadata.money_management.supported,
+                    metadata.money_management.default,
+                )
+            except (Exception, SystemExit):  # noqa: BLE001 - isolate deployed code per strategy
+                metadata = None
+                default_params = None
+                modes = []
+                default = {}
+                declaration_read_failed = True
+        finding = reconcile_strategy_entry(
+            strategy_id,
+            row,
+            strategy_class,
+            metadata=metadata,
+            declaration_read_failed=declaration_read_failed,
         )
+        reason = None if finding is None else finding.state
         return StrategyOption(
             strategy_id=strategy_id,
             display_name=str(row["display_name"]),
@@ -643,14 +668,16 @@ class StrategyRepository:
                 metadata.min_history if metadata is not None else int(cast(int, row["min_history"]))
             ),
             default_params=(
-                self._parameter_defaults(strategy_class)
-                if strategy_class is not None
+                default_params
+                if default_params is not None
                 else dict(cast(dict[str, object], row["default_params_json"]))
             ),
             supported_money_management=modes,
             default_money_management=default,
             is_active=bool(row["is_active"]),
             is_deprecated=bool(row["is_deprecated"]),
+            runnable=reason is None,
+            unrunnable_reason=reason,
             source="strategy_registry",
         )
 
@@ -659,6 +686,14 @@ class StrategyRepository:
         for strategy_id in self._strategy_registry.list():
             strategy_class = self._strategy_registry.get(strategy_id)
             metadata = strategy_class.get_metadata()
+            schema = strategy_class.get_parameter_schema()
+            finding = reconcile_strategy_entry(
+                strategy_id,
+                None,
+                strategy_class,
+                metadata=metadata,
+            )
+            reason = None if finding is None else finding.state
             modes, default = _money_management_options(
                 metadata.money_management.supported,
                 metadata.money_management.default,
@@ -671,20 +706,22 @@ class StrategyRepository:
                     supported_timeframes=list(metadata.supported_timeframes),
                     required_indicators=list(metadata.required_indicators),
                     min_history=metadata.min_history,
-                    default_params=self._parameter_defaults(strategy_class),
+                    default_params=self._parameter_defaults(schema),
                     supported_money_management=modes,
                     default_money_management=default,
                     is_active=True,
                     is_deprecated=False,
+                    runnable=reason is None,
+                    unrunnable_reason=reason,
                     source="code_registry",
                 )
             )
         return StrategyListResponse(data=options)
 
     @staticmethod
-    def _parameter_defaults(strategy_class: AdapterClass) -> dict[str, object]:
-        schema = StrategyConfig.json_schema(strategy_class.get_parameter_schema())
-        properties = cast("Mapping[str, Mapping[str, object]]", schema["properties"])
+    def _parameter_defaults(schema: ParameterSchema) -> dict[str, object]:
+        json_schema = StrategyConfig.json_schema(schema)
+        properties = cast("Mapping[str, Mapping[str, object]]", json_schema["properties"])
         return {name: field["default"] for name, field in properties.items() if "default" in field}
 
 

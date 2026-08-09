@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Literal, Self
 
 from backtest_service.config import RunConfig
+from core_lib.strategy import StrategyReconciliationState
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -22,6 +23,16 @@ DecimalString = Annotated[
         ),
         json_schema_extra={"format": "decimal"},
     ),
+]
+
+UnrunnableReason = Literal[
+    StrategyReconciliationState.CATALOG_ONLY,
+    StrategyReconciliationState.ALLOWLIST_ONLY,
+    StrategyReconciliationState.IDENTITY_MISMATCH,
+    StrategyReconciliationState.INACTIVE,
+    StrategyReconciliationState.DEPRECATED,
+    StrategyReconciliationState.DECLARATION_MISMATCH,
+    StrategyReconciliationState.DECLARATION_READ_FAILED,
 ]
 
 
@@ -913,7 +924,15 @@ class StrategyOption(BaseModel):
     default_money_management: dict[str, object]
     is_active: bool
     is_deprecated: bool
+    runnable: bool
+    unrunnable_reason: UnrunnableReason | None
     source: Literal["strategy_registry", "code_registry"]
+
+    @model_validator(mode="after")
+    def validate_runnability_pair(self) -> Self:
+        if self.runnable != (self.unrunnable_reason is None):
+            raise ValueError("runnable must be true exactly when unrunnable_reason is null")
+        return self
 
 
 class StrategyListResponse(BaseModel):

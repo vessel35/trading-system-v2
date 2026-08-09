@@ -3,6 +3,8 @@
 from collections.abc import Mapping
 from typing import ClassVar
 
+import core_lib.strategy.manager as strategy_manager_module
+import core_lib.strategy.reconciliation as strategy_reconciliation_module
 import pytest
 from core_lib.ports import StrategyRegistry
 from core_lib.strategy import (
@@ -156,6 +158,20 @@ class LegacyMoneyManagedAdaptee(FakeAdaptee):
             supports_signal_exit=True,
         )
         return metadata
+
+
+class ReconciliationReadProbe(FakeAdaptee):
+    """Allow registration, then count or fail the request-time metadata read."""
+
+    metadata_calls: ClassVar[int] = 0
+    failure: ClassVar[BaseException | None] = None
+
+    @classmethod
+    def get_metadata(cls) -> StrategyMetadata:
+        cls.metadata_calls += 1
+        if cls.failure is not None:
+            raise cls.failure
+        return super().get_metadata()
 
 
 def make_manager() -> tuple[AdapterManager, InProcessStrategyRegistry, FakeCatalog]:
@@ -333,6 +349,13 @@ def test_registration_that_disagrees_with_the_adaptee_is_refused() -> None:
             )
 
 
+def test_manager_and_reconciliation_share_one_declaration_comparator() -> None:
+    assert (
+        vars(strategy_manager_module)["catalog_declaration_mismatch"]
+        is strategy_reconciliation_module.catalog_declaration_mismatch
+    )
+
+
 def test_a_registration_that_agrees_with_the_adaptee_is_accepted() -> None:
     manager, _, catalog = make_manager()
     catalog.rows["fake-breakout"].update(
@@ -412,3 +435,41 @@ def test_catalog_reconciliation_returns_five_distinct_states() -> None:
         class_name=FakeAdaptee.__name__,
         module_path=FakeAdaptee.__module__,
     )
+
+
+def test_catalog_reconciliation_adds_declaration_mismatch_and_isolates_read_failure() -> None:
+    plugins = InProcessStrategyRegistry()
+    ReconciliationReadProbe.failure = None
+    plugins.register("declaration-mismatch", FakeAdaptee)
+    plugins.register("read-failed", ReconciliationReadProbe)
+    ReconciliationReadProbe.metadata_calls = 0
+    ReconciliationReadProbe.failure = SystemExit(17)
+    catalog = FakeCatalog([])
+    catalog.rows["declaration-mismatch"] = {
+        "strategy_id": "declaration-mismatch",
+        "class_name": FakeAdaptee.__name__,
+        "module_path": FakeAdaptee.__module__,
+        "min_history": 1,
+        "supported_timeframes": ["1h"],
+        "required_indicators_json": [{"name": "EMA", "params": {"period": 21}}],
+        "is_active": True,
+        "is_deprecated": False,
+    }
+    catalog.rows["read-failed"] = {
+        "strategy_id": "read-failed",
+        "class_name": ReconciliationReadProbe.__name__,
+        "module_path": ReconciliationReadProbe.__module__,
+        "min_history": 55,
+        "supported_timeframes": ["1h"],
+        "required_indicators_json": [{"name": "EMA", "params": {"period": 21}}],
+        "is_active": False,
+        "is_deprecated": False,
+    }
+
+    findings = AdapterManager(catalog, plugins).reconcile_catalog()
+
+    assert {finding.strategy_id: finding.state for finding in findings} == {
+        "declaration-mismatch": StrategyReconciliationState.DECLARATION_MISMATCH,
+        "read-failed": StrategyReconciliationState.DECLARATION_READ_FAILED,
+    }
+    assert ReconciliationReadProbe.metadata_calls == 1
