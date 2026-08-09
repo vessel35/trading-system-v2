@@ -913,6 +913,7 @@ class StrategyOption(BaseModel):
     strategy_id: str
     display_name: str
     strategy_version: str
+    profile_id: str | None
     supported_timeframes: list[str]
     required_indicators: list[dict[str, object]]
     min_history: int

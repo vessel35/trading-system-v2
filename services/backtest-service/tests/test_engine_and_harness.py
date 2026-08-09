@@ -1072,6 +1072,23 @@ def test_engine_defaults_come_from_installed_package_metadata(tmp_path: Path) ->
     assert engine.core_lib_version == version("core-lib")
 
 
+def test_engine_evidence_profile_ref_matches_declared_strategy_profile_id(
+    tmp_path: Path,
+) -> None:
+    declared_profile_id = _Strategy.get_metadata().profile.id
+    config = _config()
+    assert config.profile_ref == declared_profile_id
+
+    result = _engine(tmp_path, _Catalog(), []).run(config)
+
+    with sqlite3.connect(result.evidence_path) as connection:
+        profile_ref, profile_json = connection.execute(
+            "SELECT profile_ref, strategy_profile_json FROM BACKTEST_RUN_LOCAL"
+        ).fetchone()
+    assert profile_ref == declared_profile_id
+    assert json.loads(profile_json)["id"] == declared_profile_id
+
+
 def test_engine_orders_configure_before_submit_and_persists_timing(
     tmp_path: Path,
 ) -> None:

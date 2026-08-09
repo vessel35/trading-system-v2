@@ -35,6 +35,7 @@ function managementHandlers(
       atr_stop_multiple: 1.5,
     },
   },
+  profileId = "vessel-reference-v1",
 ) {
   return [
     http.get("http://localhost/api/v1/strategies", () =>
@@ -44,6 +45,7 @@ function managementHandlers(
             strategy_id: "vessel-reference",
             display_name: "Vessel",
             strategy_version: "1",
+            profile_id: profileId,
             supported_timeframes: supportedTimeframes,
             required_indicators: [],
             min_history: 10,
@@ -114,6 +116,7 @@ function strategyOption(
     strategy_id: strategyId,
     display_name: strategyId,
     strategy_version: "1",
+    profile_id: `${strategyId}-v1`,
     supported_timeframes: ["1h"],
     required_indicators: [],
     min_history: 10,
@@ -484,6 +487,51 @@ describe("실행 관리 보강", () => {
         profile_ref: "vessel-reference-v1",
       },
     });
+  });
+
+  it("전략 id 규칙과 다른 선언 profile id를 단일 실행과 스윕에 그대로 제출한다", async () => {
+    const user = userEvent.setup();
+    const bodies: { run?: unknown; sweep?: unknown } = {};
+    server.use(
+      ...managementHandlers(
+        ["1h"],
+        {
+          supported: ["manual"],
+          default: {
+            mode: "manual",
+            leverage: 1,
+            reward_risk: 2,
+            atr_stop_multiple: 1.5,
+          },
+        },
+        "declaration-owned-profile",
+      ),
+      http.post("http://localhost/api/v1/runs", async ({ request }) => {
+        bodies.run = await request.json();
+        return HttpResponse.json({}, { status: 500 });
+      }),
+      http.post("http://localhost/api/v1/sweeps", async ({ request }) => {
+        bodies.sweep = await request.json();
+        return HttpResponse.json({}, { status: 500 });
+      }),
+    );
+    renderManagementPage();
+    await chooseStrategy();
+
+    await user.click(screen.getByRole("button", { name: "백테스트 실행" }));
+    await waitFor(() => expect(bodies.run).toBeDefined());
+    expect(bodies.run).toHaveProperty(
+      "config.profile_ref",
+      "declaration-owned-profile",
+    );
+
+    await user.click(screen.getByLabelText(/스윕으로 실행/));
+    await user.click(screen.getByRole("button", { name: "스윕 실행" }));
+    await waitFor(() => expect(bodies.sweep).toBeDefined());
+    expect(bodies.sweep).toHaveProperty(
+      "config.profile_ref",
+      "declaration-owned-profile",
+    );
   });
 
   it("Turtle 자동 관리에서는 수동값을 숨기고 일봉 N 정책만 제출한다", async () => {
@@ -1123,6 +1171,36 @@ describe("실행 가능 판정", () => {
     expect(
       await screen.findAllByText(/등록 정보에서 비활성화된 전략입니다/),
     ).not.toHaveLength(0);
+    await expectEveryBlockedSubmissionPath(runPost, sweepPost);
+  });
+
+  it("고른 전략의 profile_id가 null이면 버튼과 폼 제출의 단일·스윕 네 경로를 막는다", async () => {
+    let profileId: string | null = "declaration-owned-profile";
+    server.use(
+      http.get("http://localhost/api/v1/strategies", () =>
+        HttpResponse.json({
+          data: [
+            {
+              ...strategyOption("vessel-reference", {
+                supported: ["manual"],
+                default: { mode: "manual" },
+              }),
+              profile_id: profileId,
+            },
+          ],
+        }),
+      ),
+      ...managementHandlers().slice(1),
+    );
+    const { runPost, sweepPost } = installExecutionSpies();
+    const { queryClient } = renderManagementPage();
+    await chooseStrategy();
+    profileId = null;
+
+    await queryClient.invalidateQueries({ queryKey: ["strategies"] });
+    expect(
+      await screen.findByText(/선언한 성격 정보 id를 읽을 수 없어 실행할 수 없습니다/),
+    ).toBeInTheDocument();
     await expectEveryBlockedSubmissionPath(runPost, sweepPost);
   });
 

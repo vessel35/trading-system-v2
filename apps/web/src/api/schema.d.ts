@@ -2456,6 +2456,8 @@ export interface components {
             display_name: string;
             /** Strategy Version */
             strategy_version: string;
+            /** Profile Id */
+            profile_id: string | null;
             /** Supported Timeframes */
             supported_timeframes: string[];
             /** Required Indicators */

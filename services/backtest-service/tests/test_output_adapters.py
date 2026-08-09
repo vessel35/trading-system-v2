@@ -441,6 +441,15 @@ def _run_meta() -> dict[str, object]:
     return values
 
 
+def test_profile_ref_remains_outside_the_config_hash_inputs() -> None:
+    values = _run_meta()
+    original_hash = normalized_config_hash(values)
+
+    values["profile_ref"] = "a-different-declared-profile"
+
+    assert normalized_config_hash(values) == original_hash
+
+
 def test_catalog_register_uses_one_sequence_cte_before_any_filename() -> None:
     connection = _Connection()
     store = BacktestCatalogStore(connection)

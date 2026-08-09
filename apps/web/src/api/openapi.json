@@ -8867,6 +8867,17 @@
             "type": "string",
             "title": "Strategy Version"
           },
+          "profile_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Id"
+          },
           "supported_timeframes": {
             "items": {
               "type": "string"
@@ -8949,6 +8960,7 @@
           "strategy_id",
           "display_name",
           "strategy_version",
+          "profile_id",
           "supported_timeframes",
           "required_indicators",
           "min_history",

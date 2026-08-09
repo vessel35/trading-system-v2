@@ -649,6 +649,7 @@ class StrategyRepository:
                 if strategy_class is not None
                 else str(row["strategy_version"])
             ),
+            profile_id=metadata.profile.id if metadata is not None and reason is None else None,
             supported_timeframes=(
                 list(metadata.supported_timeframes)
                 if metadata is not None
@@ -703,6 +704,7 @@ class StrategyRepository:
                     strategy_id=strategy_id,
                     display_name=strategy_id.replace("-", " ").title(),
                     strategy_version=str(getattr(strategy_class, "VERSION", "1.0.0")),
+                    profile_id=metadata.profile.id if reason is None else None,
                     supported_timeframes=list(metadata.supported_timeframes),
                     required_indicators=list(metadata.required_indicators),
                     min_history=metadata.min_history,

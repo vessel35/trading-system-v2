@@ -223,6 +223,15 @@ def test_normal_and_all_seven_reasons_are_projected_without_unioning_membership(
         "inactive": StrategyReconciliationState.INACTIVE,
         "read-failed": StrategyReconciliationState.DECLARATION_READ_FAILED,
     }
+    assert {option.strategy_id: option.profile_id for option in options} == {
+        "healthy": "runnability-fixture-v1",
+        "catalog-only": None,
+        "identity": None,
+        "declaration": None,
+        "deprecated": None,
+        "inactive": None,
+        "read-failed": None,
+    }
     for option in options:
         _assert_bidirectional_pair(option)
 
@@ -237,6 +246,7 @@ def test_normal_and_all_seven_reasons_are_projected_without_unioning_membership(
     )
     assert len(fallback) == 1
     assert fallback[0].unrunnable_reason is StrategyReconciliationState.ALLOWLIST_ONLY
+    assert fallback[0].profile_id is None
     _assert_bidirectional_pair(fallback[0])
 
 
@@ -250,6 +260,7 @@ def test_strategy_option_rejects_both_invalid_runnability_pairs() -> None:
             strategy_id="fixture",
             display_name="Fixture",
             strategy_version="1.0.0",
+            profile_id="declared-profile-unlike-fixture-v1",
             supported_timeframes=["1h"],
             required_indicators=[],
             min_history=1,
@@ -292,6 +303,11 @@ def test_openapi_model_requires_exactly_the_closed_additive_runnability_contract
         },
         {"type": "null"},
     ]
+    assert schema["properties"]["profile_id"]["anyOf"] == [
+        {"type": "string"},
+        {"type": "null"},
+    ]
+    assert "profile_id" in schema["required"]
 
 
 @pytest.mark.parametrize(
@@ -395,7 +411,8 @@ def test_each_declaration_is_read_once_and_one_snapshot_fills_existing_fields() 
     option = _repository([_row("fixture")], registry).list().data[0]
 
     assert (_FixtureStrategy.metadata_calls, _FixtureStrategy.schema_calls) == (1, 1)
-    assert option.model_dump(exclude={"runnable", "unrunnable_reason"}) == {
+    assert option.profile_id == "runnability-fixture-v1"
+    assert option.model_dump(exclude={"runnable", "unrunnable_reason", "profile_id"}) == {
         "strategy_id": "fixture",
         "display_name": "Row fixture",
         "strategy_version": "9.9.9",

@@ -257,10 +257,6 @@ function automaticRunName(strategyId: string, symbol: string): string {
     .replace(/-+$/g, "");
 }
 
-function automaticProfileRef(strategyId: string): string {
-  return `${strategyId}-v1`;
-}
-
 function paramsForDisplay(value: string): Record<string, unknown> {
   try {
     return parseObject(value, "전략 파라미터");
@@ -414,6 +410,12 @@ function assessRunReadiness({
       selectedStrategy,
     );
   }
+  if (!selectedStrategy.profile_id) {
+    return blocked(
+      `${selectedStrategy.display_name} 전략이 선언한 성격 정보 id를 읽을 수 없어 실행할 수 없습니다.`,
+      selectedStrategy,
+    );
+  }
   if (!selectedStrategy.supported_timeframes.includes(form.timeframe)) {
     return blocked(
       `선택한 전략은 timeframe ${form.timeframe}을 지원하지 않습니다. 새 값을 선택하세요.`,
@@ -493,6 +495,7 @@ function buildMoneyManagement(
 
 function buildSubmission(
   form: FormState,
+  selectedStrategy: StrategyOption,
   usesMoneyManagement: boolean,
 ): RunSubmission {
   const config: RunSubmission["config"] = {
@@ -531,7 +534,7 @@ function buildSubmission(
         : [],
     trigger_feed: "tf_candle",
     fill_timing: "next_bar",
-    profile_ref: form.profileRef.trim(),
+    profile_ref: selectedStrategy.profile_id!,
   };
   const prereg: PreregistrationInput | undefined = form.preregEnabled
     ? {
@@ -1035,7 +1038,6 @@ export function RunManagementPage() {
         timeframe: strategy.supported_timeframes.includes(current.timeframe)
           ? current.timeframe
           : (strategy.supported_timeframes[0] ?? current.timeframe),
-        profileRef: automaticProfileRef(strategyId),
       };
     });
   }
@@ -1059,7 +1061,11 @@ export function RunManagementPage() {
     setBusy("trigger");
     setNotice(null);
     try {
-      const submission = buildSubmission(form, readiness.usesMoneyManagement);
+      const submission = buildSubmission(
+        form,
+        readiness.selectedStrategy!,
+        readiness.usesMoneyManagement,
+      );
       const { data, error } = await apiClient.POST("/api/v1/runs", {
         body: submission,
       });
@@ -1089,7 +1095,11 @@ export function RunManagementPage() {
     setBusy("sweep");
     setNotice(null);
     try {
-      const base = buildSubmission(form, readiness.usesMoneyManagement);
+      const base = buildSubmission(
+        form,
+        readiness.selectedStrategy!,
+        readiness.usesMoneyManagement,
+      );
       const submission: SweepSubmission = {
         type: sweepType,
         config: base.config,
@@ -1323,11 +1333,13 @@ export function RunManagementPage() {
                       <option
                         key={strategy.strategy_id}
                         value={strategy.strategy_id}
-                        disabled={!strategy.runnable}
+                        disabled={!strategy.runnable || !strategy.profile_id}
                       >
                         {strategy.display_name} · {strategy.strategy_version}
                         {!strategy.runnable
                           ? ` · 실행 불가: ${unrunnableReasonLabel(strategy.unrunnable_reason)}`
+                          : !strategy.profile_id
+                            ? " · 실행 불가: 선언한 성격 정보 id가 없습니다."
                           : ""}
                       </option>
                     ))}
@@ -1962,7 +1974,7 @@ export function RunManagementPage() {
                     />
                   </Label>
                   <p className="text-xs leading-relaxed text-muted-foreground sm:col-span-2">
-                    시드 0 · 프로필 {form.profileRef} · 지표 자동 선택 · tf_candle
+                    시드 0 · 프로필 {selectedStrategy?.profile_id ?? "없음"} · 지표 자동 선택 · tf_candle
                     신호를 다음 봉에 체결
                   </p>
                 </div>
