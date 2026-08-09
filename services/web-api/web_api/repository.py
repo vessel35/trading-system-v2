@@ -1,17 +1,19 @@
 """SQL repository for P0 catalog reads."""
 
+import json
 import logging
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Any, Literal, cast
+from types import MappingProxyType
+from typing import Any, Final, Literal, cast
 
 from backtest_service.config.run_config import (
     SELECTABLE_MONEY_MANAGEMENT_MODES,
-    validate_money_management_config,
+    freeze_money_management_config,
 )
 from core_lib.eval import thresholds
-from core_lib.money_management import MoneyManagementFactory
+from core_lib.money_management import MoneyManagementBase, MoneyManagementFactory
 from core_lib.strategy import StrategyConfig
 from core_lib.strategy.adaptees import STRATEGY_ID, VesselReference
 from pydantic import BaseModel
@@ -165,34 +167,53 @@ def _selectable_modes(supported: Sequence[str]) -> list[str]:
     return [mode for mode in supported if mode in SELECTABLE_MONEY_MANAGEMENT_MODES]
 
 
+def _freeze_money_management_defaults(
+    policies: Mapping[str, type[MoneyManagementBase]] | None = None,
+    modes: Sequence[str] | None = None,
+) -> Mapping[str, str]:
+    """Build each selectable policy once and retain its strict JSON defaults.
+
+    Model discovery and final-union assembly have already completed in
+    ``run_config`` before this Web API module is imported. Default construction
+    remains independent per mode: a bad default removes only that default, not
+    the mode from the already accepted selectable set.
+    """
+    registered = registered_money_management() if policies is None else policies
+    selectable = sorted(SELECTABLE_MONEY_MANAGEMENT_MODES if modes is None else modes)
+    frozen: dict[str, str] = {}
+    for mode in selectable:
+        try:
+            policy = MoneyManagementFactory.create({"mode": mode}, registered)
+            resolved = dict(policy.resolved_config())
+            frozen[mode] = freeze_money_management_config(resolved, expected_mode=mode)
+        except (Exception, SystemExit):  # noqa: BLE001 - isolate one deployed default
+            _LOGGER.exception("money-management mode %s has no valid default configuration", mode)
+    return MappingProxyType(frozen)
+
+
+_FROZEN_MONEY_MANAGEMENT_DEFAULTS: Final = _freeze_money_management_defaults()
+
+
 def _default_money_management(mode: str | None) -> dict[str, object]:
-    """Return the named policy's own defaults, for the run form to start from.
+    """Return a fresh JSON-native copy of the named policy's frozen defaults.
 
     The values used to be a fixed manual-shaped dictionary, which was wrong for
     Turtle and meaningless for a policy deployed as a file, since nothing here
-    knows what settings such a policy has. Asking the policy keeps this correct
-    for every mode. A mode that cannot be built with defaults alone yields no
-    default; the selectable list still lets the client choose and configure it.
-
-    Building the policy runs code a deployed file wrote, and that happens while a
-    request is being answered. Any failure is confined to this one default so a
-    single bad deployment cannot take the whole strategy list with it. The
-    returned mapping is accepted only after the final run-config union validates
-    it and confirms that it still names the requested mode.
+    knows what settings such a policy has. The policy is asked once when this Web
+    API module loads. Requests only parse retained JSON, so they cannot run a
+    deployed constructor, validator, serializer, or registry lookup. Parsing on
+    every call also prevents nested dictionaries or lists from being shared
+    between responses.
     """
     if mode is None:
         return {}
-    try:
-        policy = MoneyManagementFactory.create({"mode": mode}, registered_money_management())
-        resolved = dict(policy.resolved_config())
-        if resolved.get("mode") != mode:
-            raise ValueError(
-                f"money-management mode {mode!r} returned defaults for {resolved.get('mode')!r}"
-            )
-        return validate_money_management_config(resolved)
-    except (Exception, SystemExit):  # noqa: BLE001 - one policy must not break the list
-        _LOGGER.exception("money-management mode %s has no valid default configuration", mode)
+    encoded = _FROZEN_MONEY_MANAGEMENT_DEFAULTS.get(mode)
+    if encoded is None:
         return {}
+    decoded = json.loads(encoded)
+    if not isinstance(decoded, dict):
+        raise TypeError("frozen money-management default must be a JSON object")
+    return cast("dict[str, object]", decoded)
 
 
 def _money_management_options(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from collections.abc import Mapping, Sequence
@@ -271,6 +272,50 @@ def validate_money_management_config(value: Mapping[str, object]) -> dict[str, o
     if not isinstance(validated, BaseModel):
         raise TypeError("money-management config did not resolve to a model")
     return cast("dict[str, object]", validated.model_dump())
+
+
+def freeze_money_management_config(
+    value: Mapping[str, object],
+    *,
+    expected_mode: str,
+) -> str:
+    """Return one final-union-valid default as strict, immutable JSON text.
+
+    The Web API owns when this function is called and owns the resulting cache.
+    Keeping the operation out of this module's import path avoids constructing
+    policies in backtest processes that never expose form defaults.
+
+    Validation deliberately happens on both sides of the JSON round trip. The
+    model dump runs deployed serializers once; the standard-library encoder then
+    rejects NaN and infinities instead of silently changing them to ``null``.
+    """
+    validated = _MONEY_MANAGEMENT_ADAPTER.validate_python(dict(value))
+    if not isinstance(validated, BaseModel):
+        raise TypeError("money-management config did not resolve to a model")
+    validated_mode = cast("Any", validated).mode
+    if validated_mode != expected_mode:
+        raise ValueError(
+            f"money-management mode {expected_mode!r} returned defaults for {validated_mode!r}"
+        )
+
+    json_value = validated.model_dump(mode="json")
+    encoded = json.dumps(
+        json_value,
+        allow_nan=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    decoded = json.loads(encoded)
+    revalidated = _MONEY_MANAGEMENT_ADAPTER.validate_python(decoded)
+    if not isinstance(revalidated, BaseModel):
+        raise TypeError("money-management JSON did not resolve to a model")
+    revalidated_mode = cast("Any", revalidated).mode
+    if revalidated_mode != expected_mode:
+        raise ValueError(
+            f"money-management mode {expected_mode!r} changed to "
+            f"{revalidated_mode!r} after JSON round trip"
+        )
+    return encoded
 
 
 class RunConfig(BaseModel):

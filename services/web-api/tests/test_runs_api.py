@@ -24,6 +24,7 @@ from web_api.models import StrategyOption
 from web_api.repository import (
     StrategyRepository,
     _default_money_management,
+    _freeze_money_management_defaults,
     _money_management_options,
     _selectable_modes,
 )
@@ -391,14 +392,14 @@ def test_a_mode_the_run_config_would_refuse_is_not_offered() -> None:
 def test_one_policy_that_fails_to_build_does_not_break_the_strategy_list(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Building a policy runs code a deployed file wrote, while answering a request."""
+    """A policy construction fault is isolated while defaults are frozen."""
 
     def explode(*args: object, **kwargs: object) -> object:
         raise RuntimeError("a deployed policy raised while being built")
 
     monkeypatch.setattr("web_api.repository.MoneyManagementFactory.create", staticmethod(explode))
 
-    assert _default_money_management("turtle") == {}
+    assert dict(_freeze_money_management_defaults({}, ["turtle"])) == {}
 
 
 def test_a_rejected_declared_default_does_not_invent_another_default() -> None:
@@ -455,4 +456,4 @@ def test_a_policy_default_with_the_wrong_mode_or_shape_is_not_projected(
         staticmethod(lambda *args, **kwargs: policy),
     )
 
-    assert _default_money_management("turtle") == {}
+    assert dict(_freeze_money_management_defaults({}, ["turtle"])) == {}
