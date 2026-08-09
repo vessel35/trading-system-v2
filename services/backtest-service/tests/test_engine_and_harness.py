@@ -2334,6 +2334,83 @@ class _HoldStrategyCatalog(StrategyRegistry):
         raise PermissionError("read-only fixture")
 
 
+class _NoPolicyEntryStrategy(_HoldStrategy):
+    """Emit a target-contract entry while declaring no supported policy."""
+
+    def analyze(
+        self,
+        market_data: dict[str, object],
+        current_position: Position | None,
+    ) -> DecisionIntent:
+        del current_position
+        candle = market_data["candle"]
+        assert isinstance(candle, Candle)
+        return DecisionIntent(
+            action=DecisionAction.ENTER_LONG,
+            symbol=candle.symbol,
+            timestamp=candle.close_time,
+            reference_price=float(candle.close),
+            confidence=0.8,
+            reason="entry-without-policy",
+            metadata={"fixture": True},
+        )
+
+
+def test_a_decision_entry_without_a_policy_fails_the_backtest(tmp_path: Path) -> None:
+    candles = _candles()
+    costs = BacktestCostModel(_config().cost_values)
+    plugins = InProcessStrategyRegistry()
+    plugins.register("hold-fixture", _NoPolicyEntryStrategy)
+    engine = Engine(
+        _Feed(candles),
+        _Broker(costs),
+        BacktestClock.from_candles(candles),
+        costs,
+        BacktestEvidenceSink(tmp_path),
+        _Catalog(),
+        AdapterManager(_HoldStrategyCatalog(_NoPolicyEntryStrategy), plugins),
+        prereg=_prereg(),
+    )
+
+    with pytest.raises(
+        MoneyManagementError,
+        match="strategy entry requires a money-management policy",
+    ):
+        engine.run(_config().model_copy(update={"strategy_id": "hold-fixture"}))
+
+
+def test_a_policy_rejection_still_blocks_only_that_entry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = _engine(tmp_path, _Catalog(), [])
+    engine._money_management = MoneyManagementFactory.create({"mode": "manual"})  # noqa: SLF001
+    recorded: list[tuple[PositionSide, str]] = []
+    monkeypatch.setattr(
+        engine,
+        "_record_blocked_candidate",
+        lambda _candle, side, reason: recorded.append((side, reason)),
+    )
+    candle = _candles()[-1]
+    decision = DecisionIntent(
+        action=DecisionAction.ENTER_SHORT,
+        symbol=candle.symbol,
+        timestamp=candle.close_time,
+        reference_price=float(candle.close),
+        confidence=0.8,
+        reason="policy-rejects",
+        metadata={},
+    )
+
+    engine._handle_money_management_error(  # noqa: SLF001
+        candle,
+        decision,
+        MoneyManagementError("planned entry rejected"),
+    )
+
+    assert recorded == [(PositionSide.SHORT, "money_management_rejected")]
+
+
 def test_hold_leaves_its_reason_in_evidence_and_none_leaves_nothing(tmp_path: Path) -> None:
     candles = _candles()
     costs = BacktestCostModel(_config().cost_values)

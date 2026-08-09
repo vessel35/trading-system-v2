@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import ClassVar, Protocol, runtime_checkable
+from typing import ClassVar
 
 from core_lib.types import Candle, DecisionAction, DecisionIntent, MarketType
 
@@ -21,51 +21,8 @@ from .models import (
 )
 
 
-@runtime_checkable
-class MoneyManagementPolicy(Protocol):
-    """A stateless policy that turns an entry decision into a bounded plan."""
-
-    id: ClassVar[str]
-    version: ClassVar[str]
-
-    requires_signal_exit: ClassVar[bool]
-    """Whether this policy leaves the exit to the strategy.
-
-    Declared here rather than only on the base class because the protocol is what
-    a policy has to satisfy. Leaving it off the protocol let a policy that never
-    sets ``take_profit`` pair with a strategy that cannot emit an exit, which
-    opens a trade with nothing to close it. There is no safe default to fall back
-    on, so every policy states it.
-    """
-
-    def required_indicators(self) -> tuple[PolicyIndicatorRequirement, ...]:
-        """Return the policy-owned finalized market inputs."""
-        ...
-
-    def resolved_config(self) -> Mapping[str, object]:
-        """Return the normalized, non-secret policy configuration."""
-        ...
-
-    def plan_entry(
-        self,
-        decision: DecisionIntent,
-        market: MarketSnapshot,
-        account: AccountRiskSnapshot,
-        global_limits: RiskLimits,
-    ) -> MoneyManagementPlan:
-        """Return a proposed protection, quantity, and leverage plan."""
-        ...
-
-
 class MoneyManagementBase(ABC):
-    """Optional stateless convenience base that satisfies ``MoneyManagementPolicy``.
-
-    The protocol is structural, so it only checks that the three members exist.
-    A policy whose ``plan_entry`` takes the wrong arguments still satisfies it and
-    fails at run time instead. Inheriting here refuses the instance up front, and
-    supplies the two calculations both shipped policies share so a new policy does
-    not restate the global risk cap and get it wrong.
-    """
+    """The stateless base contract for every money-management policy."""
 
     __slots__ = ()
 
@@ -73,11 +30,9 @@ class MoneyManagementBase(ABC):
     version: ClassVar[str]
 
     requires_signal_exit: ClassVar[bool] = False
-    """Supply the protocol's declaration for a policy that sets ``take_profit``.
+    """Declare that a policy setting ``take_profit`` does not need a signal exit.
 
-    Inheriting the false value is still a declaration: a policy that plans its own
-    exit says so by not overriding it. A policy that leaves the exit to the
-    strategy overrides it to true. Nothing reads a missing value as false.
+    A policy that leaves the exit to the strategy overrides this to true.
     """
 
     @abstractmethod

@@ -55,7 +55,7 @@ from backtest_service.config import RunConfig
 from backtest_service.engine import Engine
 from core_lib.execution.matcher import _protection_reference
 from core_lib.money_management.models import PolicyIndicatorRequirement
-from core_lib.money_management.policies import MoneyManagementPolicy
+from core_lib.money_management.policies import MoneyManagementBase
 from core_lib.ports import CatalogStore, DataFeed, StrategyRegistry
 from core_lib.strategy import (
     AdapterManager,
@@ -518,7 +518,7 @@ def test_the_history_floor_covers_a_policy_declared_daily_requirement() -> None:
     """
     config = _config()
     engine = Engine.__new__(Engine)
-    engine._money_management = cast(MoneyManagementPolicy, _TurtlePolicyStub())
+    engine._money_management = cast(MoneyManagementBase, _TurtlePolicyStub())
 
     # Nine 1h bars of warm-up span barely over a day; twenty daily bars span twenty.
     span = Engine._warmup_span(engine, config, required_warmup=9)

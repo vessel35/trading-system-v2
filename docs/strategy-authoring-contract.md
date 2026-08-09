@@ -194,7 +194,7 @@ series와 실제로 읽는 series가 일치할 것, 진입을 내면 유효한 �
 ```mermaid
 flowchart LR
     A["StrategyAdapter<br/>DecisionIntent 생성"]
-    B["MoneyManagementPolicy<br/>stop_loss와 포지션 계획 생성"]
+    B["MoneyManagementBase<br/>stop_loss와 포지션 계획 생성"]
     C["Risk Governor<br/>계좌 위험 한도 승인<br/>(독립 단계 미구현)"]
     D["Execution<br/>주문과 거래소 제약 적용"]
     E["Evidence<br/>입력과 최종 계산값 기록"]
@@ -899,22 +899,24 @@ print(sorted(build_talib_pattern_registry().names()))
 
 ## 5. 자금관리 정책
 
-### 5.1 공통 Protocol
+### 5.1 공통 base class
 
-`MoneyManagementPolicy`는 `core_lib`에 두는 stateless Protocol이다. 정책
-구현은 서비스, 데이터베이스 또는 Broker를 직접 참조하지 않는다.
+`MoneyManagementBase`는 `core_lib`에 두는 stateless base class이며 **정책이 상속해야 하는
+유일한 계약이다.** 정책 구현은 서비스, 데이터베이스 또는 Broker를 직접 참조하지 않는다.
 
 ```python
-@runtime_checkable
-class MoneyManagementPolicy(Protocol):
+class MoneyManagementBase(ABC):
     id: ClassVar[str]
     version: ClassVar[str]
     requires_signal_exit: ClassVar[bool]
 
+    @abstractmethod
     def required_indicators(self) -> tuple[PolicyIndicatorRequirement, ...]: ...
 
+    @abstractmethod
     def resolved_config(self) -> Mapping[str, object]: ...
 
+    @abstractmethod
     def plan_entry(
         self,
         decision: DecisionIntent,
@@ -927,22 +929,16 @@ class MoneyManagementPolicy(Protocol):
 **`id`와 `version`은 `ClassVar`다.** 인스턴스마다 달라지는 값이 아니라 정책
 구현 자체를 가리키는 이름이며, Evidence에 그대로 기록된다.
 
-**`requires_signal_exit`도 Protocol의 멤버다.** 목표가를 두지 않는 정책은 전략이
-청산을 내주어야만 자리를 닫을 수 있으므로, 그 사실을 정책이 스스로 밝힌다.
-선언이 없는 정책은 **없는 값을 거짓으로 보지 않고 거부한다.** 없는 것을 거짓으로
-읽으면 목표가도 없고 전략 청산도 없는 짝이 만들어져 **닫을 수단이 없는 자리가
-열린다.** `MoneyManagementBase`를 상속하면 기본값 거짓이 선언을 대신하며, 이때
-거짓은 "빠뜨렸다"가 아니라 "이 정책은 스스로 청산한다"는 뜻이다.
+**`requires_signal_exit`도 계약의 멤버다.** 목표가를 두지 않는 정책은 전략이
+청산을 내주어야만 자리를 닫을 수 있으므로, 그 사실을 정책이 스스로 밝힌다. base class의
+기본값 거짓이 선언을 대신하며, 이때 거짓은 "빠뜨렸다"가 아니라 "이 정책은 스스로
+청산한다"는 뜻이다.
 
-**`MoneyManagementPolicy` Protocol이 규범 정책이며 `MoneyManagementBase`는 그
-정책을 만족하도록 제공하는 선택적 편의 base class다.** 전략 쪽의
-`StrategyAdapter`와 `StrategyBase`가 맺는 관계와 같다.
-
-**새 정책은 `MoneyManagementBase`를 상속한다.** Protocol은 구조만 보므로
-**이름만 맞으면 통과한다.** `plan_entry`가 인자를 하나도 받지 않고
-`required_indicators`가 튜플 대신 문자열을 돌려주어도 `isinstance` 검사는
-참이고 실행하다가 터진다. 기반 클래스를 상속하면 **셋 중 하나라도 비었을 때
-인스턴스 생성 자체가 거부된다.**
+**계약은 이 base class 하나다.** 예전에는 같은 것을 구조만 보는 Protocol로도 두었는데,
+**구조만 보면 이름만 맞아도 통과한다.** `plan_entry`가 인자를 하나도 받지 않고
+`required_indicators`가 튜플 대신 문자열을 돌려주어도 검사는 참이고 실행하다가 터진다.
+실제로 선언을 빠뜨린 정책이 그렇게 통과한 적이 있다. 상속 하나로 두면 **셋 중 하나라도
+비었을 때 인스턴스 생성 자체가 거부되고**, 무엇을 상속해야 하는지도 흐리지 않다.
 
 기반 클래스는 공용 계산 둘도 함께 제공한다. `entry_side`는 진입 방향을 정하고
 진입이 아닌 판단을 거부하며, `risk_inputs`는 **위험예산과 수량을 구한다.**
@@ -1078,13 +1074,18 @@ Adapter Manager는 전략과 정책을 하나의 runtime으로 조합한다. 의
 @dataclass(frozen=True, slots=True)
 class StrategyRuntime:
     strategy: StrategyAdapter
-    money_management: MoneyManagementPolicy | None
+    money_management: MoneyManagementBase
 ```
 
-**정책이 `None`인 조합이 있다.** 목표 방식이 오기 전의 legacy `TradingSignal`
-경로가 그것이며, 그때는 전략이 스스로 `stop_loss`와 leverage를 담아 보낸다.
-**신규 전략은 이 경로를 쓰지 않는다.** `DecisionIntent`를 반환하는 전략이
-정책 없이 진입하려 하면 Engine이 거부한다.
+**정책이 붙는지는 지원 정책 목록이 비었는지로만 갈린다.** 전략이 무엇을 돌려주는지는 보지
+않는다. 그래서 맞는 짝은 둘뿐이다 — `DecisionIntent`를 돌려주면 정책이 있어야 하고,
+`TradingSignal`을 돌려주면 정책이 쓰이지 않는다.
+
+**짝이 어긋나면 그대로 잘못 돈다.** `DecisionIntent`를 돌려주는데 정책이 없으면 **진입이
+하나도 되지 않으므로 실행을 실패시킨다.** 반대로 `TradingSignal`을 돌려주는데 정책이 붙어
+있으면 그 정책은 쓰이지 않으면서 Evidence에는 쓴 것으로 적힌다. **뒤엣것은 아직 막지 않는다** —
+막으려면 전략이 무엇을 돌려주는지 선언하게 하고 그 짝을 검사해야 하는데, 들이는 시점의
+검사를 늘리지 않기로 했다.
 
 manual과 Turtle 모드에서 동일한 시장 입력을 사용하면 전략이 만든
 `DecisionIntent`는 동일해야 한다. 정책이 만든 `stop_loss`, quantity 및
@@ -1613,7 +1614,15 @@ mode의 이름과 견주는 코드가 형 검사에서 막힌다. 넓히려다 �
 쓰지 않는 서비스까지 모든 정책의 비용과 멈춤 위험을 떠안는다. "한 번"은 배포 전체가
 아니라 **파이썬 프로세스마다 한 번**이다.
 
-**멈추는 코드는 실행기가 막지 않는다. 그것은 들이기 전에 거르는 일이다.** 한 정책이
+**잘못 만들어진 것을 걸러 내는 일은 실행기가 아니라 들이기 전 관문의 몫이다.** 실행기는
+자기가 쓰는 값이 규범에 맞는지만 보고, 맞지 않으면 그 자리에서 오류를 낸다. **실행 경로에
+잘못된 배포를 미리 막는 방어를 더 쌓지 않으며, 들이는 시점의 검사도 지금 있는 것에서 더
+늘리지 않는다.**
+지금 그 관문은 사람의 검토다. 전략과 정책을 중간 언어로 쓰고 변환·점검 단계를 거쳐 들이게
+되면 그 단계가 관문이 된다. 실행기가 같은 방어를 겹쳐 두면 책임이 두 곳으로 갈리고, 관문이
+생긴 뒤에도 걷어내지 못한다.
+
+**멈추는 코드도 같다. 실행기가 막지 않는다.** 한 정책이
 나머지를 죽이지 않는다는 이 문서의 약속은 **오류에 대한 것이지 멈춤에 대한 것이 아니다.**
 파이썬은 시작된 코드를 밖에서 끊지 못하므로, 실행 중에 멈춤을 막으려면 프로세스 경계를
 세우고 정책이 쓸 수 있는 형을 좁혀야 한다. **그 일은 배포 전 관문의 몫이다.** 지금 그

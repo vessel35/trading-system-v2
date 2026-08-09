@@ -2,6 +2,7 @@
 
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from core_lib.money_management import (
@@ -11,7 +12,6 @@ from core_lib.money_management import (
     MoneyManagementBase,
     MoneyManagementError,
     MoneyManagementFactory,
-    MoneyManagementPolicy,
     PolicyIndicatorRequirement,
     RiskLimits,
     TurtleMoneyManagement,
@@ -218,10 +218,16 @@ def test_base_refuses_a_policy_that_leaves_a_member_unimplemented() -> None:
         Incomplete()  # type: ignore[abstract]
 
 
-def test_shipped_policies_inherit_the_base_and_still_satisfy_the_protocol() -> None:
+def test_the_base_is_the_only_money_management_contract() -> None:
     for policy in (ManualMoneyManagement(), TurtleMoneyManagement()):
         assert isinstance(policy, MoneyManagementBase)
-        assert isinstance(policy, MoneyManagementPolicy)
+    assert isinstance(MoneyManagementFactory.create({"mode": "manual"}), MoneyManagementBase)
+
+    repository = Path(__file__).resolve().parents[3]
+    production_sources = (
+        path for path in (repository / "services").rglob("*.py") if "tests" not in path.parts
+    )
+    assert not any("MoneyManagementPolicy" in path.read_text() for path in production_sources)
 
 
 def test_base_risk_budget_comes_only_from_the_global_cap() -> None:

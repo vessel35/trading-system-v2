@@ -5,7 +5,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
-from core_lib.money_management import MoneyManagementPolicy
+from core_lib.money_management import MoneyManagementBase
 from core_lib.series import SeriesSpec, series_key
 from core_lib.types import DecisionIntent, Position, TradingSignal
 
@@ -117,4 +117,4 @@ class StrategyRuntime:
     """Compose a decision strategy with an optional common money policy."""
 
     strategy: StrategyAdapter
-    money_management: MoneyManagementPolicy | None
+    money_management: MoneyManagementBase | None

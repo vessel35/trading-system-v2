@@ -17,8 +17,19 @@ from backtest_service.config.run_config import (
     validate_money_management_config,
 )
 from core_lib.money_management import MoneyManagementFactory
+from core_lib.strategy import (
+    FieldSpec,
+    InProcessStrategyRegistry,
+    MoneyManagementSupport,
+    ParameterSchema,
+    StrategyMetadata,
+)
+from core_lib.strategy import (
+    build_strategy_registry as build_builtin_strategy_registry,
+)
+from core_lib.strategy.adaptees import VesselReference
 from fastapi.testclient import TestClient
-from web_api.database import SignalConnection
+from web_api.database import SignalConnection, signal_connection
 from web_api.main import app
 from web_api.models import StrategyOption
 from web_api.repository import (
@@ -342,9 +353,145 @@ class _MissingTableConnection:
         return _MissingTableCursor()
 
 
+class _DeployedStrategy(VesselReference):
+    VERSION = "9.9.9"
+
+    @classmethod
+    def get_metadata(cls) -> StrategyMetadata:
+        metadata = super().get_metadata()
+        metadata.required_indicators = [{"name": "EMA", "params": {"period": 55}}]
+        metadata.min_history = 77
+        metadata.supported_timeframes = ["4h"]
+        metadata.money_management = MoneyManagementSupport(
+            supported=("manual", "not-in-the-run-union"),
+            default="not-in-the-run-union",
+            supports_external_stop=True,
+            supports_external_take_profit=True,
+            supports_signal_exit=True,
+        )
+        return metadata
+
+    @classmethod
+    def get_parameter_schema(cls) -> ParameterSchema:
+        return ParameterSchema(
+            fields={
+                "edge": FieldSpec(type="number", default=3.5),
+                "required_input": FieldSpec(type="integer", required=True),
+            }
+        )
+
+
+class _StrategyRowsCursor:
+    def __init__(
+        self,
+        *,
+        one: dict[str, object] | None = None,
+        many: list[dict[str, object]] | None = None,
+    ) -> None:
+        self._one = one
+        self._many = [] if many is None else many
+
+    def fetchone(self) -> dict[str, object] | None:
+        return self._one
+
+    def fetchall(self) -> list[dict[str, object]]:
+        return self._many
+
+
+class _StrategyRowsConnection:
+    def __init__(self, rows: list[dict[str, object]]) -> None:
+        self._rows = rows
+
+    def execute(self, query: str) -> _StrategyRowsCursor:
+        if "to_regclass" in query:
+            return _StrategyRowsCursor(one={"relation": "strategy_registry"})
+        return _StrategyRowsCursor(many=self._rows)
+
+
+def _deployed_row() -> dict[str, object]:
+    return {
+        "strategy_id": "deployed-strategy",
+        "display_name": "Deployed Row",
+        "strategy_version": "row-version",
+        "supported_timeframes": ["5m"],
+        "required_indicators_json": [{"name": "RSI", "params": {"period": 14}}],
+        "min_history": 2,
+        "default_params_json": {"stale": True},
+        "is_active": True,
+        "is_deprecated": False,
+    }
+
+
+def test_a_non_vessel_row_reads_its_deployed_class_declaration_through_projection() -> None:
+    registry = InProcessStrategyRegistry()
+    registry.register("deployed-strategy", _DeployedStrategy)
+    connection = cast(SignalConnection, _StrategyRowsConnection([_deployed_row()]))
+
+    strategy = StrategyRepository(connection, registry).list().data[0]
+
+    assert strategy.strategy_version == "9.9.9"
+    assert strategy.supported_timeframes == ["4h"]
+    assert strategy.required_indicators == [{"name": "EMA", "params": {"period": 55}}]
+    assert strategy.min_history == 77
+    assert strategy.default_params == {"edge": 3.5}
+    assert strategy.supported_money_management == ["manual"]
+    assert strategy.default_money_management == {}
+
+
+def test_a_row_missing_from_the_common_registry_keeps_row_values_and_empty_policies() -> None:
+    connection = cast(SignalConnection, _StrategyRowsConnection([_deployed_row()]))
+
+    strategy = StrategyRepository(connection, InProcessStrategyRegistry()).list().data[0]
+
+    assert strategy.strategy_version == "row-version"
+    assert strategy.supported_timeframes == ["5m"]
+    assert strategy.required_indicators == [{"name": "RSI", "params": {"period": 14}}]
+    assert strategy.min_history == 2
+    assert strategy.default_params == {"stale": True}
+    assert strategy.supported_money_management == []
+    assert strategy.default_money_management == {}
+
+
+def test_code_fallback_lists_every_strategy_in_the_common_registry() -> None:
+    registry = build_builtin_strategy_registry()
+    registry.register("deployed-strategy", _DeployedStrategy)
+    connection = cast(SignalConnection, _MissingTableConnection())
+
+    response = StrategyRepository(connection, registry).list()
+
+    assert [strategy.strategy_id for strategy in response.data] == [
+        "deployed-strategy",
+        "vessel-reference",
+    ]
+
+
+def test_the_app_builds_the_common_strategy_registry_once_for_multiple_requests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+
+    def counted_registry() -> InProcessStrategyRegistry:
+        nonlocal calls
+        calls += 1
+        return build_builtin_strategy_registry()
+
+    monkeypatch.setattr("web_api.main.build_strategy_registry", counted_registry)
+    app.dependency_overrides[signal_connection] = lambda: cast(
+        SignalConnection, _MissingTableConnection()
+    )
+    try:
+        with TestClient(app) as client:
+            assert client.get("/api/v1/strategies").status_code == 200
+            assert client.get("/api/v1/strategies").status_code == 200
+    finally:
+        app.dependency_overrides.clear()
+
+    assert calls == 1
+
+
 def test_strategy_repository_falls_back_to_code_registry() -> None:
     connection = cast(SignalConnection, _MissingTableConnection())
-    response = StrategyRepository(connection).list()
+    response = StrategyRepository(connection, build_builtin_strategy_registry()).list()
     assert len(response.data) == 1
     strategy = response.data[0]
     assert strategy.strategy_id == "vessel-reference"
@@ -370,7 +517,7 @@ def test_the_strategy_list_does_not_restrict_the_money_management_modes() -> Non
 def test_a_mode_default_comes_from_the_policy_rather_than_a_manual_shaped_dict() -> None:
     """The prefilled settings used to be manual's fields regardless of the mode."""
     connection = cast(SignalConnection, _MissingTableConnection())
-    strategy = StrategyRepository(connection).list().data[0]
+    strategy = StrategyRepository(connection, build_builtin_strategy_registry()).list().data[0]
 
     assert strategy.default_money_management == dict(
         MoneyManagementFactory.create({"mode": "manual"}).resolved_config()

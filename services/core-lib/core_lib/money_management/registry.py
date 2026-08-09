@@ -10,7 +10,6 @@ from typing import Any, Final, cast
 from .policies import (
     ManualMoneyManagement,
     MoneyManagementBase,
-    MoneyManagementPolicy,
     TurtleMoneyManagement,
 )
 
@@ -44,7 +43,7 @@ class MoneyManagementFactory:
     def create(
         raw_config: Mapping[str, object],
         policies: Mapping[str, type[MoneyManagementBase]] = BUILTIN_POLICIES,
-    ) -> MoneyManagementPolicy:
+    ) -> MoneyManagementBase:
         """Build the policy the configuration names, from whatever is registered.
 
         The accepted names and their defaults come from the policy class itself

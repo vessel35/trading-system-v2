@@ -18,7 +18,7 @@ from core_lib.money_management import (
     AccountRiskSnapshot,
     ManualMoneyManagement,
     MarketSnapshot,
-    MoneyManagementPolicy,
+    MoneyManagementBase,
     RiskLimits,
 )
 from core_lib.patterns import DEFAULT_PATTERN_REGISTRY, PatternRegistry
@@ -77,7 +77,7 @@ class SignalGenerationService:
         self._queue = queue
         self._config: SignalGenerationConfig | None = None
         self._strategy: StrategyAdapter | None = None
-        self._money_management: MoneyManagementPolicy | None = None
+        self._money_management: MoneyManagementBase | None = None
         self._specs: list[SeriesSpec] = []
         self._states: dict[str, SeriesState] = {}
         self._confirmed: list[Candle] = []

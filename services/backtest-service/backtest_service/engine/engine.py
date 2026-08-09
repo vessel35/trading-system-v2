@@ -41,9 +41,9 @@ from core_lib.indicators import DEFAULT_REGISTRY, IndicatorSpec
 from core_lib.money_management import (
     AccountRiskSnapshot,
     MarketSnapshot,
+    MoneyManagementBase,
     MoneyManagementError,
     MoneyManagementFactory,
-    MoneyManagementPolicy,
     RiskLimits,
     turtle_n_series,
 )
@@ -304,7 +304,7 @@ class Engine:
         self.config: RunConfig | None = None
         self.pending: list[_PendingOrder] = []
         self._strategy: StrategyAdapter | None = None
-        self._money_management: MoneyManagementPolicy | None = None
+        self._money_management: MoneyManagementBase | None = None
         self._history: list[Candle] = []
         self._preload: list[Candle] = []
         self._evaluation: list[Candle] = []
@@ -602,17 +602,28 @@ class Engine:
                 return
             try:
                 signal = self._managed_signal(candle, decision)
-            except MoneyManagementError:
-                side = (
-                    PositionSide.LONG
-                    if decision.action is DecisionAction.ENTER_LONG
-                    else PositionSide.SHORT
-                )
-                self._record_blocked_candidate(candle, side, "money_management_rejected")
+            except MoneyManagementError as error:
+                self._handle_money_management_error(candle, decision, error)
                 return
         if signal.timestamp > candle.close_time:
             raise ValueError("strategy signal cannot be later than the confirmed candle")
         self._handle_signal(candle, signal)
+
+    def _handle_money_management_error(
+        self,
+        candle: Candle,
+        decision: DecisionIntent,
+        error: MoneyManagementError,
+    ) -> None:
+        """Fail a missing-policy entry, while retaining a policy's normal rejection."""
+        if self._money_management is None:
+            raise error
+        side = (
+            PositionSide.LONG
+            if decision.action is DecisionAction.ENTER_LONG
+            else PositionSide.SHORT
+        )
+        self._record_blocked_candidate(candle, side, "money_management_rejected")
 
     def walk_triggers(
         self,
@@ -1104,7 +1115,7 @@ class Engine:
     def _money_management_volatility(
         self,
         candle: Candle,
-        policy: MoneyManagementPolicy,
+        policy: MoneyManagementBase,
     ) -> tuple[float, str, datetime]:
         """Read the value the policy declared, without knowing which policy it is.
 

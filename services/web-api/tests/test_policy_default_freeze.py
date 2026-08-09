@@ -23,6 +23,7 @@ from core_lib.money_management import (
     PolicyIndicatorRequirement,
     RiskLimits,
 )
+from core_lib.strategy import build_strategy_registry
 from core_lib.types import DecisionIntent
 from pydantic import BaseModel, TypeAdapter, field_validator, model_serializer
 from web_api.database import SignalConnection
@@ -366,8 +367,9 @@ def test_requests_do_not_reenter_policy_or_union_code(
     monkeypatch.setattr(repository, "freeze_money_management_config", explode)
 
     connection = cast("SignalConnection", _MissingTableConnection())
-    first = repository.StrategyRepository(connection).list()
-    second = repository.StrategyRepository(connection).list()
+    registry = build_strategy_registry()
+    first = repository.StrategyRepository(connection, registry).list()
+    second = repository.StrategyRepository(connection, registry).list()
 
     first.model_dump_json()
     second.model_dump_json()

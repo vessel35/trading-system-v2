@@ -18,12 +18,14 @@ from backtest_service.adapters.catalog_store import (
 )
 from backtest_service.config import RunConfig
 from core_lib import __version__ as core_lib_version
+from core_lib.strategy import InProcessStrategyRegistry
 from fastapi import Body, Depends, FastAPI, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import SkipValidation, ValidationError
+from trading_plugins import build_strategy_registry
 
 from web_api import __version__ as web_api_version
 from web_api.data_jobs import (
@@ -135,7 +137,8 @@ class ApiError(Exception):
 
 
 @asynccontextmanager
-async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
+async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+    application.state.strategy_registry = build_strategy_registry()
     start_executor()
     try:
         yield
@@ -318,9 +321,11 @@ def market_repository(
 
 
 def strategy_repository(
+    request: Request,
     connection: Annotated[SignalConnection, Depends(signal_connection)],
 ) -> StrategyRepository:
-    return StrategyRepository(connection)
+    registry = cast(InProcessStrategyRegistry, request.app.state.strategy_registry)
+    return StrategyRepository(connection, registry)
 
 
 def _validation_details(exc: ValidationError | RequestValidationError) -> list[dict[str, str]]:

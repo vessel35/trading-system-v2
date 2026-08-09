@@ -14,8 +14,7 @@ from backtest_service.config.run_config import (
 )
 from core_lib.eval import thresholds
 from core_lib.money_management import MoneyManagementBase, MoneyManagementFactory
-from core_lib.strategy import StrategyConfig
-from core_lib.strategy.adaptees import STRATEGY_ID, VesselReference
+from core_lib.strategy import AdapterClass, InProcessStrategyRegistry, StrategyConfig
 from pydantic import BaseModel
 from trading_plugins import registered_money_management
 
@@ -575,8 +574,13 @@ class CatalogRepository:
 class StrategyRepository:
     """Read the signal-service registry, falling back to the in-process Adaptee."""
 
-    def __init__(self, connection: SignalConnection) -> None:
+    def __init__(
+        self,
+        connection: SignalConnection,
+        strategy_registry: InProcessStrategyRegistry,
+    ) -> None:
         self._connection = connection
+        self._strategy_registry = strategy_registry
 
     def list(self) -> StrategyListResponse:
         table = self._connection.execute(
@@ -596,10 +600,13 @@ class StrategyRepository:
                 return StrategyListResponse(data=[self._database_option(row) for row in rows])
         return self._code_registry()
 
-    @staticmethod
-    def _database_option(row: Mapping[str, object]) -> StrategyOption:
+    def _database_option(self, row: Mapping[str, object]) -> StrategyOption:
         strategy_id = str(row["strategy_id"])
-        metadata = VesselReference.get_metadata() if strategy_id == STRATEGY_ID else None
+        try:
+            strategy_class = self._strategy_registry.get(strategy_id)
+        except KeyError:
+            strategy_class = None
+        metadata = None if strategy_class is None else strategy_class.get_metadata()
         support = None if metadata is None else metadata.money_management
         modes, default = (
             ([], {})
@@ -613,9 +620,15 @@ class StrategyRepository:
             strategy_id=strategy_id,
             display_name=str(row["display_name"]),
             strategy_version=(
-                VesselReference.VERSION if metadata is not None else str(row["strategy_version"])
+                str(getattr(strategy_class, "VERSION", row["strategy_version"]))
+                if strategy_class is not None
+                else str(row["strategy_version"])
             ),
-            supported_timeframes=list(cast(list[str], row["supported_timeframes"])),
+            supported_timeframes=(
+                list(metadata.supported_timeframes)
+                if metadata is not None
+                else list(cast(list[str], row["supported_timeframes"]))
+            ),
             required_indicators=(
                 metadata.required_indicators
                 if metadata is not None
@@ -629,7 +642,11 @@ class StrategyRepository:
             min_history=(
                 metadata.min_history if metadata is not None else int(cast(int, row["min_history"]))
             ),
-            default_params=dict(cast(dict[str, object], row["default_params_json"])),
+            default_params=(
+                self._parameter_defaults(strategy_class)
+                if strategy_class is not None
+                else dict(cast(dict[str, object], row["default_params_json"]))
+            ),
             supported_money_management=modes,
             default_money_management=default,
             is_active=bool(row["is_active"]),
@@ -637,35 +654,38 @@ class StrategyRepository:
             source="strategy_registry",
         )
 
-    @staticmethod
-    def _code_registry() -> StrategyListResponse:
-        metadata = VesselReference.get_metadata()
-        modes, default = _money_management_options(
-            metadata.money_management.supported,
-            metadata.money_management.default,
-        )
-        resolved = StrategyConfig.resolve(
-            VesselReference.get_parameter_schema(),
-            {"strategy_id": STRATEGY_ID, "params": {}},
-        )
-        return StrategyListResponse(
-            data=[
+    def _code_registry(self) -> StrategyListResponse:
+        options: list[StrategyOption] = []
+        for strategy_id in self._strategy_registry.list():
+            strategy_class = self._strategy_registry.get(strategy_id)
+            metadata = strategy_class.get_metadata()
+            modes, default = _money_management_options(
+                metadata.money_management.supported,
+                metadata.money_management.default,
+            )
+            options.append(
                 StrategyOption(
-                    strategy_id=STRATEGY_ID,
-                    display_name="Vessel Reference",
-                    strategy_version=VesselReference.VERSION,
-                    supported_timeframes=metadata.supported_timeframes,
-                    required_indicators=metadata.required_indicators,
+                    strategy_id=strategy_id,
+                    display_name=strategy_id.replace("-", " ").title(),
+                    strategy_version=str(getattr(strategy_class, "VERSION", "1.0.0")),
+                    supported_timeframes=list(metadata.supported_timeframes),
+                    required_indicators=list(metadata.required_indicators),
                     min_history=metadata.min_history,
-                    default_params=dict(resolved.params),
+                    default_params=self._parameter_defaults(strategy_class),
                     supported_money_management=modes,
                     default_money_management=default,
                     is_active=True,
                     is_deprecated=False,
                     source="code_registry",
                 )
-            ]
-        )
+            )
+        return StrategyListResponse(data=options)
+
+    @staticmethod
+    def _parameter_defaults(strategy_class: AdapterClass) -> dict[str, object]:
+        schema = StrategyConfig.json_schema(strategy_class.get_parameter_schema())
+        properties = cast("Mapping[str, Mapping[str, object]]", schema["properties"])
+        return {name: field["default"] for name, field in properties.items() if "default" in field}
 
 
 class MarketDataRepository:
