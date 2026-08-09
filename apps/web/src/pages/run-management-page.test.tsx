@@ -1,15 +1,17 @@
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { describe, expect, it, vi } from "vitest";
 
 import type { TrackedJob, TrackedSweep } from "../contexts/run-jobs";
+import type { RunSubmission, StrategyOption } from "../api/client";
 import { RunJobsProvider } from "../contexts/run-jobs";
 import { renderWithQuery } from "../test/render";
 import { server } from "../test/server";
 import {
   JobRow,
   RunManagementPage,
+  restoredMoneyManagementMode,
   SweepJobRow,
 } from "./run-management-page";
 
@@ -53,6 +55,8 @@ function managementHandlers(
             default_money_management: moneyManagement.default,
             is_active: true,
             is_deprecated: false,
+            runnable: true,
+            unrunnable_reason: null,
             source: "strategy_registry",
           },
         ],
@@ -76,13 +80,27 @@ function managementHandlers(
   ];
 }
 
-function renderManagement() {
+async function chooseStrategy(strategyId = "vessel-reference") {
+  const selector = await screen.findByLabelText("전략");
+  await waitFor(() => {
+    const option = Array.from((selector as HTMLSelectElement).options).find(
+      (item) => item.value === strategyId,
+    );
+    expect(option).toBeEnabled();
+  });
+  fireEvent.change(selector, { target: { value: strategyId } });
+  await waitFor(() => expect(selector).toHaveValue(strategyId));
+}
+
+async function renderManagement() {
   server.use(...managementHandlers());
-  return renderWithQuery(
+  const rendered = renderWithQuery(
     <RunJobsProvider>
       <RunManagementPage />
     </RunJobsProvider>,
   );
+  await chooseStrategy();
+  return rendered;
 }
 
 function strategyOption(
@@ -91,7 +109,7 @@ function strategyOption(
     supported: string[];
     default: Record<string, unknown>;
   },
-) {
+): StrategyOption {
   return {
     strategy_id: strategyId,
     display_name: strategyId,
@@ -104,8 +122,60 @@ function strategyOption(
     default_money_management: moneyManagement.default,
     is_active: true,
     is_deprecated: false,
+    runnable: true,
+    unrunnable_reason: null,
     source: "strategy_registry",
   };
+}
+
+function renderManagementPage() {
+  return renderWithQuery(
+    <RunJobsProvider>
+      <RunManagementPage />
+    </RunJobsProvider>,
+  );
+}
+
+function installExecutionSpies() {
+  const runPost = vi.fn();
+  const sweepPost = vi.fn();
+  server.use(
+    http.post("http://localhost/api/v1/runs", () => {
+      runPost();
+      return HttpResponse.json({}, { status: 500 });
+    }),
+    http.post("http://localhost/api/v1/sweeps", () => {
+      sweepPost();
+      return HttpResponse.json({}, { status: 500 });
+    }),
+  );
+  return { runPost, sweepPost };
+}
+
+async function expectEveryBlockedSubmissionPath(
+  runPost: ReturnType<typeof vi.fn>,
+  sweepPost: ReturnType<typeof vi.fn>,
+) {
+  const button = await screen.findByRole("button", { name: "실행할 수 없음" });
+  expect(button).toBeDisabled();
+  const form = button.closest("form");
+  expect(form).not.toBeNull();
+
+  // A disabled button and a direct form submit are distinct paths. Both must
+  // leave both endpoints untouched while this is a single-run submission.
+  fireEvent.click(button);
+  fireEvent.submit(form!);
+  expect(runPost).not.toHaveBeenCalled();
+  expect(sweepPost).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByLabelText(/스윕으로 실행/));
+  const sweepButton = await screen.findByRole("button", {
+    name: "실행할 수 없음",
+  });
+  fireEvent.click(sweepButton);
+  fireEvent.submit(form!);
+  expect(runPost).not.toHaveBeenCalled();
+  expect(sweepPost).not.toHaveBeenCalled();
 }
 
 class RunEventSourceMock {
@@ -135,7 +205,7 @@ class RunEventSourceMock {
 describe("실행 관리 보강", () => {
   it("연구 가설 도움말에서 사전등록 개념과 필드를 확인하고 Esc로 닫는다", async () => {
     const user = userEvent.setup();
-    renderManagement();
+    await renderManagement();
 
     await user.click(
       await screen.findByRole("button", { name: "연구 가설 도움말" }),
@@ -156,7 +226,7 @@ describe("실행 관리 보강", () => {
 
   it("스윕 설정 도움말이 세 유형을 각각 예로 설명하고 닫기 버튼으로 닫는다", async () => {
     const user = userEvent.setup();
-    renderManagement();
+    await renderManagement();
 
     await user.click(await screen.findByText("스윕 설정"));
     await user.click(
@@ -185,7 +255,7 @@ describe("실행 관리 보강", () => {
 
   it("수동 자금 관리 도움말에서 의미·계산식·예시를 확인하고 Esc와 닫기로 종료한다", async () => {
     const user = userEvent.setup();
-    renderManagement();
+    await renderManagement();
 
     const helpButton = await screen.findByRole("button", {
       name: "수동 자금 관리 도움말",
@@ -243,6 +313,7 @@ describe("실행 관리 보강", () => {
         <RunManagementPage />
       </RunJobsProvider>,
     );
+    await chooseStrategy();
 
     const symbol = await screen.findByLabelText("심볼");
     await user.clear(symbol);
@@ -272,7 +343,7 @@ describe("실행 관리 보강", () => {
         return HttpResponse.json({}, { status: 500 });
       }),
     );
-    renderManagement();
+    await renderManagement();
 
     // Collapsed, the summary still says which way the run will go.
     const section = await screen.findByText("스윕 설정");
@@ -294,7 +365,7 @@ describe("실행 관리 보강", () => {
 
   it("사이징 입력에 계약 범위의 min/max 제약을 둔다", async () => {
     const user = userEvent.setup();
-    renderManagement();
+    await renderManagement();
 
     await user.click(await screen.findByText("고급 실행 가정"));
     const risk = await screen.findByLabelText(/risk_per_trade/);
@@ -308,7 +379,7 @@ describe("실행 관리 보강", () => {
   });
 
   it("단일 timeframe과 데이터 계약값은 숨기고 자동 설정 요약에 표시한다", async () => {
-    renderManagement();
+    await renderManagement();
 
     expect(await screen.findByText("새 백테스트 설정")).toBeInTheDocument();
     expect(screen.queryByLabelText("실행 이름")).not.toBeInTheDocument();
@@ -335,6 +406,7 @@ describe("실행 관리 보강", () => {
         <RunManagementPage />
       </RunJobsProvider>,
     );
+    await chooseStrategy();
 
     const timeframe = await screen.findByLabelText("타임프레임");
     expect(timeframe).toHaveValue("1h");
@@ -344,7 +416,7 @@ describe("실행 관리 보강", () => {
 
   it("심볼 형식에서 현물 데이터셋과 마켓을 자동 해석한다", async () => {
     const user = userEvent.setup();
-    renderManagement();
+    await renderManagement();
 
     const symbol = await screen.findByLabelText("심볼");
     await user.clear(symbol);
@@ -374,6 +446,7 @@ describe("실행 관리 보강", () => {
         <RunManagementPage />
       </RunJobsProvider>,
     );
+    await chooseStrategy();
 
     expect(
       await screen.findByText(
@@ -433,6 +506,7 @@ describe("실행 관리 보강", () => {
         <RunManagementPage />
       </RunJobsProvider>,
     );
+    await chooseStrategy();
 
     const mode = await screen.findByLabelText("자금 관리 방법");
     await user.selectOptions(mode, "turtle");
@@ -483,6 +557,7 @@ describe("실행 관리 보강", () => {
         <RunManagementPage />
       </RunJobsProvider>,
     );
+    await chooseStrategy();
 
     const mode = await screen.findByLabelText("자금 관리 방법");
     expect(
@@ -516,6 +591,7 @@ describe("실행 관리 보강", () => {
         <RunManagementPage />
       </RunJobsProvider>,
     );
+    await chooseStrategy();
 
     const mode = await screen.findByLabelText("자금 관리 방법");
     await waitFor(() => expect(mode).toHaveValue("atr-only"));
@@ -537,6 +613,7 @@ describe("실행 관리 보강", () => {
         <RunManagementPage />
       </RunJobsProvider>,
     );
+    await chooseStrategy();
 
     const mode = await screen.findByLabelText("자금 관리 방법");
     await waitFor(() => expect(mode).toHaveValue("atr-only"));
@@ -579,6 +656,7 @@ describe("실행 관리 보강", () => {
         <RunManagementPage />
       </RunJobsProvider>,
     );
+    await chooseStrategy();
 
     const mode = await screen.findByLabelText("자금 관리 방법");
     await waitFor(() => expect(mode).toHaveValue("atr-only"));
@@ -619,6 +697,7 @@ describe("실행 관리 보강", () => {
         <RunManagementPage />
       </RunJobsProvider>,
     );
+    await chooseStrategy();
 
     const strategy = await screen.findByLabelText("전략");
     const leverage = await screen.findByLabelText("수동 레버리지");
@@ -676,6 +755,7 @@ describe("실행 관리 보강", () => {
           <RunManagementPage />
         </RunJobsProvider>,
       );
+      await chooseStrategy();
       const strategy = await screen.findByLabelText("전략");
       const leverage = await screen.findByLabelText("수동 레버리지");
       await user.clear(leverage);
@@ -726,6 +806,7 @@ describe("실행 관리 보강", () => {
         <RunManagementPage />
       </RunJobsProvider>,
     );
+    await chooseStrategy();
     const mode = await screen.findByLabelText("자금 관리 방법");
     await user.selectOptions(mode, "turtle");
     supported = ["manual"];
@@ -733,9 +814,9 @@ describe("실행 관리 보강", () => {
     await queryClient.invalidateQueries({ queryKey: ["strategies"] });
 
     expect(
-      await screen.findByText(/전략 계약이 갱신되어 현재 자금 관리 turtle/),
+      await screen.findByText(/자금 관리 turtle 정책을 더는 지원하지 않습니다/),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "백테스트 실행" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "실행할 수 없음" })).toBeDisabled();
   });
 
   it("설정 JSON의 mode는 고른 정책을 덮지 못한다", async () => {
@@ -761,6 +842,7 @@ describe("실행 관리 보강", () => {
         <RunManagementPage />
       </RunJobsProvider>,
     );
+    await chooseStrategy();
 
     const mode = await screen.findByLabelText("자금 관리 방법");
     await waitFor(() => expect(mode).toHaveValue("atr-only"));
@@ -798,6 +880,7 @@ describe("실행 관리 보강", () => {
         <RunManagementPage />
       </RunJobsProvider>,
     );
+    await chooseStrategy();
 
     const mode = await screen.findByLabelText("자금 관리 방법");
     await waitFor(() => expect(mode).toHaveValue("atr-only"));
@@ -879,18 +962,392 @@ describe("실행 관리 보강", () => {
 
   it("URL의 sweep_id로 과거 스윕 조회 진입 경로를 복원한다", async () => {
     window.history.replaceState(null, "", "/manage?sweep_id=past-sweep");
-    renderManagement();
+    await renderManagement();
 
     expect(await screen.findByLabelText("스윕 ID")).toHaveValue("past-sweep");
     expect(screen.getByLabelText("열린 스윕")).toHaveTextContent("past-sweep");
   });
 
   it("사전등록 잠금 기능을 쓰기 엔드포인트 미구현 3차 유보로 명시한다", async () => {
-    renderManagement();
+    await renderManagement();
 
     expect(
       await screen.findByText(/사전등록 잠금은 쓰기 엔드포인트 미구현으로 유보\(3차\)/),
     ).toBeInTheDocument();
+  });
+});
+
+describe("실행 가능 판정", () => {
+  it("전략 목록을 아직 받지 못한 상태를 모든 제출 경로에서 막는다", async () => {
+    server.use(
+      http.get(
+        "http://localhost/api/v1/strategies",
+        async () => await new Promise<never>(() => {}),
+      ),
+      ...managementHandlers().slice(1),
+    );
+    const { runPost, sweepPost } = installExecutionSpies();
+    renderManagementPage();
+
+    expect(
+      await screen.findByText("전략 목록을 아직 받지 못했습니다."),
+    ).toBeInTheDocument();
+    await expectEveryBlockedSubmissionPath(runPost, sweepPost);
+  });
+
+  it("전략 목록 첫 조회 실패를 모든 제출 경로에서 막는다", async () => {
+    server.use(
+      http.get("http://localhost/api/v1/strategies", () =>
+        HttpResponse.json({ detail: "failed" }, { status: 500 }),
+      ),
+      ...managementHandlers().slice(1),
+    );
+    const { runPost, sweepPost } = installExecutionSpies();
+    renderManagementPage();
+
+    expect(
+      await screen.findByText("전략 목록을 처음 조회하지 못했습니다. 다시 조회하세요."),
+    ).toBeInTheDocument();
+    await expectEveryBlockedSubmissionPath(runPost, sweepPost);
+  });
+
+  it("이전 목록을 가진 재조회 실패를 첫 조회 실패와 구분해 모든 제출 경로에서 막는다", async () => {
+    let fetches = 0;
+    server.use(
+      http.get("http://localhost/api/v1/strategies", () => {
+        fetches += 1;
+        return fetches === 1
+          ? HttpResponse.json({
+              data: [
+                strategyOption("vessel-reference", {
+                  supported: ["manual"],
+                  default: { mode: "manual" },
+                }),
+              ],
+            })
+          : HttpResponse.json({ detail: "failed" }, { status: 500 });
+      }),
+      ...managementHandlers().slice(1),
+    );
+    const { runPost, sweepPost } = installExecutionSpies();
+    const { queryClient } = renderManagementPage();
+    await chooseStrategy();
+
+    await queryClient.invalidateQueries({ queryKey: ["strategies"] });
+    expect(
+      await screen.findByText(/이전 전략 목록은 남아 있지만 최신 목록을 다시 받지 못했습니다/),
+    ).toBeInTheDocument();
+    await expectEveryBlockedSubmissionPath(runPost, sweepPost);
+  });
+
+  it("빈 전략 목록을 모든 제출 경로에서 막는다", async () => {
+    server.use(
+      http.get("http://localhost/api/v1/strategies", () =>
+        HttpResponse.json({ data: [] }),
+      ),
+      ...managementHandlers().slice(1),
+    );
+    const { runPost, sweepPost } = installExecutionSpies();
+    renderManagementPage();
+
+    expect(await screen.findByText("실행할 전략이 없습니다.")).toBeInTheDocument();
+    await expectEveryBlockedSubmissionPath(runPost, sweepPost);
+  });
+
+  it("사람이 아직 전략을 고르지 않은 상태를 모든 제출 경로에서 막는다", async () => {
+    server.use(...managementHandlers());
+    const { runPost, sweepPost } = installExecutionSpies();
+    renderManagementPage();
+
+    expect(await screen.findByText("실행할 전략을 선택하세요.")).toBeInTheDocument();
+    expect(screen.getByLabelText("전략")).toHaveValue("");
+    expect(screen.queryByText("직접 설정")).not.toBeInTheDocument();
+    await expectEveryBlockedSubmissionPath(runPost, sweepPost);
+  });
+
+  it("고른 전략이 최신 응답에서 사라진 상태를 모든 제출 경로에서 막는다", async () => {
+    let strategies = [
+      strategyOption("vessel-reference", {
+        supported: ["manual"],
+        default: { mode: "manual" },
+      }),
+    ];
+    server.use(
+      http.get("http://localhost/api/v1/strategies", () =>
+        HttpResponse.json({ data: strategies }),
+      ),
+      ...managementHandlers().slice(1),
+    );
+    const { runPost, sweepPost } = installExecutionSpies();
+    const { queryClient } = renderManagementPage();
+    await chooseStrategy();
+    strategies = [
+      strategyOption("breakout", {
+        supported: ["manual"],
+        default: { mode: "manual" },
+      }),
+    ];
+
+    await queryClient.invalidateQueries({ queryKey: ["strategies"] });
+    expect(
+      await screen.findByText(/vessel-reference이 최신 전략 목록에 없습니다/),
+    ).toBeInTheDocument();
+    await expectEveryBlockedSubmissionPath(runPost, sweepPost);
+  });
+
+  it("서버가 고른 전략을 실행 불가로 바꾼 상태를 모든 제출 경로에서 막는다", async () => {
+    let runnable = true;
+    server.use(
+      http.get("http://localhost/api/v1/strategies", () =>
+        HttpResponse.json({
+          data: [
+            {
+              ...strategyOption("vessel-reference", {
+                supported: ["manual"],
+                default: { mode: "manual" },
+              }),
+              runnable,
+              unrunnable_reason: runnable ? null : "inactive",
+            },
+          ],
+        }),
+      ),
+      ...managementHandlers().slice(1),
+    );
+    const { runPost, sweepPost } = installExecutionSpies();
+    const { queryClient } = renderManagementPage();
+    await chooseStrategy();
+    runnable = false;
+
+    await queryClient.invalidateQueries({ queryKey: ["strategies"] });
+    expect(
+      await screen.findAllByText(/등록 정보에서 비활성화된 전략입니다/),
+    ).not.toHaveLength(0);
+    await expectEveryBlockedSubmissionPath(runPost, sweepPost);
+  });
+
+  it("고른 timeframe이 새 지원 목록에 없는 상태를 모든 제출 경로에서 막는다", async () => {
+    let supportedTimeframes = ["1h", "15m"];
+    server.use(
+      http.get("http://localhost/api/v1/strategies", () =>
+        HttpResponse.json({
+          data: [
+            {
+              ...strategyOption("vessel-reference", {
+                supported: ["manual"],
+                default: { mode: "manual" },
+              }),
+              supported_timeframes: supportedTimeframes,
+            },
+          ],
+        }),
+      ),
+      ...managementHandlers().slice(1),
+    );
+    const { runPost, sweepPost } = installExecutionSpies();
+    const { queryClient } = renderManagementPage();
+    await chooseStrategy();
+    fireEvent.change(screen.getByLabelText("타임프레임"), {
+      target: { value: "15m" },
+    });
+    supportedTimeframes = ["1h"];
+
+    await queryClient.invalidateQueries({ queryKey: ["strategies"] });
+    expect(
+      await screen.findByText(/timeframe 15m을 지원하지 않습니다/),
+    ).toBeInTheDocument();
+    await expectEveryBlockedSubmissionPath(runPost, sweepPost);
+  });
+
+  it("고른 정책이 새 지원 목록에 없는 상태를 모든 제출 경로에서 막는다", async () => {
+    let supportedModes = ["manual", "turtle"];
+    server.use(
+      http.get("http://localhost/api/v1/strategies", () =>
+        HttpResponse.json({
+          data: [
+            strategyOption("vessel-reference", {
+              supported: supportedModes,
+              default: { mode: "manual" },
+            }),
+          ],
+        }),
+      ),
+      ...managementHandlers().slice(1),
+    );
+    const { runPost, sweepPost } = installExecutionSpies();
+    const { queryClient } = renderManagementPage();
+    await chooseStrategy();
+    fireEvent.change(screen.getByLabelText("자금 관리 방법"), {
+      target: { value: "turtle" },
+    });
+    supportedModes = ["manual"];
+
+    await queryClient.invalidateQueries({ queryKey: ["strategies"] });
+    expect(
+      await screen.findByText(/자금 관리 turtle 정책을 더는 지원하지 않습니다/),
+    ).toBeInTheDocument();
+    await expectEveryBlockedSubmissionPath(runPost, sweepPost);
+  });
+
+  it("기본 정책이 빠져 사람이 아직 정책을 고르지 않은 상태를 모든 제출 경로에서 막는다", async () => {
+    server.use(
+      http.get("http://localhost/api/v1/strategies", () =>
+        HttpResponse.json({
+          data: [
+            strategyOption("vessel-reference", {
+              supported: ["manual", "turtle"],
+              default: {},
+            }),
+          ],
+        }),
+      ),
+      ...managementHandlers().slice(1),
+    );
+    const { runPost, sweepPost } = installExecutionSpies();
+    renderManagementPage();
+    await chooseStrategy();
+
+    expect(
+      await screen.findByText(/기본 자금 관리 정책이 없어 아직 정책을 고르지 않았습니다/),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("자금 관리 방법")).toHaveValue("");
+    await expectEveryBlockedSubmissionPath(runPost, sweepPost);
+  });
+
+  it("전략 변경과 같은 이벤트 턴의 버튼·폼 제출에서 이전 설정을 단일·스윕으로 보내지 않는다", async () => {
+    server.use(
+      http.get("http://localhost/api/v1/strategies", () =>
+        HttpResponse.json({
+          data: [
+            strategyOption("vessel-reference", {
+              supported: ["manual"],
+              default: { mode: "manual", leverage: 1 },
+            }),
+            strategyOption("breakout", {
+              supported: ["manual"],
+              default: { mode: "manual", leverage: 9 },
+            }),
+          ],
+        }),
+      ),
+      ...managementHandlers().slice(1),
+    );
+    const { runPost, sweepPost } = installExecutionSpies();
+    renderManagementPage();
+    await chooseStrategy();
+    const strategy = screen.getByLabelText("전략") as HTMLSelectElement;
+    const button = screen.getByRole("button", { name: "백테스트 실행" });
+    const form = button.closest("form")!;
+
+    act(() => {
+      strategy.value = "breakout";
+      strategy.dispatchEvent(new Event("change", { bubbles: true }));
+      button.click();
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+    expect(runPost).not.toHaveBeenCalled();
+    expect(sweepPost).not.toHaveBeenCalled();
+
+    await waitFor(() => expect(strategy).toHaveValue("breakout"));
+    fireEvent.click(screen.getByLabelText(/스윕으로 실행/));
+    const sweepButton = screen.getByRole("button", { name: "스윕 실행" });
+    act(() => {
+      strategy.value = "vessel-reference";
+      strategy.dispatchEvent(new Event("change", { bubbles: true }));
+      sweepButton.click();
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+    expect(runPost).not.toHaveBeenCalled();
+    expect(sweepPost).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["catalog_only", "등록 정보는 있지만 배포된 코드가 없습니다."],
+    ["allowlist_only", "배포된 코드는 있지만 등록 정보가 없습니다."],
+    ["identity_mismatch", "등록 정보와 배포 코드의 신원이 일치하지 않습니다."],
+    ["inactive", "등록 정보에서 비활성화된 전략입니다."],
+    ["deprecated", "폐기된 전략입니다."],
+    ["declaration_mismatch", "등록 정보와 배포 코드의 실행 선언이 일치하지 않습니다."],
+    ["declaration_read_failed", "배포 코드의 실행 선언을 읽지 못했습니다."],
+  ] as const)("서버 사유 %s를 사람이 읽을 수 있는 말로 그대로 보인다", async (reason, label) => {
+    let runnable = true;
+    server.use(
+      http.get("http://localhost/api/v1/strategies", () =>
+        HttpResponse.json({
+          data: [
+            {
+              ...strategyOption("vessel-reference", {
+                supported: ["manual"],
+                default: { mode: "manual" },
+              }),
+              runnable,
+              unrunnable_reason: runnable ? null : reason,
+            },
+          ],
+        }),
+      ),
+      ...managementHandlers().slice(1),
+    );
+    const { queryClient } = renderManagementPage();
+    await chooseStrategy();
+    runnable = false;
+
+    await queryClient.invalidateQueries({ queryKey: ["strategies"] });
+    expect(await screen.findAllByText(new RegExp(label))).not.toHaveLength(0);
+    expect(
+      within(screen.getByLabelText("전략")).getByRole("option", {
+        name: new RegExp(label),
+      }),
+    ).toBeDisabled();
+  });
+
+  it("정책 목록이 빈 전략은 단일·스윕 payload에서 자금 관리를 생략한다", async () => {
+    const bodies: { run?: Record<string, unknown>; sweep?: Record<string, unknown> } = {};
+    server.use(
+      http.get("http://localhost/api/v1/strategies", () =>
+        HttpResponse.json({
+          data: [
+            strategyOption("vessel-reference", { supported: [], default: {} }),
+          ],
+        }),
+      ),
+      ...managementHandlers().slice(1),
+      http.post("http://localhost/api/v1/runs", async ({ request }) => {
+        bodies.run = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({}, { status: 500 });
+      }),
+      http.post("http://localhost/api/v1/sweeps", async ({ request }) => {
+        bodies.sweep = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({}, { status: 500 });
+      }),
+    );
+    renderManagementPage();
+    await chooseStrategy();
+
+    expect(screen.queryByLabelText("자금 관리 방법")).not.toBeInTheDocument();
+    expect(screen.getByText(/자금 관리 정책을 사용하지 않습니다/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "백테스트 실행" }));
+    await waitFor(() => expect(bodies.run).toBeDefined());
+    expect(bodies.run).not.toHaveProperty("config.money_management");
+
+    fireEvent.click(screen.getByLabelText(/스윕으로 실행/));
+    fireEvent.change(screen.getByLabelText("유형"), {
+      target: { value: "walk_forward" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "스윕 실행" }));
+    await waitFor(() => expect(bodies.sweep).toBeDefined());
+    expect(bodies.sweep).not.toHaveProperty("config.money_management");
+  });
+
+  it("실패한 실행 설정에 자금 관리가 없어도 manual을 만들어 복원하지 않는다", () => {
+    const submission = {
+      config: {
+        run_name: "no-policy",
+        strategy_id: "vessel-reference",
+      },
+    } as RunSubmission;
+
+    expect(restoredMoneyManagementMode(submission)).toBe("");
   });
 });
 
@@ -913,6 +1370,7 @@ describe("스윕 축 값", () => {
         <RunManagementPage />
       </RunJobsProvider>,
     );
+    await chooseStrategy();
 
     await user.click(await screen.findByText("스윕 설정"));
     await user.click(screen.getByLabelText(/스윕으로 실행/));
@@ -938,7 +1396,7 @@ describe("스윕 축 값", () => {
 
   it("축 파라미터가 정수 항목이면 값도 정수로 시작한다", async () => {
     const user = userEvent.setup();
-    renderManagement();
+    await renderManagement();
 
     await user.click(await screen.findByText("스윕 설정"));
     // vessel-reference의 기본 파라미터는 모두 자금 관리 소관이라 첫 축은
@@ -967,7 +1425,7 @@ describe("스윕 축 값", () => {
         return HttpResponse.json({ job_id: "job", sweep_id: "sweep" });
       }),
     );
-    renderManagement();
+    await renderManagement();
 
     await user.click(await screen.findByText("스윕 설정"));
     await user.click(screen.getByLabelText(/스윕으로 실행/));
@@ -992,7 +1450,7 @@ describe("스윕 축 값", () => {
         return HttpResponse.json({ job_id: "job", sweep_id: "sweep" });
       }),
     );
-    renderManagement();
+    await renderManagement();
 
     await user.click(await screen.findByText("스윕 설정"));
     await user.click(screen.getByLabelText(/스윕으로 실행/));
