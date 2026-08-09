@@ -12,7 +12,10 @@ from typing import Any, cast
 import pytest
 import web_api.jobs as jobs
 from backtest_service.config import RunConfig
-from backtest_service.config.run_config import SELECTABLE_MONEY_MANAGEMENT_MODES
+from backtest_service.config.run_config import (
+    SELECTABLE_MONEY_MANAGEMENT_MODES,
+    validate_money_management_config,
+)
 from core_lib.money_management import MoneyManagementFactory
 from fastapi.testclient import TestClient
 from web_api.database import SignalConnection
@@ -21,6 +24,7 @@ from web_api.models import StrategyOption
 from web_api.repository import (
     StrategyRepository,
     _default_money_management,
+    _money_management_options,
     _selectable_modes,
 )
 
@@ -394,4 +398,61 @@ def test_one_policy_that_fails_to_build_does_not_break_the_strategy_list(
 
     monkeypatch.setattr("web_api.repository.MoneyManagementFactory.create", staticmethod(explode))
 
-    assert _default_money_management("turtle") == {"mode": "turtle"}
+    assert _default_money_management("turtle") == {}
+
+
+def test_a_rejected_declared_default_does_not_invent_another_default() -> None:
+    modes, default = _money_management_options(
+        ["manual", "not-in-the-run-union"],
+        "not-in-the-run-union",
+    )
+
+    assert modes == ["manual"]
+    assert default == {}
+
+
+def test_all_rejected_modes_leave_both_the_list_and_default_empty() -> None:
+    assert _money_management_options(["not-in-the-run-union"], "not-in-the-run-union") == (
+        [],
+        {},
+    )
+
+
+@pytest.mark.parametrize(
+    ("supported", "declared_default"),
+    [
+        (["manual", "turtle"], "manual"),
+        (["manual", "turtle"], "turtle"),
+        (["manual", "not-in-the-run-union"], "not-in-the-run-union"),
+    ],
+)
+def test_projected_default_is_empty_or_valid_for_a_selectable_mode(
+    supported: list[str],
+    declared_default: str,
+) -> None:
+    modes, default = _money_management_options(supported, declared_default)
+
+    if not default:
+        return
+    assert default["mode"] in modes
+    assert validate_money_management_config(default) == default
+
+
+@pytest.mark.parametrize(
+    "resolved",
+    [
+        {"mode": "manual"},
+        {"mode": "turtle", "not_in_the_schema": True},
+    ],
+)
+def test_a_policy_default_with_the_wrong_mode_or_shape_is_not_projected(
+    monkeypatch: pytest.MonkeyPatch,
+    resolved: dict[str, object],
+) -> None:
+    policy = SimpleNamespace(resolved_config=lambda: resolved)
+    monkeypatch.setattr(
+        "web_api.repository.MoneyManagementFactory.create",
+        staticmethod(lambda *args, **kwargs: policy),
+    )
+
+    assert _default_money_management("turtle") == {}

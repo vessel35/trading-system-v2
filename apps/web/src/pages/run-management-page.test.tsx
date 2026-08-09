@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { describe, expect, it, vi } from "vitest";
@@ -83,6 +83,53 @@ function renderManagement() {
       <RunManagementPage />
     </RunJobsProvider>,
   );
+}
+
+function strategyOption(
+  strategyId: string,
+  moneyManagement: {
+    supported: string[];
+    default: Record<string, unknown>;
+  },
+) {
+  return {
+    strategy_id: strategyId,
+    display_name: strategyId,
+    strategy_version: "1",
+    supported_timeframes: ["1h"],
+    required_indicators: [],
+    min_history: 10,
+    default_params: {},
+    supported_money_management: moneyManagement.supported,
+    default_money_management: moneyManagement.default,
+    is_active: true,
+    is_deprecated: false,
+    source: "strategy_registry",
+  };
+}
+
+class RunEventSourceMock {
+  static instances: RunEventSourceMock[] = [];
+  private statusListener?: (event: MessageEvent<string>) => void;
+  onerror: ((event: Event) => void) | null = null;
+
+  constructor(_url: string | URL) {
+    RunEventSourceMock.instances.push(this);
+  }
+
+  addEventListener(type: string, listener: EventListenerOrEventListenerObject) {
+    if (type === "status") {
+      this.statusListener = listener as (event: MessageEvent<string>) => void;
+    }
+  }
+
+  close() {}
+
+  emitStatus(status: Record<string, unknown>) {
+    this.statusListener?.(
+      new MessageEvent("status", { data: JSON.stringify(status) }),
+    );
+  }
 }
 
 describe("실행 관리 보강", () => {
@@ -505,6 +552,192 @@ describe("실행 관리 보강", () => {
     );
   });
 
+  it("같은 전략 목록을 다시 받아도 사용자가 고른 mode와 설정을 보존한다", async () => {
+    const user = userEvent.setup();
+    let fetches = 0;
+    server.use(
+      http.get("http://localhost/api/v1/strategies", () => {
+        fetches += 1;
+        return HttpResponse.json({
+          data: [
+            {
+              ...strategyOption("vessel-reference", {
+                supported: ["manual", "atr-only"],
+                default: { mode: "atr-only", atr_stop_multiple: 3 },
+              }),
+              // A catalog refresh may change presentation metadata without
+              // changing the strategy contract the form is editing.
+              display_name: `Vessel ${fetches}`,
+            },
+          ],
+        });
+      }),
+      ...managementHandlers().slice(1),
+    );
+    const { queryClient } = renderWithQuery(
+      <RunJobsProvider>
+        <RunManagementPage />
+      </RunJobsProvider>,
+    );
+
+    const mode = await screen.findByLabelText("자금 관리 방법");
+    await waitFor(() => expect(mode).toHaveValue("atr-only"));
+    const box = screen.getByLabelText("배포 정책 설정");
+    await user.clear(box);
+    await user.type(box, '{{"atr_stop_multiple": 9}');
+
+    await queryClient.invalidateQueries({ queryKey: ["strategies"] });
+
+    await waitFor(() => expect(fetches).toBe(2));
+    await waitFor(() => expect(mode).toHaveValue("atr-only"));
+    expect(screen.getByLabelText("배포 정책 설정")).toHaveValue(
+      '{"atr_stop_multiple": 9}',
+    );
+  });
+
+  it("전략 A→B는 B 기본값을 쓰고 B→A는 앞서 편집한 A 값을 복원한다", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("http://localhost/api/v1/strategies", () =>
+        HttpResponse.json({
+          data: [
+            strategyOption("vessel-reference", {
+              supported: ["manual", "turtle"],
+              default: { mode: "manual", leverage: 1 },
+            }),
+            strategyOption("breakout", {
+              supported: ["manual", "turtle"],
+              default: { mode: "turtle", n_period: 20 },
+            }),
+          ],
+        }),
+      ),
+      ...managementHandlers().slice(1),
+    );
+    renderWithQuery(
+      <RunJobsProvider>
+        <RunManagementPage />
+      </RunJobsProvider>,
+    );
+
+    const strategy = await screen.findByLabelText("전략");
+    const leverage = await screen.findByLabelText("수동 레버리지");
+    await user.clear(leverage);
+    await user.type(leverage, "7");
+
+    await user.selectOptions(strategy, "breakout");
+    await waitFor(() =>
+      expect(screen.getByLabelText("자금 관리 방법")).toHaveValue("turtle"),
+    );
+
+    await user.selectOptions(strategy, "vessel-reference");
+    await waitFor(() =>
+      expect(screen.getByLabelText("자금 관리 방법")).toHaveValue("manual"),
+    );
+    expect(screen.getByLabelText("수동 레버리지")).toHaveValue(7);
+  });
+
+  it("다른 전략의 실패한 제출을 불러오면 복원값을 기본값으로 덮지 않는다", async () => {
+    const user = userEvent.setup();
+    const originalEventSource = globalThis.EventSource;
+    RunEventSourceMock.instances = [];
+    Object.defineProperty(globalThis, "EventSource", {
+      configurable: true,
+      value: RunEventSourceMock,
+    });
+    server.use(
+      http.get("http://localhost/api/v1/strategies", () =>
+        HttpResponse.json({
+          data: [
+            strategyOption("vessel-reference", {
+              supported: ["manual", "turtle"],
+              default: { mode: "manual", leverage: 1 },
+            }),
+            strategyOption("breakout", {
+              supported: ["manual", "turtle"],
+              default: { mode: "turtle", n_period: 20 },
+            }),
+          ],
+        }),
+      ),
+      ...managementHandlers().slice(1),
+      http.post("http://localhost/api/v1/runs", () =>
+        HttpResponse.json({
+          job_id: "failed-a",
+          status: "QUEUED",
+          events_url: "/events/failed-a",
+          status_url: "/status/failed-a",
+        }),
+      ),
+    );
+    try {
+      renderWithQuery(
+        <RunJobsProvider>
+          <RunManagementPage />
+        </RunJobsProvider>,
+      );
+      const strategy = await screen.findByLabelText("전략");
+      const leverage = await screen.findByLabelText("수동 레버리지");
+      await user.clear(leverage);
+      await user.type(leverage, "7");
+      await user.click(screen.getByRole("button", { name: "백테스트 실행" }));
+      await waitFor(() => expect(RunEventSourceMock.instances).toHaveLength(1));
+      act(() => {
+        RunEventSourceMock.instances[0].emitStatus({
+          job_id: "failed-a",
+          status: "FAILED",
+          updated_at: "2026-01-01T00:00:00Z",
+        });
+      });
+
+      await user.selectOptions(strategy, "breakout");
+      await user.click(await screen.findByRole("button", { name: "폼 수정" }));
+
+      await waitFor(() => expect(strategy).toHaveValue("vessel-reference"));
+      expect(screen.getByLabelText("자금 관리 방법")).toHaveValue("manual");
+      expect(screen.getByLabelText("수동 레버리지")).toHaveValue(7);
+    } finally {
+      Object.defineProperty(globalThis, "EventSource", {
+        configurable: true,
+        value: originalEventSource,
+      });
+      RunEventSourceMock.instances = [];
+    }
+  });
+
+  it("같은 전략의 새 계약이 현재 선택을 제외하면 알리고 제출을 막는다", async () => {
+    const user = userEvent.setup();
+    let supported = ["manual", "turtle"];
+    server.use(
+      http.get("http://localhost/api/v1/strategies", () =>
+        HttpResponse.json({
+          data: [
+            strategyOption("vessel-reference", {
+              supported,
+              default: { mode: "manual", leverage: 1 },
+            }),
+          ],
+        }),
+      ),
+      ...managementHandlers().slice(1),
+    );
+    const { queryClient } = renderWithQuery(
+      <RunJobsProvider>
+        <RunManagementPage />
+      </RunJobsProvider>,
+    );
+    const mode = await screen.findByLabelText("자금 관리 방법");
+    await user.selectOptions(mode, "turtle");
+    supported = ["manual"];
+
+    await queryClient.invalidateQueries({ queryKey: ["strategies"] });
+
+    expect(
+      await screen.findByText(/전략 계약이 갱신되어 현재 자금 관리 turtle/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "백테스트 실행" })).toBeDisabled();
+  });
+
   it("설정 JSON의 mode는 고른 정책을 덮지 못한다", async () => {
     const user = userEvent.setup();
     let submitted: unknown;
@@ -662,6 +895,47 @@ describe("실행 관리 보강", () => {
 });
 
 describe("스윕 축 값", () => {
+  it("축 후보 없는 grid만 막고 walk-forward와 IS/OOS는 제출한다", async () => {
+    const user = userEvent.setup();
+    const submissions: Record<string, unknown>[] = [];
+    server.use(
+      ...managementHandlers(["1h"], {
+        supported: ["atr-only"],
+        default: { mode: "atr-only", atr_stop_multiple: 3 },
+      }),
+      http.post("http://localhost/api/v1/sweeps", async ({ request }) => {
+        submissions.push((await request.json()) as Record<string, unknown>);
+        return HttpResponse.json({ job_id: `job-${submissions.length}`, sweep_id: "sweep" });
+      }),
+    );
+    renderWithQuery(
+      <RunJobsProvider>
+        <RunManagementPage />
+      </RunJobsProvider>,
+    );
+
+    await user.click(await screen.findByText("스윕 설정"));
+    await user.click(screen.getByLabelText(/스윕으로 실행/));
+    const gridButton = await screen.findByRole("button", {
+      name: "grid 축을 입력하세요",
+    });
+    expect(gridButton).toBeDisabled();
+    expect(screen.getByText("스윕 설정").textContent).toMatch(/유효한 축 필요/);
+    expect(screen.getByLabelText("축 1 파라미터")).toHaveValue("");
+
+    await user.selectOptions(screen.getByLabelText("유형"), "walk_forward");
+    await user.click(screen.getByRole("button", { name: "스윕 실행" }));
+    await waitFor(() => expect(submissions).toHaveLength(1));
+    expect(submissions[0]).toMatchObject({ type: "walk_forward", folds: 3 });
+    expect(submissions[0]).not.toHaveProperty("axes");
+
+    await user.selectOptions(screen.getByLabelText("유형"), "is_oos");
+    await user.click(screen.getByRole("button", { name: "스윕 실행" }));
+    await waitFor(() => expect(submissions).toHaveLength(2));
+    expect(submissions[1]).toMatchObject({ type: "is_oos" });
+    expect(submissions[1]).not.toHaveProperty("axes");
+  });
+
   it("축 파라미터가 정수 항목이면 값도 정수로 시작한다", async () => {
     const user = userEvent.setup();
     renderManagement();

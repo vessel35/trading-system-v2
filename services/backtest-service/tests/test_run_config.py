@@ -259,7 +259,9 @@ def _check_with_mypy(tmp_path: Path, name: str, body: str) -> str:
     service = Path(__file__).resolve().parents[1]
     probe = tmp_path / f"probe_{name}.py"
     probe.write_text(
-        "from backtest_service.config import RunConfig\n\n\n"
+        "from backtest_service.config import (\n"
+        "    ManualMoneyManagementConfig, RunConfig, TurtleMoneyManagementConfig,\n"
+        ")\n\n\n"
         "def read(config: RunConfig) -> int:\n" + body
     )
     result = subprocess.run(
@@ -279,7 +281,7 @@ def _check_with_mypy(tmp_path: Path, name: str, body: str) -> str:
     return result.stdout
 
 
-def test_the_checked_union_is_no_narrower_than_the_one_built_at_import(
+def test_the_checked_union_refuses_an_unconditional_built_in_field_access(
     tmp_path: Path,
 ) -> None:
     """A type checker must not approve an attribute a deployed policy lacks.
@@ -301,20 +303,25 @@ def test_the_checked_union_is_no_narrower_than_the_one_built_at_import(
     assert "has no attribute" in refused, refused
 
 
-def test_the_checked_union_still_narrows_to_each_built_in_shape(tmp_path: Path) -> None:
-    """Widening the checker's view must not cost the settings the built-ins do carry.
-
-    The stand-in arm first carried ``mode: str``, which overlaps both built-in
-    names. That stopped the checker narrowing ``mode == "manual"`` to the manual
-    shape, so reading ``leverage`` — a setting that shape really has — was
-    refused. The arm carries a placeholder literal instead.
-    """
+def test_the_checked_union_allows_comparing_any_deployed_mode_name(tmp_path: Path) -> None:
+    """The checker stand-in must not be narrower than deployed ids at runtime."""
     accepted = _check_with_mypy(
         tmp_path,
-        "safe",
-        '    if config.money_management.mode == "manual":\n'
+        "deployed_name",
+        '    if config.money_management.mode == "atr-only":\n        return 1\n    return 0\n',
+    )
+
+    assert "no issues found" in accepted, accepted
+
+
+def test_the_checked_union_allows_built_in_fields_after_type_narrowing(tmp_path: Path) -> None:
+    """Built-in settings remain readable after narrowing by their concrete types."""
+    accepted = _check_with_mypy(
+        tmp_path,
+        "built_in_types",
+        "    if isinstance(config.money_management, ManualMoneyManagementConfig):\n"
         "        return config.money_management.leverage\n"
-        '    if config.money_management.mode == "turtle":\n'
+        "    if isinstance(config.money_management, TurtleMoneyManagementConfig):\n"
         "        return config.money_management.n_period\n"
         "    return 0\n",
     )
@@ -390,6 +397,59 @@ def _policy_with_annotation(mode: str, annotation: str) -> type[MoneyManagementB
     }
     created = type(f"Policy{mode.title().replace('-', '')}", (MoneyManagementBase,), namespace)
     return cast("type[MoneyManagementBase]", dataclass(frozen=True)(created))
+
+
+def _named_policy(
+    mode: str,
+    class_name: str,
+    annotation: object = int,
+    default: object = 0,
+) -> type[MoneyManagementBase]:
+    namespace: dict[str, Any] = {
+        "__annotations__": {"setting": annotation},
+        "setting": default,
+        "id": mode,
+        "version": "1.0.0",
+        "required_indicators": lambda self: (),
+        "resolved_config": lambda self: {"mode": mode, "setting": self.setting},
+        "plan_entry": lambda self, *args: None,
+    }
+    created = type(class_name, (MoneyManagementBase,), namespace)
+    return cast("type[MoneyManagementBase]", dataclass(frozen=True)(created))
+
+
+def test_a_generated_arm_name_collision_skips_only_the_later_policy() -> None:
+    first = _named_policy("alpha", "SamePolicy")
+    second = _named_policy("beta", "SamePolicy")
+
+    models = _deployed_money_management_models({"alpha": first, "beta": second})
+
+    assert [model.model_fields["mode"].default for model in models] == ["alpha"]
+
+
+def test_a_nested_schema_name_collision_skips_only_the_later_policy() -> None:
+    first_settings: type[Any] = dataclass(frozen=True)(
+        type("SharedSettings", (), {"__annotations__": {"value": str}, "value": "one"})
+    )
+    second_settings: type[Any] = dataclass(frozen=True)(
+        type("SharedSettings", (), {"__annotations__": {"value": int}, "value": 2})
+    )
+    first = _named_policy(
+        "alpha-nested",
+        "AlphaNestedPolicy",
+        first_settings,
+        field(default_factory=first_settings),
+    )
+    second = _named_policy(
+        "beta-nested",
+        "BetaNestedPolicy",
+        second_settings,
+        field(default_factory=second_settings),
+    )
+
+    models = _deployed_money_management_models({"alpha-nested": first, "beta-nested": second})
+
+    assert [model.model_fields["mode"].default for model in models] == ["alpha-nested"]
 
 
 def test_an_annotation_that_ends_the_process_is_caught_like_any_other_fault() -> None:

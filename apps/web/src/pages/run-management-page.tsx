@@ -586,6 +586,10 @@ export function RunManagementPage() {
   const { jobs, sweeps, track, trackSweep } = useRunJobs();
   const formRef = useRef<HTMLFormElement>(null);
   const [form, setForm] = useState<FormState>(initialForm);
+  const strategyDrafts = useRef<Record<string, FormState>>({});
+  const activeStrategyId = useRef<string | null>(null);
+  const restoredStrategyId = useRef<string | null>(null);
+  const axisContract = useRef<string | null>(null);
   const [busy, setBusy] = useState<"trigger" | "sweep" | null>(null);
   // The sweep is a mode the run is submitted in, not a separate action. Keeping it
   // in form state means the choice is visible while the section is collapsed and
@@ -635,6 +639,15 @@ export function RunManagementPage() {
         : (["manual"] as MoneyManagementMode[]),
     [selectedStrategy],
   );
+  const moneyManagementSelectionInvalid = Boolean(
+    selectedStrategy &&
+      selectedStrategy.supported_money_management.length > 0 &&
+      !selectedStrategy.supported_money_management.includes(form.moneyManagementMode),
+  );
+  const timeframeSelectionInvalid = Boolean(
+    selectedStrategy &&
+      !selectedStrategy.supported_timeframes.includes(form.timeframe),
+  );
   const axisCandidates = useMemo(
     () => [
       ...Object.keys(
@@ -671,6 +684,29 @@ export function RunManagementPage() {
       }),
     [selectedStrategy, strategyParams],
   );
+  const strategyContractError = useMemo(() => {
+    if (!selectedStrategy) return null;
+    const invalidMode = moneyManagementSelectionInvalid;
+    const invalidTimeframe = timeframeSelectionInvalid;
+    if (!invalidMode && !invalidTimeframe) return null;
+    const invalid = [
+      invalidMode ? `자금 관리 ${form.moneyManagementMode}` : null,
+      invalidTimeframe ? `timeframe ${form.timeframe}` : null,
+    ].filter(Boolean);
+    return `전략 계약이 갱신되어 현재 ${invalid.join(" · ")} 값을 더는 지원하지 않습니다. 새 값을 명시적으로 선택하세요.`;
+  }, [
+    form.moneyManagementMode,
+    form.timeframe,
+    moneyManagementSelectionInvalid,
+    selectedStrategy,
+    timeframeSelectionInvalid,
+  ]);
+  const gridAxesReady =
+    Boolean(axisOneParameter.trim()) &&
+    (!axisTwoEnabled ||
+      (Boolean(axisTwoParameter.trim()) &&
+        axisTwoParameter.trim() !== axisOneParameter.trim()));
+  const gridSweepBlocked = sweepEnabled && sweepType === "grid" && !gridAxesReady;
   const coverage = useCoverage(form.dataSource, form.symbol, form.exchange);
   const coverageWarning = useMemo(() => {
     if (!coverage.data) return null;
@@ -689,7 +725,16 @@ export function RunManagementPage() {
 
   useEffect(() => {
     if (!selectedStrategy) return;
+    const strategyId = selectedStrategy.strategy_id;
+    if (activeStrategyId.current === strategyId) return;
+    activeStrategyId.current = strategyId;
+    if (restoredStrategyId.current === strategyId) {
+      restoredStrategyId.current = null;
+      return;
+    }
     setForm((current) => {
+      const saved = strategyDrafts.current[strategyId];
+      if (saved) return saved;
       const supportedTimeframes = selectedStrategy.supported_timeframes;
       const defaultMoneyManagement =
         selectedStrategy.default_money_management ?? {};
@@ -755,7 +800,17 @@ export function RunManagementPage() {
   }, [form.symbol]);
 
   useEffect(() => {
-    if (axisCandidates.length === 0) return;
+    const contract = `${form.strategyId}\u0000${form.moneyManagementMode}\u0000${axisCandidates.join("\u0000")}`;
+    if (axisContract.current === contract) return;
+    axisContract.current = contract;
+    if (axisCandidates.length === 0) {
+      setAxisOneParameter("");
+      setAxisOneValues("[]");
+      setAxisTwoEnabled(false);
+      setAxisTwoParameter("");
+      setAxisTwoValues("[]");
+      return;
+    }
     const nextOne = axisCandidates.includes(axisOneParameter)
       ? axisOneParameter
       : axisCandidates[0];
@@ -766,7 +821,7 @@ export function RunManagementPage() {
     if (axisOneParameter !== nextOne) setAxisOneParameter(nextOne);
     if (nextTwo && axisTwoParameter !== nextTwo) setAxisTwoParameter(nextTwo);
     if (!nextTwo) setAxisTwoEnabled(false);
-  }, [axisCandidates, axisOneParameter, axisTwoParameter]);
+  }, [axisCandidates, axisOneParameter, axisTwoParameter, form.moneyManagementMode, form.strategyId]);
 
   // A parameter change carries its own valid starting values: sweeping leverage
   // over [1.5, 2.0, 2.5] would produce runs the schema rejects one by one.
@@ -927,90 +982,102 @@ export function RunManagementPage() {
     const config = submission.config;
     const prereg = submission.prereg;
     const moneyManagement = config.money_management;
-    setForm((current) => ({
-      ...current,
-      strategyId: config.strategy_id,
-      params: JSON.stringify(
-        strategyOnlyParams(config.params ?? {}),
-        null,
-        2,
-      ),
-      moneyManagementMode: moneyManagement?.mode ?? "manual",
-      manualLeverage: String(
-        moneyManagement?.mode === "manual"
-          ? moneyManagement.leverage
-          : current.manualLeverage,
-      ),
-      manualRewardRisk: String(
-        moneyManagement?.mode === "manual"
-          ? moneyManagement.reward_risk
-          : current.manualRewardRisk,
-      ),
-      manualAtrStopMultiple: String(
-        moneyManagement?.mode === "manual"
-          ? moneyManagement.atr_stop_multiple
-          : current.manualAtrStopMultiple,
-      ),
-      turtleNPeriod: String(
-        moneyManagement?.mode === "turtle"
-          ? moneyManagement.n_period
-          : current.turtleNPeriod,
-      ),
-      turtleStopNMultiple: String(
-        moneyManagement?.mode === "turtle"
-          ? moneyManagement.stop_n_multiple
-          : current.turtleStopNMultiple,
-      ),
-      turtleLeverageCap: String(
-        moneyManagement?.mode === "turtle"
-          ? moneyManagement.leverage_cap
-          : current.turtleLeverageCap,
-      ),
-      deployedMoneyManagement:
-        moneyManagement && !isBuiltInMoneyManagement(moneyManagement.mode)
-          ? {
-              ...current.deployedMoneyManagement,
-              [moneyManagement.mode]: settingsJson(
-                moneyManagement as Record<string, unknown>,
-              ),
-            }
-          : current.deployedMoneyManagement,
-      symbol: config.symbol,
-      exchange: config.exchange,
-      timeframe: config.timeframe,
-      marketType: config.market_type,
-      dataSource: config.data_source,
-      start: localDateTime(config.start),
-      end: localDateTime(config.end),
-      initialCapital: String(config.initial_capital),
-      seed: String(config.seed),
-      sizingMethod: config.sizing_method,
-      riskPerTrade: String(config.risk_per_trade ?? current.riskPerTrade),
-      positionSizePct: String(config.position_size_pct ?? current.positionSizePct),
-      futuresTakerFeeRate: String(
-        config.cost_values?.futures_taker_fee_rate ?? current.futuresTakerFeeRate,
-      ),
-      futuresEntrySlippageRate: String(
-        config.cost_values?.futures_entry_slippage_rate ??
-          current.futuresEntrySlippageRate,
-      ),
-      exitSlippageRate: String(
-        config.cost_values?.exit_slippage_rate ?? current.exitSlippageRate,
-      ),
-      fundingFallbackRate: String(
-        config.cost_values?.funding_fallback_rate ?? current.fundingFallbackRate,
-      ),
-      indicatorMode: config.indicator_mode,
-      explicitIndicators: JSON.stringify(config.explicit_indicators ?? [], null, 2),
-      profileRef: config.profile_ref,
-      preregEnabled: Boolean(prereg),
-      hypothesis: prereg?.hypothesis ?? "",
-      primaryMetric: prereg?.primary_metric ?? "pf",
-      successThreshold: String(prereg?.success_threshold ?? ""),
-      failureThreshold: String(prereg?.failure_threshold ?? ""),
-      higherIsBetter: prereg?.higher_is_better ?? true,
-      declaredBy: prereg?.declared_by ?? "",
-    }));
+    restoredStrategyId.current =
+      activeStrategyId.current === config.strategy_id ? null : config.strategy_id;
+    setForm((current) => {
+      strategyDrafts.current[current.strategyId] = current;
+      return {
+        ...current,
+        strategyId: config.strategy_id,
+        params: JSON.stringify(
+          strategyOnlyParams(config.params ?? {}),
+          null,
+          2,
+        ),
+        moneyManagementMode: moneyManagement?.mode ?? "manual",
+        manualLeverage: String(
+          moneyManagement?.mode === "manual"
+            ? moneyManagement.leverage
+            : current.manualLeverage,
+        ),
+        manualRewardRisk: String(
+          moneyManagement?.mode === "manual"
+            ? moneyManagement.reward_risk
+            : current.manualRewardRisk,
+        ),
+        manualAtrStopMultiple: String(
+          moneyManagement?.mode === "manual"
+            ? moneyManagement.atr_stop_multiple
+            : current.manualAtrStopMultiple,
+        ),
+        turtleNPeriod: String(
+          moneyManagement?.mode === "turtle"
+            ? moneyManagement.n_period
+            : current.turtleNPeriod,
+        ),
+        turtleStopNMultiple: String(
+          moneyManagement?.mode === "turtle"
+            ? moneyManagement.stop_n_multiple
+            : current.turtleStopNMultiple,
+        ),
+        turtleLeverageCap: String(
+          moneyManagement?.mode === "turtle"
+            ? moneyManagement.leverage_cap
+            : current.turtleLeverageCap,
+        ),
+        deployedMoneyManagement:
+          moneyManagement && !isBuiltInMoneyManagement(moneyManagement.mode)
+            ? {
+                ...current.deployedMoneyManagement,
+                [moneyManagement.mode]: settingsJson(
+                  moneyManagement as Record<string, unknown>,
+                ),
+              }
+            : current.deployedMoneyManagement,
+        symbol: config.symbol,
+        exchange: config.exchange,
+        timeframe: config.timeframe,
+        marketType: config.market_type,
+        dataSource: config.data_source,
+        start: localDateTime(config.start),
+        end: localDateTime(config.end),
+        initialCapital: String(config.initial_capital),
+        seed: String(config.seed),
+        sizingMethod: config.sizing_method,
+        riskPerTrade: String(config.risk_per_trade ?? current.riskPerTrade),
+        positionSizePct: String(
+          config.position_size_pct ?? current.positionSizePct,
+        ),
+        futuresTakerFeeRate: String(
+          config.cost_values?.futures_taker_fee_rate ??
+            current.futuresTakerFeeRate,
+        ),
+        futuresEntrySlippageRate: String(
+          config.cost_values?.futures_entry_slippage_rate ??
+            current.futuresEntrySlippageRate,
+        ),
+        exitSlippageRate: String(
+          config.cost_values?.exit_slippage_rate ?? current.exitSlippageRate,
+        ),
+        fundingFallbackRate: String(
+          config.cost_values?.funding_fallback_rate ?? current.fundingFallbackRate,
+        ),
+        indicatorMode: config.indicator_mode,
+        explicitIndicators: JSON.stringify(
+          config.explicit_indicators ?? [],
+          null,
+          2,
+        ),
+        profileRef: config.profile_ref,
+        preregEnabled: Boolean(prereg),
+        hypothesis: prereg?.hypothesis ?? "",
+        primaryMetric: prereg?.primary_metric ?? "pf",
+        successThreshold: String(prereg?.success_threshold ?? ""),
+        failureThreshold: String(prereg?.failure_threshold ?? ""),
+        higherIsBetter: prereg?.higher_is_better ?? true,
+        declaredBy: prereg?.declared_by ?? "",
+      };
+    });
     setNotice({ kind: "success", message: "실패한 설정을 폼에 다시 불러왔습니다." });
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -1046,6 +1113,7 @@ export function RunManagementPage() {
           ref={formRef}
           onSubmit={(event: FormEvent) => {
             event.preventDefault();
+            if (strategyContractError || gridSweepBlocked) return;
             if (sweepEnabled) {
               void triggerSweep();
               return;
@@ -1069,11 +1137,14 @@ export function RunManagementPage() {
                     className={selectClass}
                     value={form.strategyId}
                     onChange={(event) => {
-                      setForm((current) => ({
-                        ...current,
-                        strategyId: event.target.value,
-                        params: "{}",
-                      }));
+                      setForm((current) => {
+                        strategyDrafts.current[current.strategyId] = current;
+                        return {
+                          ...current,
+                          strategyId: event.target.value,
+                          params: "{}",
+                        };
+                      });
                     }}
                     disabled={strategies.isLoading}
                   >
@@ -1198,7 +1269,8 @@ export function RunManagementPage() {
                       <StrategyParamHelpDialog strategyId={form.strategyId} />
                     )}
                   </div>
-                  {supportedMoneyManagement.length > 1 ? (
+                  {supportedMoneyManagement.length > 1 ||
+                  moneyManagementSelectionInvalid ? (
                     <Label>
                       자금 관리 방법
                       <select
@@ -1233,6 +1305,11 @@ export function RunManagementPage() {
                           }));
                         }}
                       >
+                        {moneyManagementSelectionInvalid && (
+                          <option value={form.moneyManagementMode} disabled>
+                            {form.moneyManagementMode} · 더 이상 지원되지 않음
+                          </option>
+                        )}
                         {supportedMoneyManagement.map((mode) => (
                           <option key={mode} value={mode}>
                             {moneyManagementLabel(mode)}
@@ -1422,7 +1499,8 @@ export function RunManagementPage() {
                   />
                 </Label>
                 {selectedStrategy &&
-                  selectedStrategy.supported_timeframes.length > 1 && (
+                  (selectedStrategy.supported_timeframes.length > 1 ||
+                    timeframeSelectionInvalid) && (
                     <Label className="sm:col-span-2">
                       타임프레임
                       <select
@@ -1432,6 +1510,11 @@ export function RunManagementPage() {
                           update("timeframe", event.target.value)
                         }
                       >
+                        {timeframeSelectionInvalid && (
+                          <option value={form.timeframe} disabled>
+                            {form.timeframe} · 더 이상 지원되지 않음
+                          </option>
+                        )}
                         {selectedStrategy.supported_timeframes.map((timeframe) => (
                           <option key={timeframe} value={timeframe}>
                             {timeframe}
@@ -1821,7 +1904,9 @@ export function RunManagementPage() {
                     {sweepEnabled
                       ? `켜짐 · ${sweepType}${
                           sweepType === "grid"
-                            ? ` · 축 ${axisTwoEnabled ? 2 : 1}개`
+                            ? gridSweepBlocked
+                              ? " · 유효한 축 필요"
+                              : ` · 축 ${axisTwoEnabled ? 2 : 1}개`
                             : ""
                         }`
                       : "꺼짐 · 단일 백테스트로 실행됩니다."}
@@ -1865,6 +1950,7 @@ export function RunManagementPage() {
                     <select
                       className={selectClass}
                       value={sweepType}
+                      aria-invalid={gridSweepBlocked || undefined}
                       onChange={(event) =>
                         setSweepType(event.target.value as SweepType)
                       }
@@ -2049,6 +2135,12 @@ export function RunManagementPage() {
                 </div>
               )}
 
+              {strategyContractError && (
+                <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-100">
+                  {strategyContractError}
+                </div>
+              )}
+
               <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-5">
                 <p className="max-w-xl text-[11px] leading-relaxed text-muted-foreground">
                   같은 설정을 다시 트리거해도 매번 새 run이 생성됩니다. config_hash
@@ -2057,11 +2149,19 @@ export function RunManagementPage() {
                 <div className="flex gap-2">
                   <Button
                     type="submit"
-                    disabled={busy !== null || Boolean(coverageWarning)}
+                    disabled={
+                      busy !== null ||
+                      Boolean(coverageWarning) ||
+                      Boolean(strategyContractError) ||
+                      gridSweepBlocked
+                    }
                     title={
                       coverageWarning
                         ? "데이터 커버리지 경고를 해소한 뒤 실행하세요."
-                        : undefined
+                        : strategyContractError ??
+                          (gridSweepBlocked
+                            ? "grid 스윕에는 유효한 축을 하나 이상 입력하세요."
+                            : undefined)
                     }
                   >
                     {busy !== null ? (
@@ -2071,7 +2171,11 @@ export function RunManagementPage() {
                     ) : (
                       <Play className="mr-1.5 h-4 w-4" />
                     )}
-                    {sweepEnabled ? "스윕 실행" : "백테스트 실행"}
+                    {gridSweepBlocked
+                      ? "grid 축을 입력하세요"
+                      : sweepEnabled
+                        ? "스윕 실행"
+                        : "백테스트 실행"}
                   </Button>
                 </div>
               </div>

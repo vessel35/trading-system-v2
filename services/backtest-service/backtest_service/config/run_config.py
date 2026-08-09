@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import MISSING as DATACLASS_MISSING
 from dataclasses import fields as dataclass_fields
 from datetime import UTC, datetime
@@ -93,19 +93,90 @@ def _config_model_for(mode: str, policy_class: type[MoneyManagementBase]) -> typ
         __config__=ConfigDict(extra="forbid"),
         **definitions,
     )
-    # Ask for the schema here, and prove the model can also stand in the union.
-    # Pydantic defers both, so a type it cannot express, or a shape a
-    # discriminated union will not accept, would otherwise surface while RunConfig
-    # itself is being assembled — outside the isolation below, where it takes
-    # manual validation and the OpenAPI document down with it.
+    # Ask for the schema here. Pydantic defers this, so a type it cannot express
+    # would otherwise surface while RunConfig itself is being assembled — outside
+    # the isolation below, where it takes manual validation and OpenAPI down too.
     model.model_json_schema()
-    TypeAdapter(
+    return model
+
+
+def _money_management_adapter(models: Sequence[type[BaseModel]]) -> TypeAdapter[Any]:
+    """Build the runtime discriminated union for exactly these models."""
+    return TypeAdapter(
         Annotated[
-            Union[ManualMoneyManagementConfig, model],  # noqa: UP007 - built, not written out
+            Union[tuple(models)],  # noqa: UP007 - assembled from a runtime tuple
             Field(discriminator="mode"),
         ]
     )
-    return model
+
+
+def _schema_names(model: type[BaseModel]) -> frozenset[str]:
+    """Return every component name one arm contributes to a JSON schema."""
+    schema = model.model_json_schema()
+    definitions = cast("Mapping[str, object]", schema.get("$defs", {}))
+    return frozenset((model.__name__, *definitions))
+
+
+def _referenced_schema(schema: Mapping[str, Any], mode: str) -> tuple[str, dict[str, Any]]:
+    """Return one mode's discriminator target and recursively referenced definitions."""
+    discriminator = cast("Mapping[str, Any]", schema["discriminator"])
+    mapping = cast("Mapping[str, str]", discriminator["mapping"])
+    target = mapping[mode]
+    definitions = cast("Mapping[str, dict[str, Any]]", schema.get("$defs", {}))
+    pending = [target]
+    reachable: dict[str, dict[str, Any]] = {}
+    while pending:
+        reference = pending.pop()
+        prefix = "#/$defs/"
+        if not reference.startswith(prefix):
+            raise ValueError(f"money-management mode {mode!r} has a non-local schema reference")
+        name = reference.removeprefix(prefix)
+        if name in reachable:
+            continue
+        component = definitions[name]
+        reachable[name] = component
+
+        def visit(value: object) -> None:
+            if isinstance(value, Mapping):
+                nested = value.get("$ref")
+                if isinstance(nested, str):
+                    pending.append(nested)
+                for item in value.values():
+                    visit(item)
+            elif isinstance(value, list):
+                for item in value:
+                    visit(item)
+
+        visit(component)
+    return target, reachable
+
+
+def _accept_config_model(
+    candidate: type[BaseModel],
+    accepted: Sequence[type[BaseModel]],
+) -> None:
+    """Prove a candidate preserves the complete union that will actually be exposed."""
+    existing_names = set().union(*(_schema_names(model) for model in accepted))
+    collisions = existing_names & _schema_names(candidate)
+    if collisions:
+        raise ValueError(f"money-management schema component names collide: {sorted(collisions)}")
+
+    before = _money_management_adapter(accepted).json_schema()
+    complete = (*accepted, candidate)
+    after = _money_management_adapter(complete).json_schema()
+    after_mapping = cast(
+        "Mapping[str, str]",
+        cast("Mapping[str, object]", after["discriminator"])["mapping"],
+    )
+    for model in complete:
+        mode = str(model.model_fields["mode"].default)
+        expected = f"#/$defs/{model.__name__}"
+        if after_mapping.get(mode) != expected:
+            raise ValueError(f"money-management mode {mode!r} does not point to its own schema arm")
+    for model in accepted:
+        mode = str(model.model_fields["mode"].default)
+        if _referenced_schema(before, mode) != _referenced_schema(after, mode):
+            raise ValueError(f"money-management mode {mode!r} changed while adding another policy")
 
 
 def _deployed_money_management_models(
@@ -128,7 +199,12 @@ def _deployed_money_management_models(
         if mode in {"manual", "turtle"}:
             continue
         try:
-            generated.append(_config_model_for(mode, policy_class))
+            candidate = _config_model_for(mode, policy_class)
+            _accept_config_model(
+                candidate,
+                (ManualMoneyManagementConfig, TurtleMoneyManagementConfig, *generated),
+            )
+            generated.append(candidate)
         except (Exception, SystemExit):  # noqa: BLE001 - one policy must not break the rest
             # ``SystemExit`` belongs here as much as an ordinary error: resolving
             # the annotations runs code the deployed file wrote, so a file that
@@ -141,11 +217,12 @@ def _deployed_money_management_models(
     return tuple(generated)
 
 
-_MONEY_MANAGEMENT_MODELS: Final = (
+_MONEY_MANAGEMENT_MODELS: Final[tuple[type[BaseModel], ...]] = (
     ManualMoneyManagementConfig,
     TurtleMoneyManagementConfig,
     *_deployed_money_management_models(),
 )
+_MONEY_MANAGEMENT_ADAPTER: Final = _money_management_adapter(_MONEY_MANAGEMENT_MODELS)
 
 if TYPE_CHECKING:
 
@@ -158,13 +235,12 @@ if TYPE_CHECKING:
         Turtle and approved an attribute a deployed policy does not have. This
         third arm carries only the discriminator, so such an access is refused.
 
-        Its discriminator is a placeholder literal rather than ``str``. A plain
-        ``str`` overlaps the two built-in names, which stopped the checker from
-        narrowing ``mode == "manual"`` to the manual shape and refused the
-        settings that shape really does carry.
+        ``mode`` is deliberately ``str`` so code may compare it with any deployed
+        id. Built-in fields are narrowed by ``isinstance`` instead of by a mode
+        equality, because the deployed arm necessarily overlaps every string.
         """
 
-        mode: Literal["<deployed>"]
+        mode: str
 
     MoneyManagementConfig = Annotated[
         ManualMoneyManagementConfig | TurtleMoneyManagementConfig | DeployedMoneyManagementConfig,
@@ -178,8 +254,7 @@ else:
 
 
 SELECTABLE_MONEY_MANAGEMENT_MODES: Final[frozenset[str]] = frozenset(
-    str(cast("type[BaseModel]", model).model_fields["mode"].default)
-    for model in _MONEY_MANAGEMENT_MODELS
+    str(model.model_fields["mode"].default) for model in _MONEY_MANAGEMENT_MODELS
 )
 """The modes a run may actually name.
 
@@ -188,6 +263,14 @@ is left out of the union above, and a run naming it is refused. Anything that
 offers a choice reads this set, so a mode cannot be shown as selectable and then
 rejected on submission.
 """
+
+
+def validate_money_management_config(value: Mapping[str, object]) -> dict[str, object]:
+    """Validate and normalize a projected default through the final runtime union."""
+    validated = _MONEY_MANAGEMENT_ADAPTER.validate_python(dict(value))
+    if not isinstance(validated, BaseModel):
+        raise TypeError("money-management config did not resolve to a model")
+    return cast("dict[str, object]", validated.model_dump())
 
 
 class RunConfig(BaseModel):

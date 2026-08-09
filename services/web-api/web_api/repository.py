@@ -6,9 +6,12 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, Literal, cast
 
-from backtest_service.config.run_config import SELECTABLE_MONEY_MANAGEMENT_MODES
+from backtest_service.config.run_config import (
+    SELECTABLE_MONEY_MANAGEMENT_MODES,
+    validate_money_management_config,
+)
 from core_lib.eval import thresholds
-from core_lib.money_management import ManualMoneyManagement, MoneyManagementFactory
+from core_lib.money_management import MoneyManagementFactory
 from core_lib.strategy import StrategyConfig
 from core_lib.strategy.adaptees import STRATEGY_ID, VesselReference
 from pydantic import BaseModel
@@ -168,20 +171,39 @@ def _default_money_management(mode: str | None) -> dict[str, object]:
     The values used to be a fixed manual-shaped dictionary, which was wrong for
     Turtle and meaningless for a policy deployed as a file, since nothing here
     knows what settings such a policy has. Asking the policy keeps this correct
-    for every mode. A mode that cannot be built with defaults alone still yields
-    its name, which is enough for the client to select it and fill the rest in.
+    for every mode. A mode that cannot be built with defaults alone yields no
+    default; the selectable list still lets the client choose and configure it.
 
     Building the policy runs code a deployed file wrote, and that happens while a
-    request is being answered. Any failure is confined to this one mode so a
-    single bad deployment cannot take the whole strategy list with it.
+    request is being answered. Any failure is confined to this one default so a
+    single bad deployment cannot take the whole strategy list with it. The
+    returned mapping is accepted only after the final run-config union validates
+    it and confirms that it still names the requested mode.
     """
-    selected = mode or ManualMoneyManagement.id
+    if mode is None:
+        return {}
     try:
-        policy = MoneyManagementFactory.create({"mode": selected}, registered_money_management())
-        return dict(policy.resolved_config())
+        policy = MoneyManagementFactory.create({"mode": mode}, registered_money_management())
+        resolved = dict(policy.resolved_config())
+        if resolved.get("mode") != mode:
+            raise ValueError(
+                f"money-management mode {mode!r} returned defaults for {resolved.get('mode')!r}"
+            )
+        return validate_money_management_config(resolved)
     except (Exception, SystemExit):  # noqa: BLE001 - one policy must not break the list
-        _LOGGER.exception("money-management mode %s could not be built with its defaults", selected)
-        return {"mode": selected}
+        _LOGGER.exception("money-management mode %s has no valid default configuration", mode)
+        return {}
+
+
+def _money_management_options(
+    supported: Sequence[str],
+    default: str | None,
+) -> tuple[list[str], dict[str, object]]:
+    """Project one consistent selectable-mode list and declared default."""
+    modes = _selectable_modes(supported)
+    if default not in modes:
+        return modes, {}
+    return modes, _default_money_management(default)
 
 
 def _summary_status(run_status: str, summary_present: bool) -> SummaryStatus:
@@ -558,6 +580,14 @@ class StrategyRepository:
         strategy_id = str(row["strategy_id"])
         metadata = VesselReference.get_metadata() if strategy_id == STRATEGY_ID else None
         support = None if metadata is None else metadata.money_management
+        modes, default = (
+            ([], {})
+            if support is None
+            else _money_management_options(
+                support.supported,
+                support.default,
+            )
+        )
         return StrategyOption(
             strategy_id=strategy_id,
             display_name=str(row["display_name"]),
@@ -579,12 +609,8 @@ class StrategyRepository:
                 metadata.min_history if metadata is not None else int(cast(int, row["min_history"]))
             ),
             default_params=dict(cast(dict[str, object], row["default_params_json"])),
-            supported_money_management=(
-                [] if support is None else _selectable_modes(support.supported)
-            ),
-            default_money_management=(
-                {} if support is None else _default_money_management(support.default)
-            ),
+            supported_money_management=modes,
+            default_money_management=default,
             is_active=bool(row["is_active"]),
             is_deprecated=bool(row["is_deprecated"]),
             source="strategy_registry",
@@ -593,6 +619,10 @@ class StrategyRepository:
     @staticmethod
     def _code_registry() -> StrategyListResponse:
         metadata = VesselReference.get_metadata()
+        modes, default = _money_management_options(
+            metadata.money_management.supported,
+            metadata.money_management.default,
+        )
         resolved = StrategyConfig.resolve(
             VesselReference.get_parameter_schema(),
             {"strategy_id": STRATEGY_ID, "params": {}},
@@ -607,12 +637,8 @@ class StrategyRepository:
                     required_indicators=metadata.required_indicators,
                     min_history=metadata.min_history,
                     default_params=dict(resolved.params),
-                    supported_money_management=_selectable_modes(
-                        metadata.money_management.supported
-                    ),
-                    default_money_management=_default_money_management(
-                        metadata.money_management.default
-                    ),
+                    supported_money_management=modes,
+                    default_money_management=default,
                     is_active=True,
                     is_deprecated=False,
                     source="code_registry",
