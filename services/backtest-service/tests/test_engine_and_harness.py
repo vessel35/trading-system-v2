@@ -46,6 +46,7 @@ from core_lib.strategy import (
     InProcessStrategyRegistry,
     ParameterSchema,
     ResolvedConfig,
+    StrategyDecisionContract,
     StrategyMetadata,
     StrategyProfile,
 )
@@ -2295,7 +2296,7 @@ class _HoldStrategy:
         self,
         market_data: dict[str, object],
         current_position: Position | None,
-    ) -> DecisionIntent | None:
+    ) -> DecisionIntent | TradingSignal | None:
         del current_position
         candle = market_data["candle"]
         assert isinstance(candle, Candle)
@@ -2337,6 +2338,12 @@ class _HoldStrategyCatalog(StrategyRegistry):
 class _NoPolicyEntryStrategy(_HoldStrategy):
     """Emit a target-contract entry while declaring no supported policy."""
 
+    @classmethod
+    def get_metadata(cls) -> StrategyMetadata:
+        metadata = super().get_metadata()
+        metadata.decision_contract = StrategyDecisionContract.DECISION_INTENT
+        return metadata
+
     def analyze(
         self,
         market_data: dict[str, object],
@@ -2353,6 +2360,104 @@ class _NoPolicyEntryStrategy(_HoldStrategy):
             confidence=0.8,
             reason="entry-without-policy",
             metadata={"fixture": True},
+        )
+
+
+class _TargetLegacySignalStrategy(_HoldStrategy):
+    """Break a target declaration by returning the legacy value."""
+
+    @classmethod
+    def get_metadata(cls) -> StrategyMetadata:
+        metadata = super().get_metadata()
+        metadata.decision_contract = StrategyDecisionContract.DECISION_INTENT
+        return metadata
+
+    def analyze(
+        self,
+        market_data: dict[str, object],
+        current_position: Position | None,
+    ) -> TradingSignal:
+        del current_position
+        candle = market_data["candle"]
+        assert isinstance(candle, Candle)
+        return TradingSignal(
+            symbol=candle.symbol,
+            timestamp=candle.close_time,
+            confidence=0.8,
+            price=float(candle.close),
+            stop_loss=90.0,
+            take_profit=120.0,
+            market_type=MarketType.FUTURES,
+            leverage=1,
+            reason="legacy-result",
+            metadata={"fixture": True},
+        )
+
+
+class _TargetNoneStrategy(_HoldStrategy):
+    @classmethod
+    def get_metadata(cls) -> StrategyMetadata:
+        metadata = super().get_metadata()
+        metadata.decision_contract = StrategyDecisionContract.DECISION_INTENT
+        return metadata
+
+    def analyze(
+        self,
+        market_data: dict[str, object],
+        current_position: Position | None,
+    ) -> None:
+        del market_data, current_position
+        return None
+
+
+class _InvalidResultStrategy(_TargetLegacySignalStrategy):
+    def analyze(
+        self,
+        market_data: dict[str, object],
+        current_position: Position | None,
+    ) -> TradingSignal:
+        del market_data, current_position
+        return cast(TradingSignal, object())
+
+
+def _contract_engine(tmp_path: Path, adaptee: type) -> Engine:
+    candles = _candles()
+    costs = BacktestCostModel(_config().cost_values)
+    plugins = InProcessStrategyRegistry()
+    plugins.register("hold-fixture", adaptee)
+    return Engine(
+        _Feed(candles),
+        _Broker(costs),
+        BacktestClock.from_candles(candles),
+        costs,
+        BacktestEvidenceSink(tmp_path),
+        _Catalog(),
+        AdapterManager(_HoldStrategyCatalog(adaptee), plugins),
+        prereg=_prereg(),
+    )
+
+
+def test_target_contract_rejects_a_legacy_signal_before_backtest_uses_it(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(TypeError, match="declared DecisionIntent but returned TradingSignal"):
+        _contract_engine(tmp_path, _TargetLegacySignalStrategy).run(
+            _config().model_copy(update={"strategy_id": "hold-fixture"})
+        )
+
+
+def test_backtest_accepts_none_from_a_target_contract_strategy(tmp_path: Path) -> None:
+    result = _contract_engine(tmp_path, _TargetNoneStrategy).run(
+        _config().model_copy(update={"strategy_id": "hold-fixture"})
+    )
+
+    assert result.integrity_status == "passed"
+
+
+def test_backtest_rejects_a_third_return_type_before_using_it(tmp_path: Path) -> None:
+    with pytest.raises(TypeError, match="must return DecisionIntent, TradingSignal, or None"):
+        _contract_engine(tmp_path, _InvalidResultStrategy).run(
+            _config().model_copy(update={"strategy_id": "hold-fixture"})
         )
 
 

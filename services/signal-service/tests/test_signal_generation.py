@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from threading import Event
-from typing import ClassVar
+from typing import ClassVar, cast
 
 import pytest
 from core_lib.indicators import DEFAULT_REGISTRY
@@ -18,6 +18,7 @@ from core_lib.strategy import (
     InProcessStrategyRegistry,
     ParameterSchema,
     ResolvedConfig,
+    StrategyDecisionContract,
     StrategyMetadata,
     StrategyProfile,
 )
@@ -104,12 +105,15 @@ class _Feed(SignalDataFeed):
 
 
 class _Catalog(StrategyRegistry):
+    def __init__(self, class_name: str = "_ProbeStrategy") -> None:
+        self._class_name = class_name
+
     def get(self, strategy_id: str) -> dict[str, object]:
         if strategy_id != _STRATEGY_ID:
             raise KeyError(strategy_id)
         return {
             "strategy_id": _STRATEGY_ID,
-            "class_name": "_ProbeStrategy",
+            "class_name": self._class_name,
             "module_path": __name__,
             "is_active": True,
             "is_deprecated": False,
@@ -223,6 +227,36 @@ class _PatternProbeStrategy(_ProbeStrategy):
         return super().analyze(market_data, current_position)
 
 
+class _TargetLegacyProbeStrategy(_ProbeStrategy):
+    """Break a target declaration by returning the legacy value."""
+
+    @classmethod
+    def get_metadata(cls) -> StrategyMetadata:
+        metadata = super().get_metadata()
+        metadata.decision_contract = StrategyDecisionContract.DECISION_INTENT
+        return metadata
+
+
+class _TargetNoneProbeStrategy(_TargetLegacyProbeStrategy):
+    def analyze(
+        self,
+        market_data: dict[str, object],
+        current_position: Position | None,
+    ) -> None:
+        del market_data, current_position
+        return None
+
+
+class _InvalidProbeStrategy(_TargetLegacyProbeStrategy):
+    def analyze(
+        self,
+        market_data: dict[str, object],
+        current_position: Position | None,
+    ) -> TradingSignal:
+        del market_data, current_position
+        return cast(TradingSignal, object())
+
+
 class _Sink(SignalSink):
     def __init__(self, *, inserted: bool = True) -> None:
         self.inserted = inserted
@@ -241,10 +275,10 @@ class _Queue(SignalQueue):
         self.values.append(signal)
 
 
-def _manager() -> AdapterManager:
+def _manager(adaptee: type[_ProbeStrategy] = _ProbeStrategy) -> AdapterManager:
     plugins = InProcessStrategyRegistry()
-    plugins.register(_STRATEGY_ID, _ProbeStrategy)
-    return AdapterManager(_Catalog(), plugins)
+    plugins.register(_STRATEGY_ID, adaptee)
+    return AdapterManager(_Catalog(adaptee.__name__), plugins)
 
 
 def _pattern_manager() -> AdapterManager:
@@ -320,6 +354,29 @@ def test_finalized_candle_uses_core_incremental_state_and_adaptee_contract() -> 
     next_market_data, _ = _ProbeStrategy.calls[-1]
     assert isinstance(next_market_data["candles"], list)
     assert len(next_market_data["candles"]) == 11
+
+
+def test_target_contract_rejects_a_legacy_signal_before_signal_service_uses_it() -> None:
+    values = _candles(10)
+    service = SignalGenerationService(_Feed(values), _manager(_TargetLegacyProbeStrategy), _Sink())
+
+    with pytest.raises(TypeError, match="declared DecisionIntent but returned TradingSignal"):
+        service.start(_config(), values[-1].close_time)
+
+
+def test_signal_service_accepts_none_from_a_target_contract_strategy() -> None:
+    values = _candles(10)
+    service = SignalGenerationService(_Feed(values), _manager(_TargetNoneProbeStrategy), _Sink())
+
+    assert service.start(_config(), values[-1].close_time).signal is None
+
+
+def test_signal_service_rejects_a_third_return_type_before_using_it() -> None:
+    values = _candles(10)
+    service = SignalGenerationService(_Feed(values), _manager(_InvalidProbeStrategy), _Sink())
+
+    with pytest.raises(TypeError, match="must return DecisionIntent, TradingSignal, or None"):
+        service.start(_config(), values[-1].close_time)
 
 
 def test_declared_pattern_reaches_signal_strategy_input() -> None:

@@ -3,7 +3,7 @@
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from core_lib.strategy import StrategyAdapter, StrategyConfig
+from core_lib.strategy import StrategyAdapter, StrategyConfig, StrategyDecisionContract
 from core_lib.strategy.adaptees import STRATEGY_ID, VesselReference
 from core_lib.types import (
     Candle,
@@ -73,6 +73,7 @@ def test_vessel_declares_exact_pipeline_inputs_and_no_trailing() -> None:
         {"name": "EMA", "params": {"period": 21}},
     ]
     assert metadata.money_management.supported == ("manual", "turtle")
+    assert metadata.decision_contract is StrategyDecisionContract.DECISION_INTENT
     assert metadata.money_management.default == "manual"
 
     signal = strategy.analyze(

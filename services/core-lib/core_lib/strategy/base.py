@@ -3,6 +3,7 @@
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Protocol, runtime_checkable
 
 from core_lib.money_management import MoneyManagementBase
@@ -11,6 +12,13 @@ from core_lib.types import DecisionIntent, Position, TradingSignal
 
 from .config import ParameterSchema
 from .profile import StrategyProfile
+
+
+class StrategyDecisionContract(StrEnum):
+    """Declare which decision value a strategy promises to return."""
+
+    TRADING_SIGNAL = "TradingSignal"
+    DECISION_INTENT = "DecisionIntent"
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,14 +48,26 @@ class StrategyMetadata:
     supported_timeframes: list[str]
     profile: StrategyProfile
     money_management: MoneyManagementSupport = field(default_factory=MoneyManagementSupport)
+    decision_contract: StrategyDecisionContract = StrategyDecisionContract.TRADING_SIGNAL
 
     def __post_init__(self) -> None:
         if self.min_history <= 0:
             raise ValueError("min_history must be positive")
         if not self.supported_timeframes:
             raise ValueError("supported_timeframes must not be empty")
+        self.decision_contract = StrategyDecisionContract(self.decision_contract)
         self.required_indicators = [dict(item) for item in self.required_indicators]
         self.supported_timeframes = list(self.supported_timeframes)
+
+
+def validate_strategy_result(metadata: StrategyMetadata, result: object) -> None:
+    """Reject values outside the transition contract before an executor uses them."""
+    if not isinstance(result, (DecisionIntent, TradingSignal)):
+        raise TypeError("strategy analyze() must return DecisionIntent, TradingSignal, or None")
+    if metadata.decision_contract is StrategyDecisionContract.DECISION_INTENT and isinstance(
+        result, TradingSignal
+    ):
+        raise TypeError("strategy declared DecisionIntent but returned TradingSignal")
 
 
 @runtime_checkable

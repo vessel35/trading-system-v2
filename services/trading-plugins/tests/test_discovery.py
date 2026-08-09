@@ -19,6 +19,7 @@ from core_lib.money_management import (
     money_management_modes,
     policy_settings,
 )
+from core_lib.strategy import StrategyDecisionContract
 from trading_plugins import discovery
 
 
@@ -57,6 +58,7 @@ _STRATEGY_BODY = """
         MoneyManagementSupport,
         ParameterSchema,
         StrategyBase,
+        StrategyDecisionContract,
         StrategyMetadata,
         StrategyProfile,
     )
@@ -90,6 +92,7 @@ _STRATEGY_BODY = """
                 money_management=MoneyManagementSupport(
                     supported=("manual",), default="manual"
                 ),
+                decision_contract=StrategyDecisionContract.DECISION_INTENT,
             )
 
         @classmethod
@@ -117,6 +120,10 @@ def test_placing_a_strategy_file_is_enough_to_deploy_it(plugin_dir: ModuleType) 
 
     assert faults == ()
     assert found["dropped-trend"].__name__ == "DroppedTrend"
+    assert (
+        found["dropped-trend"].get_metadata().decision_contract
+        is StrategyDecisionContract.DECISION_INTENT
+    )
 
 
 def test_built_in_strategies_stay_registered_alongside_deployed_ones() -> None:

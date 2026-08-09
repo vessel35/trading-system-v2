@@ -24,7 +24,12 @@ from core_lib.money_management import (
 from core_lib.patterns import DEFAULT_PATTERN_REGISTRY, PatternRegistry
 from core_lib.series import SeriesSpec, SeriesState, series_key_of
 from core_lib.series_resolution import resolve_series_specs, series_key
-from core_lib.strategy import AdapterManager, StrategyAdapter, StrategyConfig
+from core_lib.strategy import (
+    AdapterManager,
+    StrategyAdapter,
+    StrategyConfig,
+    validate_strategy_result,
+)
 from core_lib.types import (
     Candle,
     DecisionAction,
@@ -304,6 +309,7 @@ class SignalGenerationService:
         )
         if signal is None:
             return None
+        validate_strategy_result(self._require_strategy().get_metadata(), signal)
         if isinstance(signal, DecisionIntent):
             if signal.action is DecisionAction.HOLD:
                 return None

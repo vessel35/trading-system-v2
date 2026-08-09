@@ -62,7 +62,12 @@ from core_lib.series_resolution import (
 )
 from core_lib.sizing import exposure_limit, wallet_pct_size
 from core_lib.sizing import size as risk_size
-from core_lib.strategy import AdapterManager, StrategyAdapter, StrategyConfig
+from core_lib.strategy import (
+    AdapterManager,
+    StrategyAdapter,
+    StrategyConfig,
+    validate_strategy_result,
+)
 from core_lib.types import (
     ZERO,
     Candle,
@@ -590,6 +595,7 @@ class Engine:
         )
         if signal is None:
             return
+        validate_strategy_result(self._strategy_instance().get_metadata(), signal)
         if isinstance(signal, DecisionIntent):
             decision = signal
             # Check the timestamp before acting on the action. A HOLD carries a

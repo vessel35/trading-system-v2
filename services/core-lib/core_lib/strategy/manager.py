@@ -10,7 +10,7 @@ from core_lib.money_management import (
 )
 from core_lib.ports import StrategyRegistry
 
-from .base import StrategyAdapter, StrategyRuntime
+from .base import StrategyAdapter, StrategyDecisionContract, StrategyRuntime
 from .config import StrategyConfig
 from .factory import AdapterFactory
 from .reconciliation import StrategyReconciliation, reconcile_strategy_registries
@@ -85,9 +85,15 @@ class AdapterManager:
     ) -> StrategyRuntime:
         """Compose one strategy with a validated policy it explicitly supports."""
         strategy = self.create(strategy_id, raw_config)
-        support = strategy.get_metadata().money_management
+        metadata = strategy.get_metadata()
+        support = metadata.money_management
         if not support.supported:
             return StrategyRuntime(strategy=strategy, money_management=None)
+        if metadata.decision_contract is StrategyDecisionContract.TRADING_SIGNAL:
+            raise ValueError(
+                f"strategy {strategy_id!r} declares TradingSignal and cannot attach "
+                "money management"
+            )
         policy = MoneyManagementFactory.create(
             money_management_config, self._money_management_policies
         )

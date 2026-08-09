@@ -13,6 +13,7 @@ from core_lib.strategy import (
     ParameterSchema,
     ResolvedConfig,
     StrategyAdapter,
+    StrategyDecisionContract,
     StrategyImplementationIdentity,
     StrategyMetadata,
     StrategyProfile,
@@ -120,6 +121,33 @@ class MoneyManagedAdaptee(FakeAdaptee):
     @classmethod
     def get_metadata(cls) -> StrategyMetadata:
         metadata = super().get_metadata()
+        metadata.decision_contract = StrategyDecisionContract.DECISION_INTENT
+        metadata.money_management = MoneyManagementSupport(
+            supported=("manual",),
+            default="manual",
+            supports_external_stop=True,
+            supports_external_take_profit=True,
+            supports_signal_exit=True,
+        )
+        return metadata
+
+
+class TargetUnmanagedAdaptee(FakeAdaptee):
+    """Declare the target decision contract without attaching a policy."""
+
+    @classmethod
+    def get_metadata(cls) -> StrategyMetadata:
+        metadata = super().get_metadata()
+        metadata.decision_contract = StrategyDecisionContract.DECISION_INTENT
+        return metadata
+
+
+class LegacyMoneyManagedAdaptee(FakeAdaptee):
+    """Try to attach a policy after constructing default legacy metadata."""
+
+    @classmethod
+    def get_metadata(cls) -> StrategyMetadata:
+        metadata = super().get_metadata()
         metadata.money_management = MoneyManagementSupport(
             supported=("manual",),
             default="manual",
@@ -137,6 +165,55 @@ def make_manager() -> tuple[AdapterManager, InProcessStrategyRegistry, FakeCatal
     catalog = FakeCatalog(FakeAdaptee.events)
     catalog.add_active_fake()
     return AdapterManager(catalog, plugins), plugins, catalog
+
+
+def _manager_for(adaptee: type[FakeAdaptee]) -> AdapterManager:
+    strategy_id = "contract-fixture"
+    plugins = InProcessStrategyRegistry()
+    plugins.register(strategy_id, adaptee)
+    catalog = FakeCatalog([])
+    catalog.rows[strategy_id] = {
+        "strategy_id": strategy_id,
+        "class_name": adaptee.__name__,
+        "module_path": adaptee.__module__,
+        "is_active": True,
+        "is_deprecated": False,
+    }
+    return AdapterManager(catalog, plugins)
+
+
+def test_strategy_metadata_defaults_to_the_legacy_decision_contract() -> None:
+    assert FakeAdaptee.get_metadata().decision_contract is StrategyDecisionContract.TRADING_SIGNAL
+
+
+@pytest.mark.parametrize(
+    ("adaptee", "has_policy"),
+    [
+        (FakeAdaptee, False),
+        (TargetUnmanagedAdaptee, False),
+        (MoneyManagedAdaptee, True),
+    ],
+)
+def test_runtime_accepts_the_three_valid_decision_contract_policy_pairs(
+    adaptee: type[FakeAdaptee],
+    has_policy: bool,
+) -> None:
+    runtime = _manager_for(adaptee).create_runtime(
+        "contract-fixture",
+        {"strategy_id": "contract-fixture", "params": {"fast": 10}},
+        {"mode": "manual"},
+    )
+
+    assert (runtime.money_management is not None) is has_policy
+
+
+def test_policy_attachment_rejects_mutated_legacy_metadata() -> None:
+    with pytest.raises(ValueError, match="declares TradingSignal"):
+        _manager_for(LegacyMoneyManagedAdaptee).create_runtime(
+            "contract-fixture",
+            {"strategy_id": "contract-fixture", "params": {"fast": 10}},
+            {"mode": "manual"},
+        )
 
 
 def test_in_process_registration_is_deterministic_and_rejects_duplicates() -> None:

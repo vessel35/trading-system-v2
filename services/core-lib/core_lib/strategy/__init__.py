@@ -5,8 +5,10 @@ from .base import (
     MoneyManagementSupport,
     StrategyAdapter,
     StrategyBase,
+    StrategyDecisionContract,
     StrategyMetadata,
     StrategyRuntime,
+    validate_strategy_result,
 )
 from .config import (
     SCHEMA_VERSION,
@@ -45,6 +47,7 @@ __all__ = [
     "StrategyAdapter",
     "StrategyBase",
     "StrategyConfig",
+    "StrategyDecisionContract",
     "StrategyImplementationIdentity",
     "StrategyMetadata",
     "StrategyProfile",
@@ -53,4 +56,5 @@ __all__ = [
     "StrategyRuntime",
     "build_strategy_registry",
     "reconcile_strategy_registries",
+    "validate_strategy_result",
 ]

@@ -13,7 +13,7 @@ from core_lib.types import (
     PositionSide,
 )
 
-from ..base import MoneyManagementSupport, StrategyMetadata
+from ..base import MoneyManagementSupport, StrategyDecisionContract, StrategyMetadata
 from ..config import FieldSpec, ParameterSchema, ResolvedConfig
 from ..profile import StrategyProfile
 
@@ -65,6 +65,7 @@ class VesselReference:
                 supports_signal_exit=True,
                 supports_pyramiding=False,
             ),
+            decision_contract=StrategyDecisionContract.DECISION_INTENT,
         )
 
     @classmethod
