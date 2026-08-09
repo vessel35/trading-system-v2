@@ -909,11 +909,27 @@ class RunAccepted(BaseModel):
     status_url: str
 
 
+class StrategyProfileResponse(BaseModel):
+    id: str
+    family: str
+    bar: str
+    expected_win_rate: tuple[float, float]
+    expected_payoff: tuple[float, float]
+    tail_shape: str
+    holding_horizon: str
+    primary_metric: str
+    risk_adjusted_pref: str
+    profit_structure_to_preserve: str
+    envelope_tolerance: float
+    envelope_status: str
+
+
 class StrategyOption(BaseModel):
     strategy_id: str
     display_name: str
     strategy_version: str
     profile_id: str | None
+    profile: StrategyProfileResponse | None
     supported_timeframes: list[str]
     required_indicators: list[dict[str, object]]
     min_history: int
@@ -930,9 +946,13 @@ class StrategyOption(BaseModel):
     source: Literal["strategy_registry", "code_registry"]
 
     @model_validator(mode="after")
-    def validate_runnability_pair(self) -> Self:
+    def validate_response_invariants(self) -> Self:
         if self.runnable != (self.unrunnable_reason is None):
             raise ValueError("runnable must be true exactly when unrunnable_reason is null")
+        if (self.profile is None) != (self.profile_id is None):
+            raise ValueError("profile and profile_id must both be present or both be null")
+        if self.profile is not None and self.profile.id != self.profile_id:
+            raise ValueError("profile.id must equal profile_id")
         return self
 
 

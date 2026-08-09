@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import json
+import re
+from dataclasses import asdict, fields
+from pathlib import Path
 from typing import ClassVar, cast
 
 import pytest
+import web_api.repository as repository_module
 from core_lib.ports import StrategyRegistry
 from core_lib.strategy import (
     AdapterManager,
@@ -19,7 +24,7 @@ from core_lib.strategy import (
 from core_lib.types import Position, TradingSignal
 from pydantic import ValidationError
 from web_api.database import SignalConnection
-from web_api.models import StrategyOption
+from web_api.models import StrategyOption, StrategyProfileResponse
 from web_api.repository import StrategyRepository
 
 
@@ -48,14 +53,14 @@ class _FixtureStrategy:
                 id="runnability-fixture-v1",
                 family="trend",
                 bar="4h",
-                expected_win_rate=(0.3, 0.6),
-                expected_payoff=(1.2, 3.0),
+                expected_win_rate=(0.0, 0.6),
+                expected_payoff=(0.0, 3.0),
                 tail_shape="right_fat",
-                holding_horizon="multi_day",
+                holding_horizon="",
                 primary_metric="calmar",
                 risk_adjusted_pref="sortino",
                 profit_structure_to_preserve="test-edge",
-                envelope_tolerance=0.1,
+                envelope_tolerance=0.0,
                 envelope_status="provisional",
             ),
         )
@@ -182,6 +187,29 @@ def _assert_bidirectional_pair(option: StrategyOption) -> None:
     assert (option.unrunnable_reason is not None) is (not option.runnable)
 
 
+def _assert_profile_pair(option: StrategyOption) -> None:
+    assert (option.profile is None) is (option.profile_id is None)
+    if option.profile is not None:
+        assert option.profile.id == option.profile_id
+
+
+def _profile_payload(profile_id: str) -> StrategyProfileResponse:
+    return StrategyProfileResponse(
+        id=profile_id,
+        family="trend",
+        bar="4h",
+        expected_win_rate=(0.0, 0.6),
+        expected_payoff=(0.0, 3.0),
+        tail_shape="right_fat",
+        holding_horizon="",
+        primary_metric="calmar",
+        risk_adjusted_pref="sortino",
+        profit_structure_to_preserve="test-edge",
+        envelope_tolerance=0.0,
+        envelope_status="provisional",
+    )
+
+
 def test_normal_and_all_seven_reasons_are_projected_without_unioning_membership() -> None:
     registry = _register(
         ("healthy", _FixtureStrategy),
@@ -232,8 +260,12 @@ def test_normal_and_all_seven_reasons_are_projected_without_unioning_membership(
         "inactive": None,
         "read-failed": None,
     }
+    assert options[0].profile is not None
+    assert options[0].profile.model_dump() == asdict(_FixtureStrategy.get_metadata().profile)
+    assert all(option.profile is None for option in options[1:])
     for option in options:
         _assert_bidirectional_pair(option)
+        _assert_profile_pair(option)
 
     fallback = (
         _repository(
@@ -247,7 +279,9 @@ def test_normal_and_all_seven_reasons_are_projected_without_unioning_membership(
     assert len(fallback) == 1
     assert fallback[0].unrunnable_reason is StrategyReconciliationState.ALLOWLIST_ONLY
     assert fallback[0].profile_id is None
+    assert fallback[0].profile is None
     _assert_bidirectional_pair(fallback[0])
+    _assert_profile_pair(fallback[0])
 
 
 def test_strategy_option_rejects_both_invalid_runnability_pairs() -> None:
@@ -261,6 +295,7 @@ def test_strategy_option_rejects_both_invalid_runnability_pairs() -> None:
             display_name="Fixture",
             strategy_version="1.0.0",
             profile_id="declared-profile-unlike-fixture-v1",
+            profile=_profile_payload("declared-profile-unlike-fixture-v1"),
             supported_timeframes=["1h"],
             required_indicators=[],
             min_history=1,
@@ -281,6 +316,38 @@ def test_strategy_option_rejects_both_invalid_runnability_pairs() -> None:
         )
     with pytest.raises(ValidationError, match="runnable must be true exactly"):
         option(runnable=False, reason=None)
+
+
+def test_strategy_option_rejects_profile_presence_and_identity_mismatches() -> None:
+    values = {
+        "strategy_id": "fixture",
+        "display_name": "Fixture",
+        "strategy_version": "1.0.0",
+        "supported_timeframes": ["1h"],
+        "required_indicators": [],
+        "min_history": 1,
+        "default_params": {},
+        "supported_money_management": [],
+        "default_money_management": {},
+        "is_active": True,
+        "is_deprecated": False,
+        "runnable": True,
+        "unrunnable_reason": None,
+        "source": "strategy_registry",
+    }
+
+    with pytest.raises(ValidationError, match="both be present or both be null"):
+        StrategyOption(
+            **values,  # type: ignore[arg-type]
+            profile_id="declared-profile",
+            profile=None,
+        )
+    with pytest.raises(ValidationError, match="profile.id must equal profile_id"):
+        StrategyOption(
+            **values,  # type: ignore[arg-type]
+            profile_id="declared-profile",
+            profile=_profile_payload("different-profile"),
+        )
 
 
 def test_openapi_model_requires_exactly_the_closed_additive_runnability_contract() -> None:
@@ -308,6 +375,76 @@ def test_openapi_model_requires_exactly_the_closed_additive_runnability_contract
         {"type": "null"},
     ]
     assert "profile_id" in schema["required"]
+    assert schema["properties"]["profile"]["anyOf"] == [
+        {"$ref": "#/$defs/StrategyProfileResponse"},
+        {"type": "null"},
+    ]
+    assert "profile" in schema["required"]
+
+    profile_schema = schema["$defs"]["StrategyProfileResponse"]
+    assert set(profile_schema["properties"]) == {field.name for field in fields(StrategyProfile)}
+    assert set(profile_schema["required"]) == {field.name for field in fields(StrategyProfile)}
+    for name in ("expected_win_rate", "expected_payoff"):
+        assert profile_schema["properties"][name] == {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [{"type": "number"}, {"type": "number"}],
+            "title": name.replace("_", " ").title(),
+            "type": "array",
+        }
+
+
+def test_profile_response_matches_dataclass_and_evidence_json_shape() -> None:
+    declared = _FixtureStrategy.get_metadata().profile
+    option = (
+        _repository(
+            [_row("fixture")],
+            _register(("fixture", _FixtureStrategy)),
+        )
+        .list()
+        .data[0]
+    )
+
+    assert set(StrategyProfileResponse.model_fields) == {
+        field.name for field in fields(StrategyProfile)
+    }
+    assert option.profile is not None
+    assert option.profile.model_dump() == asdict(declared)
+    assert option.profile.model_dump(mode="json") == json.loads(json.dumps(asdict(declared)))
+    assert option.profile.model_dump(mode="json")["expected_win_rate"] == [0.0, 0.6]
+    assert option.profile.model_dump(mode="json")["expected_payoff"] == [0.0, 3.0]
+    assert option.profile.holding_horizon == ""
+    assert option.profile.envelope_tolerance == 0.0
+
+
+def test_code_registry_profile_uses_the_same_present_and_null_conditions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry = _register(("fixture", _FixtureStrategy))
+    null_option = _repository([], registry, table_exists=False).list().data[0]
+    assert null_option.profile_id is None
+    assert null_option.profile is None
+    _assert_profile_pair(null_option)
+
+    def no_finding(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+
+    monkeypatch.setattr(repository_module, "reconcile_strategy_entry", no_finding)
+    present_option = _repository([], registry, table_exists=False).list().data[0]
+    declared = _FixtureStrategy.get_metadata().profile
+    assert present_option.profile_id == declared.id
+    assert present_option.profile is not None
+    assert present_option.profile.model_dump() == asdict(declared)
+    _assert_profile_pair(present_option)
+
+
+def test_committed_frontend_type_keeps_profile_ranges_as_two_number_tuples() -> None:
+    repository_root = Path(__file__).parents[3]
+    generated = (repository_root / "apps/web/src/api/schema.d.ts").read_text(encoding="utf-8")
+
+    assert 'profile: components["schemas"]["StrategyProfileResponse"] | null;' in generated
+    assert re.search(r"expected_win_rate:\s*\[\s*number,\s*number\s*\];", generated)
+    assert re.search(r"expected_payoff:\s*\[\s*number,\s*number\s*\];", generated)
 
 
 @pytest.mark.parametrize(
@@ -412,7 +549,9 @@ def test_each_declaration_is_read_once_and_one_snapshot_fills_existing_fields() 
 
     assert (_FixtureStrategy.metadata_calls, _FixtureStrategy.schema_calls) == (1, 1)
     assert option.profile_id == "runnability-fixture-v1"
-    assert option.model_dump(exclude={"runnable", "unrunnable_reason", "profile_id"}) == {
+    assert option.model_dump(
+        exclude={"runnable", "unrunnable_reason", "profile_id", "profile"}
+    ) == {
         "strategy_id": "fixture",
         "display_name": "Row fixture",
         "strategy_version": "9.9.9",

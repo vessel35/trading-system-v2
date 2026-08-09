@@ -8878,6 +8878,16 @@
             ],
             "title": "Profile Id"
           },
+          "profile": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StrategyProfileResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "supported_timeframes": {
             "items": {
               "type": "string"
@@ -8961,6 +8971,7 @@
           "display_name",
           "strategy_version",
           "profile_id",
+          "profile",
           "supported_timeframes",
           "required_indicators",
           "min_history",
@@ -8974,6 +8985,94 @@
           "source"
         ],
         "title": "StrategyOption"
+      },
+      "StrategyProfileResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "family": {
+            "type": "string",
+            "title": "Family"
+          },
+          "bar": {
+            "type": "string",
+            "title": "Bar"
+          },
+          "expected_win_rate": {
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "type": "array",
+            "maxItems": 2,
+            "minItems": 2,
+            "title": "Expected Win Rate"
+          },
+          "expected_payoff": {
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "type": "array",
+            "maxItems": 2,
+            "minItems": 2,
+            "title": "Expected Payoff"
+          },
+          "tail_shape": {
+            "type": "string",
+            "title": "Tail Shape"
+          },
+          "holding_horizon": {
+            "type": "string",
+            "title": "Holding Horizon"
+          },
+          "primary_metric": {
+            "type": "string",
+            "title": "Primary Metric"
+          },
+          "risk_adjusted_pref": {
+            "type": "string",
+            "title": "Risk Adjusted Pref"
+          },
+          "profit_structure_to_preserve": {
+            "type": "string",
+            "title": "Profit Structure To Preserve"
+          },
+          "envelope_tolerance": {
+            "type": "number",
+            "title": "Envelope Tolerance"
+          },
+          "envelope_status": {
+            "type": "string",
+            "title": "Envelope Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "family",
+          "bar",
+          "expected_win_rate",
+          "expected_payoff",
+          "tail_shape",
+          "holding_horizon",
+          "primary_metric",
+          "risk_adjusted_pref",
+          "profit_structure_to_preserve",
+          "envelope_tolerance",
+          "envelope_status"
+        ],
+        "title": "StrategyProfileResponse"
       },
       "SweepAxis": {
         "properties": {

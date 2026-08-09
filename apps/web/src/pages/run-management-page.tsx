@@ -766,7 +766,10 @@ export function RunManagementPage() {
       const { data, error } = await apiClient.GET("/api/v1/strategies");
       if (error) throw new Error(requestErrorMessage(error));
       if (!data) throw new Error("전략 목록 응답이 비어 있습니다.");
-      return data.data;
+      // openapi-fetch's Readable mapping widens fixed-length arrays, so the tuple
+      // length declared by the generated type is lost here. The server response
+      // model enforces exactly two items, which makes this assertion safe.
+      return data.data as StrategyOption[];
     },
   });
   const selectedStrategy = useMemo(

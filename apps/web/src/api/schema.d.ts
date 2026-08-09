@@ -2458,6 +2458,7 @@ export interface components {
             strategy_version: string;
             /** Profile Id */
             profile_id: string | null;
+            profile: components["schemas"]["StrategyProfileResponse"] | null;
             /** Supported Timeframes */
             supported_timeframes: string[];
             /** Required Indicators */
@@ -2489,6 +2490,39 @@ export interface components {
              * @enum {string}
              */
             source: "strategy_registry" | "code_registry";
+        };
+        /** StrategyProfileResponse */
+        StrategyProfileResponse: {
+            /** Id */
+            id: string;
+            /** Family */
+            family: string;
+            /** Bar */
+            bar: string;
+            /** Expected Win Rate */
+            expected_win_rate: [
+                number,
+                number
+            ];
+            /** Expected Payoff */
+            expected_payoff: [
+                number,
+                number
+            ];
+            /** Tail Shape */
+            tail_shape: string;
+            /** Holding Horizon */
+            holding_horizon: string;
+            /** Primary Metric */
+            primary_metric: string;
+            /** Risk Adjusted Pref */
+            risk_adjusted_pref: string;
+            /** Profit Structure To Preserve */
+            profit_structure_to_preserve: string;
+            /** Envelope Tolerance */
+            envelope_tolerance: number;
+            /** Envelope Status */
+            envelope_status: string;
         };
         /** SweepAxis */
         SweepAxis: {

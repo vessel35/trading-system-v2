@@ -3,6 +3,7 @@
 import json
 import logging
 from collections.abc import Mapping, Sequence
+from dataclasses import asdict
 from datetime import datetime, timedelta
 from decimal import Decimal
 from types import MappingProxyType
@@ -48,6 +49,7 @@ from web_api.models import (
     RunTagsResponse,
     StrategyListResponse,
     StrategyOption,
+    StrategyProfileResponse,
     SummaryStatus,
     SweepResponse,
     TagFacet,
@@ -641,6 +643,7 @@ class StrategyRepository:
             declaration_read_failed=declaration_read_failed,
         )
         reason = None if finding is None else finding.state
+        profile = metadata.profile if metadata is not None and reason is None else None
         return StrategyOption(
             strategy_id=strategy_id,
             display_name=str(row["display_name"]),
@@ -649,7 +652,12 @@ class StrategyRepository:
                 if strategy_class is not None
                 else str(row["strategy_version"])
             ),
-            profile_id=metadata.profile.id if metadata is not None and reason is None else None,
+            profile_id=profile.id if profile is not None else None,
+            profile=(
+                StrategyProfileResponse.model_validate(asdict(profile))
+                if profile is not None
+                else None
+            ),
             supported_timeframes=(
                 list(metadata.supported_timeframes)
                 if metadata is not None
@@ -695,6 +703,7 @@ class StrategyRepository:
                 metadata=metadata,
             )
             reason = None if finding is None else finding.state
+            profile = metadata.profile if reason is None else None
             modes, default = _money_management_options(
                 metadata.money_management.supported,
                 metadata.money_management.default,
@@ -704,7 +713,12 @@ class StrategyRepository:
                     strategy_id=strategy_id,
                     display_name=strategy_id.replace("-", " ").title(),
                     strategy_version=str(getattr(strategy_class, "VERSION", "1.0.0")),
-                    profile_id=metadata.profile.id if reason is None else None,
+                    profile_id=profile.id if profile is not None else None,
+                    profile=(
+                        StrategyProfileResponse.model_validate(asdict(profile))
+                        if profile is not None
+                        else None
+                    ),
                     supported_timeframes=list(metadata.supported_timeframes),
                     required_indicators=list(metadata.required_indicators),
                     min_history=metadata.min_history,
