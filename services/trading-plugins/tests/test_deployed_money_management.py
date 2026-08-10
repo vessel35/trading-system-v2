@@ -60,6 +60,11 @@ def test_manual_policy_exactly_reproduces_legacy_vessel_protection() -> None:
     assert plan.initial_risk_amount == 100.0
 
 
+def test_deployed_policies_declare_signal_account_state_capability() -> None:
+    assert ManualMoneyManagement.protection_and_leverage_ignore_account_state is True
+    assert TurtleMoneyManagement.protection_and_leverage_ignore_account_state is False
+
+
 def test_turtle_policy_sizes_one_percent_risk_and_minimum_leverage() -> None:
     policy = TurtleMoneyManagement()
     plan = policy.plan_entry(

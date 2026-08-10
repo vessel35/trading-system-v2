@@ -29,6 +29,7 @@ class ManualMoneyManagement(MoneyManagementBase):
 
     id: ClassVar[str] = "manual"
     version: ClassVar[str] = "1.0.0"
+    protection_and_leverage_ignore_account_state: ClassVar[bool] = True
 
     def __post_init__(self) -> None:
         if isinstance(self.leverage, bool) or not isinstance(self.leverage, int):

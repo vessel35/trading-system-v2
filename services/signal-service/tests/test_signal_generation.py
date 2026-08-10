@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -12,17 +13,33 @@ from typing import ClassVar, cast
 
 import pytest
 from core_lib.indicators import DEFAULT_REGISTRY, IndicatorRegistry, IndicatorSpec
+from core_lib.money_management import (
+    AccountRiskSnapshot,
+    MarketSnapshot,
+    MoneyManagementBase,
+    MoneyManagementPlan,
+    PolicyIndicatorRequirement,
+    RiskLimits,
+)
 from core_lib.ports import StrategyRegistry
 from core_lib.strategy import (
     AdapterManager,
     InProcessStrategyRegistry,
+    MoneyManagementSupport,
     ParameterSchema,
     ResolvedConfig,
     StrategyDecisionContract,
     StrategyMetadata,
     StrategyProfile,
 )
-from core_lib.types import Candle, MarketType, Position, TradingSignal
+from core_lib.types import (
+    Candle,
+    DecisionAction,
+    DecisionIntent,
+    MarketType,
+    Position,
+    TradingSignal,
+)
 from signal_service.application import (
     SignalDataFeed,
     SignalGenerationService,
@@ -40,6 +57,66 @@ from trading_plugins.strategies.vessel_reference import VesselReference
 _BASE = datetime(2026, 1, 1, tzinfo=UTC)
 _STRATEGY_ID = "probe"
 _PATTERN_STRATEGY_ID = "pattern-probe"
+
+
+@dataclass(frozen=True, slots=True)
+class _AccountStateSensitivePolicy(MoneyManagementBase):
+    leverage: int = 1
+    reward_risk: float = 2.0
+    atr_stop_multiple: float = 2.0
+
+    id: ClassVar[str] = "manual"
+    version: ClassVar[str] = "test"
+
+    def required_indicators(self) -> tuple[PolicyIndicatorRequirement, ...]:
+        return (
+            PolicyIndicatorRequirement(
+                name="ATR",
+                params={"period": 14},
+                timeframe="strategy",
+                min_history=14,
+            ),
+        )
+
+    def resolved_config(self) -> Mapping[str, object]:
+        return {"mode": self.id}
+
+    def plan_entry(
+        self,
+        decision: DecisionIntent,
+        market: MarketSnapshot,
+        account: AccountRiskSnapshot,
+        global_limits: RiskLimits,
+    ) -> MoneyManagementPlan:
+        return MoneyManagementPlan(
+            stop_loss=market.reference_price - 1.0,
+            take_profit=market.reference_price + 2.0,
+            requested_quantity=account.equity,
+            requested_leverage=2 if account.available_cash <= 1.0 else 3,
+            initial_risk_amount=account.equity * global_limits.risk_per_trade,
+            diagnostics={"decision": decision.action.value},
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class _SignalSafePolicy(_AccountStateSensitivePolicy):
+    protection_and_leverage_ignore_account_state: ClassVar[bool] = True
+
+    def plan_entry(
+        self,
+        decision: DecisionIntent,
+        market: MarketSnapshot,
+        account: AccountRiskSnapshot,
+        global_limits: RiskLimits,
+    ) -> MoneyManagementPlan:
+        return MoneyManagementPlan(
+            stop_loss=market.reference_price - 1.0,
+            take_profit=market.reference_price + 2.0,
+            requested_quantity=account.equity,
+            requested_leverage=3,
+            initial_risk_amount=account.equity * global_limits.risk_per_trade,
+            diagnostics={"decision": decision.action.value},
+        )
 
 
 def _candles(count: int) -> list[Candle]:
@@ -212,7 +289,7 @@ class _ProbeStrategy:
         self,
         market_data: dict[str, object],
         current_position: Position | None,
-    ) -> TradingSignal | None:
+    ) -> TradingSignal | DecisionIntent | None:
         self.calls.append((dict(market_data), current_position))
         candle = market_data["candle"]
         indicators = market_data["indicators"]
@@ -249,7 +326,7 @@ class _PatternProbeStrategy(_ProbeStrategy):
         self,
         market_data: dict[str, object],
         current_position: Position | None,
-    ) -> TradingSignal | None:
+    ) -> TradingSignal | DecisionIntent | None:
         indicators = market_data["indicators"]
         assert isinstance(indicators, Mapping)
         type(self).observed_indicators.append(dict(indicators))
@@ -434,6 +511,37 @@ class _TargetNoneProbeStrategy(_TargetLegacyProbeStrategy):
         return None
 
 
+class _TargetEntryProbeStrategy(_TargetLegacyProbeStrategy):
+    @classmethod
+    def get_metadata(cls) -> StrategyMetadata:
+        metadata = super().get_metadata()
+        metadata.money_management = MoneyManagementSupport(
+            supported=("manual",),
+            default="manual",
+            supports_external_stop=True,
+            supports_external_take_profit=True,
+        )
+        return metadata
+
+    def analyze(
+        self,
+        market_data: dict[str, object],
+        current_position: Position | None,
+    ) -> DecisionIntent:
+        del current_position
+        candle = market_data["candle"]
+        assert isinstance(candle, Candle)
+        return DecisionIntent(
+            action=DecisionAction.ENTER_LONG,
+            symbol=candle.symbol,
+            timestamp=candle.close_time,
+            reference_price=candle.close,
+            confidence=1.0,
+            reason="target-entry",
+            metadata={},
+        )
+
+
 class _InvalidProbeStrategy(_TargetLegacyProbeStrategy):
     def analyze(
         self,
@@ -462,13 +570,21 @@ class _Queue(SignalQueue):
         self.values.append(signal)
 
 
-def _manager(adaptee: type[_ProbeStrategy] = _ProbeStrategy) -> AdapterManager:
+def _manager(
+    adaptee: type[_ProbeStrategy] = _ProbeStrategy,
+    *,
+    money_management_policies: Mapping[str, type[MoneyManagementBase]] | None = None,
+) -> AdapterManager:
     plugins = InProcessStrategyRegistry()
     plugins.register(_STRATEGY_ID, adaptee)
     return AdapterManager(
         _Catalog(adaptee.__name__),
         plugins,
-        money_management_policies=registered_money_management(),
+        money_management_policies=(
+            registered_money_management()
+            if money_management_policies is None
+            else money_management_policies
+        ),
     )
 
 
@@ -777,6 +893,51 @@ def test_signal_service_accepts_none_from_a_target_contract_strategy() -> None:
     service = SignalGenerationService(_Feed(values), _manager(_TargetNoneProbeStrategy), _Sink())
 
     assert service.start(_config(), values[-1].close_time).signal is None
+
+
+def test_signal_service_rejects_policy_without_signal_account_state_capability() -> None:
+    values = _candles(15)
+    service = SignalGenerationService(
+        _Feed(values),
+        _manager(
+            _TargetEntryProbeStrategy,
+            money_management_policies={"manual": _AccountStateSensitivePolicy},
+        ),
+        _Sink(),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="account-independent protection prices and leverage",
+    ):
+        service.start(_config(), values[-1].close_time)
+
+
+def test_signal_service_accepts_declared_signal_account_state_capability() -> None:
+    values = _candles(15)
+    service = SignalGenerationService(
+        _Feed(values),
+        _manager(
+            _TargetEntryProbeStrategy,
+            money_management_policies={"manual": _SignalSafePolicy},
+        ),
+        _Sink(),
+    )
+
+    signal = service.start(_config(), values[-1].close_time).signal
+
+    assert signal is not None
+    assert signal.signal.stop_loss == values[-1].close - 1.0
+    assert signal.signal.take_profit == values[-1].close + 2.0
+    assert signal.signal.leverage == 3
+
+
+def test_signal_service_does_not_import_deployed_policy_classes() -> None:
+    package = Path(__file__).parents[1] / "signal_service"
+    sources = "\n".join(path.read_text() for path in package.rglob("*.py"))
+
+    assert "ManualMoneyManagement" not in sources
+    assert "TurtleMoneyManagement" not in sources
 
 
 def test_signal_service_rejects_a_third_return_type_before_using_it() -> None:

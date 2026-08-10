@@ -34,6 +34,13 @@ class MoneyManagementBase(ABC):
     A policy that leaves the exit to the strategy overrides this to true.
     """
 
+    protection_and_leverage_ignore_account_state: ClassVar[bool] = False
+    """Declare account-independent protection prices and requested leverage.
+
+    Signal generation may use this capability when it has no real account
+    snapshot and does not emit the policy's requested quantity or risk amount.
+    """
+
     @abstractmethod
     def required_indicators(self) -> tuple[PolicyIndicatorRequirement, ...]:
         """Return the policy-owned finalized market inputs."""

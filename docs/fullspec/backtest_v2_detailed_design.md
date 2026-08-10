@@ -2567,14 +2567,14 @@ sequenceDiagram
     participant C as SignalGenerationConfig
     participant S as SignalGenerationService
     participant AM as AdapterManager
-    participant P as ManualMoneyManagement
+    participant P as MoneyManagementPolicy
     participant Sink as SignalSink
 
     S->>S: params에서 manual_config 구성
     S->>AM: create_runtime(strategy_id, raw_config, manual_config)
     AM-->>S: StrategyRuntime(strategy, manual policy)
     alt 진입 DecisionIntent임
-        S->>S: policy가 ManualMoneyManagement인지 검사
+        S->>S: 보호가격·leverage의 계좌 독립 선언 검사
         S->>P: plan_entry(...)
         P-->>S: 보호가격·고정 leverage가 있는 계획
         S->>S: requested_quantity는 신호에 싣지 않음
@@ -2585,11 +2585,11 @@ sequenceDiagram
 ```
 
 `SignalGenerationConfig`에는 정책 mode 선택 필드가 없다. `SignalGenerationService.start`는 전략 params의 legacy
-세 값을 읽어 manual 설정을 만들어 고정 전달한다. 진입 결정을 구체화할 때 정책이 `ManualMoneyManagement`가 아니면
-`ValueError("signal generation currently requires manual money management")`를 발생시킨다. 이 실행면에는 계좌·주문
-권한이 없으므로 보호가격과 고정 leverage만 사용하고 정책의 `requested_quantity`는 운영 신호에 넣지 않는다.
-현재 이 형 검사는 `trading_plugins.money_management.manual`의 배포 클래스를 직접 import하며, 선언된 성질을 보는
-방식으로 바꾸는 작업은 아직 남아 있다.
+세 값을 읽어 manual 설정을 만들어 고정 전달한다. 진입 결정을 구체화할 때 정책이
+`protection_and_leverage_ignore_account_state`를 참으로 선언하지 않았으면 거부한다. 이 실행면에는 계좌·주문
+권한이 없으므로 자기자본과 가용 현금에 자리표시자 값을 넣어 정책을 부르고, 계좌와 무관하다고 선언된 보호가격과
+leverage만 사용하며 정책의 `requested_quantity`는 운영 신호에 넣지 않는다. 이 성질은 배포 정책의 구체 형을
+import하지 않고 공용 계약에서 읽는다.
 
 ## §4.3 실행·평가 클래스 (+ 판정 플로우)
 

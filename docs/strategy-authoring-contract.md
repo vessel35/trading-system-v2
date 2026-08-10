@@ -921,6 +921,7 @@ class MoneyManagementBase(ABC):
     id: ClassVar[str]
     version: ClassVar[str]
     requires_signal_exit: ClassVar[bool]
+    protection_and_leverage_ignore_account_state: ClassVar[bool]
 
     @abstractmethod
     def required_indicators(self) -> tuple[PolicyIndicatorRequirement, ...]: ...
@@ -945,6 +946,12 @@ class MoneyManagementBase(ABC):
 청산을 내주어야만 자리를 닫을 수 있으므로, 그 사실을 정책이 스스로 밝힌다. base class의
 기본값 거짓이 선언을 대신하며, 이때 거짓은 "빠뜨렸다"가 아니라 "이 정책은 스스로
 청산한다"는 뜻이다.
+
+**`protection_and_leverage_ignore_account_state`도 정책이 밝히는 성질이다.** 이것은 계획
+전체가 계좌와 무관하다는 뜻이 아니다. `requested_quantity`와 `initial_risk_amount`는 여전히
+자기자본에서 정할 수 있다. 참이 뜻하는 것은 **정책이 내놓는 `stop_loss`, `take_profit`,
+`requested_leverage`가 자기자본과 가용 현금에 의존하지 않는다**는 것뿐이다. base class의
+기본값은 거짓이라, 새 정책이 이 성질을 밝히지 않고 조용히 통과하지 않는다.
 
 **계약은 이 base class 하나다.** 예전에는 같은 것을 구조만 보는 Protocol로도 두었는데,
 **구조만 보면 이름만 맞아도 통과한다.** `plan_entry`가 인자를 하나도 받지 않고
@@ -1279,6 +1286,13 @@ class SignalExitAtrPolicy(MoneyManagementBase):
 **목표가를 두지 않는 정책은 `requires_signal_exit`를 참으로 선언한다.** 그러면
 청산을 내지 못하는 전략과는 조합되지 않는다. 선언하지 않으면 **진입한 뒤 고정
 목표가도 전략 청산도 없는 조합**이 만들어질 수 있다.
+
+**신호 생성에서 보호가격과 leverage를 쓸 수 있는 정책은
+`protection_and_leverage_ignore_account_state`를 참으로 선언한다.** signal-service에는
+계좌도 주문 권한도 없어서 자기자본과 가용 현금에 자리표시자 값을 넣어 정책을 부르고, 그
+결과에서 보호가격과 leverage만 신호에 싣는다. 수량과 위험 금액은 싣지 않는다. 그러므로
+signal-service는 이 선언이 참인 정책만 받아들이며, 정책의 구체 클래스나 mode 이름으로 이
+성질을 추측하지 않는다.
 
 **이미 다른 배포 파일이 주장한 mode를 다시 가져갈 수는 없다.** 발견 순서에서 먼저
 읽힌 파일만 남고 뒤의 파일은 기록과 함께 빠진다. 바꿔 치우면 그 mode를 쓰는 모든

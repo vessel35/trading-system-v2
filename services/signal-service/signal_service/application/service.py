@@ -40,7 +40,6 @@ from core_lib.types import (
     SignalType,
     TradingSignal,
 )
-from trading_plugins.money_management.manual import ManualMoneyManagement
 
 from signal_service.core import SignalGenerationConfig
 from signal_service.domain import DataGap, PersistedSignal, SignalIntent
@@ -596,8 +595,11 @@ class SignalGenerationService:
                 },
             )
         policy = self._money_management
-        if not isinstance(policy, ManualMoneyManagement):
-            raise ValueError("signal generation currently requires manual money management")
+        if policy is None or not policy.protection_and_leverage_ignore_account_state:
+            raise ValueError(
+                "signal generation requires a money-management policy declaring "
+                "account-independent protection prices and leverage"
+            )
         # Read what the policy declared rather than a key written here, so the
         # lookup cannot drift from the declaration that produced the value.
         requirements = policy.required_indicators()
@@ -619,8 +621,8 @@ class SignalGenerationService:
                 volatility_name=key,
                 volatility_timestamp=candle.close_time,
             ),
-            # Signal generation has no account or order authority. The manual
-            # policy's protection and fixed leverage do not depend on these
+            # Signal generation has no account or order authority. The policy
+            # declares that protection and leverage do not depend on these
             # placeholder sizing inputs, and requested quantity is not emitted.
             AccountRiskSnapshot(
                 equity=1.0,
