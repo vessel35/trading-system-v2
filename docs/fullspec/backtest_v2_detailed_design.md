@@ -313,7 +313,7 @@ StrategyConfig)을 담고, `adapters/` 한 디렉터리가 어댑터 일곱을 �
 | ------------------------------------------------------------------------------------------------ | ------------------------------------------- | --------------- |
 | `core_lib/{types, indicators, patterns, series, money_management, sizing, costs, execution, ports, eval}` | 각 동명 컴포넌트 | 각 1 (합 10) |
 | `core_lib/strategy/` (`base`+`profile`+`trailing` / `manager`(+`registry`+`factory`) / `config`) | StrategyAdapter · Adapter Manager · StrategyConfig | 3               |
-| `trading_plugins/strategies/`                                                                    | 배포 전략 구현                                      | 0 (플랫폼 컴포넌트 아님) |
+| `trading_plugins/{strategies,money_management}/`                                                 | 배포 전략·자금관리 구현                              | 0 (플랫폼 컴포넌트 아님) |
 | **§3.1 core-lib 소계**                                                                             |                                             | **13**          |
 | `backtest_service/{engine, config, harness}`                                                     | Engine · ConfigLayer · Harness              | 각 1 (합 3)       |
 | `backtest_service/adapters/`                                                                     | 포트 어댑터(6 대표 + `strategy_registry`)          | 7               |
@@ -380,8 +380,8 @@ services/core-lib/
         trailing_stop.py             #     현재 구현은 모듈 docstring뿐이며 계산 클래스·함수 없음
     money_management/                # [컴포넌트] 결정을 보호가격·요청 수량·요청 leverage가 있는 계획으로 변환
       models.py                      #   PolicyIndicatorRequirement·MarketSnapshot·AccountRiskSnapshot·RiskLimits·MoneyManagementPlan
-      policies.py                    #   MoneyManagementPolicy Protocol·ManualMoneyManagement·TurtleMoneyManagement·turtle_n_series
-      registry.py                    #   MoneyManagementFactory와 mode별 엄격 설정 해석
+      policies.py                    #   MoneyManagementBase 계약·turtle_n_series
+      registry.py                    #   주입된 정책 mapping을 쓰는 MoneyManagementFactory와 mode별 엄격 설정 해석
     sizing/                          # [컴포넌트] 거래당 위험 규율과 사이징 인스턴스
       risk_money.py                  #   보편 사이징: 수량=(risk_per_trade×Equity)/손절거리, 1R≤1%, 노출 한도, RoR 연동
       turtle_unit.py                 #   N 유닛 크기·0.5N 간격·유닛 상한의 저수준 계산기(현재 정책 런타임과 직접 조합되지 않음)
@@ -2405,7 +2405,7 @@ classDiagram
         +plan_entry(decision, market, account, global_limits) MoneyManagementPlan
     }
     class MoneyManagementFactory {
-        +create(raw_config: Mapping) MoneyManagementPolicy
+        +create(raw_config: Mapping, policies: Mapping) MoneyManagementPolicy
     }
     class PolicyIndicatorRequirement {
         <<frozen>>
@@ -2446,8 +2446,7 @@ classDiagram
 
     ManualMoneyManagement ..|> MoneyManagementPolicy
     TurtleMoneyManagement ..|> MoneyManagementPolicy
-    MoneyManagementFactory --> ManualMoneyManagement
-    MoneyManagementFactory --> TurtleMoneyManagement
+    MoneyManagementFactory --> MoneyManagementPolicy : 주입된 mapping
     MoneyManagementPolicy --> PolicyIndicatorRequirement
     MoneyManagementPolicy --> MoneyManagementPlan
     MoneyManagementPolicy --> DecisionIntent
@@ -2456,7 +2455,8 @@ classDiagram
     MoneyManagementPolicy --> RiskLimits
 ```
 
-이 계층은 전략도 실행도 아니다. 현재 `core_lib.money_management`에서 진입 `DecisionIntent`를 최초 보호가격,
+이 계층은 전략도 실행도 아니다. 계약과 Factory는 `core_lib.money_management`에 있고, 배포 구현은
+`trading_plugins.money_management`의 정책별 파일에 있다. 진입 `DecisionIntent`를 최초 보호가격,
 선택적 목표가격, 요청 수량, 요청 leverage와 최초 위험액이 있는 `MoneyManagementPlan`으로 바꾼다. 전략이 edge를
 정한 뒤 실행이 주문을 만들기 전에 호출된다. 정책은 상태와 외부 입출력을 보유하지 않고, 계좌 사실은 Engine이 만든
 불변 `AccountRiskSnapshot`으로만 받는다.
@@ -2469,8 +2469,9 @@ classDiagram
 stop을 다시 고정하고 위험예산·가용 증거금·비용에 따라 수량을 축소할 수 있다. 이 계층이 전략에서 떼어 낸 것은 최초
 보호가격, 목표 수량과 요청 leverage이며, 계좌 전체 노출 승인과 주문 전송은 계속 뒤 실행 경로가 맡는다.
 
-`MoneyManagementFactory.create`는 `mode`가 없으면 manual로 해석하고 mode별 허용 키 이외의 값은 거부한다. 현재
-생성 가능한 정책은 모두 판 `1.0.0`인 manual과 turtle 두 개다.
+`MoneyManagementFactory.create`는 `mode`와 발견된 정책 mapping을 반드시 받고 mode별 허용 키 이외의 값을
+거부한다. 자금관리 설정 해석 판은 mode 기본값을 없앤 변경에서 `1.1.0`으로 올랐고, 현재 발견되는 정책 구현은
+각자 판 `1.0.0`인 manual과 turtle 두 개다.
 
 #### `ManualMoneyManagement`
 
@@ -2535,7 +2536,7 @@ leverage는 요청 notional을 가용 현금으로 나눈 값의 올림이며 �
 
 #### 실행면별 정책 조합
 
-같은 `core_lib` 정책을 사용해도 백테스트와 신호 생성의 정책 선택 및 수량 책임은 다르다.
+같은 배포 정책을 사용해도 백테스트와 신호 생성의 정책 선택 및 수량 책임은 다르다.
 
 ```mermaid
 sequenceDiagram
@@ -2547,7 +2548,7 @@ sequenceDiagram
 
     RC-->>E: discriminated money_management 설정
     E->>AM: create_runtime(strategy_id, raw_config, money_management_config)
-    AM->>F: create(money_management_config)
+    AM->>F: create(money_management_config, 발견된 정책 mapping)
     alt mode가 manual임
         F-->>AM: ManualMoneyManagement
     else mode가 turtle임
@@ -2587,6 +2588,8 @@ sequenceDiagram
 세 값을 읽어 manual 설정을 만들어 고정 전달한다. 진입 결정을 구체화할 때 정책이 `ManualMoneyManagement`가 아니면
 `ValueError("signal generation currently requires manual money management")`를 발생시킨다. 이 실행면에는 계좌·주문
 권한이 없으므로 보호가격과 고정 leverage만 사용하고 정책의 `requested_quantity`는 운영 신호에 넣지 않는다.
+현재 이 형 검사는 `trading_plugins.money_management.manual`의 배포 클래스를 직접 import하며, 선언된 성질을 보는
+방식으로 바꾸는 작업은 아직 남아 있다.
 
 ## §4.3 실행·평가 클래스 (+ 판정 플로우)
 

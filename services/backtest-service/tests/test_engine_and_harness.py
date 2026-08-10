@@ -66,6 +66,7 @@ from core_lib.types import (
     PositionSide,
     TradingSignal,
 )
+from trading_plugins import registered_money_management
 from trading_plugins.strategies.vessel_reference import STRATEGY_ID as VESSEL_STRATEGY_ID
 from trading_plugins.strategies.vessel_reference import VesselReference
 
@@ -740,43 +741,67 @@ class _DailyStrategyCatalog(StrategyRegistry):
 def _manager() -> AdapterManager:
     plugins = InProcessStrategyRegistry()
     plugins.register("engine-fixture", _Strategy)
-    return AdapterManager(_StrategyCatalog(), plugins)
+    return AdapterManager(
+        _StrategyCatalog(), plugins, money_management_policies=registered_money_management()
+    )
 
 
 def _managed_pin_manager() -> AdapterManager:
     plugins = InProcessStrategyRegistry()
     plugins.register("managed-pin-fixture", _ManagedPinStrategy)
-    return AdapterManager(_ManagedPinStrategyCatalog(), plugins)
+    return AdapterManager(
+        _ManagedPinStrategyCatalog(),
+        plugins,
+        money_management_policies=registered_money_management(),
+    )
 
 
 def _pattern_manager() -> AdapterManager:
     plugins = InProcessStrategyRegistry()
     plugins.register("pattern-fixture", _PatternStrategy)
-    return AdapterManager(_PatternStrategyCatalog(), plugins)
+    return AdapterManager(
+        _PatternStrategyCatalog(),
+        plugins,
+        money_management_policies=registered_money_management(),
+    )
 
 
 def _multi_timeframe_manager() -> AdapterManager:
     plugins = InProcessStrategyRegistry()
     plugins.register("multi-timeframe-fixture", _MultiTimeframeStrategy)
-    return AdapterManager(_MultiTimeframeStrategyCatalog(), plugins)
+    return AdapterManager(
+        _MultiTimeframeStrategyCatalog(),
+        plugins,
+        money_management_policies=registered_money_management(),
+    )
 
 
 def _paired_manager() -> AdapterManager:
     plugins = InProcessStrategyRegistry()
     plugins.register("paired-fixture", _PairedStrategy)
-    return AdapterManager(_PairedStrategyCatalog(), plugins)
+    return AdapterManager(
+        _PairedStrategyCatalog(),
+        plugins,
+        money_management_policies=registered_money_management(),
+    )
 
 
 def _reversal_manager() -> AdapterManager:
     plugins = InProcessStrategyRegistry()
     plugins.register("reversal-fixture", _ReversalStrategy)
-    return AdapterManager(_ReversalStrategyCatalog(), plugins)
+    return AdapterManager(
+        _ReversalStrategyCatalog(),
+        plugins,
+        money_management_policies=registered_money_management(),
+    )
 
 
 def _daily_manager() -> AdapterManager:
     plugins = InProcessStrategyRegistry()
     plugins.register("daily-fixture", _DailyStrategy)
-    return AdapterManager(_DailyStrategyCatalog(), plugins)
+    return AdapterManager(
+        _DailyStrategyCatalog(), plugins, money_management_policies=registered_money_management()
+    )
 
 
 class _VesselCatalog(StrategyRegistry):
@@ -809,13 +834,19 @@ class _LegacyModulePathVesselCatalog(_VesselCatalog):
 def _vessel_manager() -> AdapterManager:
     plugins = InProcessStrategyRegistry()
     plugins.register(VESSEL_STRATEGY_ID, VesselReference)
-    return AdapterManager(_VesselCatalog(), plugins)
+    return AdapterManager(
+        _VesselCatalog(), plugins, money_management_policies=registered_money_management()
+    )
 
 
 def test_vessel_registration_with_the_old_module_path_is_rejected() -> None:
     plugins = InProcessStrategyRegistry()
     plugins.register(VESSEL_STRATEGY_ID, VesselReference)
-    manager = AdapterManager(_LegacyModulePathVesselCatalog(), plugins)
+    manager = AdapterManager(
+        _LegacyModulePathVesselCatalog(),
+        plugins,
+        money_management_policies=registered_money_management(),
+    )
 
     with pytest.raises(
         ValueError,
@@ -2929,7 +2960,11 @@ def _contract_engine(tmp_path: Path, adaptee: type) -> Engine:
         costs,
         BacktestEvidenceSink(tmp_path),
         _Catalog(),
-        AdapterManager(_HoldStrategyCatalog(adaptee), plugins),
+        AdapterManager(
+            _HoldStrategyCatalog(adaptee),
+            plugins,
+            money_management_policies=registered_money_management(),
+        ),
         prereg=_prereg(),
     )
 
@@ -2970,7 +3005,11 @@ def test_a_decision_entry_without_a_policy_fails_the_backtest(tmp_path: Path) ->
         costs,
         BacktestEvidenceSink(tmp_path),
         _Catalog(),
-        AdapterManager(_HoldStrategyCatalog(_NoPolicyEntryStrategy), plugins),
+        AdapterManager(
+            _HoldStrategyCatalog(_NoPolicyEntryStrategy),
+            plugins,
+            money_management_policies=registered_money_management(),
+        ),
         prereg=_prereg(),
     )
 
@@ -2986,7 +3025,9 @@ def test_a_policy_rejection_still_blocks_only_that_entry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     engine = _engine(tmp_path, _Catalog(), [])
-    engine._money_management = MoneyManagementFactory.create({"mode": "manual"})  # noqa: SLF001
+    engine._money_management = MoneyManagementFactory.create(  # noqa: SLF001
+        {"mode": "manual"}, registered_money_management()
+    )
     recorded: list[tuple[PositionSide, str]] = []
     monkeypatch.setattr(
         engine,
@@ -3025,7 +3066,11 @@ def test_hold_leaves_its_reason_in_evidence_and_none_leaves_nothing(tmp_path: Pa
         costs,
         BacktestEvidenceSink(tmp_path),
         _Catalog(),
-        AdapterManager(_HoldStrategyCatalog(), plugins),
+        AdapterManager(
+            _HoldStrategyCatalog(),
+            plugins,
+            money_management_policies=registered_money_management(),
+        ),
         prereg=_prereg(),
     ).run(_config().model_copy(update={"strategy_id": "hold-fixture"}))
 
@@ -3115,7 +3160,11 @@ def test_a_strategy_that_declares_no_series_runs_and_passes_integrity(tmp_path: 
         costs,
         BacktestEvidenceSink(tmp_path),
         _Catalog(),
-        AdapterManager(_CandleOnlyCatalog(), plugins),
+        AdapterManager(
+            _CandleOnlyCatalog(),
+            plugins,
+            money_management_policies=registered_money_management(),
+        ),
         prereg=_prereg(),
     ).run(_config().model_copy(update={"strategy_id": "candle-only-fixture"}))
 
@@ -3162,7 +3211,11 @@ def test_a_hold_about_a_future_bar_is_refused_like_any_other_decision(tmp_path: 
         costs,
         BacktestEvidenceSink(tmp_path),
         _Catalog(),
-        AdapterManager(_HoldStrategyCatalog(_FutureHoldStrategy), plugins),
+        AdapterManager(
+            _HoldStrategyCatalog(_FutureHoldStrategy),
+            plugins,
+            money_management_policies=registered_money_management(),
+        ),
         prereg=_prereg(),
     )
     with pytest.raises(ValueError, match="later than the confirmed candle"):
@@ -3714,6 +3767,12 @@ _EVIDENCE_GOLDEN_HASHES: dict[str, dict[str, str]] = {
         "funding": "d75151dc7f9ea2846bc46fb686efef370c92e30cd647e88481b6f27567f143a3",
         "hold": "d74b5d474a0d1398cc2eef215a297dbd32cf4003c5ee775484075d17b427f6c8",
     },
+    "1.10.0": {
+        "legacy": "fa74b48d3f6d486c4b20b9bac6e7179be310145f1309a9f61d42f06e21eb6805",
+        "managed": "73afd32de18d290d6114d9eb1af635008c250c872770a09d075fd7d32d47dbc5",
+        "funding": "56dbfe6a1f745d86586bd7ef60d2fc4ec3b42e442e7f72e072e9d3fd8e82c742",
+        "hold": "3fb4f8bb25892388724a5f174aa2ba5ad1a84501bd256a97d5247d64e465439a",
+    },
 }
 
 # The three analysis extension tables stay empty because the engine does not write
@@ -3742,6 +3801,12 @@ def test_previous_evidence_schema_hashes_remain_pinned() -> None:
         "funding": "f2fa379ac2f11a31aa6ae1b3caf69354e2fb660c95c04b35023293930e76dbb7",
         "hold": "dcac83232b4ec8d9b3599dc093b947b3b405283a461589516adb9e10e2fb1eab",
     }
+    assert _EVIDENCE_GOLDEN_HASHES["1.9.0"] == {
+        "legacy": "ef98eef15c6cd237603fc1882409a7a08f63dfb3b89883696e656cc0cb7a2707",
+        "managed": "f1ad06c2fcf3f8c50c3035a375155ed3e8329aaa3128a92046a08501835bde5f",
+        "funding": "d75151dc7f9ea2846bc46fb686efef370c92e30cd647e88481b6f27567f143a3",
+        "hold": "d74b5d474a0d1398cc2eef215a297dbd32cf4003c5ee775484075d17b427f6c8",
+    }
 
 
 def test_hashed_evidence_content_is_pinned_to_its_schema_version(tmp_path: Path) -> None:
@@ -3758,7 +3823,9 @@ def test_hashed_evidence_content_is_pinned_to_its_schema_version(tmp_path: Path)
     not decline a bar, and neither covers what the other writes. Version 1.9.0
     separates the managed pin from the deployed Vessel strategy; the fixture change,
     not an Evidence format change, raises the version once so later strategy changes
-    cannot drag the Evidence pin forward.
+    cannot drag the Evidence pin forward. Version 1.10.0 records the money-management
+    interpretation version changing to 1.1.0. The Evidence format is unchanged, but
+    the recorded value is hashed and therefore requires a new pin.
     """
     legacy = _engine(tmp_path, _Catalog(), []).run(_config())
 
@@ -3798,7 +3865,11 @@ def test_hashed_evidence_content_is_pinned_to_its_schema_version(tmp_path: Path)
         BacktestCostModel(_config().cost_values),
         BacktestEvidenceSink(tmp_path),
         _Catalog(),
-        AdapterManager(_HoldStrategyCatalog(), hold_plugins),
+        AdapterManager(
+            _HoldStrategyCatalog(),
+            hold_plugins,
+            money_management_policies=registered_money_management(),
+        ),
         prereg=_prereg(),
     ).run(_config().model_copy(update={"strategy_id": "hold-fixture", "run_name": "hold-pin"}))
 
@@ -3843,4 +3914,4 @@ def test_recorded_config_schema_version_comes_from_the_resolver(tmp_path: Path) 
             connection.execute("SELECT money_management_json FROM BACKTEST_RUN_LOCAL").fetchone()[0]
         )
 
-    assert recorded["config_schema_version"] == MoneyManagementFactory.version()
+    assert recorded["config_schema_version"] == MoneyManagementFactory.version() == "1.1.0"

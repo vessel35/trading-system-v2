@@ -25,7 +25,7 @@ from core_lib.strategy import (
     StrategyMetadata,
 )
 from fastapi.testclient import TestClient
-from trading_plugins import build_strategy_registry
+from trading_plugins import build_strategy_registry, registered_money_management
 from trading_plugins.strategies.vessel_reference import VesselReference
 from web_api.database import SignalConnection, signal_connection
 from web_api.main import app
@@ -518,10 +518,14 @@ def test_a_mode_default_comes_from_the_policy_rather_than_a_manual_shaped_dict()
     strategy = StrategyRepository(connection, build_strategy_registry()).list().data[0]
 
     assert strategy.default_money_management == dict(
-        MoneyManagementFactory.create({"mode": "manual"}).resolved_config()
+        MoneyManagementFactory.create(
+            {"mode": "manual"}, registered_money_management()
+        ).resolved_config()
     )
     assert _default_money_management("turtle") == dict(
-        MoneyManagementFactory.create({"mode": "turtle"}).resolved_config()
+        MoneyManagementFactory.create(
+            {"mode": "turtle"}, registered_money_management()
+        ).resolved_config()
     )
 
 

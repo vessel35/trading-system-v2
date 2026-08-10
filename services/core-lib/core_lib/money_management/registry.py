@@ -4,31 +4,17 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import fields
-from types import MappingProxyType
 from typing import Any, Final, cast
 
-from .policies import (
-    ManualMoneyManagement,
-    MoneyManagementBase,
-    TurtleMoneyManagement,
-)
+from .policies import MoneyManagementBase
 
-MONEY_MANAGEMENT_SCHEMA_VERSION: Final = "1.0.0"
+MONEY_MANAGEMENT_SCHEMA_VERSION: Final = "1.1.0"
 """How a submitted ``money_management`` mapping is interpreted.
 
 Raise this whenever the accepted names, their defaults, or their ranges change,
 so a stored configuration can be replayed the way it was originally read instead
 of being reinterpreted under whatever the current defaults happen to be.
 """
-
-
-BUILTIN_POLICIES: Final[Mapping[str, type[MoneyManagementBase]]] = MappingProxyType(
-    {
-        ManualMoneyManagement.id: ManualMoneyManagement,
-        TurtleMoneyManagement.id: TurtleMoneyManagement,
-    }
-)
-"""The policies the platform ships. Deployed ones are passed in, never added here."""
 
 
 class MoneyManagementFactory:
@@ -42,7 +28,7 @@ class MoneyManagementFactory:
     @staticmethod
     def create(
         raw_config: Mapping[str, object],
-        policies: Mapping[str, type[MoneyManagementBase]] = BUILTIN_POLICIES,
+        policies: Mapping[str, type[MoneyManagementBase]],
     ) -> MoneyManagementBase:
         """Build the policy the configuration names, from whatever is registered.
 
@@ -50,7 +36,7 @@ class MoneyManagementFactory:
         rather than a branch here, so a deployed policy needs no edit in this file
         to be configurable. The class validates its own values on construction.
         """
-        mode = raw_config.get("mode", ManualMoneyManagement.id)
+        mode = raw_config.get("mode")
         if not isinstance(mode, str):
             raise TypeError("money-management mode must be a string")
         policy_class = policies.get(mode)
@@ -80,7 +66,7 @@ def policy_settings(policy_class: type[MoneyManagementBase]) -> frozenset[str]:
 
 
 def money_management_modes(
-    policies: Mapping[str, type[MoneyManagementBase]] = BUILTIN_POLICIES,
+    policies: Mapping[str, type[MoneyManagementBase]],
 ) -> tuple[str, ...]:
     """Return the modes a configuration may name, in a stable order."""
     return tuple(sorted(policies))
@@ -90,6 +76,3 @@ def _reject_extra(raw: Mapping[str, object], allowed: set[str]) -> None:
     extra = set(raw) - allowed
     if extra:
         raise ValueError(f"unexpected money-management parameters: {sorted(extra)}")
-
-
-MONEY_MANAGEMENT_MODES: Final = money_management_modes()

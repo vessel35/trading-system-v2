@@ -10,17 +10,17 @@ from collections.abc import Iterator
 from pathlib import Path
 from types import ModuleType
 
+import core_lib.money_management as money_management
 import pytest
 import trading_plugins
 from core_lib.money_management import (
-    BUILTIN_POLICIES,
-    ManualMoneyManagement,
     MoneyManagementFactory,
     money_management_modes,
     policy_settings,
 )
 from core_lib.strategy import StrategyDecisionContract
 from trading_plugins import discovery
+from trading_plugins.money_management.manual import ManualMoneyManagement
 
 
 @pytest.fixture
@@ -275,6 +275,23 @@ def test_two_files_claiming_one_policy_mode_keep_the_first_and_report_the_second
     assert any("already claimed by" in fault.reason for fault in faults)
 
 
+def test_a_duplicate_policy_fault_is_logged_without_hiding_the_first(
+    plugin_dir: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    for name, class_name in (("mode_one", "ModeOne"), ("mode_two", "ModeTwo")):
+        _write(plugin_dir, name, _POLICY_BODY.format(class_name=class_name, mode="contested-mode"))
+    found, faults = discovery.discover_money_management(plugin_dir)
+    monkeypatch.setattr(discovery, "discover_money_management", lambda: (found, faults))
+
+    registered = discovery.registered_money_management()
+
+    assert registered["contested-mode"] is found["contested-mode"]
+    assert "deployed policy was not loaded" in caplog.text
+    assert "already claimed by" in caplog.text
+
+
 def test_the_package_exposes_only_the_discovery_surface() -> None:
     assert set(trading_plugins.__all__) == {
         "build_strategy_registry",
@@ -292,29 +309,33 @@ def test_a_deployed_policy_becomes_configurable_without_touching_the_factory(
     found, faults = discovery.discover_money_management(plugin_dir)
     assert faults == ()
 
-    registered = {**dict(BUILTIN_POLICIES), **dict(found)}
+    registered = {**dict(discovery.registered_money_management()), **dict(found)}
     policy = MoneyManagementFactory.create({"mode": "atr-only"}, registered)
 
     assert policy.id == "atr-only"
     assert money_management_modes(registered) == ("atr-only", "manual", "turtle")
 
 
-def test_a_deployed_policy_may_not_take_a_built_in_mode(plugin_dir: ModuleType) -> None:
-    _write(plugin_dir, "shadow", _POLICY_BODY.format(class_name="Shadow", mode="manual"))
-    found, _ = discovery.discover_money_management(plugin_dir)
-    assert "manual" in found
+def test_money_management_package_contents_are_the_only_registered_policies() -> None:
+    found, faults = discovery.discover_money_management()
 
-    assert discovery.registered_money_management()["manual"] is not found["manual"]
+    assert faults == ()
+    assert set(found) == {"manual", "turtle"}
+    assert discovery.registered_money_management() == found
+    assert not hasattr(money_management, "BUILTIN_POLICIES")
+    assert not hasattr(money_management, "MONEY_MANAGEMENT_MODES")
 
 
 def test_an_unknown_mode_is_refused_by_name() -> None:
     with pytest.raises(ValueError, match="unsupported money-management mode: 'nope'"):
-        MoneyManagementFactory.create({"mode": "nope"})
+        MoneyManagementFactory.create({"mode": "nope"}, discovery.registered_money_management())
 
 
 def test_a_setting_the_policy_does_not_declare_is_refused() -> None:
     with pytest.raises(ValueError, match="unexpected money-management parameters"):
-        MoneyManagementFactory.create({"mode": "manual", "invented": 1})
+        MoneyManagementFactory.create(
+            {"mode": "manual", "invented": 1}, discovery.registered_money_management()
+        )
 
 
 def test_a_policy_that_is_not_a_dataclass_is_refused_at_discovery(
@@ -344,7 +365,9 @@ def test_naming_fields_are_not_treated_as_settings() -> None:
     }
 
     with pytest.raises(ValueError, match="unexpected money-management parameters"):
-        MoneyManagementFactory.create({"mode": "manual", "id": "spoofed"})
+        MoneyManagementFactory.create(
+            {"mode": "manual", "id": "spoofed"}, discovery.registered_money_management()
+        )
 
 
 def test_a_file_that_exits_at_import_does_not_end_the_process(plugin_dir: ModuleType) -> None:

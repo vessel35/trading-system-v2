@@ -186,7 +186,7 @@ def _deployed_money_management_models(
 ) -> tuple[type[BaseModel], ...]:
     """Build a config model per deployed policy, skipping any that cannot form one.
 
-    The two built-in models above are written by hand and stay that way, so the
+    The two established client-facing models above are written by hand and stay that way, so the
     schema and error messages a client already sees do not move. A deployed policy
     gets a generated model instead of an edit here, which is what lets a new policy
     be configurable without touching this file.
@@ -232,13 +232,13 @@ if TYPE_CHECKING:
         """The shape a checker sees for any policy deployed as a file.
 
         The real union is assembled at import time from what is deployed, and a
-        checker cannot see it. Naming only the two built-in shapes made the
+        checker cannot see it. Naming only the two established shapes made the
         checker's view narrower than run time: it read ``mode != "manual"`` as
         Turtle and approved an attribute a deployed policy does not have. This
         third arm carries only the discriminator, so such an access is refused.
 
         ``mode`` is deliberately ``str`` so code may compare it with any deployed
-        id. Built-in fields are narrowed by ``isinstance`` instead of by a mode
+        id. Fields on the established models are narrowed by ``isinstance`` instead of by a mode
         equality, because the deployed arm necessarily overlaps every string.
         """
 

@@ -641,6 +641,7 @@ def test_catalog_tag_mutations_are_parameterized_and_idempotent() -> None:
 # Keyed by MONEY_MANAGEMENT_SCHEMA_VERSION and append-only, like the Evidence pins.
 _MONEY_CONFIG_SURFACE: dict[str, str] = {
     "1.0.0": "fb89fc1be12e54134c8027f997b6801f6e3e454fed6944087903ddb442bf0f56",
+    "1.1.0": "fb89fc1be12e54134c8027f997b6801f6e3e454fed6944087903ddb442bf0f56",
 }
 
 

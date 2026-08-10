@@ -29,6 +29,7 @@ from core_lib.strategy import (
     StrategyProfile,
 )
 from core_lib.types import Candle, MarketType, Position, PositionSide, TradingSignal
+from trading_plugins import registered_money_management
 from trading_plugins.strategies.vessel_reference import STRATEGY_ID as VESSEL_STRATEGY_ID
 
 pytestmark = pytest.mark.acceptance
@@ -248,6 +249,7 @@ def _fixture_manager(
     return AdapterManager(
         _FixtureCatalog(strategy_id, strategy_class),
         plugins,
+        money_management_policies=registered_money_management(),
     )
 
 

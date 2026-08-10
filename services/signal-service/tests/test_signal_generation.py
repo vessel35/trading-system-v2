@@ -33,6 +33,7 @@ from signal_service.application import (
 )
 from signal_service.core import SignalGenerationConfig
 from signal_service.domain import PersistedSignal, SignalIntent, SignalMode
+from trading_plugins import registered_money_management
 from trading_plugins.strategies.vessel_reference import STRATEGY_ID as VESSEL_STRATEGY_ID
 from trading_plugins.strategies.vessel_reference import VesselReference
 
@@ -464,19 +465,27 @@ class _Queue(SignalQueue):
 def _manager(adaptee: type[_ProbeStrategy] = _ProbeStrategy) -> AdapterManager:
     plugins = InProcessStrategyRegistry()
     plugins.register(_STRATEGY_ID, adaptee)
-    return AdapterManager(_Catalog(adaptee.__name__), plugins)
+    return AdapterManager(
+        _Catalog(adaptee.__name__),
+        plugins,
+        money_management_policies=registered_money_management(),
+    )
 
 
 def _pattern_manager() -> AdapterManager:
     plugins = InProcessStrategyRegistry()
     plugins.register(_PATTERN_STRATEGY_ID, _PatternProbeStrategy)
-    return AdapterManager(_PatternCatalog(), plugins)
+    return AdapterManager(
+        _PatternCatalog(), plugins, money_management_policies=registered_money_management()
+    )
 
 
 def _vessel_manager() -> AdapterManager:
     plugins = InProcessStrategyRegistry()
     plugins.register(VESSEL_STRATEGY_ID, VesselReference)
-    return AdapterManager(_VesselCatalog(), plugins)
+    return AdapterManager(
+        _VesselCatalog(), plugins, money_management_policies=registered_money_management()
+    )
 
 
 def _config() -> SignalGenerationConfig:

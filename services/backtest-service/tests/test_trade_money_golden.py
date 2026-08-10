@@ -74,6 +74,7 @@ from core_lib.types import (
     PositionSide,
     TradingSignal,
 )
+from trading_plugins import registered_money_management
 
 # 01:00 UTC so the four-hour run window crosses none of the 00:00/08:00/16:00 funding
 # boundaries; funding is exercised separately from this arithmetic.
@@ -304,7 +305,9 @@ class _RunCatalog(CatalogStore):
 def _manager() -> AdapterManager:
     plugins = InProcessStrategyRegistry()
     plugins.register("money-golden", _Strategy)
-    return AdapterManager(_Catalog(), plugins)
+    return AdapterManager(
+        _Catalog(), plugins, money_management_policies=registered_money_management()
+    )
 
 
 def _config() -> RunConfig:

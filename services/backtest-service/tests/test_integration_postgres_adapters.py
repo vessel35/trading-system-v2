@@ -41,6 +41,7 @@ from core_lib.strategy import (
     StrategyProfile,
 )
 from core_lib.types import Candle, MarketType, Position, PositionSide, TradingSignal
+from trading_plugins import registered_money_management
 from trading_plugins.strategies.vessel_reference import STRATEGY_ID as VESSEL_STRATEGY_ID
 from trading_plugins.strategies.vessel_reference import VesselReference
 
@@ -892,7 +893,9 @@ class _FundingProbeCatalog(StrategyRegistry):
 def _funding_probe_manager() -> AdapterManager:
     plugins = InProcessStrategyRegistry()
     plugins.register(_FUNDING_PROBE_ID, _FundingExhaustionProbe)
-    return AdapterManager(_FundingProbeCatalog(), plugins)
+    return AdapterManager(
+        _FundingProbeCatalog(), plugins, money_management_policies=registered_money_management()
+    )
 
 
 class _RealDataReversalProbe:
@@ -1002,7 +1005,11 @@ class _RealDataReversalCatalog(StrategyRegistry):
 def _real_data_reversal_manager() -> AdapterManager:
     plugins = InProcessStrategyRegistry()
     plugins.register(_MATRIX_REVERSAL_ID, _RealDataReversalProbe)
-    return AdapterManager(_RealDataReversalCatalog(), plugins)
+    return AdapterManager(
+        _RealDataReversalCatalog(),
+        plugins,
+        money_management_policies=registered_money_management(),
+    )
 
 
 class _GapFreeVesselFeed(DataFeed):
@@ -1092,7 +1099,9 @@ def _gap_free_vessel_candles() -> tuple[datetime, list[Candle]]:
 def _vessel_manager(registry: StrategyRegistry) -> AdapterManager:
     plugins = InProcessStrategyRegistry()
     plugins.register(VESSEL_STRATEGY_ID, VesselReference)
-    return AdapterManager(registry, plugins)
+    return AdapterManager(
+        registry, plugins, money_management_policies=registered_money_management()
+    )
 
 
 def _real_vessel_config(

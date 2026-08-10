@@ -2,11 +2,7 @@
 
 from collections.abc import Mapping
 
-from core_lib.money_management import (
-    BUILTIN_POLICIES,
-    MoneyManagementBase,
-    MoneyManagementFactory,
-)
+from core_lib.money_management import MoneyManagementBase, MoneyManagementFactory
 from core_lib.ports import StrategyRegistry
 
 from .base import StrategyAdapter, StrategyDecisionContract, StrategyRuntime
@@ -28,9 +24,9 @@ class AdapterManager:
         catalog_registry: StrategyRegistry,
         adapter_registry: InProcessStrategyRegistry,
         *,
+        money_management_policies: Mapping[str, type[MoneyManagementBase]],
         config: type[StrategyConfig] = StrategyConfig,
         factory: type[AdapterFactory] = AdapterFactory,
-        money_management_policies: Mapping[str, type[MoneyManagementBase]] = BUILTIN_POLICIES,
     ) -> None:
         self._catalog_registry = catalog_registry
         self._adapter_registry = adapter_registry

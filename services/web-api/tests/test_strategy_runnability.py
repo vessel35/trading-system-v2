@@ -674,7 +674,7 @@ def test_list_runnability_matches_adapter_manager_creation(
     row.update(overrides)
     registry = _register(("fixture", _FixtureStrategy))
     option = _repository([row], registry).list().data[0]
-    manager = AdapterManager(_Catalog([row]), registry)
+    manager = AdapterManager(_Catalog([row]), registry, money_management_policies={})
 
     assert option.runnable is runnable
     if runnable:
@@ -691,7 +691,7 @@ def test_read_failure_and_membership_findings_are_also_rejected_by_manager() -> 
     option = _repository([read_row], read_registry).list().data[0]
     assert option.runnable is False
     with pytest.raises(RuntimeError, match="broken declaration"):
-        AdapterManager(_Catalog([read_row]), read_registry).create(
+        AdapterManager(_Catalog([read_row]), read_registry, money_management_policies={}).create(
             "read", {"strategy_id": "read", "params": {}}
         )
 
@@ -705,9 +705,11 @@ def test_read_failure_and_membership_findings_are_also_rejected_by_manager() -> 
     )
     assert catalog_only.runnable is False
     with pytest.raises(KeyError, match="not registered"):
-        AdapterManager(_Catalog([_row("catalog-only")]), InProcessStrategyRegistry()).create(
-            "catalog-only", {"strategy_id": "catalog-only", "params": {}}
-        )
+        AdapterManager(
+            _Catalog([_row("catalog-only")]),
+            InProcessStrategyRegistry(),
+            money_management_policies={},
+        ).create("catalog-only", {"strategy_id": "catalog-only", "params": {}})
 
     allowlist_registry = _register(("allowlist-only", _FixtureStrategy))
     allowlist_only = (
@@ -721,6 +723,6 @@ def test_read_failure_and_membership_findings_are_also_rejected_by_manager() -> 
     )
     assert allowlist_only.runnable is False
     with pytest.raises(KeyError, match="allowlist-only"):
-        AdapterManager(_Catalog([]), allowlist_registry).create(
+        AdapterManager(_Catalog([]), allowlist_registry, money_management_policies={}).create(
             "allowlist-only", {"strategy_id": "allowlist-only", "params": {}}
         )

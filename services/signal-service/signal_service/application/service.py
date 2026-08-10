@@ -17,7 +17,6 @@ from core_lib.indicators import (
 )
 from core_lib.money_management import (
     AccountRiskSnapshot,
-    ManualMoneyManagement,
     MarketSnapshot,
     MoneyManagementBase,
     RiskLimits,
@@ -41,6 +40,7 @@ from core_lib.types import (
     SignalType,
     TradingSignal,
 )
+from trading_plugins.money_management.manual import ManualMoneyManagement
 
 from signal_service.core import SignalGenerationConfig
 from signal_service.domain import DataGap, PersistedSignal, SignalIntent

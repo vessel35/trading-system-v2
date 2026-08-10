@@ -1,11 +1,20 @@
 """Verify fake-Adaptee registration, creation sequence, and lifecycle."""
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import ClassVar
 
 import core_lib.strategy.manager as strategy_manager_module
 import core_lib.strategy.reconciliation as strategy_reconciliation_module
 import pytest
+from core_lib.money_management import (
+    AccountRiskSnapshot,
+    MarketSnapshot,
+    MoneyManagementBase,
+    MoneyManagementPlan,
+    PolicyIndicatorRequirement,
+    RiskLimits,
+)
 from core_lib.ports import StrategyRegistry
 from core_lib.strategy import (
     AdapterManager,
@@ -21,7 +30,40 @@ from core_lib.strategy import (
     StrategyProfile,
     StrategyReconciliationState,
 )
-from core_lib.types import Position, TradingSignal
+from core_lib.types import DecisionIntent, Position, TradingSignal
+
+
+@dataclass(frozen=True, slots=True)
+class _ManualFixturePolicy(MoneyManagementBase):
+    leverage: int = 1
+
+    id: ClassVar[str] = "manual"
+    version: ClassVar[str] = "test"
+
+    def required_indicators(self) -> tuple[PolicyIndicatorRequirement, ...]:
+        return ()
+
+    def resolved_config(self) -> Mapping[str, object]:
+        return {"mode": self.id, "leverage": self.leverage}
+
+    def plan_entry(
+        self,
+        decision: DecisionIntent,
+        market: MarketSnapshot,
+        account: AccountRiskSnapshot,
+        global_limits: RiskLimits,
+    ) -> MoneyManagementPlan:
+        del decision, market, account, global_limits
+        raise NotImplementedError
+
+
+@dataclass(frozen=True, slots=True)
+class _TurtleFixturePolicy(_ManualFixturePolicy):
+    id: ClassVar[str] = "turtle"
+    requires_signal_exit: ClassVar[bool] = True
+
+
+_POLICIES = {"manual": _ManualFixturePolicy, "turtle": _TurtleFixturePolicy}
 
 
 class FakeAdaptee:
@@ -180,7 +222,13 @@ def make_manager() -> tuple[AdapterManager, InProcessStrategyRegistry, FakeCatal
     FakeAdaptee.events.clear()
     catalog = FakeCatalog(FakeAdaptee.events)
     catalog.add_active_fake()
-    return AdapterManager(catalog, plugins), plugins, catalog
+    return AdapterManager(catalog, plugins, money_management_policies=_POLICIES), plugins, catalog
+
+
+def test_adapter_manager_requires_an_explicit_policy_mapping() -> None:
+    plugins = InProcessStrategyRegistry()
+    with pytest.raises(TypeError):
+        AdapterManager(FakeCatalog([]), plugins)  # type: ignore[call-arg]
 
 
 def _manager_for(adaptee: type[FakeAdaptee]) -> AdapterManager:
@@ -195,7 +243,7 @@ def _manager_for(adaptee: type[FakeAdaptee]) -> AdapterManager:
         "is_active": True,
         "is_deprecated": False,
     }
-    return AdapterManager(catalog, plugins)
+    return AdapterManager(catalog, plugins, money_management_policies=_POLICIES)
 
 
 def test_strategy_metadata_defaults_to_the_legacy_decision_contract() -> None:
@@ -305,7 +353,7 @@ def test_runtime_composes_only_a_strategy_supported_money_policy() -> None:
         "is_active": True,
         "is_deprecated": False,
     }
-    manager = AdapterManager(catalog, plugins)
+    manager = AdapterManager(catalog, plugins, money_management_policies=_POLICIES)
     runtime = manager.create_runtime(
         "money-breakout",
         {"strategy_id": "money-breakout", "params": {"fast": 10}},
@@ -436,7 +484,9 @@ def test_catalog_reconciliation_returns_five_distinct_states() -> None:
     catalog.rows["inactive"]["is_active"] = False
     catalog.rows["deprecated"].update({"is_active": False, "is_deprecated": True})
 
-    findings = AdapterManager(catalog, plugins).reconcile_catalog()
+    findings = AdapterManager(
+        catalog, plugins, money_management_policies=_POLICIES
+    ).reconcile_catalog()
 
     assert [finding.strategy_id for finding in findings] == [
         "allowlist-only",
@@ -494,7 +544,9 @@ def test_catalog_reconciliation_adds_declaration_mismatch_and_isolates_read_fail
         "is_deprecated": False,
     }
 
-    findings = AdapterManager(catalog, plugins).reconcile_catalog()
+    findings = AdapterManager(
+        catalog, plugins, money_management_policies=_POLICIES
+    ).reconcile_catalog()
 
     assert {finding.strategy_id: finding.state for finding in findings} == {
         "declaration-mismatch": StrategyReconciliationState.DECLARATION_MISMATCH,

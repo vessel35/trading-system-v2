@@ -1,20 +1,21 @@
 """Verify common manual and Turtle money-management calculations."""
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 from core_lib.money_management import (
     AccountRiskSnapshot,
-    ManualMoneyManagement,
     MarketSnapshot,
     MoneyManagementBase,
     MoneyManagementError,
     MoneyManagementFactory,
+    MoneyManagementPlan,
     PolicyIndicatorRequirement,
     RiskLimits,
-    TurtleMoneyManagement,
     turtle_n_series,
 )
 from core_lib.types import Candle, DecisionAction, DecisionIntent, MarketType
@@ -54,105 +55,6 @@ def _limits() -> RiskLimits:
     )
 
 
-def test_manual_policy_exactly_reproduces_legacy_vessel_protection() -> None:
-    policy = ManualMoneyManagement(
-        leverage=3,
-        reward_risk=2.0,
-        atr_stop_multiple=2.0,
-    )
-    plan = policy.plan_entry(
-        _decision(),
-        MarketSnapshot(
-            reference_price=101.0,
-            volatility=2.0,
-            volatility_name="ATR(14)",
-            volatility_timestamp=_NOW,
-        ),
-        _account(),
-        _limits(),
-    )
-    assert plan.stop_loss == 97.0
-    assert plan.take_profit == 109.0
-    assert plan.requested_quantity == 25.0
-    assert plan.requested_leverage == 3
-    assert plan.initial_risk_amount == 100.0
-
-
-def test_turtle_policy_sizes_one_percent_risk_and_minimum_leverage() -> None:
-    policy = TurtleMoneyManagement()
-    plan = policy.plan_entry(
-        DecisionIntent(
-            action=DecisionAction.ENTER_LONG,
-            symbol="BTC/USDT:USDT",
-            timestamp=_NOW,
-            reference_price=100.0,
-            confidence=1.0,
-            reason="fixture-entry",
-            metadata={},
-        ),
-        MarketSnapshot(
-            reference_price=100.0,
-            volatility=2.0,
-            volatility_name="TURTLE_N",
-            volatility_timestamp=_NOW - timedelta(days=1),
-        ),
-        _account(cash=1_000.0),
-        _limits(),
-    )
-    assert plan.stop_loss == 96.0
-    assert plan.take_profit is None
-    assert plan.requested_quantity == 25.0
-    assert plan.requested_leverage == 3
-    assert plan.initial_risk_amount == 100.0
-    assert plan.diagnostics["liquidation_safe"] is True
-
-
-def test_turtle_rejects_cap_and_liquidation_safety_failures() -> None:
-    policy = TurtleMoneyManagement(leverage_cap=10)
-    market = MarketSnapshot(
-        reference_price=100.0,
-        volatility=2.0,
-        volatility_name="TURTLE_N",
-        volatility_timestamp=_NOW - timedelta(days=1),
-    )
-    with pytest.raises(MoneyManagementError, match="leverage"):
-        policy.plan_entry(
-            DecisionIntent(
-                action=DecisionAction.ENTER_LONG,
-                symbol="BTC/USDT:USDT",
-                timestamp=_NOW,
-                reference_price=100.0,
-                confidence=1.0,
-                reason="fixture-entry",
-                metadata={},
-            ),
-            market,
-            _account(cash=100.0),
-            _limits(),
-        )
-
-    with pytest.raises(MoneyManagementError, match="liquidation"):
-        policy.plan_entry(
-            DecisionIntent(
-                action=DecisionAction.ENTER_LONG,
-                symbol="BTC/USDT:USDT",
-                timestamp=_NOW,
-                reference_price=100.0,
-                confidence=1.0,
-                reason="fixture-entry",
-                metadata={},
-            ),
-            MarketSnapshot(
-                reference_price=100.0,
-                volatility=20.0,
-                volatility_name="TURTLE_N",
-                volatility_timestamp=_NOW - timedelta(days=1),
-            ),
-            _account(cash=100.0),
-            _limits(),
-        )
-
-
 def test_turtle_n_uses_only_finalized_candle_values_and_wilder_update() -> None:
     candles = []
     start = datetime(2026, 1, 1, tzinfo=UTC)
@@ -182,23 +84,69 @@ def test_turtle_n_uses_only_finalized_candle_values_and_wilder_update() -> None:
     assert values[0][0] > candles[19].open_time
 
 
+@dataclass(frozen=True, slots=True)
+class _FixturePolicy(MoneyManagementBase):
+    leverage: int = 1
+
+    id: ClassVar[str] = "manual"
+    version: ClassVar[str] = "test"
+
+    def required_indicators(self) -> tuple[PolicyIndicatorRequirement, ...]:
+        return ()
+
+    def resolved_config(self) -> Mapping[str, object]:
+        return {"mode": self.id, "leverage": self.leverage}
+
+    def plan_entry(
+        self,
+        decision: DecisionIntent,
+        market: MarketSnapshot,
+        account: AccountRiskSnapshot,
+        global_limits: RiskLimits,
+    ) -> MoneyManagementPlan:
+        del decision, market, account, global_limits
+        raise NotImplementedError
+
+
+@dataclass(frozen=True, slots=True)
+class _AlternateFixturePolicy(_FixturePolicy):
+    id: ClassVar[str] = "turtle"
+
+
+_POLICIES = {"manual": _FixturePolicy, "turtle": _AlternateFixturePolicy}
+
+
 @pytest.mark.parametrize(
     "raw",
     [
         {"mode": "manual", "leverage": 3},
-        {"mode": "turtle", "n_period": 20, "n_timeframe": "1d"},
+        {"mode": "turtle", "leverage": 3},
     ],
 )
 def test_factory_returns_only_registered_validated_modes(raw: dict[str, object]) -> None:
-    policy = MoneyManagementFactory.create(raw)
+    policy = MoneyManagementFactory.create(raw, _POLICIES)
     assert policy.id == raw["mode"]
 
 
 def test_factory_rejects_unknown_or_extra_policy_fields() -> None:
     with pytest.raises(ValueError, match="unsupported"):
-        MoneyManagementFactory.create({"mode": "kelly"})
+        MoneyManagementFactory.create({"mode": "kelly"}, _POLICIES)
     with pytest.raises(ValueError, match="unexpected"):
-        MoneyManagementFactory.create({"mode": "manual", "api_key": "forbidden"})
+        MoneyManagementFactory.create({"mode": "manual", "api_key": "forbidden"}, _POLICIES)
+
+
+def test_factory_rejects_a_configuration_without_a_mode() -> None:
+    with pytest.raises(TypeError, match="mode must be a string"):
+        MoneyManagementFactory.create({}, _POLICIES)
+
+
+def test_factory_and_mode_listing_require_an_explicit_policy_mapping() -> None:
+    from core_lib.money_management import money_management_modes
+
+    with pytest.raises(TypeError):
+        MoneyManagementFactory.create({"mode": "manual"})  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        money_management_modes()  # type: ignore[call-arg]
 
 
 def test_base_refuses_a_policy_that_leaves_a_member_unimplemented() -> None:
@@ -219,9 +167,11 @@ def test_base_refuses_a_policy_that_leaves_a_member_unimplemented() -> None:
 
 
 def test_the_base_is_the_only_money_management_contract() -> None:
-    for policy in (ManualMoneyManagement(), TurtleMoneyManagement()):
+    for policy in (_FixturePolicy(), _AlternateFixturePolicy()):
         assert isinstance(policy, MoneyManagementBase)
-    assert isinstance(MoneyManagementFactory.create({"mode": "manual"}), MoneyManagementBase)
+    assert isinstance(
+        MoneyManagementFactory.create({"mode": "manual"}, _POLICIES), MoneyManagementBase
+    )
 
     repository = Path(__file__).resolve().parents[3]
     production_sources = (

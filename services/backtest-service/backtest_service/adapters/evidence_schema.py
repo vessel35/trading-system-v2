@@ -10,7 +10,7 @@ from decimal import Decimal
 from types import MappingProxyType
 from typing import Final
 
-EVIDENCE_SCHEMA_VERSION: Final = "1.9.0"
+EVIDENCE_SCHEMA_VERSION: Final = "1.10.0"
 MINIMUM_SQLITE_VERSION: Final = (3, 37, 0)
 DECIMAL_PLACES: Final = 8
 DECIMAL_SCALE: Final = Decimal(10) ** DECIMAL_PLACES

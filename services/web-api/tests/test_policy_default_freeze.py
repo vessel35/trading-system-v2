@@ -14,7 +14,6 @@ import backtest_service.config.run_config as run_config
 import pytest
 import web_api.repository as repository
 from core_lib.money_management import (
-    BUILTIN_POLICIES,
     AccountRiskSnapshot,
     MarketSnapshot,
     MoneyManagementBase,
@@ -25,7 +24,7 @@ from core_lib.money_management import (
 )
 from core_lib.types import DecisionIntent
 from pydantic import BaseModel, TypeAdapter, field_validator, model_serializer
-from trading_plugins import build_strategy_registry
+from trading_plugins import build_strategy_registry, registered_money_management
 from web_api.database import SignalConnection
 
 _HOOKS = {
@@ -106,7 +105,7 @@ def test_fixed_policy_hooks_run_during_freeze_and_not_during_two_responses(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The documented 1/1/1/1/2/1 counts belong to this exact fixture."""
-    policies: dict[str, type[MoneyManagementBase]] = dict(BUILTIN_POLICIES)
+    policies: dict[str, type[MoneyManagementBase]] = dict(registered_money_management())
     policies[_CountedPolicy.id] = _CountedPolicy
     adapter = _adapter_for({_CountedPolicy.id: _CountedPolicy})
     adapter_calls = 0
@@ -255,7 +254,7 @@ def test_each_default_phase_fault_removes_only_that_default(
     error_type: type[Exception] | type[SystemExit],
 ) -> None:
     policy, _ = _failing_policy(phase, error_type)
-    policies: dict[str, type[MoneyManagementBase]] = dict(BUILTIN_POLICIES)
+    policies: dict[str, type[MoneyManagementBase]] = dict(registered_money_management())
     policies[policy.id] = policy
     adapter = _adapter_for({policy.id: policy})
     monkeypatch.setattr(run_config, "_MONEY_MANAGEMENT_ADAPTER", adapter)
@@ -297,7 +296,7 @@ def test_required_setting_without_a_default_leaves_the_mode_without_a_default(
 ) -> None:
     adapter = _adapter_for({_RequiredSettingPolicy.id: _RequiredSettingPolicy})
     monkeypatch.setattr(run_config, "_MONEY_MANAGEMENT_ADAPTER", adapter)
-    policies: dict[str, type[MoneyManagementBase]] = dict(BUILTIN_POLICIES)
+    policies: dict[str, type[MoneyManagementBase]] = dict(registered_money_management())
     policies[_RequiredSettingPolicy.id] = _RequiredSettingPolicy
 
     frozen = repository._freeze_money_management_defaults(
@@ -336,7 +335,7 @@ def test_non_finite_json_is_rejected_without_removing_the_selectable_mode(
 ) -> None:
     adapter = _adapter_for({_NonFinitePolicy.id: _NonFinitePolicy})
     monkeypatch.setattr(run_config, "_MONEY_MANAGEMENT_ADAPTER", adapter)
-    policies: dict[str, type[MoneyManagementBase]] = dict(BUILTIN_POLICIES)
+    policies: dict[str, type[MoneyManagementBase]] = dict(registered_money_management())
     policies[_NonFinitePolicy.id] = _NonFinitePolicy
 
     frozen = repository._freeze_money_management_defaults(
@@ -403,11 +402,9 @@ def test_only_the_web_api_cold_import_builds_form_defaults(
 import json
 import sys
 
-from core_lib.money_management import (
-    ManualMoneyManagement,
-    MoneyManagementFactory,
-    TurtleMoneyManagement,
-)
+from core_lib.money_management import MoneyManagementFactory
+from trading_plugins.money_management.manual import ManualMoneyManagement
+from trading_plugins.money_management.turtle import TurtleMoneyManagement
 
 counts = {"create": 0, "resolved": 0}
 real_create = MoneyManagementFactory.create
