@@ -88,13 +88,24 @@ def test_a_series_may_name_another_timeframe_but_not_the_running_one() -> None:
 
 
 def test_an_unregistered_parameter_combination_is_refused() -> None:
-    registry = build_default_registry()
-    registered = {(spec.name, tuple(sorted(spec.params.items()))) for spec in registry.list()}
-    assert ("EMA", (("period", 21),)) in registered
-    assert ("EMA", (("period", 50),)) not in registered
+    """Build the missing combination out of a registered one.
 
+    Naming a concrete absent combination would make this fail the day someone
+    registers it, which is a normal thing to do and must never break the
+    capability list.
+    """
+    registry = build_default_registry()
+    sample, name, value = next(
+        (spec, key, item)
+        for spec in registry.list()
+        for key, item in spec.params.items()
+        if isinstance(item, int) and not isinstance(item, bool)
+    )
+    absent = {**dict(sample.params), name: value + 10_000}
+
+    assert registry.get(sample.name, sample.params) is sample
     with pytest.raises(KeyError, match="indicator is not registered"):
-        registry.get("EMA", {"period": 50})
+        registry.get(sample.name, absent)
     assert capability("series.registration_unit").value == "name and parameter combination"
 
 
