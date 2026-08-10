@@ -22,7 +22,7 @@ VALUES (
     'trading_plugins.strategies.vessel_reference',
     'Vessel Reference',
     'EMA decision-only Vessel Adaptee with injected money-management policies.',
-    '3.0.0',
+    '3.1.0',
     ARRAY['1h']::text[],
     '[
         {"name": "EMA", "params": {"period": 9}},

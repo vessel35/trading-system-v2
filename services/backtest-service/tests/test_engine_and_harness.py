@@ -1880,7 +1880,7 @@ def test_vessel_reference_entry_and_exit_timing_and_direction_are_characterized(
     with sqlite3.connect(result.evidence_path) as connection:
         decisions = connection.execute(
             """
-            SELECT decision_ts, action, intended_side, planned_execution_ts
+            SELECT decision_ts, action, intended_side, planned_execution_ts, skip_reason
             FROM DECISION
             ORDER BY decision_id
             """
@@ -1894,13 +1894,38 @@ def test_vessel_reference_entry_and_exit_timing_and_direction_are_characterized(
         ).fetchall()
 
     assert decisions == [
-        (1767232800000, "enter", "LONG", 1767232800001),
-        (1767247200000, "exit", "LONG", 1767250800000),
-        (1767250800000, "skip", None, None),
+        (1767232800000, "enter", "LONG", 1767232800001, None),
+        (1767236400000, "skip", None, None, "vessel-ema-regime-intact"),
+        (1767240000000, "skip", None, None, "vessel-ema-regime-intact"),
+        (1767243600000, "skip", None, None, "vessel-ema-regime-intact"),
+        (1767247200000, "skip", None, None, "vessel-ema-regime-intact"),
+        (1767247200000, "exit", "LONG", 1767250800000, None),
+        (1767250800000, "skip", None, None, "end_of_data"),
     ]
     assert executions == [
         (1767232800001, "BUY", "LONG", 0, None),
         (1767250800000, "SELL", "LONG", 1, "TAKE_PROFIT"),
+    ]
+
+
+def test_vessel_hold_decision_is_recorded_in_evidence(tmp_path: Path) -> None:
+    result = _vessel_engine(tmp_path, _Catalog()).run(_vessel_config())
+
+    with sqlite3.connect(result.evidence_path) as connection:
+        holds = connection.execute(
+            """
+            SELECT decision_ts, action, skip_reason, signal_id
+            FROM DECISION
+            WHERE skip_reason = 'vessel-ema-regime-intact'
+            ORDER BY decision_id
+            """
+        ).fetchall()
+
+    assert holds == [
+        (1767236400000, "skip", "vessel-ema-regime-intact", None),
+        (1767240000000, "skip", "vessel-ema-regime-intact", None),
+        (1767243600000, "skip", "vessel-ema-regime-intact", None),
+        (1767247200000, "skip", "vessel-ema-regime-intact", None),
     ]
 
 

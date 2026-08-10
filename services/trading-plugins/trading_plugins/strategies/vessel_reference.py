@@ -33,7 +33,7 @@ class VesselReference(StrategyBase):
     """Own only the EMA entry/exit edge; runtime policies own money management."""
 
     STRATEGY_ID = STRATEGY_ID
-    VERSION = "3.0.0"
+    VERSION = "3.1.0"
 
     def __init__(self, config: ResolvedConfig) -> None:
         if config.strategy_id != STRATEGY_ID:
@@ -84,7 +84,7 @@ class VesselReference(StrategyBase):
         self,
         market_data: dict[str, object],
         current_position: Position | None,
-    ) -> DecisionIntent | None:
+    ) -> DecisionIntent:
         """Emit explicit EMA-regime entry and exit decisions without sizing fields."""
         candle = market_data.get("candle")
         indicators = market_data.get("indicators")
@@ -114,7 +114,11 @@ class VesselReference(StrategyBase):
                 current_position.side is PositionSide.SHORT and fast >= slow
             )
             if not should_exit:
-                return None
+                return self._decision(
+                    candle,
+                    DecisionAction.HOLD,
+                    reason="vessel-ema-regime-intact",
+                )
             return self._decision(
                 candle,
                 DecisionAction.EXIT,
@@ -122,10 +126,18 @@ class VesselReference(StrategyBase):
             )
 
         if fast == slow:
-            return None
+            return self._decision(
+                candle,
+                DecisionAction.HOLD,
+                reason="vessel-ema-regime-flat",
+            )
         is_long = fast > slow
         if market_type is MarketType.SPOT and not is_long:
-            return None
+            return self._decision(
+                candle,
+                DecisionAction.HOLD,
+                reason="vessel-spot-short-not-available",
+            )
         return self._decision(
             candle,
             DecisionAction.ENTER_LONG if is_long else DecisionAction.ENTER_SHORT,
@@ -153,5 +165,5 @@ class VesselReference(StrategyBase):
             reference_price=float(candle.close),
             confidence=1.0,
             reason=reason,
-            metadata={"adaptee": STRATEGY_ID, "trailing": False},
+            metadata={"adaptee": STRATEGY_ID},
         )

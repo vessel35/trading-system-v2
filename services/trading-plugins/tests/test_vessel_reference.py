@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
+import pytest
 from core_lib.strategy import (
     StrategyAdapter,
     StrategyConfig,
@@ -102,7 +103,8 @@ def test_vessel_declares_exact_pipeline_inputs_and_no_trailing() -> None:
     assert signal.action is DecisionAction.ENTER_LONG
     assert not hasattr(signal, "stop_loss")
     assert not hasattr(signal, "leverage")
-    assert signal.metadata == {"adaptee": STRATEGY_ID, "trailing": False}
+    assert signal.metadata == {"adaptee": STRATEGY_ID}
+    assert "trailing" not in signal.metadata
 
 
 def test_vessel_exits_only_when_ema_regime_reverses() -> None:
@@ -126,6 +128,39 @@ def test_vessel_exits_only_when_ema_regime_reverses() -> None:
     assert signal.reason == "vessel-ema-regime-exit"
 
 
+@pytest.mark.parametrize(
+    ("fast", "slow", "market_type", "current_position", "reason"),
+    [
+        (102.0, 100.0, "futures", _position(), "vessel-ema-regime-intact"),
+        (100.0, 100.0, "futures", None, "vessel-ema-regime-flat"),
+        (99.0, 100.0, "spot", None, "vessel-spot-short-not-available"),
+    ],
+)
+def test_vessel_hold_reasons_distinguish_each_non_execution_case(
+    fast: float,
+    slow: float,
+    market_type: str,
+    current_position: Position | None,
+    reason: str,
+) -> None:
+    decision = _strategy().analyze(
+        {
+            "candle": _candle(),
+            "timeframe": "1h",
+            "market_type": market_type,
+            "indicators": {
+                "ema:period=9@1h": fast,
+                "ema:period=21@1h": slow,
+            },
+        },
+        current_position,
+    )
+
+    assert decision.action is DecisionAction.HOLD
+    assert decision.reason == reason
+    assert decision.metadata == {"adaptee": STRATEGY_ID}
+
+
 def test_vessel_parameter_schema_has_no_money_management_names() -> None:
     forbidden = {
         "leverage",
@@ -138,7 +173,7 @@ def test_vessel_parameter_schema_has_no_money_management_names() -> None:
     }
 
     assert forbidden.isdisjoint(VesselReference.get_parameter_schema().fields)
-    assert VesselReference.VERSION == "3.0.0"
+    assert VesselReference.VERSION == "3.1.0"
 
 
 def test_vessel_registration_script_matches_the_code_declaration() -> None:

@@ -93,7 +93,7 @@ def _vessel_registry_row() -> tuple[object, ...]:
         "trading_plugins.strategies.vessel_reference",
         "Vessel Reference",
         None,
-        "3.0.0",
+        "3.1.0",
         ["1h"],
         [
             {"name": "EMA", "params": {"period": 9}},
