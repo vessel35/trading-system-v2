@@ -133,8 +133,17 @@ parameter뿐이고 나머지는 registry에서 온다.**
 | `{"name": "pat_engulfing", "params": {}}`                                                | `pat_engulfing`                                      | 패턴  | 성립·방향·강도·확인 네 출력을 담은 `dict`                 |
 
 
-등록된 것은 지표 91 조합과 캔들 패턴 61종이다. 이 수는 늘어나며, 어느 시점의
-수가 규칙을 바꾸지는 않는다.
+**무엇이 등록되어 있는지는 여기 적지 않고 registry에 묻는다.** 수는 늘어나며
+어느 시점의 수도 규칙을 바꾸지 않는다. 적어 두면 늘어날 때마다 이 문서가
+낡는다.
+
+```python
+from core_lib.indicators.registry import build_default_registry
+from core_lib.patterns import TALIB_PATTERN_REGISTRY
+
+{(spec.name, dict(spec.params)) for spec in build_default_registry().list()}
+{spec.name for spec in TALIB_PATTERN_REGISTRY.list()}
+```
 
 ## 2. 전략이 반드시 지켜야 하는 것
 
@@ -796,11 +805,15 @@ market_data["indicators"]["pat_engulfing@4h"] == {
 덕분에 **구체 timeframe은 실행 timeframe과 절대 같아질 수 없고, 서로 다른 두
 선언이 같은 execution key로 겹치는 일이 생기지 않는다.**
 
-**어디까지 구현되었나.** 선언의 `timeframe` 자리와 위의 key 형식, 그리고 패턴
-안쪽 이름은 구현되어 있다. **아직 캔들 흐름은 하나뿐이다.** 그래서 실행
-timeframe이 아닌 값을 선언하면 아직 지원하지 않는다는 사유로 거부되며,
-`market_data`의 `candles`와 `timeframe`도 실행 timeframe 하나를 가리킨다.
-**여러 흐름을 읽고 위의 정렬 규칙을 지키는 것은 아직 남아 있다.**
+**어디까지 구현되었나.** 선언의 `timeframe` 자리와 위의 key 형식과 패턴 안쪽
+이름에 더해, **여러 캔들 흐름을 읽고 위의 정렬 규칙을 지키는 것까지
+구현되어 있다.** 실행 timeframe이 아닌 값을 선언하면 그 흐름을 따로 읽어
+판단 시점까지 마감된 봉의 값만 넘긴다.
+
+**다만 원본 캔들은 여전히 하나다.** `market_data`의 `candles`와 `timeframe`은
+실행 timeframe 하나를 가리키므로, **상위 timeframe의 봉을 직접 훑어야 하는
+요구는 그것이 series로 표현될 때에만 된다.** 4시간봉 EMA를 15분봉 실행에서
+읽는 것은 되고, 4시간봉 스윙 고점을 봉마다 훑는 것은 되지 않는다.
 
 **key를 만드는 곳은 하나로 모여 있어야 한다.** 값을 쓸 때와 기록에서 읽어 되만들
 때가 서로 다른 규칙을 쓰면 같은 series를 찾지 못한다. 그래서 서버 쪽은 한 함수가
@@ -823,9 +836,9 @@ key를 만들고, **그 함수는 timeframe을 반드시 받는다** — 받지 
 전략의 `indicators`에는 들어가지 않는다. 지금 이 경로를 실제로 쓰는 것은
 Turtle 정책의 일간 `N` 하나뿐이다.
 
-**그 경로는 위의 정렬 규칙을 이미 지킨다.** 판단 시각보다 늦게 마감된 일봉의
-값은 후보에서 빼고 마지막으로 마감된 것을 쓴다. 전략 쪽 multi-timeframe을
-구현할 때 따를 본보기가 여기 있다.
+**그 경로는 위의 정렬 규칙을 지킨다.** 판단 시각보다 늦게 마감된 일봉의 값은
+후보에서 빼고 마지막으로 마감된 것을 쓴다. 전략이 선언하는 상위 timeframe
+series도 같은 규칙을 따른다.
 
 단순히 1시간 ATR을 쓰면서 역사적 Turtle 규칙과 동일하다고 표시하면 안 된다.
 
@@ -851,10 +864,10 @@ timeframe으로 환산하고 그중 가장 넓은 구간을 취한다.
 warm-up을 채우지 못하면 구현은 구간 제한을 풀고 다시 읽어야 한다. 결측이 있는
 구간에서는 같은 개수를 얻는 데 더 넓은 달력 구간이 필요하기 때문이다.
 
-**위 식의 둘째 항은 지금 자금관리 정책을 통해서만 닿는다.** 요구마다
-timeframe을 가질 수 있는 것은 `PolicyIndicatorRequirement`뿐이고, 전략이 선언한
-series는 모두 실행 timeframe으로 계산된다(§4.4.1). 전략 쪽 multi-timeframe이
-열리면 이 식은 그대로 쓰인다.
+**위 식의 둘째 항에는 전략과 정책이 함께 닿는다.** 전략이 선언한 series도
+`timeframe`을 가질 수 있고(§4.4.1), 정책은 `PolicyIndicatorRequirement`로
+가진다. 흐름마다 필요한 봉 수를 따로 셈한 뒤 각 흐름의 달력 구간으로
+환산한다.
 
 ### 4.6 등록은 Adaptee와 일치해야 한다
 
@@ -1551,8 +1564,9 @@ services/trading-plugins/trading_plugins/
 **넷째는 실행 timeframe을 쓰는 정책에 한해 지금 풀 수 있다.** 정책이
 `required_indicators()`로 이미 선언하므로 그 선언에서 execution key를 만들어
 조회하면 분기가 사라진다. **다른 timeframe의 값을 쓰는 정책은 그렇게 풀리지
-않는다** — Turtle의 일간 `N`은 지표 registry에 등록된 것이 아니라 Engine이 따로
-계산하는 값이며, 이 문제는 §4.4.1의 multi-timeframe 작업과 같은 것이다.
+않는다** — 막는 것은 timeframe이 아니라 등록이다. Turtle의 일간 `N`은 지표
+registry에 등록된 것이 아니라 Engine이 따로 계산하는 값이므로, 선언에서 만든
+key로는 아무것도 찾을 수 없다. 여러 캔들 흐름 자체는 이미 있다(§4.4.1).
 
 **실행 설정 union은 가장 조심스러웠다.** 자금관리 설정을 두 형으로 정적으로 묶어 두면 mode를
 늘릴 때마다 그 파일을 고쳐야 한다. **union은 발견된 정책에서 만들어 낸다.** 발견이
