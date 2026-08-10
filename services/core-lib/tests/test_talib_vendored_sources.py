@@ -92,6 +92,12 @@ _EXPECTED_INDICATOR_SOURCES = frozenset(
         "src/ta_func/ta_MAMA.c",
     }
 )
+_EXPECTED_STATISTIC_SOURCES = frozenset(
+    {
+        "src/ta_func/ta_BETA.c",
+        "src/ta_func/ta_CORREL.c",
+    }
+)
 
 
 def _read_manifest() -> tuple[dict[str, str], dict[str, str]]:
@@ -124,6 +130,7 @@ def test_vendored_talib_sources_match_manifest() -> None:
         "Candlestick pattern source count": "61",
         "Shared source count": "2",
         "Hilbert indicator source count": "7",
+        "Statistic indicator source count": "2",
     }
 
     manifest_paths = set(hashes)
@@ -135,11 +142,15 @@ def test_vendored_talib_sources_match_manifest() -> None:
     assert len(_EXPECTED_PATTERN_SOURCES) == 61
     assert len(_EXPECTED_SHARED_SOURCES) == 2
     assert len(_EXPECTED_INDICATOR_SOURCES) == 7
+    assert len(_EXPECTED_STATISTIC_SOURCES) == 2
 
     expected_paths = (
-        _EXPECTED_PATTERN_SOURCES | _EXPECTED_SHARED_SOURCES | _EXPECTED_INDICATOR_SOURCES
+        _EXPECTED_PATTERN_SOURCES
+        | _EXPECTED_SHARED_SOURCES
+        | _EXPECTED_INDICATOR_SOURCES
+        | _EXPECTED_STATISTIC_SOURCES
     )
-    assert len(expected_paths) == 70
+    assert len(expected_paths) == 72
     assert manifest_paths == expected_paths
     assert vendored_source_paths == expected_paths
     assert (_VENDORED_ROOT / "LICENSE").is_file()

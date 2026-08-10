@@ -92,11 +92,11 @@ ROC(P, n)_t = 100 · (P_t − P_{t-n}) / P_{t-n}
 - **NaN 전파**: warm-up 구간은 NaN 유지 권장(0 대체 시 초기 신호 왜곡).
 - **실시간(update) vs 배치**: 재귀형(EMA/RMA/SAR/누적)은 확정된 직전값만 사용해야 함 → **미확정(진행 중) 봉으로 상태 갱신 금지**(look-ahead/재계산 오염 방지). 프로젝트 규약 `close_time ≤ T` 준수.
 
-### 0.12 계산 출처 정책 예외 — TA-Lib Hilbert 일곱 함수
+### 0.12 계산 출처 정책 예외 — TA-Lib 함수 아홉 개
 
 일반 정책에서 TA-Lib과 다른 외부 라이브러리는 독립 계산 원본이 아니라 교차대조군이다.
 `services/core-lib/tests/indicator_reference/__init__.py`의 "TA-Lib은 대조군이고 계산
-원본이 아니다"라는 설명도 이 일반 정책을 가리킨다. 다만 아래 일곱 함수에는 그 정책을
+원본이 아니다"라는 설명도 이 일반 정책을 가리킨다. 다만 아래 아홉 함수에는 그 정책을
 적용하지 않고 **TA-Lib C 구현 자체를 계산 원본으로 삼는다.** 이 예외는 다른 TA-Lib
 함수나 다른 지표로 자동 확대되지 않는다.
 
@@ -109,18 +109,22 @@ ROC(P, n)_t = 100 · (P_t − P_{t-n}) / P_{t-n}
 | `HT_DCPHASE` | `src/ta_func/ta_HT_DCPHASE.c` |
 | `HT_PHASOR` | `src/ta_func/ta_HT_PHASOR.c` |
 | `HT_TRENDMODE` | `src/ta_func/ta_HT_TRENDMODE.c` |
+| `BETA` | `src/ta_func/ta_BETA.c` |
+| `CORREL` | `src/ta_func/ta_CORREL.c` |
 
 원본 저장소는 `https://github.com/TA-Lib/ta-lib`, 태그는 `v0.7.1`, 커밋은
 `2247d599bddf37ed37e3a709371517e46efc66f6`으로 고정한다. 위 파일들은 원래 경로를
 유지한 채 `third_party/ta-lib/src/ta_func/`에 반입한다. Ehlers 원저의 6-tap 계수와
 위상 파이프라인 상수를 확보하지 못해 §8.1과 §8.4가 미확정으로 남아 있었고, 상수를
 지어내는 대신 공개된 TA-Lib 구현을 계산 원본으로 삼기로 사용자가 확정했기 때문에
-이 일곱만 예외다.
+이 일곱에 더해, 두 가격 계열의 입력 순서와 0에 가까운 분모 처리를 원본과 같은 값으로
+고정해야 하는 BETA와 CORREL도 공개된 TA-Lib 구현을 계산 원본으로 삼는다. 예외는 위 표의
+아홉 함수로 닫혀 있다.
 
 `third_party/ta-lib/SHA256SUMS`와
 `services/core-lib/tests/test_talib_vendored_sources.py`는 패턴 판정 소스 61개, 공용
-소스 2개, 위 지표 소스 7개의 경로 집합과 개수 및 각 SHA-256을 네트워크 없이
-검증한다. 계산 포트는 TA-Lib 0.7.1의 오프라인 포획값과 상대·절대 오차 모두
+소스 2개, Hilbert 지표 소스 7개, 통계 지표 소스 2개의 경로 집합과 개수 및 각 SHA-256을
+네트워크 없이 검증한다. 계산 포트는 TA-Lib 0.7.1의 오프라인 포획값과 상대·절대 오차 모두
 `1e-9` 이내로 대조하고, 서로 독립인 배치 경로와 상태 경로는 상대·절대 오차 모두
 `1e-12` 이내로 대조한다. `HT_TRENDMODE`는 허용오차 없이 정확히 대조한다. 런타임과
 지속적 통합 환경은 외부 TA-Lib 설치에 의존하지 않는다.
@@ -1003,6 +1007,79 @@ CCI(14) + CCI Turbo(6) 병행 표시 + ±100/±200 존 + zero-line 패턴(ZLR, T
 ```
 단일 계산식 아님 — 판정 규칙 집합.
 
+### 9.7 통계 / 회귀 계열 (Statistics / Regression)
+
+이 장의 두 지표는 마감 시각이 같은 두 가격 계열을 한 쌍으로 받는다. `X`는 기준 종목의
+가격이고 `Y`는 실행 주 종목의 가격이다. 두 배열의 같은 index는 같은 마감 시각을 가리키며,
+한쪽에만 있는 봉은 입력에 반복하거나 0으로 채우지 않는다. 아래의 `n`은 1 이상 100000 이하인
+정수다.
+
+#### 9.7.1 BETA — 두 수익률 계열의 회귀 기울기
+
+계산 원본은 TA-Lib v0.7.1의 `src/ta_func/ta_BETA.c`다. 원본의 실행되는 산술은 첫 입력
+`inReal0`을 `X`, 둘째 입력 `inReal1`을 `Y`로 놓고 `Y`의 수익률을 `X`의 수익률로 설명하는
+회귀 기울기를 구한다. 원본의 설명 주석 중 배열의 종목 역할을 적은 문장과 그 뒤의 `x`·`y`
+설명은 서로 어긋나므로, 이 표준은 주석의 종목 이름이 아니라 실제 산술 순서를 따른다.
+플랫폼은 기준 종목을 `X`에, 실행 주 종목을 `Y`에 넣는다.
+
+먼저 연속한 두 가격의 단순 수익률을 만든다. 직전 가격의 절댓값이 원본의
+`TA_EPSILON = 10^-14`보다 작으면 그 수익률은 0이다.
+
+```text
+x_i = 0                                      if |X_{i-1}| < 10^-14
+x_i = (X_i - X_{i-1}) / X_{i-1}            otherwise
+
+y_i = 0                                      if |Y_{i-1}| < 10^-14
+y_i = (Y_i - Y_{i-1}) / Y_{i-1}            otherwise
+```
+
+최근 수익률 `n`쌍에서 아래 합을 구한다.
+
+```text
+S_xx = sum(x_i^2)
+S_xy = sum(x_i * y_i)
+S_x  = sum(x_i)
+S_y  = sum(y_i)
+D    = n * S_xx - S_x^2
+```
+
+`|D| < 10^-14`이면 결과는 `0.0`이고, 아니면 아래 회귀 기울기를 낸다.
+
+```text
+BETA = (n * S_xy - S_x * S_y) / D
+```
+
+다음 봉에서는 새 수익률 한 쌍을 합에 더하고 가장 오래된 수익률 한 쌍을 뺀다. 기본 `n`은
+5다. 수익률 `n`개를 만들려면 가격 쌍 `n+1`개가 필요하므로 lookback은 `n`이고
+`min_history`는 `n+1`이다.
+
+#### 9.7.2 CORREL — Pearson 상관계수
+
+계산 원본은 TA-Lib v0.7.1의 `src/ta_func/ta_CORREL.c`다. BETA와 달리 수익률로 바꾸지 않고
+최근 가격 `n`쌍을 그대로 사용한다.
+
+```text
+S_x  = sum(X_i)
+S_y  = sum(Y_i)
+S_xx = sum(X_i^2)
+S_yy = sum(Y_i^2)
+S_xy = sum(X_i * Y_i)
+
+V_x = S_xx - S_x^2 / n
+V_y = S_yy - S_y^2 / n
+D   = V_x * V_y
+```
+
+원본의 `TA_IS_ZERO_OR_NEG` 판정에 따라 `D < 10^-14`이면 결과는 `0.0`이고, 아니면
+아래 값을 낸다.
+
+```text
+CORREL = (S_xy - S_x * S_y / n) / sqrt(D)
+```
+
+다음 봉에서는 새 가격 쌍을 합에 더하고 가장 오래된 가격 쌍을 뺀다. 기본 `n`은 30이다.
+가격 쌍 `n`개에서 첫 값이 나오므로 lookback은 `n-1`이고 `min_history`는 `n`이다.
+
 ## §10. 중복 제거 의존성 맵 (Dependency Map)
 
 각 지표가 어떤 공유 프리미티브를 재사용하는지 — 계산 로직 중복을 프리미티브 계층으로 흡수한 결과.
@@ -1113,16 +1190,17 @@ graph LR
 | §7 Market Breadth | McClellan Osc, McClellan Summation, TRIN | 3 |
 | §8 Cycle / Ehlers | MAMA/FAMA, Center of Gravity, Roofing Filter, Sinewave/ITrend, HT_DCPERIOD, HT_DCPHASE, HT_PHASOR, HT_TRENDMODE | 8 |
 | §9 기타 시스템 | Parabolic SAR, Ichimoku, Elder Ray, Elder Impulse, TD Sequential, Woodies CCI | 6 |
-| **합계** | | **93** |
+| §9.7 Statistics / Regression | BETA, CORREL | 2 |
+| **합계** | | **95** |
 
-> 세는 규칙 명시: 위 표는 "시스템/지표 단위"로 **93개**(11+31+14+10+6+4+3+8+6=93)를 수록한다.
+> 세는 규칙 명시: 위 표는 "시스템/지표 단위"로 **95개**(11+31+14+10+6+4+3+8+6+2=95)를 수록한다.
 > 이번에 §8에서 확정하거나 신설한 제목은 §8.1과 §8.4부터 §8.9까지 일곱이지만 **집계가 늘어난 것은 넷**이다. MAMA/FAMA(§8.1)와 Sinewave/ITrend(§8.4)는 이전부터 집계에 있던 항목이고 이번에 계산 원본만 확정했으므로 다시 세지 않는다. §8.5 공통 Hilbert 전단은 여러 지표가 공유하는 계산 단계이지 독립 지표가 아니므로 세지 않는다. §8.4의 `HT_SINE`과 `HT_TRENDLINE`은 함수가 둘이지만 Sinewave/ITrend 한 항목으로 센다. 따라서 새로 더해진 넷은 HT_DCPERIOD, HT_DCPHASE, HT_PHASOR, HT_TRENDMODE다.
-> - DMI/ADX를 구성요소(+DI, −DI, ADX, ADXR) 4개로 펼치면 +3 → 96
-> - Bollinger를 밴드 1개로 묶고 %B·BandWidth를 파생으로 빼면 −2 → 91
-> - Stochastic의 Fast와 Slow를 한 시스템으로 묶으면 −1 → 92 (§2.2는 둘을 별개로 세고 별개로 등록한다)
-> - ATR과 NATR을 한 항목으로 묶으면 −1 → 92 (§3.11은 NATR을 독립 지표로 센다)
-> - `HT_SINE`과 `HT_TRENDLINE`을 별개로 세면 +1 → 94 (§8.4는 둘을 한 항목으로 센다)
-> - MACD와 MACD Histogram을 분리하면 +1
+> - DMI/ADX를 구성요소(+DI, −DI, ADX, ADXR) 4개로 펼치면 3개가 늘어 98개다.
+> - Bollinger를 밴드 1개로 묶고 %B·BandWidth를 파생으로 빼면 2개가 줄어 93개다.
+> - Stochastic의 Fast와 Slow를 한 시스템으로 묶으면 1개가 줄어 94개다. §2.2는 둘을 별개로 세고 별개로 등록한다.
+> - ATR과 NATR을 한 항목으로 묶으면 1개가 줄어 94개다. §3.11은 NATR을 독립 지표로 센다.
+> - `HT_SINE`과 `HT_TRENDLINE`을 별개로 세면 1개가 늘어 96개다. §8.4는 둘을 한 항목으로 센다.
+> - MACD와 MACD Histogram을 분리하면 1개가 늘어 96개다.
 >
 > **crypto 미수록(의도적 제외)**: Wilder의 Swing Index / ASI / CSI / Volatility Stop은 ★5이나 암호화폐 적용성이 낮아 제외했다. Swing Index·ASI는 "limit move" 파라미터가 무기한 시장에 정의되지 않고, Volatility Stop은 §3.5 Chandelier Exit(ATR 스톱)로 사실상 대체된다. 필요 시 별도 추가 가능.
 
@@ -1166,7 +1244,7 @@ QQE, Roofing Filter, Special K는 TA-Lib v0.7.1에 대응 계산 함수가 없�
 19. Richard W. Arms Jr., 1967. — TRIN(Arms Index)
 20. Tom DeMark, *The New Science of Technical Analysis*, 1994. — TD Sequential, DeMarker
 21. Goichi Hosoda(一目山人), 1969. — Ichimoku Kinko Hyo
-22. **라이브러리 교차대조**: TA-Lib(ta-lib.org), pandas-ta(github.com/twopirllc/pandas-ta), Tulip Indicators(tulipindicators.org), TradingView Pine 내장 함수 문서. 다만 §0.12의 Hilbert 일곱 함수는 명시한 고정 TA-Lib C 구현을 계산 원본으로 쓰는 제한적 예외다.
+22. **라이브러리 교차대조**: TA-Lib(ta-lib.org), pandas-ta(github.com/twopirllc/pandas-ta), Tulip Indicators(tulipindicators.org), TradingView Pine 내장 함수 문서. 다만 §0.12의 아홉 함수는 명시한 고정 TA-Lib C 구현을 계산 원본으로 쓰는 제한적 예외다.
 23. Igor Livshin, "Balance Of Power", *Technical Analysis of Stocks & Commodities* V.19:8, 2001년 8월, 18–32쪽. — BOP(§2.29). 축약형이 원문 전개형과 같음을 저자가 확인한 서신은 같은 잡지 2001년 10월 독자란.
 24. J. J. Payne, "A Better Way to Smooth Data", *Technical Analysis of Stocks & Commodities*, 1989년 10월. — 삼각가중(TRIMA, §1.11). 위 5번 Kaufman의 "Triangular Weighting" 절이 이 글을 1차 출처로 인용한다.
 25. John Forman, "Cross-Market Evaluations With Normalized Average True Range", *Technical Analysis of Stocks & Commodities* V.24:5, 2006년 5월, 60–63쪽. — NATR(§3.11)
@@ -1186,4 +1264,4 @@ LinRegSlope = b ;  LinRegIntercept = a
 
 ---
 
-*본 명세서는 1차 마스터 목록의 ★4 이상 지표에 대한 계산 계층이다. 계산의 뼈대는 원저자 1차 출처 기준으로 확정하되 §0.12의 Hilbert 일곱 함수만 고정 TA-Lib C 구현을 계산 원본으로 삼는다. 구현체별로 갈리는 나머지 상수는 §12에 "검증 필요"로 명시하여 추측을 배제했다. 각 지표의 의사코드(반복문 포함)·시간복잡도·NaN/오버플로 처리·플랫폼별 수치 검증은 후속 상세 문서 단계에서 지표별로 확장한다.*
+*본 명세서는 1차 마스터 목록의 ★4 이상 지표에 대한 계산 계층이다. 계산의 뼈대는 원저자 1차 출처 기준으로 확정하되 §0.12의 아홉 함수만 고정 TA-Lib C 구현을 계산 원본으로 삼는다. 구현체별로 갈리는 나머지 상수는 §12에 "검증 필요"로 명시하여 추측을 배제했다. 각 지표의 의사코드(반복문 포함)·시간복잡도·NaN/오버플로 처리·플랫폼별 수치 검증은 후속 상세 문서 단계에서 지표별로 확장한다.*

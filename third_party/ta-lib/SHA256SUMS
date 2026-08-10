@@ -5,7 +5,10 @@
 # Candlestick pattern source count: 61
 # Shared source count: 2
 # Hilbert indicator source count: 7
+# Statistic indicator source count: 2
 91c18070b376e71a562155dcebb7f4f16f40d991ec42b66be41fb90bbe4c3619  src/ta_common/ta_global.c
+b9cc2c51cd2eed59ff722b0223094260ed3449dc6cfbe0622245628d6976ba55  src/ta_func/ta_BETA.c
+1c49cb42ddaadf9175dbf91bc21f533e2cf520fdf8c3edb30082e85bb6c03fad  src/ta_func/ta_CORREL.c
 bf72e526c8ba9cbf93b68f079a9f61bc0db342cef14b18d0695754e5dd045f29  src/ta_func/ta_CDL2CROWS.c
 a3b63bdb63a828dc1504ded39e388816bdab85b0346564b71998adfca0b4ab12  src/ta_func/ta_CDL3BLACKCROWS.c
 018f6c7961f1a2775226728d7fcf882044185c69ce84e3464350bccdfd3cf28f  src/ta_func/ta_CDL3INSIDE.c
