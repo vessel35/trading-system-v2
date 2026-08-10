@@ -9,12 +9,11 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Protocol, cast
 
+from core_lib.candles import resample_confirmed_ohlcv
 from core_lib.ports import DataFeed
 from core_lib.types import Candle
 
 _LOGGER = logging.getLogger(__name__)
-_TIMEFRAME_PATTERN = re.compile(r"^(?P<count>[1-9]\d*)(?P<unit>[mhd])$")
-_TIMEFRAME_SECONDS = {"m": 60, "h": 3600, "d": 86400}
 _MINUTE = timedelta(minutes=1)
 # Exchange rates are fixed at the boundary; crypto_data may timestamp their
 # collection a few milliseconds later. The coordinator-approved normalization
@@ -95,26 +94,10 @@ class ReadConnection(Protocol):
         """Execute one parameterized SELECT."""
 
 
-def _timeframe_duration(timeframe: str) -> timedelta:
-    match = _TIMEFRAME_PATTERN.fullmatch(timeframe)
-    if match is None:
-        raise ValueError(f"unsupported timeframe: {timeframe!r}")
-    seconds = _TIMEFRAME_SECONDS[match.group("unit")] * int(match.group("count"))
-    if seconds % 60 != 0:
-        raise ValueError("backtest candles must be a whole number of minutes")
-    return timedelta(seconds=seconds)
-
-
 def _utc(value: datetime, *, name: str) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError(f"{name} must be timezone-aware")
     return value.astimezone(UTC)
-
-
-def _bucket_start(value: datetime, duration: timedelta) -> datetime:
-    seconds = int(duration.total_seconds())
-    epoch_seconds = int(_utc(value, name="candle time").timestamp())
-    return datetime.fromtimestamp(epoch_seconds - epoch_seconds % seconds, tz=UTC)
 
 
 def _decimal(value: object, *, name: str) -> Decimal:
@@ -197,7 +180,6 @@ class BacktestDataFeed(DataFeed):
     def candles(self, symbol: str, tf: str, up_to: datetime) -> list[Candle]:
         """Resample 1m source rows and expose only buckets closed by ``up_to``."""
         boundary = _utc(up_to, name="up_to")
-        duration = _timeframe_duration(tf)
         floor = self._history_floor
         resampled = self._candle_cache.get((symbol, tf, boundary, floor))
         if resampled is not None:
@@ -218,46 +200,15 @@ class BacktestDataFeed(DataFeed):
             self._candle_cache[(symbol, tf, boundary, floor)] = []
             return []
 
-        grouped: dict[datetime, dict[datetime, Sequence[object]]] = {}
-        for row in rows:
-            if len(row) != 8:
-                raise ValueError("ohlcv_futures SELECT returned an unexpected row shape")
-            open_time = row[0]
-            if not isinstance(open_time, datetime):
-                raise TypeError("ohlcv_futures.time must be datetime")
-            for index, name in (
-                (1, "open"),
-                (2, "high"),
-                (3, "low"),
-                (4, "close"),
-                (5, "volume"),
-            ):
-                _decimal(row[index], name=name)
-            normalized_time = _utc(open_time, name="ohlcv_futures.time")
-            group = grouped.setdefault(_bucket_start(normalized_time, duration), {})
-            if normalized_time in group:
-                raise ValueError("duplicate 1m source candle")
-            group[normalized_time] = row
-
-        first_bucket = min(grouped)
-        latest_complete_bucket = _bucket_start(boundary - duration, duration)
-        if latest_complete_bucket < first_bucket:
-            return []
-
-        result: list[Candle] = []
-        dropped = 0
-        expected_count = int(duration / _MINUTE)
-        current = first_bucket
-        while current <= latest_complete_bucket:
-            bucket = grouped.get(current, {})
-            expected_times = {current + index * _MINUTE for index in range(expected_count)}
-            if set(bucket) != expected_times:
-                dropped += 1
-                current += duration
-                continue
-            ordered = [bucket[at] for at in sorted(bucket)]
-            result.append(self._build_candle(symbol, tf, current, duration, ordered))
-            current += duration
+        resampling = resample_confirmed_ohlcv(
+            rows,
+            symbol=symbol,
+            exchange=self._exchange,
+            timeframe=tf,
+            boundary=boundary,
+        )
+        result = list(resampling.candles)
+        dropped = resampling.dropped_bucket_count
 
         if dropped:
             self._dropped_bucket_count += dropped

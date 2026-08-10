@@ -10,6 +10,7 @@ from .base import (
     StrategyRuntime,
     validate_strategy_result,
 )
+from .catalog_row import CATALOG_COLUMNS, catalog_row_entry
 from .config import (
     SCHEMA_VERSION,
     CrossValidator,
@@ -36,6 +37,7 @@ from .registry import (
 )
 
 __all__ = [
+    "CATALOG_COLUMNS",
     "SCHEMA_VERSION",
     "STRATEGY_ALLOWLIST",
     "AdapterClass",
@@ -59,6 +61,7 @@ __all__ = [
     "StrategyRuntime",
     "build_strategy_registry",
     "catalog_declaration_mismatch",
+    "catalog_row_entry",
     "reconcile_strategy_entry",
     "reconcile_strategy_registries",
     "strategy_identity_matches",

@@ -1,8 +1,40 @@
 """Guard shared standards against service-local reimplementation."""
 
 import ast
+import importlib
 import tomllib
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Protocol, cast
+
+import pytest
+from core_lib.ports import StrategyRegistry
+from core_lib.strategy import CATALOG_COLUMNS
+
+
+class _CatalogResult:
+    def __init__(self, row: Sequence[object]) -> None:
+        self._row = row
+
+    def fetchall(self) -> list[Sequence[object]]:
+        return [self._row]
+
+    def fetchone(self) -> Sequence[object]:
+        return self._row
+
+
+class _CatalogConnection:
+    def __init__(self, row: Sequence[object]) -> None:
+        self._row = row
+
+    def execute(self, query: str, params: tuple[object, ...]) -> _CatalogResult:
+        del params
+        assert "sentinel" in query
+        return _CatalogResult(self._row)
+
+
+class _RegistryFactory(Protocol):
+    def __call__(self, connection: _CatalogConnection) -> StrategyRegistry: ...
 
 
 def test_backtest_service_has_no_core_component_directories() -> None:
@@ -50,6 +82,90 @@ def test_services_do_not_copy_canonical_calculation_modules() -> None:
             if path.name in canonical_names:
                 copied.append(path.relative_to(repository_root).as_posix())
     assert copied == []
+
+
+def test_services_do_not_redeclare_the_strategy_catalog_row_contract() -> None:
+    """Keep the shared column list and row parser out of both service adapters."""
+    repository_root = Path(__file__).resolve().parents[3]
+    paths = (
+        repository_root
+        / "services"
+        / "backtest-service"
+        / "backtest_service"
+        / "adapters"
+        / "strategy_registry.py",
+        repository_root
+        / "services"
+        / "signal-service"
+        / "signal_service"
+        / "infrastructure"
+        / "strategy_registry.py",
+    )
+
+    for path in paths:
+        tree = ast.parse(path.read_text())
+        assigned_names = {
+            target.id
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.Assign, ast.AnnAssign))
+            for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
+            if isinstance(target, ast.Name)
+        }
+        function_names = {node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}
+        shared_imports = {
+            alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module == "core_lib.strategy"
+            for alias in node.names
+        }
+
+        assert "_COLUMNS" not in assigned_names
+        assert "CATALOG_COLUMNS" not in assigned_names
+        assert "_entry" not in function_names
+        assert "catalog_row_entry" not in function_names
+        assert {"CATALOG_COLUMNS", "catalog_row_entry"} <= shared_imports
+
+
+@pytest.mark.parametrize(
+    ("module_name", "class_name"),
+    [
+        (
+            "backtest_service.adapters.strategy_registry",
+            "BacktestStrategyRegistry",
+        ),
+        (
+            "signal_service.infrastructure.strategy_registry",
+            "SignalStrategyRegistry",
+        ),
+    ],
+)
+def test_shared_catalog_column_extension_reaches_both_service_adapters(
+    monkeypatch: pytest.MonkeyPatch,
+    module_name: str,
+    class_name: str,
+) -> None:
+    """Prove one shared column addition reaches each service query and row parser."""
+    strategy_module = importlib.import_module("core_lib.strategy")
+    catalog_row_module = importlib.import_module("core_lib.strategy.catalog_row")
+    registry_module = importlib.import_module(module_name)
+    extended_columns = (*CATALOG_COLUMNS, "sentinel")
+    values: dict[str, object] = {column: f"value:{column}" for column in extended_columns}
+    values["strategy_id"] = "probe"
+    values["required_indicators_json"] = []
+    values["default_params_json"] = {}
+    row = tuple(values[column] for column in extended_columns)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(catalog_row_module, "CATALOG_COLUMNS", extended_columns)
+        patch.setattr(strategy_module, "CATALOG_COLUMNS", extended_columns)
+        registry_module = importlib.reload(registry_module)
+        factory = cast(_RegistryFactory, getattr(registry_module, class_name))
+
+        entry = factory(_CatalogConnection(row)).get("probe")
+
+        assert entry["sentinel"] == "value:sentinel"
+
+    importlib.reload(registry_module)
 
 
 def test_core_lib_dependencies_follow_the_one_way_component_graph() -> None:

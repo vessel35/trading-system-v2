@@ -10,6 +10,7 @@ from decimal import Decimal
 
 import pytest
 from backtest_service.adapters import cost_model as cost_model_module
+from backtest_service.adapters import data_feed as data_feed_module
 from backtest_service.adapters.clock import BacktestClock
 from backtest_service.adapters.cost_model import BacktestCostModel
 from backtest_service.adapters.data_feed import BacktestDataFeed
@@ -18,6 +19,7 @@ from backtest_service.adapters.ohlcv_gaps import (
     decode_ohlcv_gap_contract,
 )
 from backtest_service.adapters.strategy_registry import BacktestStrategyRegistry
+from core_lib.candles import ResampledCandles
 from core_lib.costs import SlippageParams
 from core_lib.execution import normalize_order
 from core_lib.ports import Clock, CostModel, DataFeed, StrategyRegistry
@@ -132,6 +134,56 @@ def test_data_feed_discards_and_counts_absent_source_buckets(
     assert candles == []
     assert feed.dropped_bucket_count == 1
     assert "discarded 1 incomplete OHLCV bucket" in caplog.text
+
+
+def test_data_feed_delegates_resampling_to_the_shared_core_calculation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    rows: list[Sequence[object]] = [_minute_row(base, 100)]
+    expected = Candle(
+        symbol="BTCUSDT",
+        exchange="binance",
+        timeframe="5m",
+        open_time=base,
+        close_time=base + timedelta(minutes=5),
+        open=100.0,
+        high=102.0,
+        low=99.0,
+        close=101.0,
+        volume=1.0,
+        quote_volume=10.0,
+        trade_count=2,
+    )
+    calls: list[tuple[Sequence[Sequence[object]], str, str, str, datetime]] = []
+
+    def shared_resampler(
+        source_rows: Sequence[Sequence[object]],
+        *,
+        symbol: str,
+        exchange: str,
+        timeframe: str,
+        boundary: datetime,
+    ) -> ResampledCandles:
+        calls.append((source_rows, symbol, exchange, timeframe, boundary))
+        return ResampledCandles((expected,), 1)
+
+    monkeypatch.setattr(data_feed_module, "resample_confirmed_ohlcv", shared_resampler)
+    feed = BacktestDataFeed(StubConnection(lambda query, params: rows))
+
+    candles = feed.candles("BTCUSDT", "5m", base + timedelta(minutes=5))
+
+    assert candles == [expected]
+    assert feed.dropped_bucket_count == 1
+    assert calls == [
+        (
+            tuple(rows),
+            "BTCUSDT",
+            "binance",
+            "5m",
+            base + timedelta(minutes=5),
+        )
+    ]
 
 
 def test_gap_contract_classifies_partial_resample_and_is_compact() -> None:
