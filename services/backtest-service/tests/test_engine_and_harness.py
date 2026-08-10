@@ -28,6 +28,7 @@ from backtest_service.adapters.evidence_sink import BacktestEvidenceSink
 from backtest_service.config import RunConfig
 from backtest_service.engine import Engine, RunResult
 from backtest_service.harness import Harness
+from core_lib.capabilities import capability
 from core_lib.eval import MetricSet
 from core_lib.eval import thresholds as evaluation_thresholds
 from core_lib.indicators import DEFAULT_REGISTRY, IndicatorRegistry, IndicatorSpec
@@ -3450,6 +3451,24 @@ def test_multi_timeframe_series_aligns_without_future_values_and_records_its_sou
         assert source[2] == 0
         assert isinstance(source[3], str) and len(source[3]) == 64
         assert source[3] != unchanged_source_hash
+
+
+def test_engine_passes_exactly_the_six_declared_inputs(tmp_path: Path) -> None:
+    """Pin what a strategy is given, which is also what it can never see.
+
+    ``core_lib.capabilities`` records these six as the whole of a strategy's
+    input. There is no account state here and no record of earlier trades, which
+    is why a rule such as "at most five trades a day" cannot be written inside a
+    strategy.
+    """
+    _run_multi_timeframe_fixture(tmp_path / "inputs", changed_tail=False)
+    observed = list(_MultiTimeframeStrategy.observed_market_data)
+
+    assert observed
+    assert all(
+        set(item) == set(cast(tuple[str, ...], capability("run.strategy_inputs").value))
+        for item in observed
+    )
 
 
 def _paired_candles(
