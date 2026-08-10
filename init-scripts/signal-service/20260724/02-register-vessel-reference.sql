@@ -19,7 +19,7 @@ INSERT INTO public.strategy_registry (
 VALUES (
     'vessel-reference',
     'VesselReference',
-    'core_lib.strategy.adaptees.vessel_reference',
+    'trading_plugins.strategies.vessel_reference',
     'Vessel Reference',
     'EMA decision-only Vessel Adaptee with injected money-management policies.',
     '2.0.0',

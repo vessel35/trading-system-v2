@@ -162,26 +162,13 @@ def discover_money_management(
 
 
 def build_strategy_registry() -> InProcessStrategyRegistry:
-    """Compose the platform's built-in strategies with everything deployed here.
-
-    The built-ins stay registered in ``core_lib`` because moving them would shift
-    the shared library's release for a reason unrelated to it. A deployed file that
-    claims a built-in id is a conflict rather than an override, because silently
-    replacing a shipped strategy would change results with no trace.
-    """
-    from core_lib.strategy import build_strategy_registry as build_builtin_registry
-
-    registry = build_builtin_registry()
+    """Build a fresh registry from every strategy discovered in the fixed package."""
+    registry = InProcessStrategyRegistry()
     found, faults = discover_strategies()
     for fault in faults:
         _LOGGER.error("deployed strategy was not loaded: %s (%s)", fault.module, fault.reason)
     for strategy_id, adaptee_class in found.items():
-        try:
-            registry.register(strategy_id, adaptee_class)
-        except ValueError as error:
-            # A built-in already holds this id. Refusing keeps a shipped strategy
-            # from being replaced without a trace.
-            _LOGGER.error("deployed strategy %s was not registered: %s", strategy_id, error)
+        registry.register(strategy_id, adaptee_class)
     return registry
 
 

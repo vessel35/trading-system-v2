@@ -305,14 +305,15 @@ core-lib은 특정 DB에 묶이지 않는다. 이 방식은 현행 signal-servic
 트리는 현행 구조를 이어받으므로 채택 설계(§3.3·부록)에서 확정한다.
 
 짝은 대부분 1:1이지만 예외가 있다. `strategy/` 한 디렉터리가 컴포넌트 셋(StrategyAdapter·Adapter Manager·
-StrategyConfig)을 담고, `adapters/` 한 디렉터리가 어댑터 일곱을 담는다. 반대로 `adaptees/`는 참조 플러그인이 놓이는
-자리라 플랫폼 컴포넌트로 세지 않는다. 아래 표가 디렉터리와 §3 컴포넌트의 짝, 그리고 개수를 확정한다.
+StrategyConfig)을 담고, `adapters/` 한 디렉터리가 어댑터 일곱을 담는다. 구현 전략은 별도 배포 단위인
+`trading_plugins/strategies/`에 있어 플랫폼 컴포넌트로 세지 않는다. 아래 표가 디렉터리와 §3 컴포넌트의 짝,
+그리고 개수를 확정한다.
 
 | 경로                                                                                               | §3 컴포넌트                                     | 개수              |
 | ------------------------------------------------------------------------------------------------ | ------------------------------------------- | --------------- |
 | `core_lib/{types, indicators, patterns, series, money_management, sizing, costs, execution, ports, eval}` | 각 동명 컴포넌트 | 각 1 (합 10) |
 | `core_lib/strategy/` (`base`+`profile`+`trailing` / `manager`(+`registry`+`factory`) / `config`) | StrategyAdapter · Adapter Manager · StrategyConfig | 3               |
-| `core_lib/strategy/adaptees/`                                                                    | 참조 플러그인 전략                                  | 0 (플랫폼 컴포넌트 아님) |
+| `trading_plugins/strategies/`                                                                    | 배포 전략 구현                                      | 0 (플랫폼 컴포넌트 아님) |
 | **§3.1 core-lib 소계**                                                                             |                                             | **13**          |
 | `backtest_service/{engine, config, harness}`                                                     | Engine · ConfigLayer · Harness              | 각 1 (합 3)       |
 | `backtest_service/adapters/`                                                                     | 포트 어댑터(6 대표 + `strategy_registry`)          | 7               |
@@ -369,7 +370,6 @@ services/core-lib/
       specs/                         #   기본 TA-Lib PatternSpec 등록 목록
     strategy/                        # [컴포넌트×3] StrategyAdapter(base.py) + Adapter Manager(manager.py) + StrategyConfig(config.py)
       base.py                        #   규범 정책 StrategyAdapter(typing.Protocol) + 선택적 StrategyBase(추상 메서드 셋·읽기 전용 series_value, 상태 슬롯 없음)
-      allowlist.py                   #   STRATEGY_ALLOWLIST — 배포된 전략 클래스의 명시적 허용 목록 + 격리된 InProcessStrategyRegistry 생성
       registry.py                    #   in-process 플러그인(Adaptee) 등록·조회 규약 — Adapter Manager 소관; 외부 signal_db 구현 카탈로그와 별개(그건 ports/strategy_registry.py)
       reconciliation.py             #   외부 카탈로그와 허용 목록의 다섯 비정상 상태 맞춰 보기(정상 항목은 결과에서 제외)
       factory.py                     #   Adaptee 생성 규약 — Adapter Manager(manager.py) 소관
@@ -378,8 +378,6 @@ services/core-lib/
       profile.py                     #   전략 프로파일 스키마(family·기대 승률/손익비 범위·tail_shape·성숙도 등) — 전략 선택 정책 부속
       trailing/                      #   트레일링 예약 위치
         trailing_stop.py             #     현재 구현은 모듈 docstring뿐이며 계산 클래스·함수 없음
-      adaptees/                      #   구현 전략(Adaptee) 위치 — 코어 정책 거버넌스와 별도 관리되는 첫 검증 참조 플러그인(플랫폼 컴포넌트 아님); 진입·청산 엣지는 각 Adaptee 소유(범위 밖); strategy/allowlist.py가 in-process 레지스트리를 만들고, 외부 signal_db 카탈로그 접근은 Adapter Manager가 ports/strategy_registry.py로 수행
-        vessel_reference.py          #     EMA 9/21 진입·청산 DecisionIntent를 반환하는 VesselReference 2.0.0
     money_management/                # [컴포넌트] 결정을 보호가격·요청 수량·요청 leverage가 있는 계획으로 변환
       models.py                      #   PolicyIndicatorRequirement·MarketSnapshot·AccountRiskSnapshot·RiskLimits·MoneyManagementPlan
       policies.py                    #   MoneyManagementPolicy Protocol·ManualMoneyManagement·TurtleMoneyManagement·turtle_n_series
@@ -423,8 +421,7 @@ services/core-lib/
 이 트리가 표준 패키지 구조에 더한 파일은 두 갈래다. 한 갈래는 표준이 이름만 잡아 두었던 것을 실제 파일로 앉힌
 경우로, `strategy/manager.py`(Adapter Manager)와 `strategy/config.py`(StrategyConfig)가 여기 든다. 다른 갈래는 이
 상세 설계가 정책을 구체화하며 새로 더한 파일로, Decimal 단일 관문 `execution/normalizer.py`, 레지스트리 접근 포트
-`ports/strategy_registry.py`, 참조 플러그인 자리 `strategy/adaptees/`, 명시적 배포 경계
-`strategy/allowlist.py`, 카탈로그 맞춰 보기 경계 `strategy/reconciliation.py`, 재복제 가드 `tests/`가 그렇다. 둘 중 어느
+`ports/strategy_registry.py`, 카탈로그 맞춰 보기 경계 `strategy/reconciliation.py`, 재복제 가드 `tests/`가 그렇다. 둘 중 어느
 것도 표준을 덜어내지 않는다 — 표준의 정본 파일은 하나도 빠지지 않았다.
 
 아래 다이어그램은 `core_lib` 내부 모듈끼리의 의존만 본 것이다. 화살표는 "참조한다"는 뜻이고, 모두 한 방향이라
@@ -445,8 +442,9 @@ core_lib 안에서 값·타입으로 소비하므로 이 세 참조가 아래 �
 게다가 이 접근 포트는 Adaptee 카탈로그 식별자와 직렬화 metadata만 다루고 core 값 타입은 쓰지 않아, `types`로 가는
 엣지도 없다.
 
-셋째, `strategy/adaptees/`의 구현 전략은 이 그림에서 뺐다. 현재 `VesselReference`는 `strategy` 내부 정책과
-`types`만 참조하고 `ports`·`execution`·서비스 코드·DB 어댑터를 참조하지 않는다.
+셋째, `trading_plugins/strategies/`의 구현 전략은 별도 배포 단위라 이 그림에서 뺐다. 현재
+`VesselReference`는 `core_lib.strategy`와 `types`만 참조하고 `ports`·`execution`·서비스 코드·DB 어댑터를
+참조하지 않는다.
 
 각 클래스의 정책과 컴포넌트 인터페이스는 §3.1과 §4에서 확정한다.
 
@@ -559,7 +557,7 @@ services/backtest-service/
 
 `core-lib`는 세 실행 모드가 공유하는 도메인 표준의 유일한 구현처다. 열세 개 컴포넌트로 이뤄지며, 여기서 한 번
 정의해 모든 소비자가 참조한다. 아래 다이어그램이 열세 컴포넌트와 그 내부 의존 방향을 담는다 — `types`가 바닥이고,
-화살표는 "참조한다(의존)"를 뜻하며 역방향은 없다. `strategy/adaptees/`의 구현 전략(Adaptee)은 플랫폼 컴포넌트가
+화살표는 "참조한다(의존)"를 뜻하며 역방향은 없다. `trading_plugins/strategies/`의 구현 전략(Adaptee)은 플랫폼 컴포넌트가
 아니라 참조 플러그인이므로 이 뷰에 컴포넌트로 등장하지 않는다 — 플랫폼은 전략을 끼우는 정책(`StrategyAdapter`)만
 그린다. `ports`·`eval`은 아래로는 `types`만 참조한다. `eval`의 소비자는 서비스 계층(Engine 등)뿐이라 이 내부 뷰가 아니라
 §3.2·§3.3의 소비 화살표에 나타난다. 여섯 환경 포트 중 `DataFeed`·`Broker`·`Clock`·`EvidenceSink`·`CatalogStore`
@@ -626,22 +624,22 @@ flowchart TD
 | `patterns` | 캔들 패턴 계산 신원·증분 상태·네 출력 정책의 별도 등록처 | 공개: `PatternSpec`·`PatternState`·`PatternRegistry`·TA-Lib 어댑터. 하지 않음: 지표 레지스트리에 패턴을 섞지 않음; 워밍업 뒤 비일치는 `0.0`, 워밍업 전만 NaN; 확인을 과거 패턴 캔들에 소급하지 않음 | `patterns/`의 registry·outputs·primitives·talib_*·specs |
 | `series` | 지표와 패턴을 두 실행면이 한 경로로 소비하게 하는 최소 Protocol과 선택 해석 | 공개: `SeriesSpec`·`SeriesState`·`resolve_series_specs`·`series_specs_from_descriptors`·`series_key`. 하지 않음: `IndicatorSpec`과 `PatternSpec`의 계산 신원을 합치지 않음; `all`에서도 패턴 전체를 자동 활성화하지 않음 | `series/contracts.py`·`series_resolution.py` |
 | `money_management` | 전략 결정을 보호가격·요청 수량·요청 leverage가 있는 한계 지어진 계획으로 변환 | 공개: `MoneyManagementPolicy`·manual/turtle 정책·값 타입·`MoneyManagementFactory`. 하지 않음: 진입·청산 edge, 계좌 전체 승인, 주문 전송을 소유하지 않음 | `money_management/`의 models·policies·registry |
-| `StrategyAdapter` | 전략을 끼우는 규범 전략 선택 정책과 선택적 작성 기반 제공 | 공개: 규범인 `StrategyAdapter`(`typing.Protocol`)의 `get_metadata()`·`get_parameter_schema()`·`analyze(market_data, position?) → DecisionIntent | TradingSignal | None`; 이를 만족하는 선택적 `StrategyBase`의 같은 추상 메서드 셋과 `series_value(market_data, spec) → object`. 현재 `VesselReference`는 Protocol을 직접 만족하고 `DecisionIntent`를 반환하며 다른 legacy 전략의 `TradingSignal`은 호환 경계로 수용한다. 하지 않음: 기반 클래스 상속 강제, 데이터 읽기·저장·루프·계좌 조회·보호가격·수량·leverage 계산·주문 생성, 상태 보유 | `strategy/base.py`·`profile.py`·`adaptees/`·`trailing/`(예약) |
+| `StrategyAdapter` | 전략을 끼우는 규범 전략 선택 정책과 선택적 작성 기반 제공 | 공개: 규범인 `StrategyAdapter`(`typing.Protocol`)의 `get_metadata()`·`get_parameter_schema()`·`analyze(market_data, position?) → DecisionIntent | TradingSignal | None`; 이를 만족하는 선택적 `StrategyBase`의 같은 추상 메서드 셋과 `series_value(market_data, spec) → object`. 현재 `VesselReference`는 발견 조건 때문에 `StrategyBase`를 상속하고 `DecisionIntent`를 반환하며 다른 legacy 전략의 `TradingSignal`은 호환 경계로 수용한다. 하지 않음: 데이터 읽기·저장·루프·계좌 조회·보호가격·수량·leverage 계산·주문 생성, 상태 보유 | `strategy/base.py`·`profile.py`·`trailing/`(예약), 구현은 `trading_plugins/strategies/` |
 | `sizing` | 거래당 위험 규율과 사이징 인스턴스 | 공개: `risk_money.size(risk_per_trade, equity, stop_distance)`·`turtle_unit`·`wallet_pct.size`(호환)·`kelly.cap`·`exposure_limit`(단일 시장·상관군·단일 방향 위험 합 한도 검사). 하지 않음: 엣지 창조 없음(엣지는 진입 신호); `1R = |체결가 − 최초 보호 스탑| × 수량`이고 `1R ≤ 1%`; pct 경로는 보장 실패 시 비준수 플래그 의무 | `sizing/`의 risk_money·turtle_unit·wallet_pct·kelly·exposure_limit |
 | `costs` | net 손익 4개 비용 수식 표준(값은 주입) | 공개: `fee.calc`·`slippage.apply`·`funding.settle`·`liquidation.price/is_triggered`. 하지 않음: 비용 값 미보유(전량 `CostModel` 주입); 펀딩은 이산 정산(UTC 경계, 정산가 = 경계 포함 최소 가용 TF 캔들 시가); 청산은 Isolated 우선·보수 방향 | `costs/`의 fee·slippage·funding·liquidation |
 | `execution` | 주문 라이프사이클·결정적 체결·포지션 장부·회계 + Decimal 단일 변환 관문 | 공개: `order_lifecycle`(VALID_TRANSITIONS)·`matcher`(체결 규칙)·`position_book`·`accounting.recompute`·`normalizer`. 하지 않음: `cash + position = equity` 유지·비용 1회 차감; float→Decimal 단일 변환은 `normalizer` 한 곳에서만(모든 Broker 어댑터가 `submit()`에서 통과, 어댑터별 캐스팅 금지); `decision_ts < execution_ts` 강제 | `execution/`의 order_lifecycle·matcher·position_book·accounting·normalizer |
 | `ports` | 환경별 관심사의 어댑터 경계(전부 ABC, 구현은 서비스 주입) | 공개: 7 ABC — `DataFeed`·`Broker`·`Clock`·`CostModel`·`EvidenceSink`·`CatalogStore`·`StrategyRegistry`. 하지 않음: Protocol만 선언(`types`만 참조, `execution` 미참조); wall-clock·네트워크·파일 IO는 구현 어댑터 안에만; 특정 DB 직접 의존 없음(레지스트리도 주입 포트) | `ports/`의 7파일 |
 | `eval` | 성과 수식 표준 1곳 + 판정 3단계 | 공개: `metrics`·`integrity.check`·`hard_gate.judge`·`profile.check_envelope`·`decision.decide`·`thresholds`. 하지 않음: 판정 순서는 무결성 → Hard Gate → Decision 고정; 통과선은 한 곳 구현(수식·임계값 수치는 §4가 확정); 프로파일은 established 회귀만 reject | `eval/`의 metrics·integrity·hard_gate·decision·thresholds·profile |
-| `Adapter Manager` | Adaptee 생성(Factory)·lifecycle·배포 허용 목록·외부 카탈로그 맞춰 보기와 정책 runtime 조합 | 공개: `STRATEGY_ALLOWLIST`·`build_strategy_registry() → InProcessStrategyRegistry`·`create(strategy_id, raw_config) → StrategyAdapter`·`create_runtime(strategy_id, raw_config, money_management_config) → StrategyRuntime`·`reconcile_catalog() → tuple[StrategyReconciliation, ...]`·lifecycle·`registry.list()/register()`. 정책 id 지원 여부와 turtle의 signal-exit capability를 검사한다. 하지 않음: 카탈로그 `module_path`의 동적 import, 전략 결정·정책 수식·파라미터 검증 로직 미보유 | `strategy/allowlist.py`·`manager.py`·`registry.py`·`reconciliation.py`·`factory.py` |
+| `Adapter Manager` | Adaptee 생성(Factory)·lifecycle·외부 카탈로그 맞춰 보기와 정책 runtime 조합 | 공개: `create(strategy_id, raw_config) → StrategyAdapter`·`create_runtime(strategy_id, raw_config, money_management_config) → StrategyRuntime`·`reconcile_catalog() → tuple[StrategyReconciliation, ...]`·lifecycle·`registry.list()/register()`. `trading_plugins`가 발견 결과로 만든 `InProcessStrategyRegistry`를 주입받고, 정책 id 지원 여부와 turtle의 signal-exit capability를 검사한다. 하지 않음: 카탈로그 `module_path`의 동적 import, 전략 결정·정책 수식·파라미터 검증 로직 미보유 | `strategy/manager.py`·`registry.py`·`reconciliation.py`·`factory.py` |
 | `StrategyConfig` | 전략 파라미터 config의 해석·검증·직렬화·스키마 노출 | 공개: `resolve(schema, raw_config) → ResolvedConfig`·`json_schema(schema)`·`serialize/version`(스키마를 값으로 받아 무순환; 정확한 시그니처는 §4.2). 하지 않음: 스키마 선언은 Adaptee 소유(여기서 재정의 금지); 값은 호출자 소유(소스 미보유); 파라미터 스윕·실행 설정은 범위 밖(`ConfigLayer`) | `strategy/config.py` |
 
 유보한 것과 표준에 더한 파일만 따로 정리한다.
 
-- **현재 참조 Adaptee.** `strategy/adaptees/vessel_reference.py`의 `VesselReference`가 EMA 9와 EMA 21로 진입·청산
+- **현재 참조 Adaptee.** `trading_plugins/strategies/vessel_reference.py`의 `VesselReference`가 EMA 9와 EMA 21로 진입·청산
   edge만 판단하고 `DecisionIntent`를 반환한다. ATR 보호가격과 수량 및 leverage는 전략이 아니라 정책이 만든다.
-- **배포 허용 목록.** `strategy/allowlist.py`가 배포된 전략 id와 클래스를 명시하고 호출마다 격리된 in-process
-  레지스트리를 만든다. 현재 backtest-service와 signal-service가 이 생성 함수를 사용한다.
-- **카탈로그 맞춰 보기.** `strategy/reconciliation.py`가 외부 운영 카탈로그 전체와 배포 허용 목록 전체를 비교해
+- **배포 발견.** `trading_plugins.discovery`가 고정된 전략 패키지를 훑고 호출마다 발견 결과만 담은 격리된
+  in-process 레지스트리를 만든다. 세 소비 서비스가 이 생성 함수를 사용한다.
+- **카탈로그 맞춰 보기.** `strategy/reconciliation.py`가 외부 운영 카탈로그 전체와 배포 레지스트리 전체를 비교해
   다섯 비정상 상태만 반환한다. 상태와 우선순위는 §4.2.1이 클래스와 함께 확정한다.
 - **트레일링 예약 상태.** `strategy/trailing/trailing_stop.py`에는 예약 위치를 알리는 docstring만 있고 계산 클래스나
   함수가 없다. 열거형에 trailing 값은 있으나 matcher가 명시적으로 거부하므로 실행 가능한 기능이 아니다.
@@ -1985,9 +1983,9 @@ classDiagram
         +reconcile_catalog() tuple~StrategyReconciliation,...~
         +register(strategy_id: str, meta: dict) None
     }
-    class StrategyAllowlist["strategy.allowlist"] {
+    class StrategyDiscovery["trading_plugins.discovery"] {
         <<module>>
-        +STRATEGY_ALLOWLIST Mapping~str,AdapterClass~
+        +discover_strategies() Mapping~str,AdapterClass~
         +build_strategy_registry() InProcessStrategyRegistry
     }
     class InProcessStrategyRegistry {
@@ -2065,10 +2063,10 @@ classDiagram
     }
     StrategyBase ..|> StrategyAdapter : optional realization
     StrategyBase ..> SeriesSpec : read by execution key
-    VesselReference ..|> StrategyAdapter
+    VesselReference --|> StrategyBase
     VesselReference --> ResolvedConfig
-    StrategyAllowlist --> VesselReference : explicitly deploys
-    StrategyAllowlist ..> InProcessStrategyRegistry : builds fresh
+    StrategyDiscovery --> VesselReference : discovers by package scan
+    StrategyDiscovery ..> InProcessStrategyRegistry : builds fresh
     StrategyAdapter --> DecisionIntent
     StrategyAdapter --> TradingSignal
     StrategyMetadata *-- StrategyProfile
@@ -2156,22 +2154,22 @@ classDiagram
   저장 설정 호환 때문에 `atr_stop_multiple`·`reward_risk`·`leverage`가 현재 `ParameterSchema`에 임시로 남지만
   `analyze`가 이 값으로 보호가격이나 수량을 만들지는 않는다.
 
-#### 배포 허용 목록과 in-process 레지스트리
+#### 배포 발견과 in-process 레지스트리
 
-- **개요** — `strategy.allowlist`가 현재 배포 산출물에 포함한 전략 클래스의 명시적 허용 목록
-  `STRATEGY_ALLOWLIST`와 `build_strategy_registry()`를 소유한다.
-- **책임** — 현재 `vessel-reference`와 `VesselReference`의 대응을 변경 불가 `MappingProxyType`으로 노출하고,
-  호출할 때마다 새 `InProcessStrategyRegistry`에 허용 항목을 등록해 반환한다. backtest-service와 signal-service는
-  각자 손으로 등록하지 않고 이 생성 함수를 사용하므로 전역 가변 레지스트리를 공유하지 않는다.
+- **개요** — `trading_plugins.discovery`가 고정된 `trading_plugins.strategies` 패키지를 훑어
+  `StrategyBase`를 상속하고 자기 `STRATEGY_ID`를 선언한 클래스를 찾는다.
+- **책임** — 발견한 전략 id와 클래스의 대응을 호출마다 새 `InProcessStrategyRegistry`에 등록해 반환한다.
+  backtest-service와 signal-service와 web-api는 각자 손으로 등록하지 않고 이 생성 함수를 사용하므로 전역
+  가변 레지스트리를 공유하지 않는다.
 - **상속관계** — 없음(모듈 함수와 값).
-- **필드** — `STRATEGY_ALLOWLIST: Final[Mapping[str, AdapterClass]]` 한 개다.
+- **필드** — 발견할 패키지 하나를 코드에 고정한다.
 - **메서드**
-    - `build_strategy_registry()` : 허용된 클래스를 담은 새 `InProcessStrategyRegistry`를 반환한다.
+    - `discover_strategies()` : 패키지에서 발견한 클래스와 격리된 오류를 반환한다.
+    - `build_strategy_registry()` : 발견한 클래스를 담은 새 `InProcessStrategyRegistry`를 반환한다.
 - **불변식** — 외부 카탈로그 행의 `module_path`를 그대로 import하지 않는다. 그렇게 하면 카탈로그에 행을 쓸 수
   있는 사람이 서비스 프로세스에서 임의 코드를 실행할 수 있기 때문이다. 카탈로그는 운영 데이터이지 코드 배포
-  수단이 아니며, 실행 가능한 클래스는 배포된 허용 목록에서만 온다. 현재 이 조립을 쓰는 곳은 backtest-service와
-  signal-service이며, web-api는 여전히 `VesselReference`를 직접 참조한다. 전략 구현체의 위치도 계속
-  `core_lib.strategy.adaptees`다.
+  수단이 아니며, 실행 가능한 클래스는 고정된 배포 패키지의 발견 결과에서만 온다. 세 소비 서비스가 같은 조립을
+  쓰며 전략 구현체는 `trading_plugins.strategies`에 있다.
 
 #### 카탈로그와 허용 목록 맞춰 보기
 

@@ -54,8 +54,6 @@ from core_lib.strategy import (
     StrategyMetadata,
     StrategyProfile,
 )
-from core_lib.strategy.adaptees import STRATEGY_ID as VESSEL_STRATEGY_ID
-from core_lib.strategy.adaptees import VesselReference
 from core_lib.types import (
     Candle,
     DecisionAction,
@@ -67,6 +65,8 @@ from core_lib.types import (
     PositionSide,
     TradingSignal,
 )
+from trading_plugins.strategies.vessel_reference import STRATEGY_ID as VESSEL_STRATEGY_ID
+from trading_plugins.strategies.vessel_reference import VesselReference
 
 _BASE = datetime(2026, 1, 1, 1, tzinfo=UTC)
 
@@ -722,10 +722,33 @@ class _VesselCatalog(StrategyRegistry):
         raise PermissionError("read-only fixture")
 
 
+class _LegacyModulePathVesselCatalog(_VesselCatalog):
+    def get(self, strategy_id: str) -> dict[str, object]:
+        return {
+            **super().get(strategy_id),
+            "module_path": "core_lib.strategy.adaptees.vessel_reference",
+        }
+
+
 def _vessel_manager() -> AdapterManager:
     plugins = InProcessStrategyRegistry()
     plugins.register(VESSEL_STRATEGY_ID, VesselReference)
     return AdapterManager(_VesselCatalog(), plugins)
+
+
+def test_vessel_registration_with_the_old_module_path_is_rejected() -> None:
+    plugins = InProcessStrategyRegistry()
+    plugins.register(VESSEL_STRATEGY_ID, VesselReference)
+    manager = AdapterManager(_LegacyModulePathVesselCatalog(), plugins)
+
+    with pytest.raises(
+        ValueError,
+        match="external catalog module_path does not match in-process Adaptee",
+    ):
+        manager.create(
+            VESSEL_STRATEGY_ID,
+            {"strategy_id": VESSEL_STRATEGY_ID, "params": {}},
+        )
 
 
 def _vessel_candles() -> list[Candle]:
@@ -1674,6 +1697,38 @@ def test_vessel_reference_end_to_end_dry_run_is_complete_and_deterministic(
         )
         assert detail["status"] == "matched"
         assert detail["comparison_run_id"] == first.run_id
+
+
+def test_vessel_reference_entry_and_exit_timing_and_direction_are_characterized(
+    tmp_path: Path,
+) -> None:
+    result = _vessel_engine(tmp_path, _Catalog()).run(_vessel_config())
+
+    with sqlite3.connect(result.evidence_path) as connection:
+        decisions = connection.execute(
+            """
+            SELECT decision_ts, action, intended_side, planned_execution_ts
+            FROM DECISION
+            ORDER BY decision_id
+            """
+        ).fetchall()
+        executions = connection.execute(
+            """
+            SELECT execution_ts, side, position_side, reduce_only, exit_reason
+            FROM EXECUTION
+            ORDER BY execution_id
+            """
+        ).fetchall()
+
+    assert decisions == [
+        (1767232800000, "enter", "LONG", 1767232800001),
+        (1767247200000, "exit", "LONG", 1767250800000),
+        (1767250800000, "skip", None, None),
+    ]
+    assert executions == [
+        (1767232800001, "BUY", "LONG", 0, None),
+        (1767250800000, "SELL", "LONG", 1, "TAKE_PROFIT"),
+    ]
 
 
 def test_vessel_turtle_uses_only_prior_finalized_daily_n_and_records_plan(

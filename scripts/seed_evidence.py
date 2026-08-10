@@ -11,7 +11,7 @@ from pathlib import Path
 
 from backtest_service.config import RunConfig
 from backtest_service.runner import run_backtest
-from core_lib.strategy.adaptees import STRATEGY_ID
+from trading_plugins.strategies.vessel_reference import STRATEGY_ID
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 

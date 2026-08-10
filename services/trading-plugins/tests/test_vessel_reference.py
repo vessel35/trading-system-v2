@@ -4,7 +4,6 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from core_lib.strategy import StrategyAdapter, StrategyConfig, StrategyDecisionContract
-from core_lib.strategy.adaptees import STRATEGY_ID, VesselReference
 from core_lib.types import (
     Candle,
     DecisionAction,
@@ -14,6 +13,7 @@ from core_lib.types import (
     Position,
     PositionSide,
 )
+from trading_plugins.strategies.vessel_reference import STRATEGY_ID, VesselReference
 
 
 def _candle() -> Candle:

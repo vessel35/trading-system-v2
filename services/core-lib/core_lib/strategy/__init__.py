@@ -1,6 +1,5 @@
 """Define strategy contracts, configuration, profiles, and lifecycle."""
 
-from .allowlist import STRATEGY_ALLOWLIST, build_strategy_registry
 from .base import (
     MoneyManagementSupport,
     StrategyAdapter,
@@ -39,7 +38,6 @@ from .registry import (
 __all__ = [
     "CATALOG_COLUMNS",
     "SCHEMA_VERSION",
-    "STRATEGY_ALLOWLIST",
     "AdapterClass",
     "AdapterFactory",
     "AdapterManager",
@@ -59,7 +57,6 @@ __all__ = [
     "StrategyReconciliation",
     "StrategyReconciliationState",
     "StrategyRuntime",
-    "build_strategy_registry",
     "catalog_declaration_mismatch",
     "catalog_row_entry",
     "reconcile_strategy_entry",

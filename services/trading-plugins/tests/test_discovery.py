@@ -126,8 +126,12 @@ def test_placing_a_strategy_file_is_enough_to_deploy_it(plugin_dir: ModuleType) 
     )
 
 
-def test_built_in_strategies_stay_registered_alongside_deployed_ones() -> None:
-    assert "vessel-reference" in discovery.build_strategy_registry().list()
+def test_strategy_package_contents_are_registered_without_a_built_in_registry() -> None:
+    found, faults = discovery.discover_strategies()
+
+    assert faults == ()
+    assert discovery.build_strategy_registry().list() == sorted(found)
+    assert "vessel-reference" in found
 
 
 def test_an_id_that_is_only_inherited_does_not_count_as_declared(
@@ -176,8 +180,19 @@ def test_one_unloadable_file_does_not_hide_the_others(plugin_dir: ModuleType) ->
     assert [fault.module for fault in faults] == [f"{plugin_dir.__name__}.explodes"]
 
 
-def test_a_broken_plugin_leaves_the_built_in_strategies_usable() -> None:
-    assert "vessel-reference" in discovery.build_strategy_registry().list()
+def test_a_broken_file_does_not_hide_other_discovered_strategies(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    found, faults = discovery.discover_strategies()
+    monkeypatch.setattr(
+        discovery,
+        "discover_strategies",
+        lambda: (found, (*faults, discovery.PluginFault("broken", "failed"))),
+    )
+
+    assert discovery.build_strategy_registry().list() == sorted(found)
+    assert "deployed strategy was not loaded: broken (failed)" in caplog.text
 
 
 _POLICY_BODY = """

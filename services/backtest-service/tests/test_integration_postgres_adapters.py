@@ -40,9 +40,9 @@ from core_lib.strategy import (
     StrategyMetadata,
     StrategyProfile,
 )
-from core_lib.strategy.adaptees import STRATEGY_ID as VESSEL_STRATEGY_ID
-from core_lib.strategy.adaptees import VesselReference
 from core_lib.types import Candle, MarketType, Position, PositionSide, TradingSignal
+from trading_plugins.strategies.vessel_reference import STRATEGY_ID as VESSEL_STRATEGY_ID
+from trading_plugins.strategies.vessel_reference import VesselReference
 
 pytestmark = pytest.mark.integration
 

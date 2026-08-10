@@ -24,11 +24,9 @@ from core_lib.strategy import (
     ParameterSchema,
     StrategyMetadata,
 )
-from core_lib.strategy import (
-    build_strategy_registry as build_builtin_strategy_registry,
-)
-from core_lib.strategy.adaptees import VesselReference
 from fastapi.testclient import TestClient
+from trading_plugins import build_strategy_registry
+from trading_plugins.strategies.vessel_reference import VesselReference
 from web_api.database import SignalConnection, signal_connection
 from web_api.main import app
 from web_api.models import StrategyOption
@@ -453,7 +451,7 @@ def test_a_row_missing_from_the_common_registry_keeps_row_values_and_empty_polic
 
 
 def test_code_fallback_lists_every_strategy_in_the_common_registry() -> None:
-    registry = build_builtin_strategy_registry()
+    registry = build_strategy_registry()
     registry.register("deployed-strategy", _DeployedStrategy)
     connection = cast(SignalConnection, _MissingTableConnection())
 
@@ -473,7 +471,7 @@ def test_the_app_builds_the_common_strategy_registry_once_for_multiple_requests(
     def counted_registry() -> InProcessStrategyRegistry:
         nonlocal calls
         calls += 1
-        return build_builtin_strategy_registry()
+        return build_strategy_registry()
 
     monkeypatch.setattr("web_api.main.build_strategy_registry", counted_registry)
     app.dependency_overrides[signal_connection] = lambda: cast(
@@ -491,7 +489,7 @@ def test_the_app_builds_the_common_strategy_registry_once_for_multiple_requests(
 
 def test_strategy_repository_falls_back_to_code_registry() -> None:
     connection = cast(SignalConnection, _MissingTableConnection())
-    response = StrategyRepository(connection, build_builtin_strategy_registry()).list()
+    response = StrategyRepository(connection, build_strategy_registry()).list()
     assert len(response.data) == 1
     strategy = response.data[0]
     assert strategy.strategy_id == "vessel-reference"
@@ -517,7 +515,7 @@ def test_the_strategy_list_does_not_restrict_the_money_management_modes() -> Non
 def test_a_mode_default_comes_from_the_policy_rather_than_a_manual_shaped_dict() -> None:
     """The prefilled settings used to be manual's fields regardless of the mode."""
     connection = cast(SignalConnection, _MissingTableConnection())
-    strategy = StrategyRepository(connection, build_builtin_strategy_registry()).list().data[0]
+    strategy = StrategyRepository(connection, build_strategy_registry()).list().data[0]
 
     assert strategy.default_money_management == dict(
         MoneyManagementFactory.create({"mode": "manual"}).resolved_config()

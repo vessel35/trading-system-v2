@@ -5,6 +5,16 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from core_lib.series import series_key_of
+from core_lib.strategy import (
+    FieldSpec,
+    MoneyManagementSupport,
+    ParameterSchema,
+    ResolvedConfig,
+    StrategyBase,
+    StrategyDecisionContract,
+    StrategyMetadata,
+    StrategyProfile,
+)
 from core_lib.types import (
     Candle,
     DecisionAction,
@@ -14,19 +24,16 @@ from core_lib.types import (
     PositionSide,
 )
 
-from ..base import MoneyManagementSupport, StrategyDecisionContract, StrategyMetadata
-from ..config import FieldSpec, ParameterSchema, ResolvedConfig
-from ..profile import StrategyProfile
-
 STRATEGY_ID = "vessel-reference"
 
 _FAST_EMA_PARAMS = {"period": 9}
 _SLOW_EMA_PARAMS = {"period": 21}
 
 
-class VesselReference:
+class VesselReference(StrategyBase):
     """Own only the EMA entry/exit edge; runtime policies own money management."""
 
+    STRATEGY_ID = STRATEGY_ID
     VERSION = "2.0.0"
 
     def __init__(self, config: ResolvedConfig) -> None:

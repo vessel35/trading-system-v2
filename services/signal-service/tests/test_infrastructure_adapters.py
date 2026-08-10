@@ -90,7 +90,7 @@ def _vessel_registry_row() -> tuple[object, ...]:
     return (
         "vessel-reference",
         "VesselReference",
-        "core_lib.strategy.adaptees.vessel_reference",
+        "trading_plugins.strategies.vessel_reference",
         "Vessel Reference",
         None,
         "1.0.0",

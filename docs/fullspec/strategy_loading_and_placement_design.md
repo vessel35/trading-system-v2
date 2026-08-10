@@ -1,6 +1,7 @@
 # 전략 적재 경로와 전략 구현체 배치 설계
 
-이 문서는 전략 적재와 카탈로그 맞춰 보기의 최종 설계이며, 기반 클래스와 허용 목록과 맞춰 보기는 구현되었지만 화면 연계와 전략 구현체의 별도 패키지 이동은 아직 끝나지 않았다.
+이 문서는 전략 적재와 카탈로그 맞춰 보기의 설계다. 화면 연계와 별도 패키지 이동은 이후 변경에서
+완료되었으며, 현재 배치 결정은 `strategy_implementation_placement_design.md`가 소유한다.
 
 ## 1. 목적과 범위
 
@@ -19,13 +20,12 @@ legacy `TradingSignal`도 계속 허용한다. 이 설계의 적재 경로는 �
 등록처이지 코드 배포 수단이 아니다. 카탈로그 행을 쓸 수 있는 주체가 임의의 모듈을 실행하게
 해서는 안 된다.
 
-배포 가능한 전략 클래스는 명시적인 `STRATEGY_ALLOWLIST`에 둔다. 허용 목록은 전략 id와 이미
-import된 클래스 객체를 잇고, 각 소비자는 `build_strategy_registry()`로 격리된
-`InProcessStrategyRegistry`를 만든다. 현재 backtest-service와 signal-service는 이 경로를
-사용한다.
+배포 가능한 전략 클래스는 코드에 고정된 `trading_plugins.strategies` 패키지에 둔다. 발견기는
+그 패키지만 훑고 각 소비자는 `build_strategy_registry()`로 격리된
+`InProcessStrategyRegistry`를 만든다. 세 소비 서비스가 이 경로를 사용한다.
 
 적재 조립은 서비스를 실행하는 쪽이 소유한다. `core_lib`은 `StrategyRegistry` 포트, in-process
-레지스트리, `AdapterManager`, 허용 목록과 맞춰 보기 규칙을 제공하지만 외부 카탈로그가 지시한
+레지스트리, `AdapterManager`와 맞춰 보기 규칙을 제공하지만 외부 카탈로그가 지시한
 코드를 동적으로 가져오지 않는다.
 
 ## 3. 단건 생성과 전체 맞춰 보기
@@ -63,18 +63,18 @@ in-process 레지스트리에서 허용된 클래스를 찾은 뒤 다음 사실
 선언한 지표와 패턴 값을 공통 `series_key()`로 읽는 `series_value()`를 제공한다. 상태 슬롯은
 두지 않는다. 계좌 조회, 보호가격, 수량, leverage, 주문 생성과 입출력도 제공하지 않는다.
 
-현재 `VesselReference`는 기반 클래스를 상속하지 않고 `StrategyAdapter`를 구조적으로 만족한다.
-그러므로 기반 클래스 도입은 기존 전략의 동작이나 상속 구조를 바꾸지 않는다.
+`VesselReference`는 별도 배치 변경에서 기반 클래스를 상속하도록 바뀌었다. 발견기가
+`StrategyBase` 상속과 클래스 자신의 `STRATEGY_ID` 선언을 요구하므로, 이 상속은 전략 판단을
+바꾸지 않고 파일 발견 조건을 만족시킨다.
 
 ## 5. 등록 산출물과 읽기 전용 운영 경계
 
 신규 전략 changeset은 다음 산출물을 함께 가져야 한다.
 
-1. 전략 구현과 메타데이터를 추가한다.
-2. 같은 전략 id와 클래스를 `STRATEGY_ALLOWLIST`에 추가한다.
-3. 카탈로그의 모든 필드를 채운 판이 매겨진 멱등 SQL 등록 행을 추가한다.
-4. 코드 선언과 등록 행을 사전에 대조하는 검사를 추가한다.
-5. backtest-service와 signal-service가 같은 허용 목록으로 그 전략을 생성하는지 확인한다.
+1. 전략 구현과 메타데이터를 `trading_plugins/strategies/`에 추가한다.
+2. 카탈로그의 모든 필드를 채운 판이 매겨진 멱등 SQL 등록 행을 추가한다.
+3. 코드 선언과 등록 행을 사전에 대조하는 검사를 추가한다.
+4. 세 소비 서비스가 같은 발견 레지스트리로 그 전략을 생성하는지 확인한다.
 
 서비스의 런타임 카탈로그 어댑터는 읽기 전용으로 유지한다. 등록 SQL을 changeset에 포함하는
 것과 운영 중 임의 쓰기 API를 허용하는 것은 다른 문제다. 이 설계는 운영 등록 API를 만들지
@@ -107,24 +107,14 @@ Web API는 허용 목록과 카탈로그 맞춰 보기 결과를 사용해 다�
 
 ## 7. 전략 구현체의 배치
 
-현재 전략 구현체는 `services/core-lib/core_lib/strategy/adaptees/`에 있다. 안정적인 플랫폼
-정책과 계속 늘어나는 전략 구현체를 다른 배포 단위로 나누는 책임 경계에는 이점이 있지만,
-별도 패키지로 옮길지는 아직 사용자 판단이 남아 있다.
+배치 판단은 `docs/fullspec/strategy_implementation_placement_design.md`에서 닫혔다.
+`VesselReference`와 앞으로 추가할 Adaptee는
+`services/trading-plugins/trading_plugins/strategies/`에 두고, `StrategyAdapter`, 설정 해석,
+in-process 레지스트리, `AdapterManager`, 프로파일과 카탈로그 포트는 `core_lib`에 남긴다.
 
-별도 패키지를 선택하면 `StrategyAdapter`, 설정 해석, in-process 레지스트리,
-`AdapterManager`, 프로파일과 카탈로그 포트는 `core_lib`에 남고, `VesselReference`와 앞으로
-추가할 Adaptee만 새 패키지로 이동한다. 이동은 전략의 판단이나 자금관리 결과를 바꾸지 않아야
-한다.
-
-이동 비용은 실제로 넓다. 새 패키지 메타데이터와 타입 표식, 공개 export, 구현체의 상대 import,
-세 소비자의 의존 선언과 editable 경로, 저장소 설치 목록, CI의 mypy 대상과 테스트 소유권을
-함께 바꿔야 한다. `core-lib==0.2.0`을 선언하는 서비스는 backtest-service, signal-service,
-web-api와 wallet-service의 네 곳이지만 전략 패키지를 직접 소비할 곳은 앞의 세 곳이다.
-
-현재 저장소에는 패키지를 게시하는 CI가 없고 개발 의존성은 로컬 editable 경로로 연결된다.
-따라서 별도 패키지의 판을 독립적으로 올리면 배포 마찰이 줄어든다는 이점은 아직 입증되지
-않았다. 패키지 이동을 선택하기 전에 정확한 판 고정과 호환 범위 가운데 어느 의존 정책을 쓸지
-확정해야 한다.
+세 소비 서비스가 이미 `trading-plugins`를 의존하고 발견 레지스트리를 조립하므로 새 패키지나
+의존을 더할 필요는 없었다. 이동은 전략 판단과 parameter와 Evidence를 바꾸지 않는 별도
+changeset으로 수행한다.
 
 ## 8. 구현 순서
 
@@ -136,18 +126,17 @@ web-api와 wallet-service의 네 곳이지만 전략 패키지를 직접 소비�
 1. Web API가 직접 `VesselReference`를 참조하는 경로를 허용 목록과 맞춰 보기 결과로 바꾼다.
 2. 실행 가능 여부와 사유를 API와 화면과 생성 타입에 반영한다.
 3. 신규 전략 등록 절차와 읽기 전용 사전 점검을 완성한다.
-4. 전략 구현체의 별도 패키지 이동은 사용자 결정과 의존 정책 확정 뒤에 별도 changeset으로
-   수행한다.
+4. 전략 구현체를 `trading-plugins`의 발견 패키지로 옮기고 손으로 적은 허용 목록을 없앤다.
 
 전략 edge 변경, 자금관리와 실행 리팩터링은 이 순서에 섞지 않는다. manual 호환 정책과 기존
 기본값도 그대로 보존한다.
 
 ## 9. 완료 기준
 
-- 두 실행 서비스와 Web API가 같은 허용 목록을 사용해야 한다.
+- 두 실행 서비스와 Web API가 같은 발견 레지스트리를 사용해야 한다.
 - 카탈로그의 `module_path`를 동적으로 import하는 경로가 없어야 한다.
 - 다섯 맞춰 보기 상태가 API와 화면에서 서로 다른 실행 가능 상태로 드러나야 한다.
-- 신규 전략의 코드, 허용 목록과 등록 SQL이 같은 changeset에 있어야 한다.
+- 신규 전략의 코드와 등록 SQL이 같은 changeset에 있어야 한다.
 - 등록과 코드의 신원 및 선언 불일치가 실행 전에 검출되어야 한다.
 - 구현체를 이동하기로 했다면 의존 선언, 설치 목록, 타입 검사와 테스트 소유권까지 함께
   이동해야 한다.

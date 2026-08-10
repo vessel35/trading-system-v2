@@ -23,9 +23,9 @@ from core_lib.money_management import (
     PolicyIndicatorRequirement,
     RiskLimits,
 )
-from core_lib.strategy import build_strategy_registry
 from core_lib.types import DecisionIntent
 from pydantic import BaseModel, TypeAdapter, field_validator, model_serializer
+from trading_plugins import build_strategy_registry
 from web_api.database import SignalConnection
 
 _HOOKS = {
