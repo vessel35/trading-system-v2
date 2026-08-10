@@ -1998,7 +1998,7 @@ def test_indicator_mode_changes_selection_and_longest_history_owns_warmup(
         _engine(tmp_path / "insufficient", catalog, brokers).run(insufficient)
 
     all_indicators = RunConfig.model_validate({**_config().model_dump(), "indicator_mode": "all"})
-    with pytest.raises(ValueError, match="requires 200"):
+    with pytest.raises(ValueError, match="reference_symbol is required"):
         _engine(tmp_path / "all", catalog, brokers).run(all_indicators)
 
 

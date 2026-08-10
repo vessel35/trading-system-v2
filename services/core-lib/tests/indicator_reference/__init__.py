@@ -31,7 +31,7 @@ disagree, and the documented disagreements are seed-window conventions the stand
 itself describes rather than errors in either implementation.
 
 Each category owns one module here, so two people adding indicators to different
-categories never edit the same file. This module merges the seven and is the only place
+categories never edit the same file. This module merges the eight and is the only place
 that names them. Leaving a category out of the merge takes both of its statements with
 it, and the tests refuse to pass on the shorter list: the registry comparison sees a
 registered combination nobody expected, and the outside comparison sees a registered
@@ -43,7 +43,16 @@ from types import MappingProxyType
 from typing import NamedTuple, Protocol
 
 from . import cycle, momentum, statistics, strength, systems, trend, volatility, volume
-from .series import CONVERGENCE_NOISE_FLOOR, SAMPLE_INDICES, reference_candles
+from .series import (
+    CONVERGENCE_NOISE_FLOOR,
+    RANDOM_BAR_COUNT,
+    RANDOM_SEEDS,
+    SAMPLE_INDICES,
+    paired_random_candles,
+    paired_reference_candles,
+    random_candles,
+    reference_candles,
+)
 
 __all__ = [
     "CATEGORY_DATA",
@@ -51,12 +60,17 @@ __all__ = [
     "CONVERGING",
     "COVERED_CATEGORIES",
     "REFERENCE",
+    "RANDOM_BAR_COUNT",
+    "RANDOM_SEEDS",
     "REGISTERED_IDENTIFIERS",
     "REGISTERED_NAMES",
     "REGISTERED_STANDARD_SYSTEMS",
     "SAMPLE_INDICES",
     "UNCOMPARED",
     "UNDEFINED_OUTPUTS",
+    "paired_random_candles",
+    "paired_reference_candles",
+    "random_candles",
     "reference_candles",
 ]
 

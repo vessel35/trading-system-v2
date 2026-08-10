@@ -1,6 +1,5 @@
 """Prove vectorized and O(1) incremental required indicators are identical."""
 
-import random
 import statistics
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
@@ -16,6 +15,8 @@ from core_lib.indicators.registry import (
     IndicatorValue,
 )
 from core_lib.types import Candle
+
+from indicator_reference import random_candles as make_random_candles
 
 
 def make_candles(count: int = 260) -> list[Candle]:
@@ -70,38 +71,6 @@ def make_linear_candles(count: int) -> list[Candle]:
                 trade_count=None,
             )
         )
-    return candles
-
-
-def make_random_candles(seed: int, count: int = 600) -> list[Candle]:
-    """Build a long reproducible OHLCV stream for every warm-up length."""
-    generator = random.Random(seed)
-    candles: list[Candle] = []
-    start = datetime(2025, 1, 1, tzinfo=UTC)
-    previous_close = 100.0
-    for index in range(count):
-        open_price = previous_close
-        close = max(1.0, open_price + generator.uniform(-2.0, 2.0))
-        high = max(open_price, close) + generator.uniform(0.01, 1.5)
-        low = min(open_price, close) - generator.uniform(0.01, 1.5)
-        open_time = start + timedelta(hours=index)
-        candles.append(
-            Candle(
-                symbol="BTCUSDT",
-                exchange="BINANCE",
-                timeframe="1h",
-                open_time=open_time,
-                close_time=open_time + timedelta(hours=1),
-                open=open_price,
-                high=high,
-                low=low,
-                close=close,
-                volume=generator.uniform(1.0, 10_000.0),
-                quote_volume=None,
-                trade_count=None,
-            )
-        )
-        previous_close = close
     return candles
 
 
@@ -199,7 +168,9 @@ def assert_parity(spec: IndicatorSpec, candles: Sequence[Candle]) -> None:
         assert_value_equal(expected, actual)
 
 
-ALL_REGISTERED_SPECS = DEFAULT_REGISTRY.list()
+ALL_SINGLE_SERIES_SPECS = [
+    spec for spec in DEFAULT_REGISTRY.list() if not spec.needs_reference_series
+]
 
 HILBERT_IDENTIFIERS = (
     "HT_DCPERIOD",
@@ -212,7 +183,7 @@ HILBERT_IDENTIFIERS = (
 )
 
 
-@pytest.mark.parametrize("spec", ALL_REGISTERED_SPECS, ids=lambda spec: spec.identifier)
+@pytest.mark.parametrize("spec", ALL_SINGLE_SERIES_SPECS, ids=lambda spec: spec.identifier)
 @pytest.mark.parametrize("seed", [0, 7, 42, 2026])
 def test_all_registered_indicators_match_on_long_seeded_random_streams(
     spec: IndicatorSpec,
@@ -221,7 +192,7 @@ def test_all_registered_indicators_match_on_long_seeded_random_streams(
     assert_parity(spec, make_random_candles(seed))
 
 
-@pytest.mark.parametrize("spec", ALL_REGISTERED_SPECS, ids=lambda spec: spec.identifier)
+@pytest.mark.parametrize("spec", ALL_SINGLE_SERIES_SPECS, ids=lambda spec: spec.identifier)
 def test_all_registered_indicators_match_on_flat_streams(spec: IndicatorSpec) -> None:
     assert_parity(spec, make_flat_candles())
 
@@ -294,6 +265,16 @@ def test_min_history_and_seed_warmup(identifier: str) -> None:
         candidate for candidate in DEFAULT_REGISTRY.list() if candidate.identifier == identifier
     )
     candles = make_candles(spec.min_history + 1)
+    if spec.needs_reference_series:
+        state = spec.make_paired_state()
+        state.seed(
+            candles[: spec.min_history - 1],
+            candles[: spec.min_history - 1],
+        )
+        assert not bool(state.warmed_up)
+        state.update(candles[spec.min_history - 1], candles[spec.min_history - 1])
+        assert bool(state.warmed_up)
+        return
     state = spec.make_state()
     state.seed(candles[: spec.min_history - 1])
     assert not bool(state.warmed_up)

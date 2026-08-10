@@ -46,11 +46,11 @@ target-version = "py312"
 select = ["B", "E", "F", "I", "UP"]
 
 [tool.ruff.lint.per-file-ignores]
-# Generated capture. `scripts/capture_talib_pattern_signals.py` writes one line per CDL
-# function so the file stays a readable table of functions instead of tens of thousands of
-# lines of bare integers, and the block is fenced with `# fmt: off` for the same reason.
-# Those lines are long by construction and no hand edit goes into them.
+# Generated captures keep one logical output series per line instead of expanding into
+# tens of thousands of bare numbers. Their blocks are fenced with `# fmt: off`, and their
+# lines are long by construction rather than by hand editing.
 "tests/pattern_reference/talib_signals.py" = ["E501"]
+"tests/indicator_reference/statistics_talib.py" = ["E501"]
 
 [tool.mypy]
 files = ["core_lib", "tests"]

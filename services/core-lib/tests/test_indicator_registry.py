@@ -157,14 +157,14 @@ def test_follow_up_catalog_preserves_all_6_not_yet_registered_items() -> None:
         + systems.FOLLOW_UP_INDICATORS
         + donchian.FOLLOW_UP_INDICATORS
     )
-    # The standard carries 93 systems, and the registered ones plus this catalog must
-    # account for all of them. How many of the 93 a category has taken is stated in
+    # The standard carries 95 systems, and the registered ones plus this catalog must
+    # account for all of them. How many of the 95 a category has taken is stated in
     # that category's own module, so implementing an indicator moves one number in one
     # owner's file instead of a shared constant here. The counts differ from the
     # number of registered names where the standard says they should: EMA and Volume
-    # SMA are §0 primitives outside the 93, and Bollinger Bands is counted there as
+    # SMA are §0 primitives outside the 95, and Bollinger Bands is counted there as
     # three systems rather than one.
-    assert len(follow_up) == 93 - REGISTERED_STANDARD_SYSTEMS
+    assert len(follow_up) == 95 - REGISTERED_STANDARD_SYSTEMS
     assert len(set(follow_up)) == len(follow_up)
     assert set(follow_up) == {
         "McClellan Oscillator",
@@ -289,9 +289,22 @@ def test_every_spec_min_history_matches_its_state_min_history() -> None:
     """
 
     mismatched = [
-        (spec.identifier, spec.min_history, spec.make_state().min_history)
+        (
+            spec.identifier,
+            spec.min_history,
+            (
+                spec.make_paired_state().min_history
+                if spec.needs_reference_series
+                else spec.make_state().min_history
+            ),
+        )
         for spec in DEFAULT_REGISTRY.list()
-        if spec.make_state().min_history != spec.min_history
+        if (
+            spec.make_paired_state().min_history
+            if spec.needs_reference_series
+            else spec.make_state().min_history
+        )
+        != spec.min_history
     ]
     assert mismatched == []
 
@@ -301,6 +314,16 @@ def test_warmed_up_state_agrees_with_declared_min_history() -> None:
 
     candles = make_candles(260)
     for spec in DEFAULT_REGISTRY.list():
+        if spec.needs_reference_series:
+            state = spec.make_paired_state()
+            state.seed(
+                candles[: spec.min_history - 1],
+                candles[: spec.min_history - 1],
+            )
+            assert not state.warmed_up, f"{spec.identifier} warmed up early"
+            state.update(candles[spec.min_history - 1], candles[spec.min_history - 1])
+            assert state.warmed_up, f"{spec.identifier} not warm at its declared minimum"
+            continue
         state = spec.make_state()
         state.seed(candles[: spec.min_history - 1])
         assert not state.warmed_up, f"{spec.identifier} warmed up early"

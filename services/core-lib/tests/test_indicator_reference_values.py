@@ -9,7 +9,7 @@ what has to hold of them.
 import math
 
 import pytest
-from core_lib.indicators.registry import DEFAULT_REGISTRY
+from core_lib.indicators.registry import DEFAULT_REGISTRY, IndicatorSeries
 
 from indicator_reference import (
     CONVERGENCE_NOISE_FLOOR,
@@ -18,6 +18,7 @@ from indicator_reference import (
     REFERENCE,
     SAMPLE_INDICES,
     UNCOMPARED,
+    paired_reference_candles,
     reference_candles,
 )
 
@@ -26,9 +27,18 @@ def _computed_series() -> dict[str, list[float]]:
     """Return every registered series, flattening dict outputs to `name.key`."""
 
     candles = reference_candles()
+    reference = paired_reference_candles()
     flattened: dict[str, list[float]] = {}
     for spec in DEFAULT_REGISTRY.list():
-        series = spec.compute_vectorized(candles)
+        series: IndicatorSeries
+        if spec.needs_reference_series:
+            state = spec.make_paired_state()
+            series = [
+                state.update(candle, reference_candle)
+                for candle, reference_candle in zip(candles, reference, strict=True)
+            ]
+        else:
+            series = spec.compute_vectorized(candles)
         if series and isinstance(series[0], dict):
             for key in series[0]:
                 flattened[f"{spec.identifier}.{key}"] = [

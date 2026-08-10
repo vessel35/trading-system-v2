@@ -113,7 +113,7 @@ def test_public_pattern_names_stay_disjoint_from_indicators_and_indicator_tally_
     indicator_names = {spec.name for spec in DEFAULT_REGISTRY.list()}
     pattern_names = DEFAULT_PATTERN_REGISTRY.names()
 
-    assert len(DEFAULT_REGISTRY.list()) == 91
+    assert len(DEFAULT_REGISTRY.list()) == 93
     assert len(pattern_names) == TALIB_CDL_PATTERN_COUNT
     assert indicator_names.isdisjoint(pattern_names)
 
