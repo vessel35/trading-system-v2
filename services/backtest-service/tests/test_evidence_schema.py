@@ -223,7 +223,7 @@ def test_schema_creates_14_basic_and_7_extension_strict_tables(
     assert evidence_db.execute("PRAGMA foreign_keys").fetchone() == (1,)
     assert evidence_db.execute("PRAGMA integrity_check").fetchone() == ("ok",)
     assert evidence_db.execute("PRAGMA foreign_key_check").fetchall() == []
-    assert EVIDENCE_SCHEMA_VERSION == "1.8.0"
+    assert EVIDENCE_SCHEMA_VERSION == "1.9.0"
     for table in EVIDENCE_TABLES:
         assert "run_id" in _table_columns(evidence_db, table)
 

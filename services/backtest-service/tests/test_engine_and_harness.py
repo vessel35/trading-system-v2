@@ -48,6 +48,7 @@ from core_lib.series_resolution import ResolvedSeriesSpec
 from core_lib.strategy import (
     AdapterManager,
     InProcessStrategyRegistry,
+    MoneyManagementSupport,
     ParameterSchema,
     ResolvedConfig,
     StrategyDecisionContract,
@@ -160,7 +161,7 @@ class _Feed(DataFeed):
         return Decimal("100")
 
 
-class _VesselTurtleFeed(_Feed):
+class _TurtleDailyFeed(_Feed):
     """Expose separate finalized daily candles for Turtle N."""
 
     def __init__(self, candles: list[Candle], daily: list[Candle]) -> None:
@@ -296,6 +297,56 @@ class _Strategy:
                 metadata={"fixture": True},
             )
         return None
+
+
+class _ManagedPinStrategy:
+    """Own the managed Evidence pin without coupling it to a deployed strategy."""
+
+    VERSION: ClassVar[str] = "1.0.0"
+
+    def __init__(self, config: ResolvedConfig) -> None:
+        self.config = config
+
+    @classmethod
+    def get_metadata(cls) -> StrategyMetadata:
+        metadata = _Strategy.get_metadata()
+        metadata.required_indicators = [
+            {"name": "EMA", "params": {"period": 9}},
+            {"name": "EMA", "params": {"period": 21}},
+        ]
+        metadata.min_history = 21
+        metadata.money_management = MoneyManagementSupport(
+            supported=("turtle",),
+            default="turtle",
+            supports_external_stop=True,
+            supports_external_take_profit=True,
+            supports_signal_exit=True,
+        )
+        metadata.decision_contract = StrategyDecisionContract.DECISION_INTENT
+        return metadata
+
+    @classmethod
+    def get_parameter_schema(cls) -> ParameterSchema:
+        return ParameterSchema(fields={})
+
+    def analyze(
+        self,
+        market_data: dict[str, object],
+        current_position: Position | None,
+    ) -> DecisionIntent | None:
+        candle = market_data["candle"]
+        assert isinstance(candle, Candle)
+        if candle.open_time != _BASE or current_position is not None:
+            return None
+        return DecisionIntent(
+            action=DecisionAction.ENTER_LONG,
+            symbol=candle.symbol,
+            timestamp=candle.close_time,
+            reference_price=float(candle.close),
+            confidence=0.8,
+            reason="managed-pin-entry",
+            metadata={"fixture": True},
+        )
 
 
 class _PatternStrategy(_Strategy):
@@ -520,6 +571,25 @@ class _StrategyCatalog(StrategyRegistry):
         raise PermissionError("read-only fixture")
 
 
+class _ManagedPinStrategyCatalog(StrategyRegistry):
+    def get(self, strategy_id: str) -> dict[str, object]:
+        assert strategy_id == "managed-pin-fixture"
+        return {
+            "strategy_id": strategy_id,
+            "class_name": _ManagedPinStrategy.__name__,
+            "module_path": _ManagedPinStrategy.__module__,
+            "is_active": True,
+            "is_deprecated": False,
+        }
+
+    def list(self) -> list[dict[str, object]]:
+        return [self.get("managed-pin-fixture")]
+
+    def register(self, strategy_id: str, meta: dict[str, object]) -> None:
+        del strategy_id, meta
+        raise PermissionError("read-only fixture")
+
+
 class _PatternStrategyCatalog(StrategyRegistry):
     def get(self, strategy_id: str) -> dict[str, object]:
         assert strategy_id == "pattern-fixture"
@@ -673,6 +743,12 @@ def _manager() -> AdapterManager:
     return AdapterManager(_StrategyCatalog(), plugins)
 
 
+def _managed_pin_manager() -> AdapterManager:
+    plugins = InProcessStrategyRegistry()
+    plugins.register("managed-pin-fixture", _ManagedPinStrategy)
+    return AdapterManager(_ManagedPinStrategyCatalog(), plugins)
+
+
 def _pattern_manager() -> AdapterManager:
     plugins = InProcessStrategyRegistry()
     plugins.register("pattern-fixture", _PatternStrategy)
@@ -805,6 +881,62 @@ def _vessel_config(*, run_name: str = "vessel-dry-run") -> RunConfig:
         profile_ref="vessel-reference-v1",
         seed=17,
     )
+
+
+def _managed_pin_config() -> RunConfig:
+    return RunConfig.model_validate(
+        {
+            "run_name": "managed-pin",
+            "strategy_id": "managed-pin-fixture",
+            "params": {},
+            "symbol": "BTCUSDT",
+            "exchange": "binance",
+            "timeframe": "1h",
+            "market_type": "futures",
+            "data_source": "managed-pin-fixture",
+            "start": _BASE,
+            "end": _BASE + timedelta(hours=6),
+            "initial_capital": Decimal("10000"),
+            "risk_per_trade": 0.01,
+            "cost_values": {
+                "futures_taker_fee_rate": Decimal("0"),
+                "futures_entry_slippage_rate": Decimal("0"),
+                "exit_slippage_rate": Decimal("0"),
+                "funding_fallback_rate": Decimal("0"),
+            },
+            "profile_ref": "engine-profile",
+            "seed": 17,
+            "money_management": {
+                "mode": "turtle",
+                "n_period": 20,
+                "n_timeframe": "1d",
+                "stop_n_multiple": 2.0,
+                "leverage_cap": 10,
+            },
+        }
+    )
+
+
+def _managed_pin_candles() -> list[Candle]:
+    """Return a fixed rising stream owned only by the managed Evidence pin."""
+    first = _BASE - timedelta(hours=21)
+    return [
+        Candle(
+            symbol="BTCUSDT",
+            exchange="binance",
+            timeframe="1h",
+            open_time=first + timedelta(hours=index),
+            close_time=first + timedelta(hours=index + 1),
+            open=100.0 + index,
+            high=100.75 + index,
+            low=99.75 + index,
+            close=100.5 + index,
+            volume=100.0,
+            quote_volume=10_000.0,
+            trade_count=100,
+        )
+        for index in range(27)
+    ]
 
 
 def _turtle_daily_candles() -> list[Candle]:
@@ -1750,7 +1882,7 @@ def test_vessel_turtle_uses_only_prior_finalized_daily_n_and_records_plan(
     candles = _vessel_candles()
     costs = BacktestCostModel(config.cost_values)
     result = Engine(
-        _VesselTurtleFeed(candles, _turtle_daily_candles()),
+        _TurtleDailyFeed(candles, _turtle_daily_candles()),
         BacktestBroker(costs),
         BacktestClock.from_candles(candles),
         costs,
@@ -3510,6 +3642,12 @@ _EVIDENCE_GOLDEN_HASHES: dict[str, dict[str, str]] = {
         "funding": "f2fa379ac2f11a31aa6ae1b3caf69354e2fb660c95c04b35023293930e76dbb7",
         "hold": "dcac83232b4ec8d9b3599dc093b947b3b405283a461589516adb9e10e2fb1eab",
     },
+    "1.9.0": {
+        "legacy": "ef98eef15c6cd237603fc1882409a7a08f63dfb3b89883696e656cc0cb7a2707",
+        "managed": "f1ad06c2fcf3f8c50c3035a375155ed3e8329aaa3128a92046a08501835bde5f",
+        "funding": "d75151dc7f9ea2846bc46fb686efef370c92e30cd647e88481b6f27567f143a3",
+        "hold": "d74b5d474a0d1398cc2eef215a297dbd32cf4003c5ee775484075d17b427f6c8",
+    },
 }
 
 # The three analysis extension tables stay empty because the engine does not write
@@ -3532,6 +3670,12 @@ def test_previous_evidence_schema_hashes_remain_pinned() -> None:
         "funding": "7d17836164997c3a29c2fd390913c58f62c53633ff538f40735f69bbc739b623",
         "hold": "fe14ed3c9ef32aec81df3c7217ee4705b9d188347ed680d625d8561c72a4c270",
     }
+    assert _EVIDENCE_GOLDEN_HASHES["1.8.0"] == {
+        "legacy": "ddd7d94555ff568899694cc6cac6a35e115ffe75b6b19c87226d1b518e3d253d",
+        "managed": "3f0c6545855f6969d7e8b767efb6b5a4a9db390f47b333fae3d110d6ff73358e",
+        "funding": "f2fa379ac2f11a31aa6ae1b3caf69354e2fb660c95c04b35023293930e76dbb7",
+        "hold": "dcac83232b4ec8d9b3599dc093b947b3b405283a461589516adb9e10e2fb1eab",
+    }
 
 
 def test_hashed_evidence_content_is_pinned_to_its_schema_version(tmp_path: Path) -> None:
@@ -3545,34 +3689,35 @@ def test_hashed_evidence_content_is_pinned_to_its_schema_version(tmp_path: Path)
 
     Two fixtures are pinned because one run does not touch everything hashed. The
     legacy-signal run never builds a money-management plan, the managed run does
-    not decline a bar, and neither covers what the other writes.
+    not decline a bar, and neither covers what the other writes. Version 1.9.0
+    separates the managed pin from the deployed Vessel strategy; the fixture change,
+    not an Evidence format change, raises the version once so later strategy changes
+    cannot drag the Evidence pin forward.
     """
     legacy = _engine(tmp_path, _Catalog(), []).run(_config())
 
-    managed_config = RunConfig.model_validate(
-        {
-            **_vessel_config(run_name="vessel-turtle-pin").model_dump(),
-            "money_management": {
-                "mode": "turtle",
-                "n_period": 20,
-                "n_timeframe": "1d",
-                "stop_n_multiple": 2.0,
-                "leverage_cap": 10,
-            },
-        }
-    )
-    candles = _vessel_candles()
+    managed_config = _managed_pin_config()
+    candles = _managed_pin_candles()
     costs = BacktestCostModel(managed_config.cost_values)
     managed = Engine(
-        _VesselTurtleFeed(candles, _turtle_daily_candles()),
+        _TurtleDailyFeed(candles, _turtle_daily_candles()),
         BacktestBroker(costs),
         BacktestClock.from_candles(candles),
         costs,
         BacktestEvidenceSink(tmp_path),
         _Catalog(),
-        _vessel_manager(),
+        _managed_pin_manager(),
         prereg=_prereg(),
     ).run(managed_config)
+
+    with sqlite3.connect(managed.evidence_path) as connection:
+        assert connection.execute(
+            "SELECT strategy_id, strategy_name FROM BACKTEST_RUN_LOCAL"
+        ).fetchone() == ("managed-pin-fixture", "_ManagedPinStrategy")
+        assert connection.execute("SELECT COUNT(*) FROM SIGNAL").fetchone() == (1,)
+        assert connection.execute("SELECT COUNT(DISTINCT trade_id) FROM POSITION").fetchone() == (
+            1,
+        )
 
     funding_sinks: list[BacktestEvidenceSink] = []
     funding_engine, funding_config = _daily_engine(tmp_path, _Catalog(), funding_sinks)
