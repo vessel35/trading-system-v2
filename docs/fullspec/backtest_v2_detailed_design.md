@@ -4140,7 +4140,6 @@ classDiagram
         +indicator_name TEXT
         +params_json TEXT
         +impl_version TEXT
-        +pinned_impl INTEGER
         +series_kind TEXT
         +category TEXT
         +impl_note TEXT

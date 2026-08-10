@@ -1229,7 +1229,6 @@ erDiagram
         text indicator_name
         text params_json
         text impl_version
-        integer pinned_impl
         integer min_history
         text computation_mode "vectorized · incremental"
         text enabled_reason "auto · explicit · all"
@@ -1549,7 +1548,6 @@ erDiagram
 | `indicator_name` | 문자열 | 불가 | 없음 | 등록된 지표 이름 |
 | `params_json` | JSON 객체 문자열 | 불가 | `{}` | 파라미터 값 |
 | `impl_version` | 문자열 | 불가 | 없음 | 구현 버전. 지표 구현이 바뀌면 과거 결과와 값이 달라질 수 있으므로 남긴다 |
-| `pinned_impl` | 0 또는 1 | 불가 | `0` | 출처마다 정의가 갈리는 지표라 구현을 하나로 고정한 경우 1 |
 | `min_history` | 정수, 1 이상 | 불가 | 없음 | 이 지표의 워밍업 길이. 사전 적재 길이를 정한 근거 |
 | `computation_mode` | `vectorized`·`incremental` 중 하나 | 불가 | `vectorized` | 이 run이 쓴 계산 방식. 백테스트 Engine은 `incremental`을 명시적으로 기록하고 `vectorized`는 연구·일치 검증 경로에 남는다. 두 방식의 값이 같아야 한다는 요구의 관측 지점이다 |
 | `enabled_reason` | `auto`·`explicit`·`all` 중 하나 | 불가 | 없음 | 이 지표가 계산 대상이 된 이유 |

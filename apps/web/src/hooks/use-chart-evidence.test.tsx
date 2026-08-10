@@ -95,7 +95,6 @@ function lazyHandlers(requests: URL[]) {
               impl_version: key.startsWith("pat_")
                 ? "2.0.0+talib.0.7.1"
                 : "1.0.0",
-              pinned_impl: true,
               series_kind: key.startsWith("pat_") ? "pattern" : "indicator",
               category: key.startsWith("pat_") ? "candlestick" : "trend",
               impl_note: "fixture",

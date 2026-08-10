@@ -192,7 +192,6 @@ def _finalize(
                 "indicator_name": "EMA",
                 "params_json": {"period": 9},
                 "impl_version": "1.0.0",
-                "pinned_impl": True,
                 "series_kind": "indicator",
                 "category": "trend",
                 "impl_note": "fixture implementation",

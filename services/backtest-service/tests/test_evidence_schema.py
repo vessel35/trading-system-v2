@@ -53,7 +53,7 @@ EXPECTED_COLUMNS = {
         range_start range_end row_count gap_count fallback_used fallback_count content_hash note
     """.split(),
     "INDICATOR_DEFINITION": """
-        indicator_key run_id indicator_name params_json impl_version pinned_impl series_kind
+        indicator_key run_id indicator_name params_json impl_version series_kind
         category impl_note min_history computation_mode enabled_reason
     """.split(),
     "INDICATOR_SNAPSHOT": """
@@ -223,7 +223,7 @@ def test_schema_creates_14_basic_and_7_extension_strict_tables(
     assert evidence_db.execute("PRAGMA foreign_keys").fetchone() == (1,)
     assert evidence_db.execute("PRAGMA integrity_check").fetchone() == ("ok",)
     assert evidence_db.execute("PRAGMA foreign_key_check").fetchall() == []
-    assert EVIDENCE_SCHEMA_VERSION == "1.7.0"
+    assert EVIDENCE_SCHEMA_VERSION == "1.8.0"
     for table in EVIDENCE_TABLES:
         assert "run_id" in _table_columns(evidence_db, table)
 
@@ -337,19 +337,6 @@ def test_foreign_keys_and_representative_checks_are_enforced(
             """
         )
     _insert_run(evidence_db)
-    with pytest.raises(sqlite3.IntegrityError, match="CHECK"):
-        evidence_db.execute(
-            """
-            INSERT INTO INDICATOR_DEFINITION (
-                indicator_key, run_id, indicator_name, impl_version, pinned_impl,
-                min_history, series_kind, category, impl_note, enabled_reason
-            ) VALUES (
-                'ema:period=200', ?, 'ema', '1', 2, 200,
-                'indicator', 'trend', 'fixture implementation', 'auto'
-            )
-            """,
-            (RUN_ID,),
-        )
     with pytest.raises(sqlite3.IntegrityError, match="CHECK"):
         evidence_db.execute(
             """

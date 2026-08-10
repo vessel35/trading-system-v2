@@ -1979,7 +1979,7 @@ def test_declared_pattern_reaches_backtest_strategy_and_evidence(
         ]
         definitions = connection.execute(
             """
-            SELECT indicator_key, pinned_impl, series_kind, category, impl_note
+            SELECT indicator_key, series_kind, category, impl_note
             FROM INDICATOR_DEFINITION
             ORDER BY indicator_key
             """
@@ -1987,14 +1987,12 @@ def test_declared_pattern_reaches_backtest_strategy_and_evidence(
         assert definitions == [
             (
                 "ema:period=9@1h",
-                1,
                 "indicator",
                 "trend",
                 "technical_indicators_calc_spec.md §0.3 (SMA seed, recursive)",
             ),
             (
                 "pat_doji@1h",
-                1,
                 "pattern",
                 "candlestick",
                 f"TA-Lib v{TALIB_SOURCE_VERSION} {TALIB_FUNCTIONS['pat_doji']}",
@@ -3051,6 +3049,12 @@ _EVIDENCE_GOLDEN_HASHES: dict[str, dict[str, str]] = {
         "funding": "7d17836164997c3a29c2fd390913c58f62c53633ff538f40735f69bbc739b623",
         "hold": "fe14ed3c9ef32aec81df3c7217ee4705b9d188347ed680d625d8561c72a4c270",
     },
+    "1.8.0": {
+        "legacy": "ddd7d94555ff568899694cc6cac6a35e115ffe75b6b19c87226d1b518e3d253d",
+        "managed": "3f0c6545855f6969d7e8b767efb6b5a4a9db390f47b333fae3d110d6ff73358e",
+        "funding": "f2fa379ac2f11a31aa6ae1b3caf69354e2fb660c95c04b35023293930e76dbb7",
+        "hold": "dcac83232b4ec8d9b3599dc093b947b3b405283a461589516adb9e10e2fb1eab",
+    },
 }
 
 # The three analysis extension tables stay empty because the engine does not write
@@ -3066,6 +3070,12 @@ def test_previous_evidence_schema_hashes_remain_pinned() -> None:
         "managed": "967207d158ab562e1698467b08d2bc49f1e0b8041f3d70c83e02db76abafa694",
         "funding": "65c94c17c7fadaddf0d703bf42ec805e49c1b1cfcf08a99e91b88b97b77efcc6",
         "hold": "c72de5733f10a67d39e6d218e18bd59cddb2db5e6ba9aaf048968dba39fb4bd5",
+    }
+    assert _EVIDENCE_GOLDEN_HASHES["1.7.0"] == {
+        "legacy": "bc352a0c9a5114afef289bfc9b8d95459513a126b9bab58c7a50d5f740421076",
+        "managed": "6ab74dd73a3d6851f9c7a76f4954c84e1c4ac9c9843e890c5a171ff914d178c7",
+        "funding": "7d17836164997c3a29c2fd390913c58f62c53633ff538f40735f69bbc739b623",
+        "hold": "fe14ed3c9ef32aec81df3c7217ee4705b9d188347ed680d625d8561c72a4c270",
     }
 
 

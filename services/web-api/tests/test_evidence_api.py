@@ -217,7 +217,7 @@ def test_scaled_decimals_timestamps_json_and_real_values_are_typed(
     ).json()["data"][0]
     assert snapshot["indicator_name"] in {"EMA", "ATR"}
     assert isinstance(snapshot["params_json"], dict)
-    assert isinstance(snapshot["pinned_impl"], bool)
+    assert "pinned_impl" not in snapshot
     assert snapshot["series_kind"] == "indicator"
     assert isinstance(snapshot["category"], str) and snapshot["category"]
     assert isinstance(snapshot["impl_note"], str) and snapshot["impl_note"]

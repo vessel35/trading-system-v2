@@ -1490,8 +1490,6 @@ export interface components {
             params_json: components["schemas"]["JsonValue"];
             /** Impl Version */
             impl_version: string;
-            /** Pinned Impl */
-            pinned_impl: boolean;
             /** Series Kind */
             series_kind: ("indicator" | "pattern") | null;
             /** Category */

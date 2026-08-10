@@ -34,7 +34,6 @@ function patternSnapshot({
     indicator_name: key,
     params_json: {},
     impl_version: "2.0.0+talib.0.7.1",
-    pinned_impl: true,
     series_kind: "pattern",
     category: "candlestick",
     impl_note: "TA-Lib fixture",

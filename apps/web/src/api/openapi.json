@@ -5942,10 +5942,6 @@
             "type": "string",
             "title": "Impl Version"
           },
-          "pinned_impl": {
-            "type": "boolean",
-            "title": "Pinned Impl"
-          },
           "series_kind": {
             "anyOf": [
               {
@@ -6044,7 +6040,6 @@
           "indicator_name",
           "params_json",
           "impl_version",
-          "pinned_impl",
           "series_kind",
           "category",
           "impl_note",

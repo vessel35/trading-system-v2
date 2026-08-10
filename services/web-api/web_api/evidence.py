@@ -696,7 +696,6 @@ class EvidenceRepository:
                 row[column] = _iso8601(row[column])
             row["params_json"] = _json_value(row["params_json"])
             row["value_json"] = _json_value(row["value_json"])
-            row["pinned_impl"] = _boolean(row["pinned_impl"])
             row["is_warmup"] = _boolean(row["is_warmup"])
             return row
 
@@ -715,7 +714,7 @@ class EvidenceRepository:
             ),
             select="""
                 s.*, d.indicator_name, d.params_json, d.impl_version,
-                d.pinned_impl, d.min_history, d.computation_mode, d.enabled_reason,
+                d.min_history, d.computation_mode, d.enabled_reason,
             """
             + definition_metadata_select,
             joins="JOIN INDICATOR_DEFINITION AS d ON d.indicator_key = s.indicator_key",

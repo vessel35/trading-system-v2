@@ -196,9 +196,9 @@ def _create_evidence(path: Path, *, populated: bool) -> None:
             """
             INSERT INTO INDICATOR_DEFINITION (
                 indicator_key, run_id, indicator_name, params_json,
-                impl_version, pinned_impl, min_history, computation_mode,
+                impl_version, min_history, computation_mode,
                 enabled_reason, series_kind, category, impl_note
-            ) VALUES ('ema-20', ?, 'EMA', '{"length":20}', '1.2.3', 1, 20,
+            ) VALUES ('ema-20', ?, 'EMA', '{"length":20}', '1.2.3', 20,
                       'incremental', 'auto', 'indicator', 'trend',
                       'fixture implementation')
             """,
@@ -536,7 +536,7 @@ def test_repository_reads_correct_tables_columns_and_exact_values(
     ).data[0]
     assert snapshot.indicator_name == "EMA"
     assert snapshot.params_json == {"length": 20}
-    assert snapshot.pinned_impl is True
+    assert "pinned_impl" not in snapshot.model_dump()
     assert snapshot.series_kind == "indicator"
     assert snapshot.category == "trend"
     assert snapshot.impl_note == "fixture implementation"
@@ -842,6 +842,13 @@ def _create_legacy_indicator_evidence(path: Path, schema_version: str) -> None:
     """Create a complete file using the pre-1.5 Evidence table shapes."""
     with sqlite3.connect(path) as connection:
         initialize_evidence_schema(connection)
+        connection.execute(
+            """
+            ALTER TABLE INDICATOR_DEFINITION
+            ADD COLUMN pinned_impl INTEGER NOT NULL DEFAULT 0
+                CHECK (pinned_impl IN (0, 1))
+            """
+        )
         for column in ("series_kind", "category", "impl_note"):
             connection.execute(f"ALTER TABLE INDICATOR_DEFINITION DROP COLUMN {column}")
         _insert_run(connection, evidence_schema_version=schema_version)

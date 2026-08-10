@@ -1985,12 +1985,10 @@ class Engine:
                 series_kind = "indicator"
                 category = spec.category
                 impl_note = spec.pinned_impl
-                pinned_impl = bool(spec.pinned_impl)
             elif isinstance(spec, PatternSpec):
                 series_kind = "pattern"
                 category = "candlestick"
                 impl_note = f"TA-Lib v{TALIB_SOURCE_VERSION} {TALIB_FUNCTIONS[spec.name]}"
-                pinned_impl = True
             else:
                 raise TypeError(f"unsupported series spec type: {type(spec).__name__}")
             if not category or not impl_note:
@@ -2003,7 +2001,6 @@ class Engine:
                         "indicator_name": spec.name,
                         "params_json": dict(spec.params),
                         "impl_version": spec.version,
-                        "pinned_impl": pinned_impl,
                         "series_kind": series_kind,
                         "category": category,
                         "impl_note": impl_note,
