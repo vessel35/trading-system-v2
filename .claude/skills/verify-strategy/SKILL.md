@@ -46,10 +46,11 @@ show that stop as its exit reference, not a price the rule never named.
 
 ### 4. Timing integrity
 
-Confirm the decision timestamp is the deciding bar's close, that the fill is on the following
-bar, and that no value used at a decision was finalized after it - especially for a series on
-a higher timeframe, where only the last fully closed higher bar may be used. Run the same
-configuration twice and confirm the run hash and results are identical.
+Confirm the decision timestamp is not later than the deciding bar's close - the engine refuses
+a later one, and an earlier one is allowed - that the fill is on the following bar, and that
+no value used at a decision was finalized after it, especially for a series on a higher
+timeframe, where only the last fully closed higher bar may be used. Run the same configuration
+twice and confirm the run hash and results are identical.
 
 ### 5. Declaration against reality
 

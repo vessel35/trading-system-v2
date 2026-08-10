@@ -32,6 +32,18 @@ def test_heikin_ashi_is_not_a_registered_series() -> None:
     assert capability("candles.kinds").value == ("exchange_confirmed_ohlcv", "resampled")
 
 
+def test_an_indicator_cannot_be_fed_a_different_price_series() -> None:
+    """Registering Heikin-Ashi alone would still not give the first sample its EMA.
+
+    The document wants EMA 200 over the Heikin-Ashi close. Every registered
+    indicator computes from the run's own candles and takes no named input, so
+    that EMA would have to be a registration of its own.
+    """
+    inputs = {spec.required_inputs for spec in build_default_registry().list()}
+
+    assert inputs == {()}
+
+
 def test_the_first_sample_needs_three_things_this_platform_lacks() -> None:
     # A cap of five trades a day needs the outcome of earlier trades, which never
     # reaches a strategy.
@@ -83,8 +95,11 @@ def test_the_first_experiment_carries_two_approved_deviations() -> None:
     """Both differences the verdict says a user must approve are still real."""
     # The document enters at the trigger bar's close; this platform fills next bar.
     assert capability("run.fill_timing").value == ("next_bar",)
-    # The document's hammer is a wick ratio; the registered one is TA-Lib's.
+    # Every pattern the document names by word alone is a TA-Lib definition here,
+    # engulfing included, and the document defines none of them.
     assert capability("registry.name_does_not_fix_definition").value is True
     patterns = {spec.name: spec for spec in TALIB_PATTERN_REGISTRY.list()}
-    assert "talib" in patterns["pat_hammer"].version
-    assert "talib" in patterns["pat_shooting_star"].version
+    assert all(
+        "talib" in patterns[name].version
+        for name in ("pat_hammer", "pat_shooting_star", "pat_engulfing")
+    )

@@ -84,13 +84,14 @@ required_indicators=[
 이름이 아니라 execution key다.
 
 ```python
+# 5분봉으로 도는 실행이므로 key 뒤에 @5m이 붙는다. 붙이는 규칙은 §4.4.1에 있다.
 market_data["indicators"] == {
-    "ema:period=21": 142.02,
-    "pat_engulfing": {
-        "pat_engulfing": 1.0,          # 성립
-        "pat_engulfing_dir": 1.0,      # 방향
-        "pat_engulfing_strength": 1.0, # 강도
-        "pat_engulfing_confirm": 0.0,  # 뒤 봉에서의 확인
+    "ema:period=21@5m": 142.02,
+    "pat_engulfing@5m": {
+        "occurred": 1.0,   # 성립
+        "direction": 1.0,  # 방향
+        "strength": 1.0,   # 강도
+        "confirmed": 0.0,  # 뒤 봉에서의 확인
     },
 }
 ```
@@ -126,11 +127,14 @@ parameter뿐이고 나머지는 registry에서 온다.**
 아니라 **execution key**이며 만드는 규칙은 §4.4에 있다.
 
 
-| 선언                                                                                       | execution key                                        | 종류  | 한 봉의 값                                      |
-| ---------------------------------------------------------------------------------------- | ---------------------------------------------------- | --- | ------------------------------------------- |
-| `{"name": "EMA", "params": {"period": 21}}`                                              | `ema:period=21`                                      | 지표  | `float` 하나                                  |
-| `{"name": "MACD", "params": {"fast_period": 12, "slow_period": 26, "signal_period": 9}}` | `macd:fast_period=12,signal_period=9,slow_period=26` | 지표  | `macd`·`signal`·`histogram` 세 출력을 담은 `dict` |
-| `{"name": "pat_engulfing", "params": {}}`                                                | `pat_engulfing`                                      | 패턴  | 성립·방향·강도·확인 네 출력을 담은 `dict`                 |
+아래 execution key의 `@5m`은 5분봉으로 도는 실행을 예로 든 것이다. 실행
+timeframe이 1시간봉이면 같은 선언이 `@1h`로 들어온다.
+
+| 선언                                                                                       | execution key                                           | 종류  | 한 봉의 값                                      |
+| ---------------------------------------------------------------------------------------- | ------------------------------------------------------- | --- | ------------------------------------------- |
+| `{"name": "EMA", "params": {"period": 21}}`                                              | `ema:period=21@5m`                                      | 지표  | `float` 하나                                  |
+| `{"name": "MACD", "params": {"fast_period": 12, "slow_period": 26, "signal_period": 9}}` | `macd:fast_period=12,signal_period=9,slow_period=26@5m` | 지표  | `macd`·`signal`·`histogram` 세 출력을 담은 `dict` |
+| `{"name": "pat_engulfing", "params": {}}`                                                | `pat_engulfing@5m`                                      | 패턴  | `occurred`·`direction`·`strength`·`confirmed` 네 출력을 담은 `dict` |
 
 
 **무엇이 등록되어 있는지는 여기 적지 않고 registry에 묻는다.** 수는 늘어나며
@@ -377,9 +381,10 @@ class DecisionIntent:
 명시하고, 새로운 자금관리 수식을 전략에 추가하지 않는다.
 
 **선언한 이름을 그대로 읽지 않는다.** `indicators`의 key는 이름을 소문자로
-바꾸고 parameter를 붙인 execution key이며,
-`{"name": "EMA", "params": {"period": 21}}`은 `ema:period=21`이 된다.
-규칙 전체는 §4.4에 있다.
+바꾸고 parameter와 timeframe을 붙인 execution key이며, 1시간봉으로 도는 실행에서
+`{"name": "EMA", "params": {"period": 21}}`은 `ema:period=21@1h`가 된다.
+**key를 글자로 적어 두지 않고 `series_key_of`로 만든다** — 적어 두면 그 전략이
+한 timeframe에서만 돌게 된다. 규칙 전체는 §4.4에 있다.
 
 아래는 이 규범을 모두 지키는 최소 전략이다. 추세는 두 EMA의 위치로 보고 진입은
 장악형 캔들로 확정하며, `stop_loss`와 quantity는 전혀 다루지 않는다.
@@ -401,15 +406,16 @@ from core_lib.strategy import (
     StrategyMetadata,
     StrategyProfile,
 )
+from core_lib.series import series_key_of
 from core_lib.types import Candle, DecisionAction, DecisionIntent, Position, PositionSide
 
 STRATEGY_ID = "ema-engulfing-example"
 
-# [series 2] 아래 get_metadata가 선언한 series 셋을 execution key로 옮긴 것이다.
-# 이 문자열이 market_data["indicators"]에서 값을 꺼낼 때 쓰는 key가 된다.
-_FAST = "ema:period=21"     # <- {"name": "EMA", "params": {"period": 21}}
-_SLOW = "ema:period=55"     # <- {"name": "EMA", "params": {"period": 55}}
-_PATTERN = "pat_engulfing"  # <- {"name": "pat_engulfing", "params": {}}
+# [series 2] 아래 get_metadata가 선언한 series 셋을 execution key로 옮기는 자리다.
+# key에는 실행 timeframe이 붙으므로 판단할 때 만들고, 글자로 적어 두지 않는다.
+_FAST_PARAMS = {"period": 21}     # <- {"name": "EMA", "params": {"period": 21}}
+_SLOW_PARAMS = {"period": 55}     # <- {"name": "EMA", "params": {"period": 55}}
+_PATTERN_NAME = "pat_engulfing"   # <- {"name": "pat_engulfing", "params": {}}
 
 
 class EmaEngulfingExample(StrategyBase):
@@ -471,15 +477,17 @@ class EmaEngulfingExample(StrategyBase):
         current_position: Position | None,
     ) -> DecisionIntent | None:
         candle = market_data["candle"]
+        timeframe = market_data["timeframe"]
 
         # [series 3] 선언한 series의 이번 봉 값이 여기 들어 있다. 위에서 선언한
         # 셋이 그대로 오고, 선언하지 않은 것은 오지 않는다.
         series = market_data["indicators"]
         assert isinstance(candle, Candle) and isinstance(series, Mapping)
+        assert isinstance(timeframe, str)
 
         # 출력이 하나인 series는 값이 float이다.
-        fast = float(series[_FAST])
-        slow = float(series[_SLOW])
+        fast = float(series[series_key_of("EMA", _FAST_PARAMS, timeframe)])
+        slow = float(series[series_key_of("EMA", _SLOW_PARAMS, timeframe)])
 
         if current_position is not None:
             trend_broke = (current_position.side is PositionSide.LONG and fast <= slow) or (
@@ -490,19 +498,20 @@ class EmaEngulfingExample(StrategyBase):
             return self._intent(candle, DecisionAction.EXIT, "trend-broke")
 
         # 출력이 여럿인 series는 값이 dict다. 캔들 패턴은 언제나 넷을 낸다(§1.1).
-        pattern = series[_PATTERN]
+        # 안쪽 이름에는 timeframe이 붙지 않는다. 바깥 key가 이미 말하고 있다.
+        pattern = series[series_key_of(_PATTERN_NAME, {}, timeframe)]
         assert isinstance(pattern, Mapping)
 
         # 미실행 사유를 하나로 뭉치지 않는다. 나중에 무엇이 몇 번 걸렀는지 세려면
         # 사유가 갈려 있어야 한다.
-        if pattern[_PATTERN] != 1.0:
+        if pattern["occurred"] != 1.0:
             return self._intent(candle, DecisionAction.HOLD, "no-engulfing")
-        if pattern[f"{_PATTERN}_strength"] < float(self.config.params["min_strength"]):
+        if pattern["strength"] < float(self.config.params["min_strength"]):
             return self._intent(candle, DecisionAction.HOLD, "engulfing-too-weak")
 
         # 장악형은 패턴 표준이 부호를 이번 봉의 색으로 정의하므로 양수가 bullish다.
         # 다른 패턴에 같은 가정을 옮기지 않는다(§4.4).
-        bullish = pattern[f"{_PATTERN}_dir"] > 0
+        bullish = pattern["direction"] > 0
         if fast > slow and bullish:
             return self._intent(candle, DecisionAction.ENTER_LONG, "uptrend-engulfing")
         if fast < slow and not bullish:
@@ -524,8 +533,8 @@ class EmaEngulfingExample(StrategyBase):
 
 **`min_history`는 series의 warm-up을 모아 적는 자리가 아니다.** 각 series가 값을
 내기까지 필요한 봉 수는 **그 series가 저마다 들고 있고 registry가 소유한다.** 위
-예시에서 `ema:period=55`는 55봉, `ema:period=21`은 21봉, `pat_engulfing`은
-3봉이며, 이 숫자를 전략이 다시 적지 않는다.
+예시에서 55봉 EMA는 55봉, 21봉 EMA는 21봉, 장악형은 3봉이며, 이 숫자를 전략이
+다시 적지 않는다.
 
 전략이 적는 `min_history`는 **series를 빼고 전략 자신의 판단 로직이 필요로 하는
 봉 수**다. 위 예시는 이번 봉의 값만 보므로 1이다. 20봉 전 고가와 비교하는
@@ -906,13 +915,14 @@ API는 없으므로, 아래처럼 이름과 warm-up을 함께 뽑아 확인한�
 
 ```python
 from core_lib.indicators.registry import build_default_registry
-from core_lib.patterns.specs import build_talib_pattern_registry
-from core_lib.series import series_key
+from core_lib.patterns import TALIB_PATTERN_REGISTRY
 
-for spec in sorted(build_default_registry().list(), key=series_key):
-    print(series_key(spec), spec.min_history)
+# 선언에 적는 것은 이름과 parameter다. execution key는 실행 timeframe이 정해질 때
+# 만들어지므로 여기서는 만들지 않는다(§4.4.1).
+for spec in build_default_registry().list():
+    print(spec.name, dict(spec.params), spec.min_history)
 
-print(sorted(build_talib_pattern_registry().names()))
+print(sorted(TALIB_PATTERN_REGISTRY.names()))
 ```
 
 새 지표 조합이나 새 패턴이 필요하면 **전략 작업과 같은 변경에서 registry에
@@ -1561,12 +1571,17 @@ services/trading-plugins/trading_plugins/
 정책에서 만들어지므로 데이터베이스 상태에 흔들리지 않는다. 남은 결합은 Engine이 정책에
 넘길 변동성을 정책 id로 갈라 고르는 자리다(§5.3.2).
 
-**넷째는 실행 timeframe을 쓰는 정책에 한해 지금 풀 수 있다.** 정책이
+**넷째는 실행 timeframe을 쓰는 정책에 한해 풀렸다.** 정책이
 `required_indicators()`로 이미 선언하므로 그 선언에서 execution key를 만들어
-조회하면 분기가 사라진다. **다른 timeframe의 값을 쓰는 정책은 그렇게 풀리지
-않는다** — 막는 것은 timeframe이 아니라 등록이다. Turtle의 일간 `N`은 지표
-registry에 등록된 것이 아니라 Engine이 따로 계산하는 값이므로, 선언에서 만든
-key로는 아무것도 찾을 수 없다. 여러 캔들 흐름 자체는 이미 있다(§4.4.1).
+조회하며, 그 자리에는 정책 이름이 없다.
+
+**다른 timeframe의 값을 쓰는 정책은 아직 그렇게 풀리지 않는다.** 막는 것은
+timeframe도 등록도 아니고 **Engine에 남은 Turtle 전용 자리 둘**이다. 하나는
+정책 id가 `turtle`일 때에만 일봉 `N`을 미리 계산해 두는 자리이고, 다른 하나는
+실행 timeframe이 아닌 요구를 registry에서 찾지 않고 그 미리 계산해 둔 값에서
+읽는 자리다. 그래서 **다른 정책이 `1d` 요구를 선언하면 등록을 더해도 값을 받지
+못한다.** 여러 캔들 흐름 자체는 이미 있으므로(§4.4.1) 남은 것은 이 두 자리를
+선언 기준으로 옮기는 일이다.
 
 **실행 설정 union은 가장 조심스러웠다.** 자금관리 설정을 두 형으로 정적으로 묶어 두면 mode를
 늘릴 때마다 그 파일을 고쳐야 한다. **union은 발견된 정책에서 만들어 낸다.** 발견이

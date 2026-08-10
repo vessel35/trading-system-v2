@@ -69,9 +69,15 @@ least twice the body"; it is TA-Lib's `CDLHAMMER`. Check the definition against
 `docs/references/technical_indicators_calc_spec.md` and
 `docs/references/candlestick_pattern_calc_spec.md` before treating a name as a match.
 
-**A candle is not a series.** Anything computable from the run's own confirmed candles - body
-size, wick ratio, the highest high of the last ten bars - is written in the strategy and
-needs no registration. Only declare `min_history` large enough to look that far back.
+**A candle is not a series, but this is a narrow allowance.** A comparison of raw candle
+values - this bar's body against its wicks, the highest high of the last ten bars, the gap
+between two closes - is written in the strategy and needs no registration; declare
+`min_history` large enough to look that far back. **Never recompute a registered indicator or
+pattern inside a strategy.** If the rule is an EMA, an ATR, a Stochastic RSI, or a named
+candlestick pattern, declare it and read it, even when the formula looks short enough to
+inline. Reimplementing one puts a second definition of the same thing in the repository, and
+the two drift without anything failing. When the document's rule resembles a registered
+series but is not identical, say so and let the user choose which one is being measured.
 
 **A new money-management policy is usually not a blockage.** Deploying a policy file is the
 normal way to express a protection rule the shipped policies cannot. But the engine requires
@@ -109,5 +115,9 @@ Only with no blockages left, or with the deviations approved.
 A strategy that only runs from code is not done. Select it in the interface, run it, and read
 its result there. If a parameter needs a screen change, ask whether to fix the value inside
 the strategy or widen the screen, and raise the screen work separately.
+
+**Restarting a service and driving the screen need authority you may not have.** Both touch
+running processes outside the repository, so ask before doing either, and if you cannot,
+report the strategy as unfinished with the step that is left rather than as done.
 
 Then hand the result to `verify-strategy`. Performance never substitutes for verification.

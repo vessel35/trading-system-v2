@@ -5,12 +5,16 @@ them is what this module exists to prevent.
 
 **Inventory** is what happens to be deployed right now: which indicator/parameter
 combinations and candlestick patterns are registered, and which money-management
-modes are deployed. Inventory is *never* recorded here. It is queried, from
-``core_lib.indicators.registry``, ``core_lib.patterns``, and
-``trading_plugins.discovery``. Writing it down would break the rule that adding a
-strategy or a policy is a matter of placing a file and inserting a registration
-row (contract section 6.1): a capability list naming ``manual`` and ``turtle``
-would have to be edited, inside ``core_lib``, before a third policy could ship.
+modes are deployed. Inventory is queried, from ``core_lib.indicators.registry``,
+``core_lib.patterns``, and ``trading_plugins.discovery``.
+
+**No ``value`` here may be inventory**, and a test enforces it. Values are what
+the drift tests assert equality on, so a value listing today's policy modes would
+have to be edited, inside ``core_lib``, before a third policy could ship - which
+is exactly the rule that adding a strategy or a policy is a file plus a
+registration row (contract section 6.1). A ``statement`` may name a deployed
+thing as an example, because prose is read rather than asserted on; naming an
+example goes stale visibly, while a pinned value goes stale by blocking someone.
 
 **Capability** is what the platform can express at all: how many symbols one run
 trades, when a fill happens, whether a position can be exited in part, whether a
@@ -28,6 +32,10 @@ observes the value or the refusal. Neither proves that a *second* path will not
 appear later. A partial-exit path added beside the one this module describes
 would leave every test passing. Catching that is a review responsibility, not a
 test's.
+
+Read the path each statement is about. Several capabilities differ between a
+backtest and paper execution - risk limits especially - and a statement that did
+not say which one it meant would be false half the time.
 """
 
 from __future__ import annotations
@@ -99,6 +107,7 @@ _PLUGIN_TESTS: Final = "services/trading-plugins/tests/test_trading_plugins_capa
 _SIGNAL_TESTS: Final = "services/signal-service/tests/test_signal_generation.py"
 _ENGINE_TESTS: Final = "services/backtest-service/tests/test_engine_and_harness.py"
 _MANAGER_TESTS: Final = "services/core-lib/tests/test_strategy_manager.py"
+_WALLET_TESTS: Final = "services/wallet-service/tests/test_wallet_service.py"
 
 
 PLATFORM_CAPABILITIES: Final[Mapping[str, Capability]] = _entries(
@@ -106,13 +115,19 @@ PLATFORM_CAPABILITIES: Final[Mapping[str, Capability]] = _entries(
     Capability(
         id="run.traded_symbols",
         statement=(
-            "One run trades exactly one symbol. A second symbol can only enter as "
-            "reference_symbol, which feeds paired series such as BETA and CORREL and is "
-            "never traded, so a rule spanning two instruments cannot be expressed."
+            "One run trades exactly one symbol. A second instrument reaches the strategy "
+            "only through a registered paired series, which is named by reference_symbol "
+            "and computed from both instruments; its raw candles never arrive and it is "
+            "never traded. So a rule may compare two instruments if a registered series "
+            "does the comparing, but a rule that positions in both cannot be expressed."
         ),
         value=1,
-        proof=CapabilityProof.STRUCTURE,
-        verified_by=(f"{_BACKTEST_TESTS}::test_run_config_names_one_traded_symbol",),
+        proof=CapabilityProof.BEHAVIOR,
+        verified_by=(
+            f"{_BACKTEST_TESTS}::test_run_config_names_one_traded_symbol",
+            f"{_ENGINE_TESTS}"
+            "::test_paired_series_waits_for_a_close_without_future_reference_values_and_records_source",
+        ),
     ),
     Capability(
         id="run.decision_timeframes",
@@ -162,13 +177,19 @@ PLATFORM_CAPABILITIES: Final[Mapping[str, Capability]] = _entries(
     Capability(
         id="run.strategy_inputs",
         statement=(
-            "The strategy receives exactly these six inputs and nothing else. There is no "
-            "channel for account state or for the outcome of earlier trades, so a strategy "
-            "cannot count its own wins, losses, or trades per day."
+            "A strategy is called with two things: a mapping holding exactly these six "
+            "keys, and the position it currently holds, which is None when flat. The "
+            "position describes the open trade - its quantity, entry price, leverage, and "
+            "liquidation price - and nothing else arrives. There is no equity, no cash, and "
+            "no record of any closed trade, so a strategy cannot count its own wins, "
+            "losses, or trades per day."
         ),
         value=("candles", "candle", "symbol", "timeframe", "market_type", "indicators"),
         proof=CapabilityProof.BEHAVIOR,
-        verified_by=(f"{_ENGINE_TESTS}::test_engine_passes_exactly_the_six_declared_inputs",),
+        verified_by=(
+            f"{_ENGINE_TESTS}::test_engine_passes_exactly_the_six_declared_inputs",
+            f"{_CORE_TESTS}::test_a_strategy_is_called_with_market_data_and_its_open_position",
+        ),
     ),
     # ----- series and candles --------------------------------------------------
     Capability(
@@ -354,8 +375,10 @@ PLATFORM_CAPABILITIES: Final[Mapping[str, Capability]] = _entries(
     Capability(
         id="risk.account_limits",
         statement=(
-            "The only account-wide limits are these three, and a policy receives them as "
-            "an argument rather than being checked against them afterwards."
+            "In a backtest these three are the whole of what a policy is told about the "
+            "account's limits, and it receives them as an argument rather than being "
+            "checked against them afterwards. Paper execution adds its own limits on top "
+            "(see risk.paper_execution_guard); a backtest does not apply those."
         ),
         value=("risk_per_trade", "maintenance_margin_rate", "max_leverage"),
         proof=CapabilityProof.STRUCTURE,
@@ -374,11 +397,13 @@ PLATFORM_CAPABILITIES: Final[Mapping[str, Capability]] = _entries(
     Capability(
         id="risk.between_trade_rules",
         statement=(
-            "Nothing looks across trades. There is no daily or weekly loss limit, no "
-            "consecutive-loss halt, no cap on trades per day, and no block on entering two "
-            "correlated symbols. The three functions in core_lib.sizing.exposure_limit read "
-            "as if they were such rules, but they share one body and the engine calls each "
-            "with a single element, so nothing is ever aggregated."
+            "A backtest applies no rule that reads earlier trades: no daily or weekly loss "
+            "limit, no consecutive-loss halt, no cap on trades per day. The three functions "
+            "in core_lib.sizing.exposure_limit read like such rules, and paper execution "
+            "does aggregate through them, but the backtest engine calls each with one "
+            "element under a fixed one-percent limit, so in a backtest nothing is summed. "
+            "A document asking for any of these is asking for something a backtest result "
+            "will not contain."
         ),
         value=(),
         proof=CapabilityProof.BEHAVIOR,
@@ -391,12 +416,28 @@ PLATFORM_CAPABILITIES: Final[Mapping[str, Capability]] = _entries(
     Capability(
         id="risk.independent_governor",
         statement=(
-            "There is no separate layer that approves or refuses a trade on account-wide "
-            "grounds. A policy keeps the limits itself and no one checks it afterwards."
+            "A backtest has no layer between the policy and execution that could refuse a "
+            "trade on account-wide grounds: the policy keeps the limits itself and nothing "
+            "rechecks it. This is the layer the authoring contract calls a target state, "
+            "and it does not exist on the backtest path."
         ),
         value=False,
         proof=CapabilityProof.STRUCTURE,
         verified_by=(f"{_CORE_TESTS}::test_no_independent_risk_governor_stands_between_layers",),
+    ),
+    Capability(
+        id="risk.paper_execution_guard",
+        statement=(
+            "Paper execution does have such a layer, and it is not the backtest's. The "
+            "wallet service refuses a signal before any fill on a kill switch, an allowed "
+            "symbol list, order quantity and notional caps, a one-R limit, and aggregate "
+            "exposure per market, per correlation group, and per direction; it also holds "
+            "one open position at a time. A strategy whose backtest passes can still be "
+            "refused there, and a backtest result never reflects these refusals."
+        ),
+        value=True,
+        proof=CapabilityProof.BEHAVIOR,
+        verified_by=(f"{_WALLET_TESTS}::test_risk_guards_reject_before_fill_or_write",),
     ),
     # ----- deployment ----------------------------------------------------------
     Capability(

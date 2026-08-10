@@ -30,6 +30,7 @@ from core_lib.patterns import TALIB_PATTERN_REGISTRY
 from core_lib.ports import CostModel
 from core_lib.series import SeriesValue, resolve_series_timeframe
 from core_lib.sizing import exposure_limit
+from core_lib.strategy import StrategyBase
 from core_lib.types import (
     Candle,
     DecisionIntent,
@@ -38,6 +39,7 @@ from core_lib.types import (
     OrderRequest,
     OrderSide,
     OrderType,
+    Position,
     PositionSide,
 )
 
@@ -134,6 +136,23 @@ def test_a_candle_does_not_carry_a_kind() -> None:
     # Regrouping into a longer timeframe is the only transformation core_lib does.
     assert callable(resample_confirmed_ohlcv)
     assert capability("candles.kinds").value == ("exchange_confirmed_ohlcv", "resampled")
+
+
+def test_a_strategy_is_called_with_market_data_and_its_open_position() -> None:
+    """Pin both arguments, because the second one is easy to forget.
+
+    A design review caught this list claiming the six market_data keys were the
+    whole of a strategy's input. The open position arrives as well, and it
+    carries execution-side values. A third parameter would be a new channel and
+    has to be recorded here before it can be used.
+    """
+    parameters = tuple(inspect.signature(StrategyBase.analyze).parameters)
+
+    assert parameters == ("self", "market_data", "current_position")
+    position_fields = {field.name for field in dataclasses.fields(Position)}
+    # What the position tells a strategy is the open trade, never the account.
+    assert {"quantity", "average_price", "leverage", "liquidation_price"} <= position_fields
+    assert not {"equity", "available_cash", "realized_pnl_total", "trade_count"} & position_fields
 
 
 def test_a_decision_carries_no_sizing_or_protection() -> None:
@@ -275,14 +294,16 @@ def test_the_three_exposure_limits_share_one_body() -> None:
 
 
 def test_no_independent_risk_governor_stands_between_layers() -> None:
-    """Pin the absence the authoring contract calls a target state.
+    """Pin the absence on the backtest path, which is the path this describes.
 
     The contract describes a common risk governor that approves a trade on
-    account-wide grounds. Nothing implements it, and this fails the day one
-    arrives, which is when the capability statement has to change.
+    account-wide grounds. Nothing on the backtest path implements it. Paper
+    execution has its own guard, which risk.paper_execution_guard records
+    separately; conflating the two was a review finding.
     """
     assert importlib.util.find_spec("core_lib.risk_governor") is None
     assert capability("risk.independent_governor").value is False
+    assert capability("risk.paper_execution_guard").value is True
 
 
 def test_every_registered_series_names_the_source_of_its_definition() -> None:
