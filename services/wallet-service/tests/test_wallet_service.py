@@ -372,6 +372,26 @@ def test_one_r_tolerance_remains_fail_closed_for_material_overshoot(
     assert service.current_position is None
 
 
+def test_a_second_entry_is_refused_while_a_paper_position_is_open(
+    service: WalletService,
+    repository: RepositoryDouble,
+) -> None:
+    """Pin the one-position rule that core_lib.capabilities records for this path.
+
+    Because the wallet never holds two positions, the aggregate exposure limits
+    only ever see the candidate trade. A capability statement claiming that paper
+    execution sums exposure across trades would be wrong, and this is why.
+    """
+    first = service.process(paper_signal())
+
+    assert first is not None
+    assert service.current_position is not None
+    with pytest.raises(RiskRejected, match="pyramiding_disabled"):
+        service.process(paper_signal("signal-2", decision_index=2))
+
+    assert len(repository.executions) == 1
+
+
 def test_repository_replay_does_not_commit_candidate_memory_state() -> None:
     repository = RepositoryDouble(accept=False)
     service = WalletService(

@@ -428,16 +428,23 @@ PLATFORM_CAPABILITIES: Final[Mapping[str, Capability]] = _entries(
     Capability(
         id="risk.paper_execution_guard",
         statement=(
-            "Paper execution does have such a layer, and it is not the backtest's. The "
-            "wallet service refuses a signal before any fill on a kill switch, an allowed "
-            "symbol list, order quantity and notional caps, a one-R limit, and aggregate "
-            "exposure per market, per correlation group, and per direction; it also holds "
-            "one open position at a time. A strategy whose backtest passes can still be "
-            "refused there, and a backtest result never reflects these refusals."
+            "Paper execution does have such a layer, and it is not the backtest's. Before "
+            "any fill the wallet service refuses a signal on a kill switch, an allowed "
+            "symbol list, order quantity and notional caps, a one-R limit, and per-market, "
+            "per-correlation-group, and per-direction limits. Those last three see the "
+            "candidate trade only: the wallet holds one position at a time and refuses a "
+            "second entry, so it never has an earlier trade to add. A strategy whose "
+            "backtest passes can still be refused here, and a backtest result never "
+            "reflects these refusals."
         ),
         value=True,
         proof=CapabilityProof.BEHAVIOR,
-        verified_by=(f"{_WALLET_TESTS}::test_risk_guards_reject_before_fill_or_write",),
+        verified_by=(
+            f"{_WALLET_TESTS}::test_risk_guards_reject_before_fill_or_write",
+            f"{_WALLET_TESTS}::test_kill_switch_is_one_way_and_blocks_before_sizing",
+            f"{_WALLET_TESTS}::test_one_r_tolerance_remains_fail_closed_for_material_overshoot",
+            f"{_WALLET_TESTS}::test_a_second_entry_is_refused_while_a_paper_position_is_open",
+        ),
     ),
     # ----- deployment ----------------------------------------------------------
     Capability(
