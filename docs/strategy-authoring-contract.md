@@ -592,10 +592,9 @@ series로 풀리는 계산은 그 series의 warm-up이 함께 따라오지만, �
 `envelope_status`를 `provisional`로 두고 시작하며, 기대 범위를 무엇으로 정할지
 정하는 것은 남은 일이다.
 
-**지금 저장소에 있는 `VesselReference`를 예시로 삼지 않는다.** 그 전략의
-`ParameterSchema`에는 §4.2가 금지한 이름 셋이 그대로 들어 있다. 과거 설정을 읽기
-위해 마이그레이션 기간 동안만 허용된 예외이며, 새 전략이 그 모양을 따라 하면
-규범을 어기게 된다.
+**저장소의 `VesselReference`도 이 예시와 같은 소유권 경계를 따른다.** 그 전략은
+진입·청산 edge를 바꾸는 parameter가 없으므로 빈 `ParameterSchema`를 선언하고,
+과거 설정의 자금관리 이름 셋은 호환 변환기가 manual 정책 설정으로 옮긴다.
 
 ### 4.2 전략 parameter와 자금관리 parameter를 분리한다
 
@@ -613,10 +612,9 @@ series로 풀리는 계산은 그 series의 warm-up이 함께 따라오지만, �
 과거 전략의 동일 이름은 마이그레이션 기간에만 허용한다. 호환 normalizer가
 이를 `manual` 정책 설정으로 옮긴 뒤, 정규화된 설정을 Evidence에 기록해야 한다.
 
-**지금 그 예외에 해당하는 전략은 `VesselReference` 하나다.** 그 parameter
-스키마에 `atr_stop_multiple`과 `reward_risk`와 `leverage`가 남아 있다. 저장소에
-전략이 그것뿐이므로 새로 쓰는 사람이 그 파일을 열어 그대로 따라 하기 쉬운데,
-그러면 이 절을 어기게 된다. 따라 할 모양은 §4.1의 예시다.
+**`VesselReference`의 과거 설정은 호환 변환 대상이지만 코드 선언은 예외가 아니다.**
+그 parameter 스키마에는 이 절이 금지한 이름이 없으며, 옛 평면 값은 전략에 넘기기
+전에 manual 정책 설정으로 옮겨지고 전략 `params`에서는 빠진다.
 
 #### 4.2.1 parameter를 선언하는 법과 읽는 법
 
@@ -1387,8 +1385,8 @@ version을 Evidence에 기록하고 역사적 Turtle 전체 시스템과 동일�
 
 **다만 옮겨 담긴 경우에는 그 둘이 같아진다.** `vessel-reference`의 과거 설정은
 해석 전에 `params`에서 자금관리 설정으로 옮겨지므로, `submitted`에 남는 것은
-사용자가 적은 평면 값이 아니라 옮긴 결과다. **사용자가 실제로 적은 값은
-`params_json`에 남으므로** 되짚을 수는 있다.
+사용자가 적은 평면 값이 아니라 옮긴 결과다. **옮겨진 세 값은
+`submitted_money_management_json`에 그대로 남으므로** 되짚을 수 있다.
 
 **해석 방식에는 판이 붙어 있다.** `config_schema_version`은 설정을 해석하는
 `MoneyManagementFactory`가 소유하며 Evidence에 기록된다. **받는 이름이나

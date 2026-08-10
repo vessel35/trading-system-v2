@@ -1,9 +1,17 @@
 """Verify the first Vessel reference Adaptee's fixed-protection contract."""
 
+import json
+import re
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
 
-from core_lib.strategy import StrategyAdapter, StrategyConfig, StrategyDecisionContract
+from core_lib.strategy import (
+    StrategyAdapter,
+    StrategyConfig,
+    StrategyDecisionContract,
+    catalog_declaration_mismatch,
+)
 from core_lib.types import (
     Candle,
     DecisionAction,
@@ -67,7 +75,7 @@ def test_vessel_declares_exact_pipeline_inputs_and_no_trailing() -> None:
     strategy = _strategy()
     assert isinstance(strategy, StrategyAdapter)
     metadata = strategy.get_metadata()
-    assert metadata.min_history == 21
+    assert metadata.min_history == 1
     assert metadata.required_indicators == [
         {"name": "EMA", "params": {"period": 9}},
         {"name": "EMA", "params": {"period": 21}},
@@ -116,3 +124,49 @@ def test_vessel_exits_only_when_ema_regime_reverses() -> None:
     assert isinstance(signal, DecisionIntent)
     assert signal.action is DecisionAction.EXIT
     assert signal.reason == "vessel-ema-regime-exit"
+
+
+def test_vessel_parameter_schema_has_no_money_management_names() -> None:
+    forbidden = {
+        "leverage",
+        "reward_risk",
+        "atr_stop_multiple",
+        "risk_per_trade",
+        "position_size_pct",
+        "margin",
+        "quantity",
+    }
+
+    assert forbidden.isdisjoint(VesselReference.get_parameter_schema().fields)
+    assert VesselReference.VERSION == "3.0.0"
+
+
+def test_vessel_registration_script_matches_the_code_declaration() -> None:
+    repository_root = Path(__file__).resolve().parents[3]
+    sql = (
+        repository_root / "init-scripts/signal-service/20260724/02-register-vessel-reference.sql"
+    ).read_text()
+    values = re.search(
+        r"'(?P<version>\d+\.\d+\.\d+)',\s*"
+        r"ARRAY\['(?P<timeframe>[^']+)'\]::text\[\],\s*"
+        r"'(?P<indicators>\[.*?\])'::jsonb,\s*"
+        r"(?P<min_history>\d+),\s*"
+        r"'(?P<defaults>\{.*?\})'::jsonb,",
+        sql,
+        re.DOTALL,
+    )
+    assert values is not None
+    row = {
+        "min_history": int(values["min_history"]),
+        "supported_timeframes": [values["timeframe"]],
+        "required_indicators_json": json.loads(values["indicators"]),
+    }
+    metadata = VesselReference.get_metadata()
+
+    assert values["version"] == VesselReference.VERSION
+    assert json.loads(values["defaults"]) == {}
+    assert catalog_declaration_mismatch(row, metadata) is None
+    assert (
+        catalog_declaration_mismatch({**row, "min_history": 21}, metadata)
+        == "catalog min_history does not match the Adaptee: 21 != 1"
+    )

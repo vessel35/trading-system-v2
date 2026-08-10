@@ -494,7 +494,7 @@ def test_strategy_repository_falls_back_to_code_registry() -> None:
     strategy = response.data[0]
     assert strategy.strategy_id == "vessel-reference"
     assert strategy.supported_timeframes == ["1h"]
-    assert strategy.default_params["reward_risk"] == 2.0
+    assert strategy.default_params == {}
     assert strategy.supported_money_management == ["manual", "turtle"]
     assert strategy.default_money_management["mode"] == "manual"
     assert strategy.source == "code_registry"

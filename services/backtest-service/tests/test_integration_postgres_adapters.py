@@ -359,7 +359,7 @@ def test_signal_registry_adapter_reads_only_registry_table() -> None:
         assert entry["class_name"] == "VesselReference"
         assert entry["module_path"] == VesselReference.__module__
         assert entry["supported_timeframes"] == ["1h"]
-        assert entry["min_history"] == 21
+        assert entry["min_history"] == 1
         assert entry["is_active"] is True
         assert entry["is_deprecated"] is False
         assert VESSEL_STRATEGY_ID in [row["strategy_id"] for row in registry.list()]

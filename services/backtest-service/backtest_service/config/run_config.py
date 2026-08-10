@@ -366,6 +366,9 @@ class RunConfig(BaseModel):
             "reward_risk": legacy.get("reward_risk", 2.0),
             "atr_stop_multiple": legacy.get("atr_stop_multiple", 2.0),
         }
+        for name in ("leverage", "reward_risk", "atr_stop_multiple"):
+            legacy.pop(name, None)
+        normalized["params"] = legacy
         return normalized
 
     @field_validator("run_name")

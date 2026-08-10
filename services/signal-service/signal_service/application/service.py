@@ -118,9 +118,12 @@ class SignalGenerationService:
             "reward_risk": config.params.get("reward_risk", 2.0),
             "atr_stop_multiple": config.params.get("atr_stop_multiple", 2.0),
         }
+        strategy_params = dict(config.params)
+        for name in ("leverage", "reward_risk", "atr_stop_multiple"):
+            strategy_params.pop(name, None)
         runtime = self._manager.create_runtime(
             config.strategy_id,
-            {"strategy_id": config.strategy_id, "params": dict(config.params)},
+            {"strategy_id": config.strategy_id, "params": strategy_params},
             manual_config,
         )
         strategy = runtime.strategy
@@ -178,7 +181,7 @@ class SignalGenerationService:
                 )
         resolved = StrategyConfig.resolve(
             strategy.get_parameter_schema(),
-            {"strategy_id": config.strategy_id, "params": dict(config.params)},
+            {"strategy_id": config.strategy_id, "params": strategy_params},
         )
         serialized_params = StrategyConfig.serialize(resolved)["params"]
         if not isinstance(serialized_params, dict):

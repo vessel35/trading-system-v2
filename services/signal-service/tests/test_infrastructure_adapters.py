@@ -93,13 +93,13 @@ def _vessel_registry_row() -> tuple[object, ...]:
         "trading_plugins.strategies.vessel_reference",
         "Vessel Reference",
         None,
-        "1.0.0",
+        "3.0.0",
         ["1h"],
         [
             {"name": "EMA", "params": {"period": 9}},
             {"name": "EMA", "params": {"period": 21}},
         ],
-        21,
+        1,
         {},
         True,
         False,
@@ -301,11 +301,7 @@ def test_main_wires_confirmed_crypto_rows_through_core_vessel_to_signal_db() -> 
     persisted = cycle.signal
 
     assert persisted is not None
-    assert dict(persisted.params) == {
-        "atr_stop_multiple": 2.0,
-        "leverage": 1,
-        "reward_risk": 2.0,
-    }
+    assert dict(persisted.params) == {}
     assert persisted.signal.metadata["adaptee"] == "vessel-reference"
     assert persisted.signal.metadata["decision_action"] == "ENTER_LONG"
     money_management = cast(dict[str, object], persisted.signal.metadata["money_management"])

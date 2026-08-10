@@ -33,6 +33,8 @@ from signal_service.application import (
 )
 from signal_service.core import SignalGenerationConfig
 from signal_service.domain import PersistedSignal, SignalIntent, SignalMode
+from trading_plugins.strategies.vessel_reference import STRATEGY_ID as VESSEL_STRATEGY_ID
+from trading_plugins.strategies.vessel_reference import VesselReference
 
 _BASE = datetime(2026, 1, 1, tzinfo=UTC)
 _STRATEGY_ID = "probe"
@@ -141,6 +143,32 @@ class _PatternCatalog(StrategyRegistry):
 
     def list(self) -> list[dict[str, object]]:
         return [self.get(_PATTERN_STRATEGY_ID)]
+
+    def register(self, strategy_id: str, meta: dict[str, object]) -> None:
+        del strategy_id, meta
+        raise PermissionError
+
+
+class _VesselCatalog(StrategyRegistry):
+    def get(self, strategy_id: str) -> dict[str, object]:
+        if strategy_id != VESSEL_STRATEGY_ID:
+            raise KeyError(strategy_id)
+        return {
+            "strategy_id": VESSEL_STRATEGY_ID,
+            "class_name": VesselReference.__name__,
+            "module_path": VesselReference.__module__,
+            "supported_timeframes": ["1h"],
+            "required_indicators_json": [
+                {"name": "EMA", "params": {"period": 9}},
+                {"name": "EMA", "params": {"period": 21}},
+            ],
+            "min_history": 1,
+            "is_active": True,
+            "is_deprecated": False,
+        }
+
+    def list(self) -> list[dict[str, object]]:
+        return [self.get(VESSEL_STRATEGY_ID)]
 
     def register(self, strategy_id: str, meta: dict[str, object]) -> None:
         del strategy_id, meta
@@ -445,6 +473,12 @@ def _pattern_manager() -> AdapterManager:
     return AdapterManager(_PatternCatalog(), plugins)
 
 
+def _vessel_manager() -> AdapterManager:
+    plugins = InProcessStrategyRegistry()
+    plugins.register(VESSEL_STRATEGY_ID, VesselReference)
+    return AdapterManager(_VesselCatalog(), plugins)
+
+
 def _config() -> SignalGenerationConfig:
     return SignalGenerationConfig(
         strategy_id=_STRATEGY_ID,
@@ -512,6 +546,36 @@ def test_finalized_candle_uses_core_incremental_state_and_adaptee_contract() -> 
     next_market_data, _ = _ProbeStrategy.calls[-1]
     assert isinstance(next_market_data["candles"], list)
     assert len(next_market_data["candles"]) == 11
+
+
+def test_live_vessel_legacy_money_fields_move_before_strategy_resolution() -> None:
+    values = _candles(22)
+    service = SignalGenerationService(_Feed(values), _vessel_manager(), _Sink())
+    config = SignalGenerationConfig(
+        strategy_id=VESSEL_STRATEGY_ID,
+        params={
+            "leverage": 3,
+            "reward_risk": 2.5,
+            "atr_stop_multiple": 1.5,
+        },
+        symbol="BTCUSDT",
+        timeframe="1h",
+        market_type=MarketType.FUTURES,
+        mode=SignalMode.PAPER,
+    )
+
+    cycle = service.start(config, values[-1].close_time)
+
+    assert cycle.signal is not None
+    assert service._resolved_params == {}
+    assert dict(cycle.signal.params) == {}
+    assert service._money_management is not None
+    assert dict(service._money_management.resolved_config()) == {
+        "mode": "manual",
+        "leverage": 3,
+        "reward_risk": 2.5,
+        "atr_stop_multiple": 1.5,
+    }
 
 
 def test_live_multi_timeframe_alignment_uses_the_same_resolved_key() -> None:

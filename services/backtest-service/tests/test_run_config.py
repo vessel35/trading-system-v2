@@ -162,7 +162,7 @@ def test_vessel_legacy_money_fields_normalize_to_manual_policy() -> None:
         "reward_risk": 2.5,
         "atr_stop_multiple": 1.5,
     }
-    assert config.params["reward_risk"] == 2.5
+    assert config.params == {}
 
 
 def test_turtle_policy_is_discriminated_and_requires_global_risk_sizing() -> None:

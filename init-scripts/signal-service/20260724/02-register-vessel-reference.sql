@@ -22,18 +22,14 @@ VALUES (
     'trading_plugins.strategies.vessel_reference',
     'Vessel Reference',
     'EMA decision-only Vessel Adaptee with injected money-management policies.',
-    '2.0.0',
+    '3.0.0',
     ARRAY['1h']::text[],
     '[
         {"name": "EMA", "params": {"period": 9}},
         {"name": "EMA", "params": {"period": 21}}
     ]'::jsonb,
-    21,
-    '{
-        "atr_stop_multiple": 2.0,
-        "reward_risk": 2.0,
-        "leverage": 1
-    }'::jsonb,
+    1,
+    '{}'::jsonb,
     true,
     false
 )

@@ -1746,6 +1746,7 @@ def test_vessel_reference_end_to_end_dry_run_is_complete_and_deterministic(
     tmp_path: Path,
 ) -> None:
     """Exercise the first real Adaptee over an explicitly gap-free fixture."""
+    assert VesselReference.get_metadata().min_history == 1
     catalog = _Catalog()
     first_prereg = _prereg()
     second_prereg = {
@@ -1829,6 +1830,46 @@ def test_vessel_reference_end_to_end_dry_run_is_complete_and_deterministic(
         )
         assert detail["status"] == "matched"
         assert detail["comparison_run_id"] == first.run_id
+
+
+def test_vessel_legacy_money_fields_move_before_backtest_execution(
+    tmp_path: Path,
+) -> None:
+    raw = _vessel_config(run_name="vessel-legacy-manual").model_dump()
+    raw.pop("money_management")
+    raw["params"] = {
+        "leverage": 3,
+        "reward_risk": 2.5,
+        "atr_stop_multiple": 1.5,
+    }
+    config = RunConfig.model_validate(raw)
+
+    assert config.params == {}
+    assert config.money_management.model_dump() == {
+        "mode": "manual",
+        "leverage": 3,
+        "reward_risk": 2.5,
+        "atr_stop_multiple": 1.5,
+    }
+
+    result = _vessel_engine(tmp_path, _Catalog()).run(config)
+
+    with sqlite3.connect(result.evidence_path) as connection:
+        params_json, submitted_json, warmup_candles = connection.execute(
+            """
+            SELECT params_json, submitted_money_management_json, warmup_candles
+            FROM BACKTEST_RUN_LOCAL
+            """
+        ).fetchone()
+    params = json.loads(params_json)
+    assert set(params) == {"_money_management"}
+    assert json.loads(submitted_json) == {
+        "mode": "manual",
+        "leverage": 3,
+        "reward_risk": 2.5,
+        "atr_stop_multiple": 1.5,
+    }
+    assert warmup_candles == 21
 
 
 def test_vessel_reference_entry_and_exit_timing_and_direction_are_characterized(

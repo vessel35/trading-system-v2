@@ -6,7 +6,6 @@ from collections.abc import Mapping
 
 from core_lib.series import series_key_of
 from core_lib.strategy import (
-    FieldSpec,
     MoneyManagementSupport,
     ParameterSchema,
     ResolvedConfig,
@@ -34,7 +33,7 @@ class VesselReference(StrategyBase):
     """Own only the EMA entry/exit edge; runtime policies own money management."""
 
     STRATEGY_ID = STRATEGY_ID
-    VERSION = "2.0.0"
+    VERSION = "3.0.0"
 
     def __init__(self, config: ResolvedConfig) -> None:
         if config.strategy_id != STRATEGY_ID:
@@ -49,7 +48,7 @@ class VesselReference(StrategyBase):
                 {"name": "EMA", "params": {"period": 9}},
                 {"name": "EMA", "params": {"period": 21}},
             ],
-            min_history=21,
+            min_history=1,
             supported_timeframes=["1h"],
             profile=StrategyProfile(
                 id="vessel-reference-v1",
@@ -78,26 +77,8 @@ class VesselReference(StrategyBase):
 
     @classmethod
     def get_parameter_schema(cls) -> ParameterSchema:
-        """Temporarily accept legacy money fields until all stored configs migrate."""
-        return ParameterSchema(
-            fields={
-                "atr_stop_multiple": FieldSpec(
-                    type="number",
-                    default=2.0,
-                    range=(0.1, 10.0),
-                ),
-                "reward_risk": FieldSpec(
-                    type="number",
-                    default=2.0,
-                    range=(0.1, 10.0),
-                ),
-                "leverage": FieldSpec(
-                    type="integer",
-                    default=1,
-                    range=(1, 100),
-                ),
-            }
-        )
+        """Declare that this strategy has no strategy-owned parameters."""
+        return ParameterSchema(fields={})
 
     def analyze(
         self,
