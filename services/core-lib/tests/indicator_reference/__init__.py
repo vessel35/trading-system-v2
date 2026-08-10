@@ -42,7 +42,7 @@ from collections.abc import Iterable, Mapping
 from types import MappingProxyType
 from typing import NamedTuple, Protocol
 
-from . import cycle, momentum, strength, systems, trend, volatility, volume
+from . import cycle, momentum, statistics, strength, systems, trend, volatility, volume
 from .series import CONVERGENCE_NOISE_FLOOR, SAMPLE_INDICES, reference_candles
 
 __all__ = [
@@ -117,6 +117,7 @@ CATEGORY_DATA: Mapping[str, CategoryData] = MappingProxyType(
         "strength": _declared_by(strength),
         "systems": _declared_by(systems),
         "cycle": _declared_by(cycle),
+        "statistics": _declared_by(statistics),
     }
 )
 

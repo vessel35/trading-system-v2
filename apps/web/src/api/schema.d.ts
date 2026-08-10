@@ -1865,6 +1865,8 @@ export interface components {
             };
             /** Symbol */
             symbol: string;
+            /** Reference Symbol */
+            reference_symbol?: string | null;
             /** Exchange */
             exchange: string;
             /** Timeframe */
@@ -2180,6 +2182,8 @@ export interface components {
                 };
                 /** Symbol */
                 symbol: string;
+                /** Reference Symbol */
+                reference_symbol?: string | null;
                 /** Exchange */
                 exchange: string;
                 /** Timeframe */
@@ -2575,6 +2579,8 @@ export interface components {
                 };
                 /** Symbol */
                 symbol: string;
+                /** Reference Symbol */
+                reference_symbol?: string | null;
                 /** Exchange */
                 exchange: string;
                 /** Timeframe */
@@ -2897,6 +2903,8 @@ export interface operations {
                     };
                     /** Symbol */
                     symbol: string;
+                    /** Reference Symbol */
+                    reference_symbol?: string | null;
                     /** Exchange */
                     exchange: string;
                     /** Timeframe */

@@ -5,7 +5,7 @@ from collections.abc import Mapping
 
 from core_lib.candles import _TIMEFRAME_PATTERN
 
-from .contracts import SeriesParam, SeriesSpec, SeriesState, SeriesValue
+from .contracts import PairedSeriesState, SeriesParam, SeriesSpec, SeriesState, SeriesValue
 
 _SERIES_NAME_KEY = re.compile(r"[^a-z0-9]+")
 
@@ -81,6 +81,7 @@ def _series_param(value: object) -> str:
 
 __all__ = [
     "SeriesParam",
+    "PairedSeriesState",
     "SeriesSpec",
     "SeriesState",
     "SeriesValue",

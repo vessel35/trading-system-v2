@@ -38,6 +38,19 @@
                     "minLength": 1,
                     "title": "Symbol"
                   },
+                  "reference_symbol": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 30,
+                        "minLength": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Reference Symbol"
+                  },
                   "exchange": {
                     "type": "string",
                     "maxLength": 20,
@@ -7002,6 +7015,19 @@
             "minLength": 1,
             "title": "Symbol"
           },
+          "reference_symbol": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 30,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Symbol"
+          },
           "exchange": {
             "type": "string",
             "maxLength": 20,
@@ -7918,6 +7944,19 @@
                 "maxLength": 30,
                 "minLength": 1,
                 "title": "Symbol"
+              },
+              "reference_symbol": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 30,
+                    "minLength": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Reference Symbol"
               },
               "exchange": {
                 "type": "string",
@@ -9216,6 +9255,19 @@
                 "maxLength": 30,
                 "minLength": 1,
                 "title": "Symbol"
+              },
+              "reference_symbol": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 30,
+                    "minLength": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Reference Symbol"
               },
               "exchange": {
                 "type": "string",

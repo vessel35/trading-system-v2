@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -11,7 +11,7 @@ from threading import Event
 from typing import ClassVar, cast
 
 import pytest
-from core_lib.indicators import DEFAULT_REGISTRY
+from core_lib.indicators import DEFAULT_REGISTRY, IndicatorRegistry, IndicatorSpec
 from core_lib.ports import StrategyRegistry
 from core_lib.strategy import (
     AdapterManager,
@@ -274,6 +274,117 @@ class _MultiTimeframeFeed(_Feed):
         return super().candles_after(symbol, tf, after, up_to)
 
 
+class _PairedProbeState:
+    def __init__(self) -> None:
+        self.samples = 0
+        self.reference_close = 0.0
+
+    @property
+    def warmed_up(self) -> bool:
+        return self.samples >= 2
+
+    def seed(
+        self,
+        candles: Sequence[Candle],
+        reference_candles: Sequence[Candle],
+    ) -> None:
+        assert len(candles) == len(reference_candles)
+        assert all(
+            candle.close_time == reference.close_time
+            for candle, reference in zip(candles, reference_candles, strict=True)
+        )
+        self.samples = len(candles)
+        if reference_candles:
+            self.reference_close = reference_candles[-1].close
+
+    def update(self, candle: Candle, reference_candle: Candle) -> dict[str, float]:
+        assert candle.close_time == reference_candle.close_time
+        self.samples += 1
+        self.reference_close = reference_candle.close
+        return {
+            "reference_close": self.reference_close,
+            "samples": float(self.samples),
+        }
+
+
+_PAIRED_PROBE_SPEC = IndicatorSpec(
+    name="PAIRED_PROBE",
+    params={},
+    version="1.0.0",
+    pinned_impl="test-only paired input contract probe",
+    min_history=2,
+    category="statistics",
+    required_inputs=(),
+    _vectorized=lambda candles: [
+        {"reference_close": candle.close, "samples": float(index + 1)}
+        for index, candle in enumerate(candles)
+    ],
+    _state_factory=_PairedProbeState,
+    needs_reference_series=True,
+)
+
+
+def _paired_registry() -> IndicatorRegistry:
+    registry = IndicatorRegistry()
+    for spec in DEFAULT_REGISTRY.list():
+        registry.register(spec)
+    registry.register(_PAIRED_PROBE_SPEC)
+    return registry
+
+
+class _PairedProbeStrategy(_ProbeStrategy):
+    observed_market_data: ClassVar[list[dict[str, object]]] = []
+
+    @classmethod
+    def get_metadata(cls) -> StrategyMetadata:
+        metadata = super().get_metadata()
+        metadata.required_indicators = [{"name": "PAIRED_PROBE", "params": {}, "timeframe": "4h"}]
+        metadata.min_history = 1
+        return metadata
+
+    def analyze(
+        self,
+        market_data: dict[str, object],
+        current_position: Position | None,
+    ) -> None:
+        del current_position
+        type(self).observed_market_data.append(dict(market_data))
+        return None
+
+
+class _PairedFeed(_MultiTimeframeFeed):
+    def __init__(
+        self,
+        candles: list[Candle],
+        primary: list[Candle],
+        reference: list[Candle],
+    ) -> None:
+        super().__init__(candles, primary)
+        self.reference = reference
+
+    def candles(self, symbol: str, tf: str, up_to: datetime) -> list[Candle]:
+        if symbol == "ETHUSDT":
+            assert tf == "4h"
+            return [candle for candle in self.reference if candle.close_time <= up_to]
+        return super().candles(symbol, tf, up_to)
+
+    def candles_after(
+        self,
+        symbol: str,
+        tf: str,
+        after: datetime,
+        up_to: datetime,
+    ) -> list[Candle]:
+        if symbol == "ETHUSDT":
+            assert tf == "4h"
+            return [
+                candle
+                for candle in self.reference
+                if candle.open_time >= after and candle.close_time <= up_to
+            ]
+        return super().candles_after(symbol, tf, after, up_to)
+
+
 class _TargetLegacyProbeStrategy(_ProbeStrategy):
     """Break a target declaration by returning the legacy value."""
 
@@ -449,6 +560,135 @@ def test_live_multi_timeframe_alignment_uses_the_same_resolved_key() -> None:
         all(candle.timeframe == "1h" for candle in cast(list[Candle], item["candles"]))
         for item in observed
     )
+
+
+def _live_paired_values(
+    *,
+    changed_unfinished_tail: bool,
+    missing_tail: bool = False,
+) -> list[dict[str, float]]:
+    execution = _candles(40)
+    primary = [
+        Candle(
+            symbol="BTCUSDT",
+            exchange="binance",
+            timeframe="4h",
+            open_time=_BASE + timedelta(hours=4 * index),
+            close_time=_BASE + timedelta(hours=4 * (index + 1)),
+            open=200.0 + index,
+            high=201.0 + index,
+            low=199.0 + index,
+            close=200.5 + index,
+            volume=40.0,
+            quote_volume=None,
+            trade_count=None,
+        )
+        for index in range(10)
+    ]
+    reference = []
+    for index, candle in enumerate(primary):
+        close = 300.0 + index
+        if changed_unfinished_tail and index == 9:
+            close += 100.0
+        reference.append(
+            Candle(
+                symbol="ETHUSDT",
+                exchange=candle.exchange,
+                timeframe=candle.timeframe,
+                open_time=candle.open_time,
+                close_time=candle.close_time,
+                open=300.0 + index,
+                high=max(301.0 + index, close),
+                low=299.0 + index,
+                close=close,
+                volume=candle.volume,
+                quote_volume=None,
+                trade_count=None,
+            )
+        )
+    if missing_tail:
+        reference = reference[:-1]
+    _PairedProbeStrategy.observed_market_data.clear()
+    service = SignalGenerationService(
+        _PairedFeed(execution, primary, reference),
+        _manager(_PairedProbeStrategy),
+        _Sink(),
+        indicators=_paired_registry(),
+    )
+    config = SignalGenerationConfig(
+        strategy_id=_STRATEGY_ID,
+        symbol="BTCUSDT",
+        reference_symbol="ETHUSDT",
+        timeframe="1h",
+        market_type=MarketType.FUTURES,
+        mode=SignalMode.PAPER,
+    )
+    assert service.start(config, execution[36].close_time).signal is None
+    assert service.poll(execution[37].close_time).signal is None
+    assert service.poll(execution[38].close_time).signal is None
+    assert service.poll(execution[39].close_time).signal is None
+    return [
+        cast(
+            dict[str, float],
+            cast(Mapping[str, object], item["indicators"])["paired_probe@4h"],
+        )
+        for item in _PairedProbeStrategy.observed_market_data
+    ]
+
+
+def test_live_paired_series_matches_backtest_alignment_and_never_reuses_a_reference_bar() -> None:
+    unchanged = _live_paired_values(changed_unfinished_tail=False)
+    changed = _live_paired_values(changed_unfinished_tail=True)
+    missing = _live_paired_values(
+        changed_unfinished_tail=False,
+        missing_tail=True,
+    )
+
+    assert unchanged[:3] == changed[:3]
+    assert unchanged[3] != changed[3]
+    assert [value["samples"] for value in changed] == [2.0, 2.0, 2.0, 3.0]
+    assert [value["reference_close"] for value in unchanged[:3]] == [308.0] * 3
+    assert unchanged[3]["reference_close"] == 309.0
+    assert changed[3]["reference_close"] == 409.0
+    assert [value["samples"] for value in missing] == [2.0] * 4
+    assert [value["reference_close"] for value in missing] == [308.0] * 4
+
+
+def test_live_reference_symbol_is_required_only_by_a_paired_series() -> None:
+    values = _candles(10)
+    paired_service = SignalGenerationService(
+        _Feed(values),
+        _manager(_PairedProbeStrategy),
+        _Sink(),
+        indicators=_paired_registry(),
+    )
+    with pytest.raises(ValueError, match="reference_symbol is required"):
+        paired_service.start(_config(), values[-1].close_time)
+
+    unpaired_service = SignalGenerationService(_Feed(values), _manager(), _Sink())
+    with pytest.raises(ValueError, match="no paired series requires it"):
+        unpaired_service.start(
+            SignalGenerationConfig(
+                strategy_id=_STRATEGY_ID,
+                symbol="BTCUSDT",
+                reference_symbol="ETHUSDT",
+                timeframe="1h",
+                market_type=MarketType.FUTURES,
+                mode=SignalMode.PAPER,
+            ),
+            values[-1].close_time,
+        )
+
+
+def test_live_config_rejects_the_primary_symbol_as_its_reference() -> None:
+    with pytest.raises(ValueError, match="reference_symbol must differ"):
+        SignalGenerationConfig(
+            strategy_id=_STRATEGY_ID,
+            symbol="BTCUSDT",
+            reference_symbol="BTCUSDT",
+            timeframe="1h",
+            market_type=MarketType.FUTURES,
+        )
 
 
 def test_target_contract_rejects_a_legacy_signal_before_signal_service_uses_it() -> None:

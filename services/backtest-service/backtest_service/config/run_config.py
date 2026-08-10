@@ -328,6 +328,7 @@ class RunConfig(BaseModel):
     strategy_id: str = Field(min_length=1, max_length=80)
     params: dict[str, object] = Field(default_factory=dict)
     symbol: str = Field(min_length=1, max_length=30)
+    reference_symbol: str | None = Field(default=None, min_length=1, max_length=30)
     exchange: str = Field(min_length=1, max_length=20)
     timeframe: str = Field(min_length=2, max_length=10)
     market_type: Literal["spot", "futures"]
@@ -417,6 +418,8 @@ class RunConfig(BaseModel):
     def _validate_contract(self) -> RunConfig:
         if self.start >= self.end:
             raise ValueError("start must be earlier than end")
+        if self.reference_symbol == self.symbol:
+            raise ValueError("reference_symbol must differ from symbol")
         if self.fill_timing != "next_bar":
             raise ValueError("backtest RunConfig supports next_bar fill_timing only")
         if self.trigger_feed == "m1_subcandle":

@@ -8,6 +8,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import cast
 
 from core_lib.indicators import (
     DEFAULT_REGISTRY,
@@ -22,7 +23,7 @@ from core_lib.money_management import (
     RiskLimits,
 )
 from core_lib.patterns import DEFAULT_PATTERN_REGISTRY, PatternRegistry
-from core_lib.series import SeriesState, series_key_of
+from core_lib.series import PairedSeriesState, SeriesState, series_key_of
 from core_lib.series_resolution import ResolvedSeriesSpec, resolve_series_specs, series_key
 from core_lib.strategy import (
     AdapterManager,
@@ -47,6 +48,7 @@ from signal_service.domain import DataGap, PersistedSignal, SignalIntent
 from .ports import SignalDataFeed, SignalQueue, SignalSink
 
 _LOGGER = logging.getLogger(__name__)
+CandleStream = tuple[str, str]
 
 
 class SignalStateRecoveryRequired(RuntimeError):
@@ -84,9 +86,10 @@ class SignalGenerationService:
         self._strategy: StrategyAdapter | None = None
         self._money_management: MoneyManagementBase | None = None
         self._specs: list[ResolvedSeriesSpec] = []
-        self._states: dict[str, SeriesState] = {}
+        self._states: dict[str, SeriesState | PairedSeriesState] = {}
         self._series_values: dict[str, object] = {}
-        self._series_last_close: dict[str, datetime] = {}
+        self._series_last_close: dict[CandleStream, datetime] = {}
+        self._paired_last_close: dict[str, datetime] = {}
         self._confirmed: list[Candle] = []
         self._last_close: datetime | None = None
         self._resolved_params: dict[str, object] = {}
@@ -146,11 +149,22 @@ class SignalGenerationService:
             self._patterns,
             execution_timeframe=config.timeframe,
         )
-        required_warmups = {config.timeframe: metadata.min_history}
+        needs_reference = any(spec.needs_reference_series for spec in specs)
+        if needs_reference:
+            if config.reference_symbol is None:
+                raise ValueError("reference_symbol is required by a paired series")
+        elif config.reference_symbol is not None:
+            raise ValueError("reference_symbol was supplied but no paired series requires it")
+        required_warmups = {(config.symbol, config.timeframe): metadata.min_history}
         for spec in specs:
-            required_warmups[spec.timeframe] = max(
-                required_warmups.get(spec.timeframe, 0), spec.min_history
-            )
+            primary = (config.symbol, spec.timeframe)
+            required_warmups[primary] = max(required_warmups.get(primary, 0), spec.min_history)
+            if spec.needs_reference_series:
+                assert config.reference_symbol is not None
+                reference = (config.reference_symbol, spec.timeframe)
+                required_warmups[reference] = max(
+                    required_warmups.get(reference, 0), spec.min_history
+                )
         if runtime.money_management is not None:
             for requirement in runtime.money_management.required_indicators():
                 timeframe = (
@@ -158,8 +172,9 @@ class SignalGenerationService:
                     if requirement.timeframe == "strategy"
                     else requirement.timeframe
                 )
-                required_warmups[timeframe] = max(
-                    required_warmups.get(timeframe, 0), requirement.min_history
+                stream = (config.symbol, timeframe)
+                required_warmups[stream] = max(
+                    required_warmups.get(stream, 0), requirement.min_history
                 )
         resolved = StrategyConfig.resolve(
             strategy.get_parameter_schema(),
@@ -169,7 +184,7 @@ class SignalGenerationService:
         if not isinstance(serialized_params, dict):
             raise TypeError("core_lib resolved strategy params must serialize to a dict")
         history = self._confirmed_history(config, boundary)
-        required_warmup = required_warmups[config.timeframe]
+        required_warmup = required_warmups[(config.symbol, config.timeframe)]
         if len(history) < required_warmup + 1:
             raise ValueError(
                 "insufficient finalized history: "
@@ -180,9 +195,15 @@ class SignalGenerationService:
         self._strategy = strategy
         self._money_management = runtime.money_management
         self._specs = specs
-        self._states = {series_key(spec.spec, spec.timeframe): spec.make_state() for spec in specs}
+        self._states = {
+            series_key(spec.spec, spec.timeframe): (
+                spec.make_paired_state() if spec.needs_reference_series else spec.make_state()
+            )
+            for spec in specs
+        }
         self._series_values = {}
         self._series_last_close = {}
+        self._paired_last_close = {}
         self._resolved_params = dict(serialized_params)
         decision_window = history[-(required_warmup + 1) :]
         gaps = self._report_series_gaps(decision_window, boundary)
@@ -190,21 +211,67 @@ class SignalGenerationService:
         for spec in specs:
             key = series_key(spec.spec, spec.timeframe)
             state = self._states[key]
-            if spec.timeframe == config.timeframe:
-                state.seed(self._confirmed)
+            if spec.needs_reference_series:
+                assert config.reference_symbol is not None
+                primary_history = (
+                    history
+                    if spec.timeframe == config.timeframe
+                    else self._series_history(
+                        config,
+                        config.symbol,
+                        spec.timeframe,
+                        boundary,
+                    )
+                )
+                reference_history = self._series_history(
+                    config,
+                    config.reference_symbol,
+                    spec.timeframe,
+                    boundary,
+                )
+                pairs = self._match_candles(primary_history, reference_history)
+                if spec.timeframe == config.timeframe:
+                    decision_close = decision_window[-1].close_time
+                    pairs = [pair for pair in pairs if pair[0].close_time < decision_close]
+                if len(pairs) < spec.min_history:
+                    raise ValueError(
+                        "insufficient finalized history: "
+                        f"{config.symbol}/{config.reference_symbol} {spec.timeframe} "
+                        f"requires {spec.min_history} matched pairs, got {len(pairs)}"
+                    )
+                warm_pairs = pairs[-spec.min_history :]
+                primary_candles = [pair[0] for pair in warm_pairs]
+                reference_candles = [pair[1] for pair in warm_pairs]
+                paired_state = cast(PairedSeriesState, state)
+                paired_state.seed(primary_candles[:-1], reference_candles[:-1])
+                value = paired_state.update(primary_candles[-1], reference_candles[-1])
+                self._assert_finite_indicator(value, spec.identifier)
+                self._series_values[key] = value
+                self._paired_last_close[key] = primary_candles[-1].close_time
+            elif spec.timeframe == config.timeframe:
+                cast(SeriesState, state).seed(self._confirmed)
             else:
-                series_history = self._series_history(config, spec.timeframe, boundary)
-                required = required_warmups[spec.timeframe]
+                series_history = self._series_history(
+                    config,
+                    config.symbol,
+                    spec.timeframe,
+                    boundary,
+                )
+                required = required_warmups[(config.symbol, spec.timeframe)]
                 if len(series_history) < required:
                     raise ValueError(
                         "insufficient finalized history: "
-                        f"{spec.timeframe} requires {required}, got {len(series_history)}"
+                        f"{config.symbol} {spec.timeframe} requires {required}, "
+                        f"got {len(series_history)}"
                     )
-                state.seed(series_history[:-1])
-                value = state.update(series_history[-1])
+                single_state = cast(SeriesState, state)
+                single_state.seed(series_history[:-1])
+                value = single_state.update(series_history[-1])
                 self._assert_finite_indicator(value, spec.identifier)
                 self._series_values[key] = value
-                self._series_last_close[spec.timeframe] = series_history[-1].close_time
+                self._series_last_close[(config.symbol, spec.timeframe)] = series_history[
+                    -1
+                ].close_time
             if not state.warmed_up:
                 raise ValueError("indicator state did not warm up after required preload")
         persisted = self._process(decision_window[-1], boundary, current_position)
@@ -226,6 +293,7 @@ class SignalGenerationService:
         self._states = {}
         self._series_values = {}
         self._series_last_close = {}
+        self._paired_last_close = {}
         self._confirmed = []
         self._last_close = None
         self._resolved_params = {}
@@ -274,17 +342,18 @@ class SignalGenerationService:
     def _series_history(
         self,
         config: SignalGenerationConfig,
+        symbol: str,
         timeframe: str,
         boundary: datetime,
     ) -> list[Candle]:
         history = sorted(
-            self._feed.candles(config.symbol, timeframe, boundary),
+            self._feed.candles(symbol, timeframe, boundary),
             key=lambda candle: candle.open_time,
         )
         self._validate_series_sequence(
             history,
             boundary,
-            symbol=config.symbol,
+            symbol=symbol,
             timeframe=timeframe,
         )
         return history
@@ -368,7 +437,28 @@ class SignalGenerationService:
             if spec.timeframe != self._require_config().timeframe:
                 continue
             key = series_key(spec.spec, spec.timeframe)
-            value = self._states[key].update(candle)
+            if spec.needs_reference_series:
+                reference_symbol = self._require_config().reference_symbol
+                if reference_symbol is None:
+                    raise ValueError("reference_symbol is required by a paired series")
+                reference = {
+                    item.close_time: item
+                    for item in self._series_history(
+                        self._require_config(),
+                        reference_symbol,
+                        spec.timeframe,
+                        candle.close_time,
+                    )
+                }.get(candle.close_time)
+                if reference is None or candle.close_time <= self._paired_last_close[key]:
+                    continue
+                value = cast(PairedSeriesState, self._states[key]).update(
+                    candle,
+                    reference,
+                )
+                self._paired_last_close[key] = candle.close_time
+            else:
+                value = cast(SeriesState, self._states[key]).update(candle)
             self._assert_finite_indicator(value, spec.identifier)
             indicator_values[key] = value
             self._series_values[key] = value
@@ -410,10 +500,10 @@ class SignalGenerationService:
 
     def _advance_non_execution_series(self, boundary: datetime) -> None:
         config = self._require_config()
-        for timeframe, after in tuple(self._series_last_close.items()):
+        for (symbol, timeframe), after in tuple(self._series_last_close.items()):
             fresh = sorted(
                 self._feed.candles_after(
-                    config.symbol,
+                    symbol,
                     timeframe,
                     after,
                     boundary,
@@ -423,18 +513,61 @@ class SignalGenerationService:
             self._validate_series_sequence(
                 fresh,
                 boundary,
-                symbol=config.symbol,
+                symbol=symbol,
                 timeframe=timeframe,
             )
             for source_candle in fresh:
                 for spec in self._specs:
-                    if spec.timeframe != timeframe:
+                    if spec.needs_reference_series or spec.timeframe != timeframe:
                         continue
                     key = series_key(spec.spec, timeframe)
-                    value = self._states[key].update(source_candle)
+                    value = cast(SeriesState, self._states[key]).update(source_candle)
                     self._assert_finite_indicator(value, spec.identifier)
                     self._series_values[key] = value
-                self._series_last_close[timeframe] = source_candle.close_time
+                self._series_last_close[(symbol, timeframe)] = source_candle.close_time
+
+        reference_symbol = config.reference_symbol
+        if reference_symbol is None:
+            return
+        for spec in self._specs:
+            if not spec.needs_reference_series or spec.timeframe == config.timeframe:
+                continue
+            key = series_key(spec.spec, spec.timeframe)
+            primary = self._series_history(
+                config,
+                config.symbol,
+                spec.timeframe,
+                boundary,
+            )
+            reference = self._series_history(
+                config,
+                reference_symbol,
+                spec.timeframe,
+                boundary,
+            )
+            pairs = [
+                pair
+                for pair in self._match_candles(primary, reference)
+                if pair[0].close_time > self._paired_last_close[key]
+            ]
+            state = cast(PairedSeriesState, self._states[key])
+            for primary_candle, reference_candle in pairs:
+                value = state.update(primary_candle, reference_candle)
+                self._assert_finite_indicator(value, spec.identifier)
+                self._series_values[key] = value
+                self._paired_last_close[key] = primary_candle.close_time
+
+    @staticmethod
+    def _match_candles(
+        primary: list[Candle],
+        reference: list[Candle],
+    ) -> list[tuple[Candle, Candle]]:
+        reference_by_close = {candle.close_time: candle for candle in reference}
+        return [
+            (candle, reference_by_close[candle.close_time])
+            for candle in primary
+            if candle.close_time in reference_by_close
+        ]
 
     def _materialize_decision(
         self,

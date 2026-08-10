@@ -19,6 +19,7 @@ class SignalGenerationConfig:
     symbol: str
     timeframe: str
     market_type: MarketType
+    reference_symbol: str | None = None
     mode: SignalMode = SignalMode.PAPER
     params: Mapping[str, object] = field(default_factory=dict)
 
@@ -33,3 +34,7 @@ class SignalGenerationConfig:
         object.__setattr__(self, "market_type", MarketType(self.market_type))
         object.__setattr__(self, "mode", SignalMode(self.mode))
         object.__setattr__(self, "params", MappingProxyType(dict(self.params)))
+        if self.reference_symbol is not None and not self.reference_symbol:
+            raise ValueError("reference_symbol must not be empty")
+        if self.reference_symbol == self.symbol:
+            raise ValueError("reference_symbol must differ from symbol")

@@ -1,11 +1,13 @@
 """Register indicator versions, implementations, and minimum history."""
 
+from __future__ import annotations
+
 import builtins
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from types import MappingProxyType
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from core_lib.types import Candle
 
@@ -55,7 +57,11 @@ class IndicatorSpec:
         repr=False,
         compare=False,
     )
-    _state_factory: Callable[[], IndicatorState] = field(repr=False, compare=False)
+    _state_factory: Callable[[], Any] = field(
+        repr=False,
+        compare=False,
+    )
+    needs_reference_series: bool = False
     undefined_outputs: tuple[str, ...] = ()
     """Output keys the standard itself leaves undefined for degenerate windows.
 
@@ -91,7 +97,17 @@ class IndicatorSpec:
 
     def make_state(self) -> IndicatorState:
         """Create a fresh incremental state with no shared execution data."""
-        return self._state_factory()
+        state = self._state_factory()
+        if self.needs_reference_series or not isinstance(state, IndicatorState):
+            raise TypeError(f"indicator {self.identifier} does not provide a single-series state")
+        return state
+
+    def make_paired_state(self) -> Any:
+        """Create a fresh paired state from a reference-series declaration."""
+        state = self._state_factory()
+        if not self.needs_reference_series:
+            raise TypeError(f"indicator {self.identifier} does not provide a paired-series state")
+        return state
 
 
 RegistryKey = tuple[str, tuple[tuple[str, IndicatorParam], ...]]

@@ -70,6 +70,7 @@ def test_valid_config_defaults_and_manager_selection() -> None:
         ({"risk_per_trade": 0.0101}, "risk_per_trade"),
         ({"position_size_pct": 0.2}, "position_size_pct"),
         ({"run_name": "../escape"}, "filename-safe"),
+        ({"reference_symbol": "BTCUSDT"}, "reference_symbol must differ"),
         ({"start": datetime(2025, 1, 1)}, "timezone-aware"),
         ({"cost_values": {"unknown_rate": "0.1"}}, "unknown cost parameter"),
         ({"cost_values": {"gap_multiplier": "0.5"}}, "at least one"),

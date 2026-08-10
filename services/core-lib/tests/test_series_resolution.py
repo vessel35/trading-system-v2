@@ -14,6 +14,7 @@ from core_lib.indicators.registry import (
 from core_lib.patterns.registry import PatternRegistry, PatternSpec, PatternValue
 from core_lib.series import SeriesSpec
 from core_lib.series_resolution import (
+    ResolvedSeriesSpec,
     assert_disjoint_series_registry_names,
     resolve_series_specs,
     series_key,
@@ -55,6 +56,32 @@ class _PatternState:
 
     def current(self) -> PatternValue:
         return {"pat_doji": 0.0}
+
+
+class _PairedState:
+    def __init__(self) -> None:
+        self.samples = 0
+
+    @property
+    def warmed_up(self) -> bool:
+        return self.samples >= 1
+
+    def seed(
+        self,
+        candles: Sequence[Candle],
+        reference_candles: Sequence[Candle],
+    ) -> None:
+        assert len(candles) == len(reference_candles)
+        assert all(
+            candle.close_time == reference.close_time
+            for candle, reference in zip(candles, reference_candles, strict=True)
+        )
+        self.samples = len(candles)
+
+    def update(self, candle: Candle, reference_candle: Candle) -> IndicatorValue:
+        assert candle.close_time == reference_candle.close_time
+        self.samples += 1
+        return {"reference_close": reference_candle.close, "samples": float(self.samples)}
 
 
 def _indicator(name: str, params: dict[str, IndicatorParam] | None = None) -> IndicatorSpec:
@@ -104,6 +131,56 @@ def test_series_key_requires_and_includes_the_resolved_timeframe() -> None:
         series_key(spec, "strategy")
     with pytest.raises(TypeError):
         series_key(spec)  # type: ignore[call-arg]
+
+
+def test_indicator_state_factory_must_match_its_reference_declaration() -> None:
+    paired = IndicatorSpec(
+        name="PAIRED_PROBE",
+        params={},
+        version="1.0.0",
+        pinned_impl="test",
+        min_history=1,
+        category="statistics",
+        required_inputs=(),
+        _vectorized=lambda candles: [1.0 for _ in candles],
+        _state_factory=_PairedState,
+        needs_reference_series=True,
+    )
+    undeclared = IndicatorSpec(
+        name="UNDECLARED_PAIRED_PROBE",
+        params={},
+        version="1.0.0",
+        pinned_impl="test",
+        min_history=1,
+        category="statistics",
+        required_inputs=(),
+        _vectorized=lambda candles: [1.0 for _ in candles],
+        _state_factory=_PairedState,
+    )
+    invalid_paired = IndicatorSpec(
+        name="INVALID_PAIRED_PROBE",
+        params={},
+        version="1.0.0",
+        pinned_impl="test",
+        min_history=1,
+        category="statistics",
+        required_inputs=(),
+        _vectorized=lambda candles: [1.0 for _ in candles],
+        _state_factory=_IndicatorState,
+        needs_reference_series=True,
+    )
+
+    assert paired.needs_reference_series is True
+    assert undeclared.needs_reference_series is False
+    assert paired.make_paired_state().__class__ is _PairedState
+    with pytest.raises(TypeError, match="does not provide a single-series state"):
+        paired.make_state()
+    with pytest.raises(TypeError, match="does not provide a paired-series state"):
+        undeclared.make_paired_state()
+    with pytest.raises(TypeError, match="does not provide a single-series state"):
+        undeclared.make_state()
+    with pytest.raises(TypeError, match="state is not paired"):
+        ResolvedSeriesSpec(invalid_paired, "1h").make_paired_state()
 
 
 @pytest.mark.parametrize(

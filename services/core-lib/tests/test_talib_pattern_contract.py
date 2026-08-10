@@ -389,7 +389,7 @@ def test_pattern_spec_and_registry_keep_the_shared_consumption_contract() -> Non
         registry.compute_batch(candles, {"pat_example(n=3)"})
 
 
-def test_pattern_specs_satisfy_the_shared_series_protocol_without_expanding_it() -> None:
+def test_pattern_specs_satisfy_the_shared_series_protocol_with_optional_pairing() -> None:
     pattern: SeriesSpec = DEFAULT_PATTERN_REGISTRY.list()[0]
     state: SeriesState = pattern.make_state()
 
@@ -402,7 +402,9 @@ def test_pattern_specs_satisfy_the_shared_series_protocol_without_expanding_it()
         "version",
         "min_history",
         "undefined_outputs",
+        "needs_reference_series",
         "make_state",
+        "make_paired_state",
     }
     assert set(vars(SeriesState)) - {
         name for name in vars(SeriesState) if name.startswith("_")

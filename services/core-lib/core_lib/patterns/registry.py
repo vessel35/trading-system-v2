@@ -28,7 +28,7 @@ from types import MappingProxyType
 from typing import Protocol, runtime_checkable
 
 from core_lib.indicators.contracts import assert_finalized
-from core_lib.series import SeriesParam
+from core_lib.series import PairedSeriesState, SeriesParam
 from core_lib.types import Candle
 
 from .outputs import assert_pattern_name
@@ -95,6 +95,7 @@ class PatternSpec:
     The TA-Lib registration path uses `lookback + 1`.
     """
 
+    needs_reference_series: bool = False
     undefined_outputs: tuple[str, ...] = ()
     """Output keys the standard itself leaves undefined after warm-up.
 
@@ -135,6 +136,10 @@ class PatternSpec:
     def make_state(self) -> PatternState:
         """Create a fresh incremental state with no shared execution data."""
         return self._state_factory()
+
+    def make_paired_state(self) -> PairedSeriesState:
+        """Reject a paired path because candlestick patterns consume one series."""
+        raise TypeError("candlestick patterns do not accept a reference series")
 
 
 RegistryKey = tuple[str, tuple[tuple[str, SeriesParam], ...]]

@@ -463,6 +463,18 @@ def test_profile_ref_remains_outside_the_config_hash_inputs() -> None:
     assert normalized_config_hash(values) == original_hash
 
 
+def test_reference_symbol_is_part_of_the_config_hash_when_present() -> None:
+    values = _run_meta()
+    original_hash = normalized_config_hash(values)
+
+    values["reference_symbol"] = "ETHUSDT"
+    reference_hash = normalized_config_hash(values)
+    values["reference_symbol"] = "BNBUSDT"
+
+    assert reference_hash != original_hash
+    assert normalized_config_hash(values) != reference_hash
+
+
 def test_catalog_register_uses_one_sequence_cte_before_any_filename() -> None:
     connection = _Connection()
     store = BacktestCatalogStore(connection)

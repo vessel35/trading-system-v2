@@ -9,7 +9,7 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Final, Protocol, runtime_checkable
+from typing import Final, Protocol, cast, runtime_checkable
 
 from core_lib import __version__ as CORE_LIB_VERSION
 from core_lib.costs import (
@@ -54,7 +54,7 @@ from core_lib.patterns import (
     PatternSpec,
 )
 from core_lib.ports import Broker, CatalogStore, Clock, CostModel, DataFeed, EvidenceSink
-from core_lib.series import SeriesState, series_key_of
+from core_lib.series import PairedSeriesState, SeriesState, series_key_of
 from core_lib.series_resolution import (
     ResolvedSeriesSpec,
     resolve_series_specs,
@@ -118,6 +118,7 @@ MAX_CONSECUTIVE_GAP_SECONDS: Final = 86_400
 # incremental path as live/paper.  This keeps look-ahead exclusion structural;
 # the vectorized path remains the batch API and the independent parity oracle.
 BACKTEST_INDICATOR_EXECUTION_MODE: Final = "incremental"
+CandleStream = tuple[str, str]
 
 
 @runtime_checkable
@@ -317,13 +318,16 @@ class Engine:
         self._confirmed: list[Candle] = []
         self._minute_history: list[Candle] = []
         self._indicator_specs: list[ResolvedSeriesSpec] = []
-        self._indicator_states: dict[str, SeriesState] = {}
+        self._indicator_states: dict[str, SeriesState | PairedSeriesState] = {}
         self._indicator_values: dict[str, object] = {}
         self._indicator_source_candles: dict[str, Candle] = {}
-        self._series_histories: dict[str, list[Candle]] = {}
-        self._series_preloads: dict[str, list[Candle]] = {}
-        self._series_positions: dict[str, int] = {}
-        self._required_warmups: dict[str, int] = {}
+        self._series_histories: dict[CandleStream, list[Candle]] = {}
+        self._series_preloads: dict[CandleStream, list[Candle]] = {}
+        self._series_positions: dict[CandleStream, int] = {}
+        self._paired_histories: dict[str, list[tuple[Candle, Candle]]] = {}
+        self._paired_preloads: dict[str, list[tuple[Candle, Candle]]] = {}
+        self._paired_positions: dict[str, int] = {}
+        self._required_warmups: dict[CandleStream, int] = {}
         self._turtle_n_values: tuple[tuple[datetime, float], ...] = ()
         self._funding_rates: dict[datetime, tuple[Decimal, str]] = {}
         self._funding_diagnostics = {
@@ -398,6 +402,12 @@ class Engine:
             DEFAULT_PATTERN_REGISTRY,
             execution_timeframe=config.timeframe,
         )
+        needs_reference = any(spec.needs_reference_series for spec in self._indicator_specs)
+        if needs_reference:
+            if config.reference_symbol is None:
+                raise ValueError("reference_symbol is required by a paired series")
+        elif config.reference_symbol is not None:
+            raise ValueError("reference_symbol was supplied but no paired series requires it")
         if config.indicator_mode == "explicit":
             required_specs = series_specs_from_descriptors(
                 required_indicators,
@@ -417,19 +427,21 @@ class Engine:
                     "explicit_indicators missing strategy-required indicators: "
                     + ", ".join(missing_required)
                 )
-        self._required_warmups = self._warmups_by_timeframe(metadata.min_history)
+        self._required_warmups = self._warmups_by_stream(metadata.min_history)
         histories, preloads = self._load_histories(config, self._required_warmups)
         self._series_histories = histories
         self._series_preloads = {
-            timeframe: preload[-self._required_warmups[timeframe] :]
-            for timeframe, preload in preloads.items()
+            stream: preload[-self._required_warmups[stream] :]
+            for stream, preload in preloads.items()
         }
-        self._history = histories[config.timeframe]
-        self._preload = self._series_preloads[config.timeframe]
+        primary_stream = (config.symbol, config.timeframe)
+        self._history = histories[primary_stream]
+        self._preload = self._series_preloads[primary_stream]
         self._series_positions = {
-            timeframe: sum(candle.close_time <= config.start for candle in history)
-            for timeframe, history in histories.items()
+            stream: sum(candle.close_time <= config.start for candle in history)
+            for stream, history in histories.items()
         }
+        self._prepare_paired_histories(config, histories)
         self._evaluation = [
             candle
             for candle in self._history
@@ -465,6 +477,7 @@ class Engine:
             + self._daily_policy_indicator_evidence(),
             "params_schema_version": resolved.schema_version,
             "symbol": config.symbol,
+            "reference_symbol": config.reference_symbol,
             "exchange": config.exchange,
             "timeframe": config.timeframe,
             "market_type": config.market_type.upper(),
@@ -524,17 +537,31 @@ class Engine:
         for resolved in self._indicator_specs:
             key = series_key(resolved.spec, resolved.timeframe)
             state = self._indicator_states[key]
-            preload = self._series_preloads[resolved.timeframe]
-            if resolved.timeframe == execution_timeframe:
-                state.seed(preload)
-            else:
-                state.seed(preload[:-1])
-                value = state.update(preload[-1])
+            if resolved.needs_reference_series:
+                paired_state = cast(PairedSeriesState, state)
+                pairs = self._paired_preloads[key]
+                primary = [pair[0] for pair in pairs]
+                reference = [pair[1] for pair in pairs]
+                paired_state.seed(primary[:-1], reference[:-1])
+                value = paired_state.update(primary[-1], reference[-1])
                 self._assert_finite_indicator(
                     value, resolved.identifier, resolved.undefined_outputs
                 )
                 self._indicator_values[key] = value
-                self._indicator_source_candles[key] = preload[-1]
+                self._indicator_source_candles[key] = primary[-1]
+            else:
+                single_state = cast(SeriesState, state)
+                preload = self._series_preloads[(self._config().symbol, resolved.timeframe)]
+                if resolved.timeframe == execution_timeframe:
+                    single_state.seed(preload)
+                else:
+                    single_state.seed(preload[:-1])
+                    value = single_state.update(preload[-1])
+                    self._assert_finite_indicator(
+                        value, resolved.identifier, resolved.undefined_outputs
+                    )
+                    self._indicator_values[key] = value
+                    self._indicator_source_candles[key] = preload[-1]
             if not state.warmed_up:
                 raise ValueError("indicator state did not warm up after required preload")
         return list(self._preload)
@@ -1742,14 +1769,18 @@ class Engine:
             raise LookupError(f"no settlement price at or before {boundary.isoformat()}")
         return to_decimal(previous[-1].close, quantizer=quantize_price), "prev_close"
 
-    def _warmups_by_timeframe(self, strategy_min_history: int) -> dict[str, int]:
-        """Return the largest declared bar count independently for each timeframe."""
+    def _warmups_by_stream(self, strategy_min_history: int) -> dict[CandleStream, int]:
+        """Return the largest declared bar count for each symbol/timeframe stream."""
         config = self._config()
-        warmups = {config.timeframe: strategy_min_history}
+        warmups = {(config.symbol, config.timeframe): strategy_min_history}
         for resolved in self._indicator_specs:
-            warmups[resolved.timeframe] = max(
-                warmups.get(resolved.timeframe, 0), resolved.min_history
-            )
+            primary = (config.symbol, resolved.timeframe)
+            warmups[primary] = max(warmups.get(primary, 0), resolved.min_history)
+            if resolved.needs_reference_series:
+                if config.reference_symbol is None:
+                    raise ValueError("reference_symbol is required by a paired series")
+                reference = (config.reference_symbol, resolved.timeframe)
+                warmups[reference] = max(warmups.get(reference, 0), resolved.min_history)
         policy = self._money_management
         if policy is not None:
             for requirement in policy.required_indicators():
@@ -1758,14 +1789,15 @@ class Engine:
                     if requirement.timeframe == "strategy"
                     else requirement.timeframe
                 )
-                warmups[timeframe] = max(warmups.get(timeframe, 0), requirement.min_history)
+                stream = (config.symbol, timeframe)
+                warmups[stream] = max(warmups.get(stream, 0), requirement.min_history)
         return warmups
 
     def _load_histories(
         self,
         config: RunConfig,
-        required_warmups: Mapping[str, int],
-    ) -> tuple[dict[str, list[Candle]], dict[str, list[Candle]]]:
+        required_warmups: Mapping[CandleStream, int],
+    ) -> tuple[dict[CandleStream, list[Candle]], dict[CandleStream, list[Candle]]]:
         """Read every required candle series with one shared calendar floor.
 
         The floor is an optimization only. When the bounded read cannot supply the warm-up
@@ -1776,45 +1808,63 @@ class Engine:
         if bounded is not None:
             bounded.limit_history(config.start - self._warmup_span())
         histories, preloads = self._read_histories(config, required_warmups)
-        short = {
-            timeframe: (required, len(preloads[timeframe]))
-            for timeframe, required in required_warmups.items()
-            if len(preloads[timeframe]) < required
-        }
+        short = self._short_warmups(config, required_warmups, preloads)
         if bounded is not None and short:
             bounded.limit_history(None)
             histories, preloads = self._read_histories(config, required_warmups)
-            short = {
-                timeframe: (required, len(preloads[timeframe]))
-                for timeframe, required in required_warmups.items()
-                if len(preloads[timeframe]) < required
-            }
+            short = self._short_warmups(config, required_warmups, preloads)
         if short:
             details = ", ".join(
-                f"{timeframe} requires {required}, got {available}"
-                for timeframe, (required, available) in sorted(short.items())
+                f"{label} requires {required}, got {available}"
+                for label, (required, available) in sorted(short.items())
             )
             raise ValueError(f"insufficient warm-up history: {details}")
         return histories, preloads
+
+    def _short_warmups(
+        self,
+        config: RunConfig,
+        required_warmups: Mapping[CandleStream, int],
+        preloads: Mapping[CandleStream, list[Candle]],
+    ) -> dict[str, tuple[int, int]]:
+        short = {
+            f"{symbol} {timeframe}": (required, len(preloads[(symbol, timeframe)]))
+            for (symbol, timeframe), required in required_warmups.items()
+            if len(preloads[(symbol, timeframe)]) < required
+        }
+        if config.reference_symbol is None:
+            return short
+        for resolved in self._indicator_specs:
+            if not resolved.needs_reference_series:
+                continue
+            primary = preloads[(config.symbol, resolved.timeframe)]
+            reference = preloads[(config.reference_symbol, resolved.timeframe)]
+            available = len(self._match_candles(primary, reference))
+            if available < resolved.min_history:
+                label = (
+                    f"{config.symbol}/{config.reference_symbol} {resolved.timeframe} matched pairs"
+                )
+                short[label] = (resolved.min_history, available)
+        return short
 
     def _warmup_span(self) -> timedelta:
         """Cover the calendar span implied by every resolved timeframe warm-up."""
         spans = [
             timeframe_milliseconds(timeframe) * bars
-            for timeframe, bars in self._required_warmups.items()
+            for (_, timeframe), bars in self._required_warmups.items()
         ]
         return timedelta(milliseconds=max(spans) * _WARMUP_SPAN_FACTOR)
 
     def _read_histories(
         self,
         config: RunConfig,
-        required_warmups: Mapping[str, int],
-    ) -> tuple[dict[str, list[Candle]], dict[str, list[Candle]]]:
-        histories: dict[str, list[Candle]] = {}
-        preloads: dict[str, list[Candle]] = {}
-        for timeframe in required_warmups:
+        required_warmups: Mapping[CandleStream, int],
+    ) -> tuple[dict[CandleStream, list[Candle]], dict[CandleStream, list[Candle]]]:
+        histories: dict[CandleStream, list[Candle]] = {}
+        preloads: dict[CandleStream, list[Candle]] = {}
+        for symbol, timeframe in required_warmups:
             history = sorted(
-                self.feed.candles(config.symbol, timeframe, config.end),
+                self.feed.candles(symbol, timeframe, config.end),
                 key=lambda candle: candle.open_time,
             )
             if any(
@@ -1822,22 +1872,63 @@ class Engine:
                 for left, right in zip(history, history[1:], strict=False)
             ):
                 raise ValueError(
-                    f"DataFeed {timeframe} candles must have strictly increasing open_time"
+                    f"DataFeed {symbol} {timeframe} candles must have strictly increasing open_time"
                 )
-            if any(
-                candle.symbol != config.symbol or candle.timeframe != timeframe
-                for candle in history
-            ):
-                raise ValueError(f"DataFeed returned a candle outside {timeframe}")
-            histories[timeframe] = history
-            preloads[timeframe] = [
-                candle for candle in history if candle.close_time <= config.start
-            ]
+            if any(candle.symbol != symbol or candle.timeframe != timeframe for candle in history):
+                raise ValueError(f"DataFeed returned a candle outside {symbol} {timeframe}")
+            stream = (symbol, timeframe)
+            histories[stream] = history
+            preloads[stream] = [candle for candle in history if candle.close_time <= config.start]
         return histories, preloads
+
+    @staticmethod
+    def _match_candles(
+        primary: list[Candle],
+        reference: list[Candle],
+    ) -> list[tuple[Candle, Candle]]:
+        reference_by_close = {candle.close_time: candle for candle in reference}
+        return [
+            (candle, reference_by_close[candle.close_time])
+            for candle in primary
+            if candle.close_time in reference_by_close
+        ]
+
+    def _prepare_paired_histories(
+        self,
+        config: RunConfig,
+        histories: Mapping[CandleStream, list[Candle]],
+    ) -> None:
+        self._paired_histories = {}
+        self._paired_preloads = {}
+        self._paired_positions = {}
+        if config.reference_symbol is None:
+            return
+        for resolved in self._indicator_specs:
+            if not resolved.needs_reference_series:
+                continue
+            key = series_key(resolved.spec, resolved.timeframe)
+            pairs = self._match_candles(
+                histories[(config.symbol, resolved.timeframe)],
+                histories[(config.reference_symbol, resolved.timeframe)],
+            )
+            preloads = [pair for pair in pairs if pair[0].close_time <= config.start]
+            if len(preloads) < resolved.min_history:
+                raise ValueError(
+                    "insufficient warm-up history: "
+                    f"{config.symbol}/{config.reference_symbol} {resolved.timeframe} "
+                    f"matched pairs requires {resolved.min_history}, got {len(preloads)}"
+                )
+            self._paired_histories[key] = pairs
+            self._paired_preloads[key] = preloads[-resolved.min_history :]
+            self._paired_positions[key] = len(preloads)
 
     def _prepare_indicator_states(self) -> None:
         self._indicator_states = {
-            series_key(resolved.spec, resolved.timeframe): resolved.make_state()
+            series_key(resolved.spec, resolved.timeframe): (
+                resolved.make_paired_state()
+                if resolved.needs_reference_series
+                else resolved.make_state()
+            )
             for resolved in self._indicator_specs
         }
 
@@ -1897,7 +1988,7 @@ class Engine:
             raise ValueError("insufficient finalized daily history for turtle N at run start")
 
     def _turtle_n_from_daily(self, period: int) -> tuple[tuple[datetime, float], ...]:
-        daily = self._series_histories.get("1d")
+        daily = self._series_histories.get((self._config().symbol, "1d"))
         if daily is None:
             daily = sorted(
                 self.feed.candles(
@@ -2013,29 +2104,62 @@ class Engine:
 
     def _update_indicators(self, candle: Candle) -> None:
         values: dict[str, object] = {}
+        config = self._config()
         execution_timeframe = self._config().timeframe
-        for timeframe in self._series_histories:
+        primary_streams = {
+            (config.symbol, resolved.timeframe)
+            for resolved in self._indicator_specs
+            if not resolved.needs_reference_series
+        }
+        for stream in self._series_histories:
+            symbol, timeframe = stream
+            if stream not in primary_streams:
+                continue
             if timeframe == execution_timeframe:
                 source_candles = [candle]
             else:
-                history = self._series_histories[timeframe]
-                position = self._series_positions[timeframe]
+                history = self._series_histories[stream]
+                position = self._series_positions[stream]
                 end = position
                 while end < len(history) and history[end].close_time <= candle.close_time:
                     end += 1
                 source_candles = history[position:end]
-                self._series_positions[timeframe] = end
+                self._series_positions[stream] = end
             for source_candle in source_candles:
                 for resolved in self._indicator_specs:
-                    if resolved.timeframe != timeframe:
+                    if (
+                        resolved.needs_reference_series
+                        or resolved.timeframe != timeframe
+                        or symbol != config.symbol
+                    ):
                         continue
                     key = series_key(resolved.spec, timeframe)
-                    value = self._indicator_states[key].update(source_candle)
+                    state = cast(SeriesState, self._indicator_states[key])
+                    value = state.update(source_candle)
                     self._assert_finite_indicator(
                         value, resolved.identifier, resolved.undefined_outputs
                     )
                     self._indicator_values[key] = value
                     self._indicator_source_candles[key] = source_candle
+
+        for resolved in self._indicator_specs:
+            if not resolved.needs_reference_series:
+                continue
+            key = series_key(resolved.spec, resolved.timeframe)
+            pairs = self._paired_histories[key]
+            position = self._paired_positions[key]
+            end = position
+            while end < len(pairs) and pairs[end][0].close_time <= candle.close_time:
+                end += 1
+            paired_state = cast(PairedSeriesState, self._indicator_states[key])
+            for primary_candle, reference_candle in pairs[position:end]:
+                value = paired_state.update(primary_candle, reference_candle)
+                self._assert_finite_indicator(
+                    value, resolved.identifier, resolved.undefined_outputs
+                )
+                self._indicator_values[key] = value
+                self._indicator_source_candles[key] = primary_candle
+            self._paired_positions[key] = end
 
         for resolved in self._indicator_specs:
             key = series_key(resolved.spec, resolved.timeframe)
@@ -2207,7 +2331,8 @@ class Engine:
             *(resolved.timeframe for resolved in self._indicator_specs),
         }
         range_start = min(
-            self._series_preloads[timeframe][0].open_time for timeframe in recorded_timeframes
+            self._series_preloads[(self._config().symbol, timeframe)][0].open_time
+            for timeframe in recorded_timeframes
         )
         minute_candles = [
             candle
@@ -2217,7 +2342,7 @@ class Engine:
         if not minute_candles:
             raise ValueError("run has no 1m origin snapshot")
         origin_status, origin_count, origin_hash = self._validate_minute_origin(
-            minute_candles, range_start
+            minute_candles, range_start, symbol=self._config().symbol
         )
         minute_contract = self._record_ohlcv_snapshot(
             minute_candles,
@@ -2230,7 +2355,9 @@ class Engine:
         if self._config().timeframe == "1m":
             self._strategy_gap_contract = minute_contract
         else:
-            strategy_range_start = self._series_preloads[self._config().timeframe][0].open_time
+            strategy_range_start = self._series_preloads[
+                (self._config().symbol, self._config().timeframe)
+            ][0].open_time
             strategy_candles = [
                 candle
                 for candle in self._history
@@ -2251,10 +2378,12 @@ class Engine:
             evaluation_start = self._last_closed_boundary(timeframe, self._config().start)
             if evaluation_start == range_end:
                 evaluation_start -= timedelta(milliseconds=timeframe_milliseconds(timeframe))
-            series_range_start = self._series_preloads[timeframe][0].open_time
+            series_range_start = self._series_preloads[(self._config().symbol, timeframe)][
+                0
+            ].open_time
             series_candles = [
                 candle
-                for candle in self._series_histories[timeframe]
+                for candle in self._series_histories[(self._config().symbol, timeframe)]
                 if series_range_start <= candle.open_time and candle.close_time <= range_end
             ]
             self._record_ohlcv_snapshot(
@@ -2269,8 +2398,55 @@ class Engine:
                 origin_count=origin_count,
                 origin_hash=origin_hash,
             )
+        self._record_reference_source_snapshots()
         self._set_gap_stats()
         self._record_funding_snapshot()
+
+    def _record_reference_source_snapshots(self) -> None:
+        reference_symbol = self._config().reference_symbol
+        if reference_symbol is None:
+            return
+        timeframes = sorted(
+            {
+                resolved.timeframe
+                for resolved in self._indicator_specs
+                if resolved.needs_reference_series
+            }
+        )
+        for timeframe in timeframes:
+            stream = (reference_symbol, timeframe)
+            range_end = self._last_closed_boundary(timeframe, self._config().end)
+            evaluation_start = self._last_closed_boundary(timeframe, self._config().start)
+            if evaluation_start == range_end:
+                evaluation_start -= timedelta(milliseconds=timeframe_milliseconds(timeframe))
+            range_start = self._series_preloads[stream][0].open_time
+            candles = [
+                candle
+                for candle in self._series_histories[stream]
+                if range_start <= candle.open_time and candle.close_time <= range_end
+            ]
+            origin, origin_count, origin_hash, minute_gaps = self._origin_facts(
+                reference_symbol,
+                range_start,
+                range_end,
+            )
+            if timeframe == "1m" and tuple(candles) != origin:
+                raise ValueError(
+                    "reference 1m OHLCV Evidence diverges from independent origin query"
+                )
+            self._record_ohlcv_snapshot(
+                candles,
+                symbol=reference_symbol,
+                timeframe=timeframe,
+                range_start=range_start,
+                range_end=range_end,
+                evaluation_start=evaluation_start,
+                evaluation_end=range_end,
+                minute_gap_close_times=minute_gaps,
+                origin_status="verified",
+                origin_count=origin_count,
+                origin_hash=origin_hash,
+            )
 
     @staticmethod
     def _last_closed_boundary(timeframe: str, boundary: datetime) -> datetime:
@@ -2332,6 +2508,7 @@ class Engine:
         self,
         candles: list[Candle],
         *,
+        symbol: str | None = None,
         timeframe: str,
         range_start: datetime,
         range_end: datetime | None = None,
@@ -2380,7 +2557,7 @@ class Engine:
                     "snapshot_id": self._sequence["source_snapshot"],
                     "source_kind": "ohlcv",
                     "source_ref": self._config().data_source,
-                    "symbol": self._config().symbol,
+                    "symbol": self._config().symbol if symbol is None else symbol,
                     "exchange": self._config().exchange,
                     "timeframe": timeframe,
                     "resampled_from": "1m" if timeframe != "1m" else None,
@@ -2395,17 +2572,49 @@ class Engine:
         )
         return gap_contract
 
+    def _origin_facts(
+        self,
+        symbol: str,
+        range_start: datetime,
+        range_end: datetime,
+    ) -> tuple[tuple[Candle, ...], int, str, tuple[int, ...]]:
+        origin_feed = self.feed if isinstance(self.feed, _SourceOrigin) else None
+        if origin_feed is None:
+            raise TypeError("OHLCV feed requires independent origin validation")
+        observed = tuple(
+            sorted(
+                origin_feed.source_candles(symbol, range_start, range_end),
+                key=lambda candle: candle.open_time,
+            )
+        )
+        if any(candle.symbol != symbol or candle.timeframe != "1m" for candle in observed):
+            raise ValueError("independent origin returned a candle outside the requested series")
+        timestamp_hash = hashlib.sha256(
+            canonical_json([epoch_milliseconds(candle.open_time) for candle in observed]).encode()
+        ).hexdigest()
+        start_ms = epoch_milliseconds(range_start)
+        end_ms = epoch_milliseconds(range_end)
+        actual = {epoch_milliseconds(candle.close_time) for candle in observed}
+        minute_gaps = tuple(
+            close_time
+            for close_time in range(start_ms + 60_000, end_ms + 1, 60_000)
+            if close_time not in actual
+        )
+        return observed, len(observed), timestamp_hash, minute_gaps
+
     def _validate_minute_origin(
         self,
         minute_candles: list[Candle],
         range_start: datetime,
+        *,
+        symbol: str,
     ) -> tuple[str, int, str]:
         """Validate 1m timestamps and values against a separate origin query."""
         origin_feed = self.feed if isinstance(self.feed, _SourceOrigin) else None
         if origin_feed is None:
             raise TypeError("OHLCV feed requires independent origin validation")
         observed = origin_feed.source_candles(
-            self._config().symbol,
+            symbol,
             range_start,
             self._config().end,
         )

@@ -56,6 +56,28 @@ class SeriesState(Protocol):
 
 
 @runtime_checkable
+class PairedSeriesState(Protocol):
+    """Incremental state for a calculation over matched primary/reference bars."""
+
+    @property
+    def warmed_up(self) -> bool:
+        """Return whether enough matched confirmed candle pairs have arrived."""
+        ...
+
+    def seed(
+        self,
+        candles: Sequence[Candle],
+        reference_candles: Sequence[Candle],
+    ) -> None:
+        """Reset from equal-length candles already matched by close time."""
+        ...
+
+    def update(self, candle: Candle, reference_candle: Candle) -> SeriesValue:
+        """Advance by one newly confirmed, close-time-matched candle pair."""
+        ...
+
+
+@runtime_checkable
 class SeriesSpec(Protocol):
     """What the two services read from a spec, and nothing more.
 
@@ -94,6 +116,15 @@ class SeriesSpec(Protocol):
         """Return the output keys a standard leaves undefined after warm-up."""
         ...
 
+    @property
+    def needs_reference_series(self) -> bool:
+        """Return whether this calculation consumes a matched reference series."""
+        ...
+
     def make_state(self) -> SeriesState:
-        """Create a fresh incremental state sharing no execution data."""
+        """Create a fresh single-series state sharing no execution data."""
+        ...
+
+    def make_paired_state(self) -> PairedSeriesState:
+        """Create a fresh paired-series state sharing no execution data."""
         ...

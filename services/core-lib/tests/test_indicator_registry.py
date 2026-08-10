@@ -108,14 +108,14 @@ def test_each_category_registers_exactly_what_its_own_module_expects() -> None:
     }
 
 
-def test_the_registry_is_exactly_the_seven_category_modules_gathered() -> None:
+def test_the_registry_is_exactly_the_eight_category_modules_gathered() -> None:
     """The registry must hold the category lists and nothing besides them.
 
     Registration is split so that one person's indicator never lands in another
     person's file. Three things can break that quietly: a module dropping out of the
     registration gathering, a module dropping out of the expectation merge, and a
     spec sitting in a module that does not own its category. The first two are caught
-    by pinning the seven category names here and requiring both packages to cover
+        by pinning the eight category names here and requiring both packages to cover
     exactly them, and the third by comparing each spec's declared category with the
     module holding it.
     """
@@ -128,6 +128,7 @@ def test_the_registry_is_exactly_the_seven_category_modules_gathered() -> None:
         "strength",
         "systems",
         "cycle",
+        "statistics",
     )
     assert COVERED_CATEGORIES == set(CATEGORIES)
     gathered = [spec.identifier for specs in CATEGORY_SPECS.values() for spec in specs]

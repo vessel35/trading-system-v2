@@ -12,6 +12,8 @@ from importlib.metadata import version
 from pathlib import Path
 from typing import ClassVar, cast
 
+import backtest_service.adapters.evidence_sink as evidence_sink_module
+import backtest_service.engine.engine as engine_module
 import pytest
 from backtest_service.adapters.broker import BacktestBroker
 from backtest_service.adapters.catalog_store import DeterminismReference
@@ -28,7 +30,7 @@ from backtest_service.engine import Engine, RunResult
 from backtest_service.harness import Harness
 from core_lib.eval import MetricSet
 from core_lib.eval import thresholds as evaluation_thresholds
-from core_lib.indicators import DEFAULT_REGISTRY
+from core_lib.indicators import DEFAULT_REGISTRY, IndicatorRegistry, IndicatorSpec
 from core_lib.money_management import (
     AccountRiskSnapshot,
     MarketSnapshot,
@@ -370,6 +372,135 @@ class _MultiTimeframeFeed(_Feed):
         return super().candles(symbol, tf, up_to)
 
 
+class _PairedProbeState:
+    def __init__(self) -> None:
+        self.samples = 0
+        self.reference_close = 0.0
+
+    @property
+    def warmed_up(self) -> bool:
+        return self.samples >= 2
+
+    def seed(
+        self,
+        candles: Sequence[Candle],
+        reference_candles: Sequence[Candle],
+    ) -> None:
+        assert len(candles) == len(reference_candles)
+        assert all(
+            candle.close_time == reference.close_time
+            for candle, reference in zip(candles, reference_candles, strict=True)
+        )
+        self.samples = len(candles)
+        if reference_candles:
+            self.reference_close = reference_candles[-1].close
+
+    def update(self, candle: Candle, reference_candle: Candle) -> dict[str, float]:
+        assert candle.close_time == reference_candle.close_time
+        self.samples += 1
+        self.reference_close = reference_candle.close
+        return {
+            "reference_close": self.reference_close,
+            "samples": float(self.samples),
+        }
+
+
+_PAIRED_PROBE_SPEC = IndicatorSpec(
+    name="PAIRED_PROBE",
+    params={},
+    version="1.0.0",
+    pinned_impl="test-only paired input contract probe",
+    min_history=2,
+    category="statistics",
+    required_inputs=(),
+    _vectorized=lambda candles: [
+        {"reference_close": candle.close, "samples": float(index + 1)}
+        for index, candle in enumerate(candles)
+    ],
+    _state_factory=_PairedProbeState,
+    needs_reference_series=True,
+)
+
+
+def _paired_registry() -> IndicatorRegistry:
+    registry = IndicatorRegistry()
+    for spec in DEFAULT_REGISTRY.list():
+        registry.register(spec)
+    registry.register(_PAIRED_PROBE_SPEC)
+    return registry
+
+
+class _PairedStrategy(_Strategy):
+    observed_market_data: ClassVar[list[dict[str, object]]] = []
+
+    @classmethod
+    def get_metadata(cls) -> StrategyMetadata:
+        metadata = super().get_metadata()
+        metadata.required_indicators = [{"name": "PAIRED_PROBE", "params": {}, "timeframe": "4h"}]
+        metadata.min_history = 1
+        return metadata
+
+    def analyze(
+        self,
+        market_data: dict[str, object],
+        current_position: Position | None,
+    ) -> None:
+        del current_position
+        type(self).observed_market_data.append(dict(market_data))
+        return None
+
+
+class _PairedStrategyCatalog(StrategyRegistry):
+    def get(self, strategy_id: str) -> dict[str, object]:
+        assert strategy_id == "paired-fixture"
+        return {
+            "strategy_id": strategy_id,
+            "class_name": _PairedStrategy.__name__,
+            "module_path": _PairedStrategy.__module__,
+            "is_active": True,
+            "is_deprecated": False,
+        }
+
+    def list(self) -> list[dict[str, object]]:
+        return [self.get("paired-fixture")]
+
+    def register(self, strategy_id: str, meta: dict[str, object]) -> None:
+        del strategy_id, meta
+        raise PermissionError("read-only fixture")
+
+
+class _PairedFeed(_MultiTimeframeFeed):
+    def __init__(
+        self,
+        execution: list[Candle],
+        primary: list[Candle],
+        reference: list[Candle],
+    ) -> None:
+        super().__init__(execution, primary)
+        self._reference = reference
+        self._reference_minutes = _minute_candles(reference)
+
+    def candles(self, symbol: str, tf: str, up_to: datetime) -> list[Candle]:
+        if symbol == "ETHUSDT":
+            assert tf == "4h"
+            return [candle for candle in self._reference if candle.close_time <= up_to]
+        return super().candles(symbol, tf, up_to)
+
+    def source_candles(
+        self,
+        symbol: str,
+        range_start: datetime,
+        range_end: datetime,
+    ) -> tuple[Candle, ...]:
+        if symbol == "ETHUSDT":
+            return tuple(
+                candle
+                for candle in self._reference_minutes
+                if range_start <= candle.open_time and candle.close_time <= range_end
+            )
+        return super().source_candles(symbol, range_start, range_end)
+
+
 class _StrategyCatalog(StrategyRegistry):
     def get(self, strategy_id: str) -> dict[str, object]:
         assert strategy_id == "engine-fixture"
@@ -552,6 +683,12 @@ def _multi_timeframe_manager() -> AdapterManager:
     plugins = InProcessStrategyRegistry()
     plugins.register("multi-timeframe-fixture", _MultiTimeframeStrategy)
     return AdapterManager(_MultiTimeframeStrategyCatalog(), plugins)
+
+
+def _paired_manager() -> AdapterManager:
+    plugins = InProcessStrategyRegistry()
+    plugins.register("paired-fixture", _PairedStrategy)
+    return AdapterManager(_PairedStrategyCatalog(), plugins)
 
 
 def _reversal_manager() -> AdapterManager:
@@ -3009,6 +3146,266 @@ def test_multi_timeframe_series_aligns_without_future_values_and_records_its_sou
         assert source[3] != unchanged_source_hash
 
 
+def _paired_candles(
+    *, changed_unfinished_tail: bool
+) -> tuple[list[Candle], list[Candle], list[Candle]]:
+    execution, primary = _multi_timeframe_candles(changed_tail=False)
+    reference = []
+    for index, candle in enumerate(primary):
+        close = 300.0 + index
+        if changed_unfinished_tail and index == 9:
+            close += 100.0
+        reference.append(
+            replace(
+                candle,
+                symbol="ETHUSDT",
+                open=300.0 + index,
+                high=max(301.0 + index, close),
+                low=299.0 + index,
+                close=close,
+            )
+        )
+    return execution, primary, reference
+
+
+def _run_paired_fixture(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    changed_unfinished_tail: bool,
+    reference: list[Candle] | None = None,
+) -> tuple[RunResult, BacktestEvidenceSink, _Catalog]:
+    registry = _paired_registry()
+    monkeypatch.setattr(engine_module, "DEFAULT_REGISTRY", registry)
+    monkeypatch.setattr(evidence_sink_module, "DEFAULT_REGISTRY", registry)
+    execution, primary, default_reference = _paired_candles(
+        changed_unfinished_tail=changed_unfinished_tail
+    )
+    reference = default_reference if reference is None else reference
+    start = datetime(2026, 1, 3, tzinfo=UTC)
+    config = _config(run_name="paired-changed" if changed_unfinished_tail else "paired-base")
+    config = config.model_copy(
+        update={
+            "strategy_id": "paired-fixture",
+            "reference_symbol": "ETHUSDT",
+            "start": start,
+            "end": start + timedelta(hours=8),
+        }
+    )
+    costs = BacktestCostModel(config.cost_values)
+    sink = BacktestEvidenceSink(tmp_path)
+    catalog = _Catalog()
+    _PairedStrategy.observed_market_data.clear()
+    result = Engine(
+        _PairedFeed(execution, primary, reference),
+        _Broker(costs),
+        BacktestClock.from_candles(execution),
+        costs,
+        sink,
+        catalog,
+        _paired_manager(),
+        prereg=_prereg(),
+    ).run(config)
+    return result, sink, catalog
+
+
+def test_paired_series_waits_for_a_close_without_future_reference_values_and_records_source(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    unchanged, _, _ = _run_paired_fixture(
+        tmp_path / "unchanged",
+        monkeypatch,
+        changed_unfinished_tail=False,
+    )
+    first_values = [
+        cast(Mapping[str, object], item["indicators"])["paired_probe@4h"]
+        for item in _PairedStrategy.observed_market_data
+    ]
+    changed, sink, catalog = _run_paired_fixture(
+        tmp_path / "changed",
+        monkeypatch,
+        changed_unfinished_tail=True,
+    )
+    second_values = [
+        cast(Mapping[str, object], item["indicators"])["paired_probe@4h"]
+        for item in _PairedStrategy.observed_market_data
+    ]
+
+    assert first_values[:3] == second_values[:3]
+    assert first_values[3] != second_values[3]
+    assert [cast(Mapping[str, float], value)["samples"] for value in second_values[:4]] == [
+        2.0,
+        2.0,
+        2.0,
+        3.0,
+    ]
+    assert [cast(Mapping[str, float], value)["reference_close"] for value in first_values[:3]] == [
+        308.0
+    ] * 3
+    assert cast(Mapping[str, float], first_values[3])["reference_close"] == 309.0
+    assert cast(Mapping[str, float], second_values[3])["reference_close"] == 409.0
+    assert unchanged.integrity_status == changed.integrity_status == "passed"
+    assert catalog.runs[changed.run_id]["reference_symbol"] == "ETHUSDT"
+    with sqlite3.connect(changed.evidence_path) as connection:
+        reference_row = connection.execute(
+            """
+            SELECT range_start, range_end, row_count, gap_count, content_hash, note
+            FROM SOURCE_DATA_SNAPSHOT
+            WHERE source_kind = 'ohlcv' AND symbol = 'ETHUSDT' AND timeframe = '4h'
+            """
+        ).fetchone()
+        assert reference_row is not None
+        assert reference_row[0] < reference_row[1]
+        assert reference_row[2] > 0
+        assert reference_row[3] == 0
+        assert isinstance(reference_row[4], str) and len(reference_row[4]) == 64
+        assert reference_row[5] is not None
+        start = datetime(2026, 1, 3, tzinfo=UTC)
+        assert connection.execute(
+            """
+            SELECT feature_ts, candle_open_time, candle_close_time
+            FROM INDICATOR_SNAPSHOT
+            WHERE indicator_key = 'paired_probe@4h'
+            ORDER BY snapshot_seq
+            LIMIT 4
+            """
+        ).fetchall() == [
+            (
+                int(start.timestamp() * 1_000),
+                int((start - timedelta(hours=4)).timestamp() * 1_000),
+                int(start.timestamp() * 1_000),
+            ),
+            (
+                int(start.timestamp() * 1_000),
+                int((start - timedelta(hours=4)).timestamp() * 1_000),
+                int(start.timestamp() * 1_000),
+            ),
+            (
+                int(start.timestamp() * 1_000),
+                int((start - timedelta(hours=4)).timestamp() * 1_000),
+                int(start.timestamp() * 1_000),
+            ),
+            (
+                int((start + timedelta(hours=4)).timestamp() * 1_000),
+                int(start.timestamp() * 1_000),
+                int((start + timedelta(hours=4)).timestamp() * 1_000),
+            ),
+        ]
+
+    sink.connection.execute(
+        """
+        UPDATE SOURCE_DATA_SNAPSHOT
+        SET note = NULL
+        WHERE source_kind = 'ohlcv' AND symbol = 'ETHUSDT' AND timeframe = '4h'
+        """
+    )
+    sink.connection.commit()
+    assert sink.audit(require_eval_decision=True)["evidence_complete"] is False
+    source_failures = cast(
+        Sequence[str],
+        sink.integrity_details["evidence_complete"]["source_failures"],
+    )
+    assert any(failure.startswith("ohlcv_gap_contract_missing:") for failure in source_failures)
+
+
+def test_paired_series_requires_exactly_one_different_reference_symbol(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry = _paired_registry()
+    monkeypatch.setattr(engine_module, "DEFAULT_REGISTRY", registry)
+    monkeypatch.setattr(evidence_sink_module, "DEFAULT_REGISTRY", registry)
+    execution, primary, reference = _paired_candles(changed_unfinished_tail=False)
+    costs = BacktestCostModel(_config().cost_values)
+    paired_engine = Engine(
+        _PairedFeed(execution, primary, reference),
+        _Broker(costs),
+        BacktestClock.from_candles(execution),
+        costs,
+        BacktestEvidenceSink(tmp_path / "missing"),
+        _Catalog(),
+        _paired_manager(),
+        prereg=_prereg(),
+    )
+    with pytest.raises(ValueError, match="reference_symbol is required"):
+        paired_engine.run(_config().model_copy(update={"strategy_id": "paired-fixture"}))
+
+    with pytest.raises(ValueError, match="no paired series requires it"):
+        _engine(tmp_path / "unused", _Catalog(), []).run(
+            _config().model_copy(update={"reference_symbol": "ETHUSDT"})
+        )
+
+
+def test_paired_series_does_not_advance_when_only_the_primary_bar_closes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, _, reference = _paired_candles(changed_unfinished_tail=False)
+    start = datetime(2026, 1, 3, tzinfo=UTC)
+    reference = [candle for candle in reference if candle.close_time != start + timedelta(hours=4)]
+    result, _, _ = _run_paired_fixture(
+        tmp_path,
+        monkeypatch,
+        changed_unfinished_tail=False,
+        reference=reference,
+    )
+    values = [
+        cast(
+            Mapping[str, float],
+            cast(Mapping[str, object], item["indicators"])["paired_probe@4h"],
+        )
+        for item in _PairedStrategy.observed_market_data
+    ]
+
+    assert [value["samples"] for value in values] == [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        3.0,
+    ]
+    assert [value["reference_close"] for value in values[:7]] == [308.0] * 7
+    assert values[7]["reference_close"] == 310.0
+    assert result.integrity_status == "passed"
+
+
+def test_paired_warmups_are_counted_per_symbol_and_timeframe_and_report_short_reference(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = Engine.__new__(Engine)
+    config = _config().model_copy(update={"reference_symbol": "ETHUSDT", "timeframe": "1h"})
+    engine.config = config
+    engine._indicator_specs = [ResolvedSeriesSpec(_PAIRED_PROBE_SPEC, "4h")]
+    engine._money_management = None
+
+    assert Engine._warmups_by_stream(engine, strategy_min_history=1) == {
+        ("BTCUSDT", "1h"): 1,
+        ("BTCUSDT", "4h"): 2,
+        ("ETHUSDT", "4h"): 2,
+    }
+
+    _, _, reference = _paired_candles(changed_unfinished_tail=False)
+    start = datetime(2026, 1, 3, tzinfo=UTC)
+    short_reference = [
+        candle for candle in reference if candle.close_time > start - timedelta(hours=4)
+    ]
+    with pytest.raises(
+        ValueError,
+        match=r"ETHUSDT 4h requires 2, got 1",
+    ):
+        _run_paired_fixture(
+            tmp_path,
+            monkeypatch,
+            changed_unfinished_tail=False,
+            reference=short_reference,
+        )
+
+
 def test_warmup_counts_are_kept_per_timeframe_and_policy_minimum_wins() -> None:
     engine = Engine.__new__(Engine)
     config = _config().model_copy(update={"timeframe": "5m"})
@@ -3030,9 +3427,12 @@ def test_warmup_counts_are_kept_per_timeframe_and_policy_minimum_wins() -> None:
         ResolvedSeriesSpec(DEFAULT_REGISTRY.get("EMA", {"period": 55}), "4h"),
     ]
     engine._money_management = cast(MoneyManagementBase, _LongerPolicy())
-    engine._required_warmups = Engine._warmups_by_timeframe(engine, strategy_min_history=1)
+    engine._required_warmups = Engine._warmups_by_stream(engine, strategy_min_history=1)
 
-    assert engine._required_warmups == {"5m": 50, "4h": 55}
+    assert engine._required_warmups == {
+        (config.symbol, "5m"): 50,
+        (config.symbol, "4h"): 55,
+    }
     assert Engine._warmup_span(engine) == timedelta(hours=4 * 55 * 4)
 
 

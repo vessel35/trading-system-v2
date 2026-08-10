@@ -1,8 +1,8 @@
-"""Gather the seven category-owned registration lists into one fixed sequence.
+"""Gather the eight category-owned registration lists into one fixed sequence.
 
 Every category owns exactly one module in this package and one calculation module
 beside `registry.py`, so adding an indicator touches those two files and nothing
-else. This package is the only place that names the seven categories; `registry.py`
+else. This package is the only place that names the eight categories; `registry.py`
 gathers whatever they hold without knowing what is in them, which is what keeps the
 registry itself unchanged as the catalog grows.
 
@@ -16,7 +16,7 @@ from types import MappingProxyType
 
 from core_lib.indicators.registry import IndicatorSpec
 
-from . import cycle, momentum, strength, systems, trend, volatility, volume
+from . import cycle, momentum, statistics, strength, systems, trend, volatility, volume
 
 CATEGORY_SPECS: Mapping[str, tuple[IndicatorSpec, ...]] = MappingProxyType(
     {
@@ -27,6 +27,7 @@ CATEGORY_SPECS: Mapping[str, tuple[IndicatorSpec, ...]] = MappingProxyType(
         "strength": strength.SPECS,
         "systems": systems.SPECS,
         "cycle": cycle.SPECS,
+        "statistics": statistics.SPECS,
     }
 )
 

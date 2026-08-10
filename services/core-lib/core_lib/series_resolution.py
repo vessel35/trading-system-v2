@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
+from inspect import signature
 from typing import cast
 
 from core_lib.indicators.registry import IndicatorRegistry
 from core_lib.patterns.registry import PatternRegistry
 from core_lib.series import (
+    PairedSeriesState,
     SeriesParam,
     SeriesSpec,
     SeriesState,
@@ -58,8 +60,28 @@ class ResolvedSeriesSpec:
     def undefined_outputs(self) -> tuple[str, ...]:
         return self.spec.undefined_outputs
 
+    @property
+    def needs_reference_series(self) -> bool:
+        return self.spec.needs_reference_series
+
     def make_state(self) -> SeriesState:
         return self.spec.make_state()
+
+    def make_paired_state(self) -> PairedSeriesState:
+        state = self.spec.make_paired_state()
+        if not isinstance(state, PairedSeriesState):
+            raise TypeError(
+                f"series {self.identifier} declares a reference but its state is not paired"
+            )
+        paired_signatures = tuple(signature(state.seed).parameters) == (
+            "candles",
+            "reference_candles",
+        ) and tuple(signature(state.update).parameters) == ("candle", "reference_candle")
+        if not paired_signatures:
+            raise TypeError(
+                f"series {self.identifier} declares a reference but its state is not paired"
+            )
+        return state
 
 
 def assert_disjoint_series_registry_names(

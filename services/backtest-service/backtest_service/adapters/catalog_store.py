@@ -238,6 +238,9 @@ def normalized_config_hash(run_meta: Mapping[str, object]) -> str:
         )
         for field in _CONFIG_HASH_FIELDS
     ]
+    reference_symbol = run_meta.get("reference_symbol")
+    if reference_symbol is not None:
+        values.append(_hash_scalar(reference_symbol, json_field=False))
     return hashlib.sha256(b"\x1f".join(values)).hexdigest()
 
 
