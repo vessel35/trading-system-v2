@@ -630,6 +630,7 @@ class StrategyRepository:
                     metadata.money_management.default,
                 )
             except (Exception, SystemExit):  # noqa: BLE001 - isolate deployed code per strategy
+                _LOGGER.exception("strategy %s declaration could not be read", strategy_id)
                 metadata = None
                 default_params = None
                 modes = []
@@ -694,20 +695,35 @@ class StrategyRepository:
         options: list[StrategyOption] = []
         for strategy_id in self._strategy_registry.list():
             strategy_class = self._strategy_registry.get(strategy_id)
-            metadata = strategy_class.get_metadata()
-            schema = strategy_class.get_parameter_schema()
+            metadata: StrategyMetadata | None = None
+            default_params: dict[str, object] = {}
+            modes: list[str] = []
+            default: dict[str, object] = {}
+            declaration_read_failed = False
+            try:
+                metadata = strategy_class.get_metadata()
+                schema = strategy_class.get_parameter_schema()
+                default_params = self._parameter_defaults(schema)
+                modes, default = _money_management_options(
+                    metadata.money_management.supported,
+                    metadata.money_management.default,
+                )
+            except (Exception, SystemExit):  # noqa: BLE001 - isolate deployed code per strategy
+                _LOGGER.exception("strategy %s declaration could not be read", strategy_id)
+                metadata = None
+                default_params = {}
+                modes = []
+                default = {}
+                declaration_read_failed = True
             finding = reconcile_strategy_entry(
                 strategy_id,
                 None,
                 strategy_class,
                 metadata=metadata,
+                declaration_read_failed=declaration_read_failed,
             )
             reason = None if finding is None else finding.state
-            profile = metadata.profile if reason is None else None
-            modes, default = _money_management_options(
-                metadata.money_management.supported,
-                metadata.money_management.default,
-            )
+            profile = metadata.profile if metadata is not None and reason is None else None
             options.append(
                 StrategyOption(
                     strategy_id=strategy_id,
@@ -719,10 +735,14 @@ class StrategyRepository:
                         if profile is not None
                         else None
                     ),
-                    supported_timeframes=list(metadata.supported_timeframes),
-                    required_indicators=list(metadata.required_indicators),
-                    min_history=metadata.min_history,
-                    default_params=self._parameter_defaults(schema),
+                    supported_timeframes=(
+                        list(metadata.supported_timeframes) if metadata is not None else []
+                    ),
+                    required_indicators=(
+                        list(metadata.required_indicators) if metadata is not None else []
+                    ),
+                    min_history=metadata.min_history if metadata is not None else 0,
+                    default_params=default_params,
                     supported_money_management=modes,
                     default_money_management=default,
                     is_active=True,

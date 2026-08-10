@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import asdict, fields
 from pathlib import Path
@@ -511,7 +512,10 @@ def test_overlapping_reasons_follow_the_canonical_precedence() -> None:
     assert read_failed.unrunnable_reason is StrategyReconciliationState.DECLARATION_READ_FAILED
 
 
-def test_declaration_errors_and_system_exit_are_isolated_from_other_rows() -> None:
+def test_declaration_errors_and_system_exit_are_isolated_from_other_rows(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.ERROR, logger="web_api.repository")
     registry = _register(
         ("healthy", _FixtureStrategy),
         ("runtime", _RuntimeReadFailure),
@@ -538,6 +542,86 @@ def test_declaration_errors_and_system_exit_are_isolated_from_other_rows() -> No
         "healthy": None,
         "system-exit": StrategyReconciliationState.DECLARATION_READ_FAILED,
     }
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("runtime" in message for message in messages)
+    assert any("system-exit" in message for message in messages)
+    assert any(
+        record.exc_info is not None and "ordinary failure" in str(record.exc_info[1])
+        for record in caplog.records
+    )
+    assert any(
+        record.exc_info is not None and "19" in str(record.exc_info[1]) for record in caplog.records
+    )
+
+
+def test_code_registry_isolates_and_logs_each_declaration_failure(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.ERROR, logger="web_api.repository")
+    registry = _register(
+        ("healthy", _FixtureStrategy),
+        ("runtime-failure", _RuntimeReadFailure),
+        ("system-exit-failure", _SystemExitReadFailure),
+    )
+    _RuntimeReadFailure.metadata_failure = RuntimeError("ordinary code-registry failure")
+    _SystemExitReadFailure.schema_failure = SystemExit(23)
+
+    options = _repository([], registry, table_exists=False).list().data
+
+    assert [option.strategy_id for option in options] == [
+        "healthy",
+        "runtime-failure",
+        "system-exit-failure",
+    ]
+    healthy, runtime_failure, system_exit_failure = options
+    assert healthy.model_dump() == {
+        "strategy_id": "healthy",
+        "display_name": "Healthy",
+        "strategy_version": "9.9.9",
+        "profile_id": None,
+        "profile": None,
+        "supported_timeframes": ["4h"],
+        "required_indicators": [{"name": "EMA", "params": {"period": 55}}],
+        "min_history": 77,
+        "default_params": {"edge": 3.5},
+        "supported_money_management": [],
+        "default_money_management": {},
+        "is_active": True,
+        "is_deprecated": False,
+        "runnable": False,
+        "unrunnable_reason": StrategyReconciliationState.ALLOWLIST_ONLY,
+        "source": "code_registry",
+    }
+    for option in (runtime_failure, system_exit_failure):
+        assert option.model_dump() == {
+            "strategy_id": option.strategy_id,
+            "display_name": option.strategy_id.replace("-", " ").title(),
+            "strategy_version": "9.9.9",
+            "profile_id": None,
+            "profile": None,
+            "supported_timeframes": [],
+            "required_indicators": [],
+            "min_history": 0,
+            "default_params": {},
+            "supported_money_management": [],
+            "default_money_management": {},
+            "is_active": True,
+            "is_deprecated": False,
+            "runnable": False,
+            "unrunnable_reason": StrategyReconciliationState.ALLOWLIST_ONLY,
+            "source": "code_registry",
+        }
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("runtime-failure" in message for message in messages)
+    assert any("system-exit-failure" in message for message in messages)
+    assert any(
+        record.exc_info is not None and "ordinary code-registry failure" in str(record.exc_info[1])
+        for record in caplog.records
+    )
+    assert any(
+        record.exc_info is not None and "23" in str(record.exc_info[1]) for record in caplog.records
+    )
 
 
 def test_each_declaration_is_read_once_and_one_snapshot_fills_existing_fields() -> None:
