@@ -6,6 +6,7 @@ from .clock import BacktestClock
 from .cost_model import BacktestCostModel
 from .data_feed import BacktestDataFeed
 from .evidence_sink import BacktestEvidenceSink, EvidenceRecord
+from .money_management_registry import BacktestMoneyManagementRegistry
 from .strategy_registry import BacktestStrategyRegistry
 
 __all__ = [
@@ -15,6 +16,7 @@ __all__ = [
     "BacktestCostModel",
     "BacktestDataFeed",
     "BacktestEvidenceSink",
+    "BacktestMoneyManagementRegistry",
     "BacktestStrategyRegistry",
     "EvidenceRecord",
 ]

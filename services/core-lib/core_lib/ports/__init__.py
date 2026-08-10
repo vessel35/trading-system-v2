@@ -6,6 +6,7 @@ from .clock import Clock
 from .cost_model import CostModel
 from .data_feed import DataFeed
 from .evidence_sink import EvidenceSink
+from .money_management_registry import MoneyManagementRegistry
 from .strategy_registry import StrategyRegistry
 
 __all__ = [
@@ -15,5 +16,6 @@ __all__ = [
     "CostModel",
     "DataFeed",
     "EvidenceSink",
+    "MoneyManagementRegistry",
     "StrategyRegistry",
 ]

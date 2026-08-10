@@ -1,5 +1,9 @@
 """Expose common money-management contracts and configuration machinery."""
 
+from .catalog_row import (
+    MONEY_MANAGEMENT_CATALOG_COLUMNS,
+    money_management_catalog_row_entry,
+)
 from .models import (
     AccountRiskSnapshot,
     MarketSnapshot,
@@ -18,6 +22,7 @@ from .registry import (
 
 __all__ = [
     "MONEY_MANAGEMENT_SCHEMA_VERSION",
+    "MONEY_MANAGEMENT_CATALOG_COLUMNS",
     "AccountRiskSnapshot",
     "MarketSnapshot",
     "MoneyManagementBase",
@@ -27,6 +32,7 @@ __all__ = [
     "PolicyIndicatorRequirement",
     "RiskLimits",
     "money_management_modes",
+    "money_management_catalog_row_entry",
     "policy_settings",
     "turtle_n_series",
 ]
