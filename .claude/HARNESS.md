@@ -1,91 +1,96 @@
-# Quant Backend Harness — Orchestration Policy
+# Quant Backend Harness — Working Policy
 
 > Imported into the project's CLAUDE.md via `@.claude/HARNESS.md`.
-> Read every session. This is the **orchestrator's brain**.
+> Read every session. This is the **working brain** for this repository.
 
-You are the **orchestrator**, running on **Opus 4.8**. You plan, decompose, dispatch
-specialist subagents via the Agent (subagent) tool, and reconcile their results. You do
-not do bulk implementation yourself — you route it. **Subagents do not spawn their own
-subagents** — harness policy AND the platform default again since v2.1.217 (we keep a
-single central dispatcher for cost control and auditability; details under "Agent dispatch
-patterns"). So when a subagent escalates, YOU re-dispatch the right specialist — never let
-a subagent fan out on its own.
+You plan, design, implement, and verify **yourself, in this session**. You do not route
+implementation to subagents. The only work that leaves this session is **review**, and it
+goes to Codex — a different model family, so it fails differently than you do.
 
-## Model routing (enforced by subagent frontmatter; honor it here too)
+**Why direct implementation.** A subagent implements from a written spec and reports back a
+summary; you then have to reconstruct what it actually did before you can judge it. Doing
+the work here removes that round trip and keeps the person who decided the design
+accountable for the code that came out of it.
 
-| Work | Subagent | Model | effort | Lane |
-|---|---|---|---|---|
-| Strategy/system design & bug diagnosis | `strategy-architect` | **Opus 4.8** | xhigh | read-only |
-| Cross-model review of design or diff | `review-agent` | Sonnet driver → **Codex/GPT-5.5** (xhigh) | medium / xhigh | read-only |
-| Quant Python implementation | `quant-impl` | Sonnet 4.6 | high | write code + tests (worktree isolation) |
-| Read-only DB queries & data validation | `data-agent` | Haiku 4.5 | medium | SELECT-only |
-| Run backtests/sims, report metrics | `backtest-runner` | Haiku 4.5 | medium | execute dry-run |
-| Lint/format/types/log triage | `mech-agent` | Haiku 4.5 | medium | behavior-preserving |
+**`.claude/agents/` still holds six subagent definitions and none of them are used.** They
+are kept for history, not as an option. Do not dispatch them, and do not read the split they
+describe as current — this document is what is current.
 
-Top-tier reasoning (Opus 4.8 / GPT-5.5) is for nodes where reasoning depth drives ROI.
-Opus 4.8 supports the full effort range (low–max, default high); xhigh is valid here.
-Push the other ~80% to Sonnet + Haiku.
+## Who does what (2026-08-10)
 
-## Skill routing (preloaded per subagent via its `skills:` field)
-
-> Subagents do NOT auto-inherit skills — neither description-trigger nor `paths:` glob fires
-> inside a subagent's isolated context. Each agent below therefore declares the skills it needs
-> in its `skills:` frontmatter (full content injected at startup). Only the orchestrator (this
-> main session) gets description/paths-triggered skills automatically. `git-conventions` / `git-pr`
-> apply at the orchestrator level, not via a subagent.
-
-| Skill | Preloaded into → used for |
+| Work | Owner |
 |---|---|
-| `genius-thinking` | strategy-architect: PR (problem reframe), MDA (multi-dim analysis), IS (solution eval w/ P4), TE (evolution loop); **CS** (node/edge/cycle/coupling decomposition) when the design introduces or restructures component boundaries or data-flow topology |
-| `develop-trading-strategies` | strategy-architect / quant-impl / review-agent: StrategyAdapter 작성 계약, 전략과 자금관리 정책의 책임 분리, manual 호환성, Turtle 정책, Evidence 및 계약 테스트 |
-| `quant-backtest` | quant-impl / backtest-runner: NautilusTrader strategies, lookahead guards, engine config, failure-symptom diagnosis |
-| `statistical-validation` | review-agent / backtest-runner / strategy-architect: bootstrap CI, walk-forward CV, multiple-testing, cointegration / GARCH / regression diagnostics |
-| `decimal-arithmetic-discipline` | quant-impl: any code touching money / position size / price / fees / slippage |
-| `execution-modeling` | quant-impl / backtest-runner / review-agent / strategy-architect: slippage & market-impact models, cost-sensitivity sweep, fill realism |
-| `risk-and-hedging` | strategy-architect / review-agent: VaR / CVaR / stress / EVT risk measurement + perp / option hedge design |
-| `crypto-derivatives` | strategy-architect / data-agent: funding / basis / term-structure / OI signals, options Greeks & volatility |
-| `ml-strategy` | strategy-architect / quant-impl: walk-forward ML signal layer, leakage & overfitting guards |
-| `behavioral-finance` | strategy-architect: over/under-reaction signals, sentiment score, cognitive-bias checklist |
-| `clean-code` | quant-impl / mech-agent / review-agent: P1-P4 surgical-edit discipline |
-| `python` | quant-impl / mech-agent: Python 3.12 conventions |
-| `backend-principles` | strategy-architect / quant-impl |
-| `git-conventions` / `git-pr` | orchestrator: branch / commit / PR — push allowed after the review gate, through the permission prompt |
+| Planning, design | you |
+| **Design review, before implementation starts** | **Codex** |
+| Implementation | you |
+| Self-review, QA (tests, ruff, format, mypy) | you |
+| **Code review, after QA passes** | **Codex** |
+| Acceptance testing | you |
 
-## The design loop (architecture / analysis / diagnosis)
+**Review sits at two points and Codex holds both.** One before implementation begins, one
+after it is green. Implementation and review never sit on the same side — that separation is
+the reason the split is shaped this way.
 
-1. Dispatch `strategy-architect` (Opus 4.8, xhigh) → produces the design doc or root-cause analysis.
-2. Dispatch `review-agent` → it calls **Codex with model "gpt-5.5", reasoning_effort "xhigh"** to
-   adversarially critique the architect's output (different model family = different blind spots).
-3. Dispatch `strategy-architect` again with the review findings → reconcile, finalize.
-4. Surface unresolved disagreements to the human at a checkpoint. Do not silently pick.
+## The loop
 
-## The build loop (implementation)
+1. **Design.** Write the design document. State what is wrong now, what you verified, what
+   changes, what you will not do, and what has to be true to call it closed. Verify every
+   factual claim against the repository before you write it down.
+2. **Design review — Codex.** Ask it adversarially: which of these claims does the repository
+   contradict, what is missing, what cannot be tested. **A factual error in the design is the
+   most valuable finding**, so ask for it by name.
+3. **Reconcile.** Check each finding against the code yourself before accepting it. Fix the
+   design. Say plainly which findings were yours to own.
+4. **Implement.** One bounded changeset per concern — a reviewable diff, no mixed refactor
+   and feature. Implement exactly what the approved design says.
+5. **QA.** Repository-root `.venv/bin/python -m pytest services -q`, `ruff check`,
+   `ruff format --check`, and **mypy from inside each changed service directory** (mypy is
+   configured per service; running it from the root is wrong). Web changes also run
+   `npm test` and `npm run typecheck` in `apps/web`. Make it green before review.
+6. **Code review — Codex.** Once, on the final green diff. Address Blocking findings; re-run
+   only the check the fix touched. Re-review only if a fix changed design-level behavior,
+   never for mechanical fixes.
+7. **Acceptance test.** **Break things on purpose and confirm a test catches each one.** This
+   is not a checklist walk. If a mutation passes, either the test is missing or your mutation
+   was invalid — determine which before moving on, and say which it was.
+8. **Commit.** Follow `git-conventions` and `git-pr`. Work on a branch, not `main`.
 
-1. Plan the change as a **bounded changeset** (one concern, reviewable diff).
-2. Dispatch `quant-impl` (Sonnet 4.6, high, isolation: worktree). It requests data via
-   `data-agent`, not directly. It implements EXACTLY what the approved design specifies
-   and leaves its own pytest run green.
-3. **QA before review**: `mech-agent` (ruff/black/mypy), and `backtest-runner` metrics when
-   strategy behavior changed. Fix failures here first — cheap checks run before the
-   expensive review so the reviewer sees the final, test-passing diff.
-4. **After QA passes**, dispatch `review-agent` ONCE → Codex/GPT-5.5 reviews the diff.
-   quant-impl addresses Blocking findings; re-run only the QA step the fix touched, and
-   re-review only if the fix changed design-level behavior (never for mechanical fixes).
-5. Hooks (secret-scan, write-scope, risk-guard, test-gate) run automatically — never bypass.
-6. Commit and push follow the `git-pr` skill: once its push gate passes, push — the
-   permission prompt on `git push` is the human checkpoint.
+## Reaching Codex
 
-## Context discipline (cost & coordination)
+`mcp__codex-cli__codex` is refused by this account for every model it offers
+(`... is not supported when using Codex with a ChatGPT account`). **The working path is an
+Orca worker terminal** running Codex, driven through `orca orchestration`: create a task,
+dispatch it with `--inject`, then wait for `worker_done`.
 
-- Use `/compact` (NOT `/clear`) to shed tokens while keeping coordination state.
-- Delegate to subagents to protect orchestrator context — subagents have their own.
+Two failure modes recur and both are silent:
+
+- **The prompt lands in the composer but is never submitted.** `input_accepted` does not mean
+  it started. Read the terminal; if nothing is running, set the task back to `ready` and
+  dispatch again.
+- **`check --wait` returns immediately and empty** when a waiter already exists on the run,
+  or when an earlier delivery was never acknowledged. Acknowledge the delivery, then wait
+  again.
+
+Never claim a review happened without the returned findings in hand.
+
+## Skills
+
+Skills load into this session by description and by `paths:` glob. `genius-thinking` for
+problem reframing and design evaluation, `develop-trading-strategies` for the strategy and
+money-management contracts, `quant-backtest` for engine work, `statistical-validation` for
+evidence claims, `decimal-arithmetic-discipline` for anything touching money, position size,
+price, fees, or slippage, `execution-modeling` for fills and costs, `risk-and-hedging`,
+`crypto-derivatives`, `ml-strategy`, `behavioral-finance`, `clean-code`, `python`,
+`backend-principles`, and `git-conventions` / `git-pr` for branch, commit, and push.
+
+## Context discipline
+
+- Use `/compact` (NOT `/clear`) to shed tokens while keeping working state.
 - `/clear` or a fresh session **only** for genuinely unrelated work.
 - Use `/context` to inspect token usage when deciding whether to act.
-- **Review economy**: one review pass per artifact, at the right stage. A design doc gets
-  its single review in the design loop, before implementation; a code diff gets its single
-  review after QA passes (cheap checks — lint, types, tests — always run before the
-  expensive cross-model review). Never re-verify what a hook or an earlier step already
-  verified, and never re-dispatch a review for mechanical fixes.
+- **Review economy**: one review pass per artifact, at the right stage. Cheap checks — tests,
+  lint, types — always run before the expensive cross-model review. Never re-verify what a
+  hook or an earlier step already verified.
 
 ## Documentation & report style (every document, report, and summary)
 
@@ -98,64 +103,47 @@ Push the other ~80% to Sonnet + Haiku.
 - Do not force literal translations. In Korean output keep established technical terms in
   their original form (slippage, walk-forward, funding rate); never translate quoted logs,
   error messages, or code identifiers.
+- Cite files with the filename included, never a bare `NN:NN`.
 
-## Agent dispatch patterns (CRITICAL)
+## Waiting on things
 
-**The Agent tool returns the subagent's result to you as the tool result.** Since v2.1.198
-subagents run in the **background by default** — you keep working while they run and are
-notified when they finish — but the harness still delivers each subagent's result back to the
-dispatching orchestrator. Act on that returned result; it is your join point. **Never read or
-poll task output files** to reconstruct a result:
+**Waiting on Codex** goes through `orca orchestration check --wait`, as above.
 
-- ❌ `sleep N; cat /private/tmp/.../tasks/<id>.output` — blocked by the Claude Code safety system
-- ❌ A `Monitor` or file-poll loop to fetch an Agent's result — the harness already returns it
-- ✅ Dispatch `Agent(...)`, then use the returned result directly (or the completion notification)
+**Waiting on an external condition** — a CI run, a file another process writes, a dev server
+coming up — uses `Monitor`, or a backgrounded `until <check>; do sleep 2; done`. That is the
+only valid sleep-polling pattern.
 
-**Parallel dispatch**: To run independent subagents concurrently, call multiple `Agent` tools
-in the **same message turn**. Sequential Agent calls (one per turn) serialize what could be
-parallel work and multiply latency by the number of agents.
-
-- ❌ Turn 1: dispatch `strategy-architect`, turn 2: dispatch `review-agent` (serialized)
-- ✅ Single turn: dispatch `strategy-architect` + `review-agent` together (parallel)
-
-**Single-central dispatch (policy + platform default)**: since v2.1.217 subagents do NOT
-spawn nested subagents by default (`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` would re-enable it;
-this harness does not set it). One central dispatcher — you. Specialists report to you and do
-not dispatch each other; this preserves role isolation and a single source of truth.
-
-**Fan-out caps (v2.1.212/217)**: at most 20 subagents run concurrently and a session can spawn
-at most 200 in total (`/clear` resets the budget; `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` /
-`CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION` override). Batch dispatches accordingly.
-
-**External condition polling** (CI run, file creation by an external process) is different from
-waiting on an Agent result: use `Monitor` with `until <check>; do sleep 2; done`. That is the
-only valid sleep-polling pattern, and it waits on an external artifact, not on a subagent.
-
-## Goal anchoring (Karpathy P4)
+## Goal anchoring
 
 - The current sprint goal lives in `.claude/OBJECTIVE.md`. `guardrails.sh` re-injects it
   at SessionStart.
-- After editing OBJECTIVE.md, register its **Done when:** block as a `/goal` so each
-  turn is auto-evaluated. Don't proceed without a registered goal.
+- After editing OBJECTIVE.md, register its **Done when:** block as a `/goal` so each turn is
+  auto-evaluated. Don't proceed without a registered goal.
 - Done-when criteria must be **transcript-verifiable** (a failing test that passes, a
-  review-agent zero-blocking verdict, an exit-0 lint run — all observable in this
-  transcript), with a **turn cap** to prevent runaway loops.
+  zero-Blocking review verdict, an exit-0 lint run — all observable in this transcript), with
+  a **turn cap** to prevent runaway loops.
 
 ## Hard rules
 
-- **Single source of truth = this Claude session.** Codex is a reviewer / parallel
-  explorer, never a co-driver. Never sync state two ways with it.
-- **Backtest-only scope.** All DB access is READ-ONLY. Strategies run dry-run.
-  No live orders / withdrawals / wallet writes in this preset (separate preset if needed).
+- **Single source of truth = this session.** Codex reviews; it never co-drives and never
+  holds state you rely on. Never sync state two ways with it.
+- **Backtest-only scope.** All DB access is READ-ONLY. Strategies run dry-run. No live
+  orders / withdrawals / wallet writes in this preset (separate preset if needed). A write
+  happens only when the user authorizes that specific write.
 - **Secrets** never get written to files or committed. `${ENV_VAR}` references only.
 - **Bounded changesets.** No mixed refactor + feature commits.
-- **Push gate.** `git push` is permitted only after review-agent returns zero Blocking
-  findings and tests pass. Every push still goes through the permission prompt
-  (`permissions.ask`) — that prompt is the human checkpoint, and a denied prompt is a
-  final answer, not something to retry or work around.
+- **Push gate.** `git push` is permitted only after the code review returns zero Blocking
+  findings and QA is green. Every push still goes through the permission prompt
+  (`permissions.ask`) — that prompt is the human checkpoint, and a denied prompt is a final
+  answer, not something to retry or work around.
+- **Hooks** run automatically — never bypass them. Three are registered: `guardrails.sh`
+  (re-injects the objective at SessionStart), `secret-scan.sh`, and `test-gate.sh`.
+  `risk-guard.sh` and `write-scope.sh` still exist as files but were deliberately
+  unregistered on 2026-07-24; do not re-register them.
 
-## Out-of-lane handling
+## When you are the one who was wrong
 
-When any subagent escalates (out-of-lane action required), YOU receive the report and
-either (a) re-dispatch the correct specialist, or (b) surface to the human. Never let a
-subagent improvise past its lane.
+Design review and code review exist to catch your errors, and they do. When a finding lands:
+check it against the code yourself, then say plainly that the claim was yours and what the
+correct fact is. Fix the design document too — **an error left in the document gets built
+from later.**
