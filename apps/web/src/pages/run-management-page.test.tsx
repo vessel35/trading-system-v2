@@ -26,6 +26,7 @@ function managementHandlers(
   moneyManagement: {
     supported: string[];
     default: Record<string, unknown>;
+    availability?: StrategyOption["money_management_availability"];
   } = {
     supported: ["manual", "turtle"],
     default: {
@@ -54,6 +55,13 @@ function managementHandlers(
               atr_stop_multiple: 1.5,
             },
             supported_money_management: moneyManagement.supported,
+            money_management_availability:
+              moneyManagement.availability ??
+              moneyManagement.supported.map((mode) => ({
+                mode,
+                runnable: true,
+                unrunnable_reason: null,
+              })),
             default_money_management: moneyManagement.default,
             is_active: true,
             is_deprecated: false,
@@ -110,6 +118,7 @@ function strategyOption(
   moneyManagement: {
     supported: string[];
     default: Record<string, unknown>;
+    availability?: StrategyOption["money_management_availability"];
   },
 ): StrategyOption {
   return {
@@ -136,6 +145,13 @@ function strategyOption(
     min_history: 10,
     default_params: {},
     supported_money_management: moneyManagement.supported,
+    money_management_availability:
+      moneyManagement.availability ??
+      moneyManagement.supported.map((mode) => ({
+        mode,
+        runnable: true,
+        unrunnable_reason: null,
+      })),
     default_money_management: moneyManagement.default,
     is_active: true,
     is_deprecated: false,
@@ -1277,6 +1293,44 @@ describe("실행 가능 판정", () => {
     await queryClient.invalidateQueries({ queryKey: ["strategies"] });
     expect(
       await screen.findByText(/자금 관리 turtle 정책을 더는 지원하지 않습니다/),
+    ).toBeInTheDocument();
+    await expectEveryBlockedSubmissionPath(runPost, sweepPost);
+  });
+
+  it("등록에서 꺼진 정책은 응답에 남지만 선택과 모든 제출 경로에서 막힌다", async () => {
+    server.use(
+      http.get("http://localhost/api/v1/strategies", () =>
+        HttpResponse.json({
+          data: [
+            strategyOption("vessel-reference", {
+              supported: ["manual", "turtle"],
+              default: {},
+              availability: [
+                {
+                  mode: "manual",
+                  runnable: false,
+                  unrunnable_reason: "inactive",
+                },
+                { mode: "turtle", runnable: true, unrunnable_reason: null },
+              ],
+            }),
+          ],
+        }),
+      ),
+      ...managementHandlers().slice(1),
+    );
+    const { runPost, sweepPost } = installExecutionSpies();
+    renderManagementPage();
+    await chooseStrategy();
+
+    const selector = screen.getByLabelText("자금 관리 방법");
+    const manual = within(selector).getByRole("option", { name: /직접 설정/ });
+    expect(manual).toBeDisabled();
+    expect(manual).toHaveTextContent("비활성화된 자금 관리 정책");
+    fireEvent.change(selector, { target: { value: "manual" } });
+
+    expect(
+      await screen.findByText(/직접 설정 정책을 실행할 수 없습니다/),
     ).toBeInTheDocument();
     await expectEveryBlockedSubmissionPath(runPost, sweepPost);
   });

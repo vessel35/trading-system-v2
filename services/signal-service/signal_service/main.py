@@ -25,6 +25,7 @@ from signal_service.infrastructure import (
     CryptoDataFeed,
     PostgresSignalSink,
     ReadConnection,
+    SignalMoneyManagementRegistry,
     SignalStrategyRegistry,
     WriteConnection,
 )
@@ -42,6 +43,7 @@ def build_signal_generator(
         SignalStrategyRegistry(registry_reader),
         build_strategy_registry(),
         money_management_policies=registered_money_management(),
+        money_management_registrations=SignalMoneyManagementRegistry(registry_reader).list(),
     )
     return SignalGenerationService(
         CryptoDataFeed(crypto_reader),

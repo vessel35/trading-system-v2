@@ -280,7 +280,13 @@ def test_main_wires_confirmed_crypto_rows_through_core_vessel_to_signal_db() -> 
         _minute_row(base + timedelta(minutes=index), 100 + index) for index in range(22 * 60)
     ]
     crypto = _Connection(lambda query, params: minute_rows)
-    registry = _Connection(lambda query, params: [_vessel_registry_row()])
+    registry = _Connection(
+        lambda query, params: (
+            [(None,)]
+            if "to_regclass('public.money_management_registry')" in query
+            else [_vessel_registry_row()]
+        )
+    )
     writer = _Connection(lambda query, params: [(1,)])
     service = build_signal_generator(
         crypto_reader=crypto,

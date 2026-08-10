@@ -1,8 +1,12 @@
 """Coordinate Adaptee creation, configuration, registry access, and lifecycle."""
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
-from core_lib.money_management import MoneyManagementBase, MoneyManagementFactory
+from core_lib.money_management import (
+    MoneyManagementBase,
+    MoneyManagementFactory,
+    reconcile_money_management_availability,
+)
 from core_lib.ports import StrategyRegistry
 
 from .base import StrategyAdapter, StrategyDecisionContract, StrategyRuntime
@@ -25,6 +29,7 @@ class AdapterManager:
         adapter_registry: InProcessStrategyRegistry,
         *,
         money_management_policies: Mapping[str, type[MoneyManagementBase]],
+        money_management_registrations: Sequence[Mapping[str, object]] | None = None,
         config: type[StrategyConfig] = StrategyConfig,
         factory: type[AdapterFactory] = AdapterFactory,
     ) -> None:
@@ -35,6 +40,7 @@ class AdapterManager:
         # Passed in rather than imported, because the deployed policies live outside
         # core_lib and core_lib must not reach into a service to find them.
         self._money_management_policies = money_management_policies
+        self._money_management_registrations = money_management_registrations
         self._instances: dict[str, StrategyAdapter] = {}
         self._active: set[str] = set()
 
@@ -78,6 +84,25 @@ class AdapterManager:
                 f"strategy {strategy_id!r} declares TradingSignal and cannot attach "
                 "money management"
             )
+        mode = money_management_config.get("mode")
+        if isinstance(mode, str):
+            availability = next(
+                (
+                    item
+                    for item in reconcile_money_management_availability(
+                        self._money_management_registrations,
+                        self._money_management_policies,
+                    )
+                    if item.mode == mode
+                ),
+                None,
+            )
+            if availability is not None and not availability.runnable:
+                reason = availability.reason
+                raise ValueError(
+                    f"money-management mode {mode!r} is not runnable: "
+                    f"{None if reason is None else reason.value}"
+                )
         policy = MoneyManagementFactory.create(
             money_management_config, self._money_management_policies
         )

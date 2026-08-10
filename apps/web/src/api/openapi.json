@@ -6444,6 +6444,44 @@
         ],
         "title": "MissedOpportunity"
       },
+      "MoneyManagementAvailabilityResponse": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "title": "Mode"
+          },
+          "runnable": {
+            "type": "boolean",
+            "title": "Runnable"
+          },
+          "unrunnable_reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "registered_only",
+                  "deployed_only",
+                  "identity_mismatch",
+                  "declaration_mismatch",
+                  "deprecated",
+                  "inactive"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unrunnable Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mode",
+          "runnable",
+          "unrunnable_reason"
+        ],
+        "title": "MoneyManagementAvailabilityResponse"
+      },
       "OutcomeBucket": {
         "properties": {
           "bucket_id": {
@@ -8953,6 +8991,13 @@
             "type": "array",
             "title": "Supported Money Management"
           },
+          "money_management_availability": {
+            "items": {
+              "$ref": "#/components/schemas/MoneyManagementAvailabilityResponse"
+            },
+            "type": "array",
+            "title": "Money Management Availability"
+          },
           "default_money_management": {
             "additionalProperties": true,
             "type": "object",
@@ -9011,6 +9056,7 @@
           "min_history",
           "default_params",
           "supported_money_management",
+          "money_management_availability",
           "default_money_management",
           "is_active",
           "is_deprecated",

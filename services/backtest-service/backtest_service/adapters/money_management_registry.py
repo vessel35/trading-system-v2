@@ -11,6 +11,7 @@ from core_lib.ports import MoneyManagementRegistry
 from .data_feed import ReadConnection
 
 _SELECT_COLUMNS = ", ".join(MONEY_MANAGEMENT_CATALOG_COLUMNS)
+_TABLE_SQL = "SELECT to_regclass('public.money_management_registry')"
 _GET_SQL = f"""
 SELECT {_SELECT_COLUMNS}
 FROM public.money_management_registry
@@ -36,7 +37,10 @@ class BacktestMoneyManagementRegistry(MoneyManagementRegistry):
             raise KeyError(mode)
         return money_management_catalog_row_entry(row)
 
-    def list(self) -> list[dict[str, object]]:
-        """Return all policy catalog entries in stable mode order."""
+    def list(self) -> list[dict[str, object]] | None:
+        """Return registrations, preserving absence of the catalog table."""
+        relation = self._connection.execute(_TABLE_SQL, ()).fetchone()
+        if relation is None or relation[0] is None:
+            return None
         rows = self._connection.execute(_LIST_SQL, ()).fetchall()
         return [money_management_catalog_row_entry(row) for row in rows]

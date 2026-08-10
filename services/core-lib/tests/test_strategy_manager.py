@@ -14,6 +14,7 @@ from core_lib.money_management import (
     MoneyManagementPlan,
     PolicyIndicatorRequirement,
     RiskLimits,
+    policy_settings,
 )
 from core_lib.ports import StrategyRegistry
 from core_lib.strategy import (
@@ -246,6 +247,21 @@ def _manager_for(adaptee: type[FakeAdaptee]) -> AdapterManager:
     return AdapterManager(catalog, plugins, money_management_policies=_POLICIES)
 
 
+def _policy_registration(
+    policy: type[MoneyManagementBase],
+    *,
+    is_active: bool = True,
+) -> dict[str, object]:
+    return {
+        "mode": policy.id,
+        "class_name": policy.__name__,
+        "module_path": policy.__module__,
+        "settings_names": sorted(policy_settings(policy)),
+        "is_active": is_active,
+        "is_deprecated": False,
+    }
+
+
 def test_strategy_metadata_defaults_to_the_legacy_decision_contract() -> None:
     assert FakeAdaptee.get_metadata().decision_contract is StrategyDecisionContract.TRADING_SIGNAL
 
@@ -369,6 +385,46 @@ def test_runtime_composes_only_a_strategy_supported_money_policy() -> None:
             {"strategy_id": "money-breakout", "params": {"fast": 10}},
             {"mode": "turtle"},
         )
+
+
+def test_runtime_refuses_an_inactive_registered_money_management_mode() -> None:
+    strategy_id = "money-breakout"
+    plugins = InProcessStrategyRegistry()
+    plugins.register(strategy_id, MoneyManagedAdaptee)
+    catalog = FakeCatalog([])
+    catalog.rows[strategy_id] = {
+        "strategy_id": strategy_id,
+        "class_name": MoneyManagedAdaptee.__name__,
+        "module_path": MoneyManagedAdaptee.__module__,
+        "is_active": True,
+        "is_deprecated": False,
+    }
+    manager = AdapterManager(
+        catalog,
+        plugins,
+        money_management_policies=_POLICIES,
+        money_management_registrations=[
+            _policy_registration(_ManualFixturePolicy, is_active=False)
+        ],
+    )
+
+    with pytest.raises(ValueError, match="money-management mode 'manual'.*inactive"):
+        manager.create_runtime(
+            strategy_id,
+            {"strategy_id": strategy_id, "params": {"fast": 10}},
+            {"mode": "manual"},
+        )
+
+
+def test_runtime_preserves_deployed_modes_while_the_registry_table_is_absent() -> None:
+    runtime = _manager_for(MoneyManagedAdaptee).create_runtime(
+        "contract-fixture",
+        {"strategy_id": "contract-fixture", "params": {"fast": 10}},
+        {"mode": "manual"},
+    )
+
+    assert runtime.money_management is not None
+    assert runtime.money_management.id == "manual"
 
 
 def test_registration_that_disagrees_with_the_adaptee_is_refused() -> None:

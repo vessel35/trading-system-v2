@@ -1655,6 +1655,15 @@ export interface components {
             /** Nearest Candidate Id */
             nearest_candidate_id: number | null;
         };
+        /** MoneyManagementAvailabilityResponse */
+        MoneyManagementAvailabilityResponse: {
+            /** Mode */
+            mode: string;
+            /** Runnable */
+            runnable: boolean;
+            /** Unrunnable Reason */
+            unrunnable_reason: ("registered_only" | "deployed_only" | "identity_mismatch" | "declaration_mismatch" | "deprecated" | "inactive") | null;
+        };
         /** OutcomeBucket */
         OutcomeBucket: {
             /** Bucket Id */
@@ -2475,6 +2484,8 @@ export interface components {
             };
             /** Supported Money Management */
             supported_money_management: string[];
+            /** Money Management Availability */
+            money_management_availability: components["schemas"]["MoneyManagementAvailabilityResponse"][];
             /** Default Money Management */
             default_money_management: {
                 [key: string]: unknown;

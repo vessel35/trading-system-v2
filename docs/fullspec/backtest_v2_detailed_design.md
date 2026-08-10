@@ -252,7 +252,7 @@ core-lib은 특정 DB에 묶이지 않는다. 이 방식은 현행 signal-servic
 |---|---|---|---|---|
 | `crypto_data` | 공유·읽기 | 확정 캔들 OHLCV(1분 적재, 상위 TF는 연속 집계 뷰) + funding rate 시계열 | `OHLCV 수집기` 쓰기; `backtest-service`(DataFeed 포트)·`signal-service` 읽기; 백테스트 미기록 | **v2가 소유·프로비저닝하는 DB**(하이퍼테이블·상위 TF 연속집계 뷰·`ohlcv_futures` retention 2000일 포함); OHLCV 적재는 `OHLCV 수집기`가 맡음; `crypto-data-hub`는 v2가 사용하지 않는 참조 원천; 현재 Engine의 캔들 내 trigger는 전략 TF만 사용 |
 | `backtest_db` | 신규·전용 메타 | run 요약·카탈로그·사전등록·태그 등 run 메타(검색·비교·집계 근거) | `backtest-service`(CatalogStore 포트) 쓰기, Harness 읽기; 조회용 읽기 전용 역할을 writer와 분리 | 운영 DB와 분리(연구 데이터 오염 방지); 상세 Evidence 미보유; 이름·writer 계승·스키마 신규·읽기 전용 역할 신설(필드는 §5.2) |
-| `signal_db` | 기존 + 레지스트리 | `signal-service` 운영 DB + 실행할 전략(Adaptee) 목록 레지스트리 — 현행 코드 상주(부팅 하드코딩) 목록을 DB로 승격해 전략 목록의 단일 출처로 삼음 | `signal-service` 쓰기; Adapter Manager가 주입 포트로 등록·조회(`backtest-service`도 주입 포트로 조회) | `core_lib` 직접 의존 없음(주입 포트 경유); 레지스트리는 현행 `trading_strategies`(클래스명·파라미터 JSONB·심볼·타임프레임·활성·버전) 구조 차용, ERD·필드는 §5.1 |
+| `signal_db` | 기존 + 레지스트리 | `signal-service` 운영 DB + 실행할 전략과 자금관리 정책의 등록 상태 | 운영 스크립트가 등록 행을 쓰고, signal·backtest·web-api가 주입 포트 또는 서비스 어댑터로 읽음 | `core_lib` 직접 의존 없음(주입 경계 사용); 전략은 `strategy_registry`, 정책은 `money_management_registry`에서 발견된 코드와 신원·선언·활성 상태를 대조함 |
 | Evidence SQLite | run별 상세 | run별 캔들 신호·주문·체결·포지션·손익·지표 스냅샷(forensics·재현 원천) | `backtest-service`(EvidenceSink 포트) 쓰기; 대시보드·연구 읽기; 라이브는 연구 피드백용만 | run 자기완결(원천 스냅샷 로컬 사본); 운영 DB 미저장; 결정성 해시=정렬 행 정규화 직렬화(파일 바이트 아님)(필드는 §5.3) |
 
 > `wallet_db`(wallet 운영 DB)와 `config_db`(수집기가 읽는 활성 심볼)는 백테스트 데이터 흐름 밖이라 이 저장소 표에서
@@ -399,7 +399,7 @@ services/core-lib/
       position_book.py               #   포지션 갱신·가중평균·reduce_only·청산 판정·최초 체결 캔들 자기검사 회피
       accounting.py                  #   cash+position=equity 항등식·비용 1회 차감
       normalizer.py                  #   float→Decimal 단일 변환·quantize 관문(공유 코드) — 모든 Broker 어댑터의 submit()이 이 함수를 통과(어댑터별 독자 캐스팅 금지); 우회는 적합성 테스트로 차단(불변식: 단일·동일 캐스트)
-    ports/                           # [컴포넌트] 환경별 관심사의 어댑터 경계(전부 ABC; 구현은 서비스가 주입) — 표준 포트 6종 + Adaptee 레지스트리 접근 포트 = 7종을 둔다; 목록 완결성·시그니처·구현 정책은 §3.2에서 확정
+    ports/                           # [컴포넌트] 환경별 관심사의 어댑터 경계(전부 ABC; 구현은 서비스가 주입) — 표준 포트 6종 + 전략·자금관리 레지스트리 접근 포트 2종을 둔다
       data_feed.py                   #   DataFeed ABC: candles(up_to 경계)·funding·mark_price
       broker.py                      #   Broker ABC: submit(request:OrderRequest)→Fill·open_orders·cancel — Protocol만 선언(ports는 types만 참조, execution 미참조). Decimal 단일 변환은 구현 어댑터가 submit()에서 core_lib.execution.normalizer(공유)를 통과해 달성
       clock.py                       #   Clock ABC: now·advance(wall-clock 금지)
@@ -584,7 +584,7 @@ flowchart TD
         SIZ["sizing<br/>거래당 위험 규율"]
         CST["costs<br/>net 비용 4수식"]
         EXE["execution<br/>체결·장부·회계·Decimal 관문"]
-        PORT["ports<br/>어댑터 경계 7 ABC"]
+        PORT["ports<br/>어댑터 경계 8 ABC"]
         EVAL["eval<br/>성과 수식·판정 3단계"]
         MGR["Adapter Manager<br/>Adaptee 생성·lifecycle·레지스트리"]
         CFG["StrategyConfig<br/>파라미터 해석·검증·스키마"]
@@ -623,12 +623,12 @@ flowchart TD
 | `indicators` | 공용 프리미티브 + 지표 표준(벡터화·증분 두 계산 방식). 정책은 등록된 지표를 **공통 방식으로 관리**하는 것이며 지표 개수가 아니다(목록·단위는 §4.1) | 공개: `registry.get(name, params)`·`compute_batch(candles, enabled_set)`·`IndicatorState.update(candle)`·`contracts.assert_finalized`. 하지 않음: 확정 캔들만 입력(`close_time ≤ 판단 시각`); 계산은 float64(Decimal 변환은 `execution` 관문 소관); 계산 대상은 run 설정이 결정 | `indicators/`의 primitives·지표군 9파일·donchian·registry·contracts |
 | `patterns` | 캔들 패턴 계산 신원·증분 상태·네 출력 정책의 별도 등록처 | 공개: `PatternSpec`·`PatternState`·`PatternRegistry`·TA-Lib 어댑터. 하지 않음: 지표 레지스트리에 패턴을 섞지 않음; 워밍업 뒤 비일치는 `0.0`, 워밍업 전만 NaN; 확인을 과거 패턴 캔들에 소급하지 않음 | `patterns/`의 registry·outputs·primitives·talib_*·specs |
 | `series` | 지표와 패턴을 두 실행면이 한 경로로 소비하게 하는 최소 Protocol과 선택 해석 | 공개: `SeriesSpec`·`SeriesState`·`resolve_series_specs`·`series_specs_from_descriptors`·`series_key`. 하지 않음: `IndicatorSpec`과 `PatternSpec`의 계산 신원을 합치지 않음; `all`에서도 패턴 전체를 자동 활성화하지 않음 | `series/contracts.py`·`series_resolution.py` |
-| `money_management` | 전략 결정을 보호가격·요청 수량·요청 leverage가 있는 한계 지어진 계획으로 변환 | 공개: `MoneyManagementPolicy`·manual/turtle 정책·값 타입·`MoneyManagementFactory`. 하지 않음: 진입·청산 edge, 계좌 전체 승인, 주문 전송을 소유하지 않음 | `money_management/`의 models·policies·registry |
+| `money_management` | 전략 결정을 보호가격·요청 수량·요청 leverage가 있는 한계 지어진 계획으로 변환 | 공개: `MoneyManagementPolicy`·값 타입·`MoneyManagementFactory`·등록 행 검사와 실행 가능 판정. 하지 않음: 진입·청산 edge, 계좌 전체 승인, 주문 전송을 소유하지 않음 | `money_management/`의 models·policies·registry·catalog_row·reconciliation; 구현은 `trading_plugins/money_management/` |
 | `StrategyAdapter` | 전략을 끼우는 규범 전략 선택 정책과 선택적 작성 기반 제공 | 공개: 규범인 `StrategyAdapter`(`typing.Protocol`)의 `get_metadata()`·`get_parameter_schema()`·`analyze(market_data, position?) → DecisionIntent | TradingSignal | None`; 이를 만족하는 선택적 `StrategyBase`의 같은 추상 메서드 셋과 `series_value(market_data, spec) → object`. 현재 `VesselReference`는 발견 조건 때문에 `StrategyBase`를 상속하고 `DecisionIntent`를 반환하며 다른 legacy 전략의 `TradingSignal`은 호환 경계로 수용한다. 하지 않음: 데이터 읽기·저장·루프·계좌 조회·보호가격·수량·leverage 계산·주문 생성, 상태 보유 | `strategy/base.py`·`profile.py`·`trailing/`(예약), 구현은 `trading_plugins/strategies/` |
 | `sizing` | 거래당 위험 규율과 사이징 인스턴스 | 공개: `risk_money.size(risk_per_trade, equity, stop_distance)`·`turtle_unit`·`wallet_pct.size`(호환)·`kelly.cap`·`exposure_limit`(단일 시장·상관군·단일 방향 위험 합 한도 검사). 하지 않음: 엣지 창조 없음(엣지는 진입 신호); `1R = |체결가 − 최초 보호 스탑| × 수량`이고 `1R ≤ 1%`; pct 경로는 보장 실패 시 비준수 플래그 의무 | `sizing/`의 risk_money·turtle_unit·wallet_pct·kelly·exposure_limit |
 | `costs` | net 손익 4개 비용 수식 표준(값은 주입) | 공개: `fee.calc`·`slippage.apply`·`funding.settle`·`liquidation.price/is_triggered`. 하지 않음: 비용 값 미보유(전량 `CostModel` 주입); 펀딩은 이산 정산(UTC 경계, 정산가 = 경계 포함 최소 가용 TF 캔들 시가); 청산은 Isolated 우선·보수 방향 | `costs/`의 fee·slippage·funding·liquidation |
 | `execution` | 주문 라이프사이클·결정적 체결·포지션 장부·회계 + Decimal 단일 변환 관문 | 공개: `order_lifecycle`(VALID_TRANSITIONS)·`matcher`(체결 규칙)·`position_book`·`accounting.recompute`·`normalizer`. 하지 않음: `cash + position = equity` 유지·비용 1회 차감; float→Decimal 단일 변환은 `normalizer` 한 곳에서만(모든 Broker 어댑터가 `submit()`에서 통과, 어댑터별 캐스팅 금지); `decision_ts < execution_ts` 강제 | `execution/`의 order_lifecycle·matcher·position_book·accounting·normalizer |
-| `ports` | 환경별 관심사의 어댑터 경계(전부 ABC, 구현은 서비스 주입) | 공개: 7 ABC — `DataFeed`·`Broker`·`Clock`·`CostModel`·`EvidenceSink`·`CatalogStore`·`StrategyRegistry`. 하지 않음: Protocol만 선언(`types`만 참조, `execution` 미참조); wall-clock·네트워크·파일 IO는 구현 어댑터 안에만; 특정 DB 직접 의존 없음(레지스트리도 주입 포트) | `ports/`의 7파일 |
+| `ports` | 환경별 관심사의 어댑터 경계(전부 ABC, 구현은 서비스 주입) | 공개: 8 ABC — `DataFeed`·`Broker`·`Clock`·`CostModel`·`EvidenceSink`·`CatalogStore`·`StrategyRegistry`·`MoneyManagementRegistry`. 하지 않음: Protocol만 선언하고, wall-clock·네트워크·파일 IO는 구현 어댑터 안에만 두며, 특정 DB에 직접 의존하지 않음 | `ports/`의 8파일 |
 | `eval` | 성과 수식 표준 1곳 + 판정 3단계 | 공개: `metrics`·`integrity.check`·`hard_gate.judge`·`profile.check_envelope`·`decision.decide`·`thresholds`. 하지 않음: 판정 순서는 무결성 → Hard Gate → Decision 고정; 통과선은 한 곳 구현(수식·임계값 수치는 §4가 확정); 프로파일은 established 회귀만 reject | `eval/`의 metrics·integrity·hard_gate·decision·thresholds·profile |
 | `Adapter Manager` | Adaptee 생성(Factory)·lifecycle·외부 카탈로그 맞춰 보기와 정책 runtime 조합 | 공개: `create(strategy_id, raw_config) → StrategyAdapter`·`create_runtime(strategy_id, raw_config, money_management_config) → StrategyRuntime`·`reconcile_catalog() → tuple[StrategyReconciliation, ...]`·lifecycle·`registry.list()/register()`. `trading_plugins`가 발견 결과로 만든 `InProcessStrategyRegistry`를 주입받고, 정책 id 지원 여부와 turtle의 signal-exit capability를 검사한다. 하지 않음: 카탈로그 `module_path`의 동적 import, 전략 결정·정책 수식·파라미터 검증 로직 미보유 | `strategy/manager.py`·`registry.py`·`reconciliation.py`·`factory.py` |
 | `StrategyConfig` | 전략 파라미터 config의 해석·검증·직렬화·스키마 노출 | 공개: `resolve(schema, raw_config) → ResolvedConfig`·`json_schema(schema)`·`serialize/version`(스키마를 값으로 받아 무순환; 정확한 시그니처는 §4.2). 하지 않음: 스키마 선언은 Adaptee 소유(여기서 재정의 금지); 값은 호출자 소유(소스 미보유); 파라미터 스윕·실행 설정은 범위 밖(`ConfigLayer`) | `strategy/config.py` |
@@ -684,7 +684,7 @@ flowchart TD
         REVAL["eval"]
         RSIZ["sizing"]
         RCST["costs"]
-        RPORT["ports (7 ABC)"]
+        RPORT["ports (8 ABC)"]
     end
 
     CFGL -->|config 주입| ENG

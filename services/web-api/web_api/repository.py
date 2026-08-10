@@ -14,7 +14,12 @@ from backtest_service.config.run_config import (
     freeze_money_management_config,
 )
 from core_lib.eval import thresholds
-from core_lib.money_management import MoneyManagementBase, MoneyManagementFactory
+from core_lib.money_management import (
+    MoneyManagementAvailability,
+    MoneyManagementBase,
+    MoneyManagementFactory,
+    reconcile_money_management_availability,
+)
 from core_lib.strategy import (
     InProcessStrategyRegistry,
     ParameterSchema,
@@ -36,6 +41,7 @@ from web_api.models import (
     DataSourceInventory,
     HealthResponse,
     InventoryItem,
+    MoneyManagementAvailabilityResponse,
     Page,
     Preregistration,
     PreregistrationResponse,
@@ -199,6 +205,7 @@ def _freeze_money_management_defaults(
 
 
 _FROZEN_MONEY_MANAGEMENT_DEFAULTS: Final = _freeze_money_management_defaults()
+_DEPLOYED_MONEY_MANAGEMENT_POLICIES: Final = MappingProxyType(dict(registered_money_management()))
 
 
 def _default_money_management(mode: str | None) -> dict[str, object]:
@@ -232,6 +239,19 @@ def _money_management_options(
     if default not in modes:
         return modes, {}
     return modes, _default_money_management(default)
+
+
+def _money_management_availability_response(
+    availability: Sequence[MoneyManagementAvailability],
+) -> list[MoneyManagementAvailabilityResponse]:
+    return [
+        MoneyManagementAvailabilityResponse(
+            mode=item.mode,
+            runnable=item.runnable,
+            unrunnable_reason=item.reason,
+        )
+        for item in availability
+    ]
 
 
 def _summary_status(run_status: str, summary_present: bool) -> SummaryStatus:
@@ -586,9 +606,22 @@ class StrategyRepository:
         self,
         connection: SignalConnection,
         strategy_registry: InProcessStrategyRegistry,
+        *,
+        money_management_policies: Mapping[str, type[MoneyManagementBase]] | None = None,
+        money_management_registrations: Sequence[Mapping[str, object]] | None = None,
     ) -> None:
         self._connection = connection
         self._strategy_registry = strategy_registry
+        self._money_management_policies = (
+            _DEPLOYED_MONEY_MANAGEMENT_POLICIES
+            if money_management_policies is None
+            else money_management_policies
+        )
+        self._money_management_registrations = money_management_registrations
+        self._money_management_availability = reconcile_money_management_availability(
+            money_management_registrations,
+            self._money_management_policies,
+        )
 
     def list(self) -> StrategyListResponse:
         table = self._connection.execute(
@@ -683,6 +716,9 @@ class StrategyRepository:
                 else dict(cast(dict[str, object], row["default_params_json"]))
             ),
             supported_money_management=modes,
+            money_management_availability=_money_management_availability_response(
+                self._money_management_availability
+            ),
             default_money_management=default,
             is_active=bool(row["is_active"]),
             is_deprecated=bool(row["is_deprecated"]),
@@ -744,6 +780,9 @@ class StrategyRepository:
                     min_history=metadata.min_history if metadata is not None else 0,
                     default_params=default_params,
                     supported_money_management=modes,
+                    money_management_availability=_money_management_availability_response(
+                        self._money_management_availability
+                    ),
                     default_money_management=default,
                     is_active=True,
                     is_deprecated=False,

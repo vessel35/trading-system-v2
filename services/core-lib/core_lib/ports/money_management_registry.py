@@ -15,5 +15,5 @@ class MoneyManagementRegistry(ABC):
         """Return one policy catalog entry by mode."""
 
     @abstractmethod
-    def list(self) -> list[dict[str, object]]:
-        """Return all policy catalog entries."""
+    def list(self) -> list[dict[str, object]] | None:
+        """Return registrations, or ``None`` while the catalog table is absent."""

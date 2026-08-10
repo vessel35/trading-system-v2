@@ -322,6 +322,39 @@ function moneyManagementLabel(mode: MoneyManagementMode): string {
   return mode;
 }
 
+type MoneyManagementAvailability =
+  StrategyOption["money_management_availability"][number];
+
+const MONEY_MANAGEMENT_UNRUNNABLE_REASON_LABELS: Record<
+  NonNullable<MoneyManagementAvailability["unrunnable_reason"]>,
+  string
+> = {
+  registered_only: "등록 정보는 있지만 배포된 정책이 없습니다.",
+  deployed_only: "배포된 정책이지만 등록 정보가 없습니다.",
+  identity_mismatch: "등록 정보와 배포된 정책의 신원이 일치하지 않습니다.",
+  declaration_mismatch: "등록 정보와 배포된 정책의 설정 선언이 일치하지 않습니다.",
+  deprecated: "폐기된 자금 관리 정책입니다.",
+  inactive: "등록 정보에서 비활성화된 자금 관리 정책입니다.",
+};
+
+function moneyManagementAvailability(
+  strategy: StrategyOption,
+  mode: string,
+): MoneyManagementAvailability | undefined {
+  return strategy.money_management_availability.find(
+    (availability) => availability.mode === mode,
+  );
+}
+
+function moneyManagementUnrunnableLabel(
+  availability: MoneyManagementAvailability | undefined,
+): string {
+  const reason = availability?.unrunnable_reason;
+  return reason
+    ? MONEY_MANAGEMENT_UNRUNNABLE_REASON_LABELS[reason]
+    : "서버가 이 자금 관리 정책을 실행할 수 없다고 판단했습니다.";
+}
+
 const UNRUNNABLE_REASON_LABELS: Record<
   NonNullable<StrategyOption["unrunnable_reason"]>,
   string
@@ -441,6 +474,18 @@ function assessRunReadiness({
   if (!supportedModes.includes(form.moneyManagementMode)) {
     return blocked(
       `선택한 전략은 자금 관리 ${form.moneyManagementMode} 정책을 더는 지원하지 않습니다. 새 값을 선택하세요.`,
+      selectedStrategy,
+    );
+  }
+  const policyAvailability = moneyManagementAvailability(
+    selectedStrategy,
+    form.moneyManagementMode,
+  );
+  if (!policyAvailability?.runnable) {
+    return blocked(
+      `${moneyManagementLabel(form.moneyManagementMode)} 정책을 실행할 수 없습니다. ${moneyManagementUnrunnableLabel(
+        policyAvailability,
+      )}`,
       selectedStrategy,
     );
   }
@@ -785,6 +830,11 @@ export function RunManagementPage() {
       form.moneyManagementMode &&
       !selectedStrategy.supported_money_management.includes(form.moneyManagementMode),
   );
+  const moneyManagementSelectionUnavailable = Boolean(
+    selectedStrategy &&
+      form.moneyManagementMode &&
+      !moneyManagementAvailability(selectedStrategy, form.moneyManagementMode)?.runnable,
+  );
   const timeframeSelectionInvalid = Boolean(
     selectedStrategy &&
       !selectedStrategy.supported_timeframes.includes(form.timeframe),
@@ -1009,7 +1059,9 @@ export function RunManagementPage() {
           : "";
       // A missing or filtered default remains unselected. Picking the first
       // remaining mode would make the screen override the strategy declaration.
-      const mode = strategy.supported_money_management.includes(declaredDefault)
+      const mode =
+        strategy.supported_money_management.includes(declaredDefault) &&
+        moneyManagementAvailability(strategy, declaredDefault)?.runnable
         ? declaredDefault
         : "";
       return {
@@ -1467,6 +1519,7 @@ export function RunManagementPage() {
                   </div>
                   {supportedMoneyManagement.length > 1 ||
                   moneyManagementSelectionInvalid ||
+                  moneyManagementSelectionUnavailable ||
                   !form.moneyManagementMode ? (
                     <Label>
                       자금 관리 방법
@@ -1515,11 +1568,24 @@ export function RunManagementPage() {
                             {form.moneyManagementMode} · 더 이상 지원되지 않음
                           </option>
                         )}
-                        {supportedMoneyManagement.map((mode) => (
-                          <option key={mode} value={mode}>
-                            {moneyManagementLabel(mode)}
-                          </option>
-                        ))}
+                        {supportedMoneyManagement.map((mode) => {
+                          const availability = moneyManagementAvailability(
+                            selectedStrategy,
+                            mode,
+                          );
+                          return (
+                            <option
+                              key={mode}
+                              value={mode}
+                              disabled={!availability?.runnable}
+                            >
+                              {moneyManagementLabel(mode)}
+                              {!availability?.runnable
+                                ? ` · ${moneyManagementUnrunnableLabel(availability)}`
+                                : ""}
+                            </option>
+                          );
+                        })}
                       </select>
                     </Label>
                   ) : (

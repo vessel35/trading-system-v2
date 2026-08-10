@@ -58,6 +58,29 @@ class _RegistryFactory(Protocol):
     def __call__(self, connection: _Connection) -> MoneyManagementRegistry: ...
 
 
+class _TableResult:
+    def __init__(self, rows: list[Sequence[object]]) -> None:
+        self._rows = rows
+
+    def fetchone(self) -> Sequence[object] | None:
+        return None if not self._rows else self._rows[0]
+
+    def fetchall(self) -> list[Sequence[object]]:
+        return list(self._rows)
+
+
+class _TableConnection:
+    def __init__(self, relation: object, rows: list[Sequence[object]]) -> None:
+        self._relation = relation
+        self._rows = rows
+
+    def execute(self, query: str, params: tuple[object, ...]) -> _TableResult:
+        del params
+        if "to_regclass" in query:
+            return _TableResult([(self._relation,)])
+        return _TableResult(self._rows)
+
+
 def _row(columns: Sequence[str] = MONEY_MANAGEMENT_CATALOG_COLUMNS) -> tuple[object, ...]:
     values: dict[str, object] = {column: f"value:{column}" for column in columns}
     values.update(
@@ -122,6 +145,21 @@ def test_both_services_return_the_same_dictionary_for_the_same_row() -> None:
             for module_name, class_name, _ in _ADAPTERS
         ]
     )
+
+
+@pytest.mark.parametrize(("module_name", "class_name", "_"), _ADAPTERS)
+def test_policy_adapters_distinguish_a_missing_table_from_an_empty_table(
+    module_name: str,
+    class_name: str,
+    _: str,
+) -> None:
+    factory = _factory(module_name, class_name)
+
+    missing = factory(cast("_Connection", _TableConnection(None, []))).list()
+    empty = factory(cast("_Connection", _TableConnection("money_management_registry", []))).list()
+
+    assert missing is None
+    assert empty == []
 
 
 @pytest.mark.parametrize(("module_name", "class_name", "_"), _ADAPTERS)

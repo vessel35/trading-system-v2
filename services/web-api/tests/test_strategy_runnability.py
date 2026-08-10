@@ -302,6 +302,7 @@ def test_strategy_option_rejects_both_invalid_runnability_pairs() -> None:
             min_history=1,
             default_params={},
             supported_money_management=[],
+            money_management_availability=[],
             default_money_management={},
             is_active=True,
             is_deprecated=False,
@@ -329,6 +330,7 @@ def test_strategy_option_rejects_profile_presence_and_identity_mismatches() -> N
         "min_history": 1,
         "default_params": {},
         "supported_money_management": [],
+        "money_management_availability": [],
         "default_money_management": {},
         "is_active": True,
         "is_deprecated": False,
@@ -574,7 +576,7 @@ def test_code_registry_isolates_and_logs_each_declaration_failure(
         "system-exit-failure",
     ]
     healthy, runtime_failure, system_exit_failure = options
-    assert healthy.model_dump() == {
+    assert healthy.model_dump(exclude={"money_management_availability"}) == {
         "strategy_id": "healthy",
         "display_name": "Healthy",
         "strategy_version": "9.9.9",
@@ -593,7 +595,7 @@ def test_code_registry_isolates_and_logs_each_declaration_failure(
         "source": "code_registry",
     }
     for option in (runtime_failure, system_exit_failure):
-        assert option.model_dump() == {
+        assert option.model_dump(exclude={"money_management_availability"}) == {
             "strategy_id": option.strategy_id,
             "display_name": option.strategy_id.replace("-", " ").title(),
             "strategy_version": "9.9.9",
@@ -634,7 +636,13 @@ def test_each_declaration_is_read_once_and_one_snapshot_fills_existing_fields() 
     assert (_FixtureStrategy.metadata_calls, _FixtureStrategy.schema_calls) == (1, 1)
     assert option.profile_id == "runnability-fixture-v1"
     assert option.model_dump(
-        exclude={"runnable", "unrunnable_reason", "profile_id", "profile"}
+        exclude={
+            "runnable",
+            "unrunnable_reason",
+            "profile_id",
+            "profile",
+            "money_management_availability",
+        }
     ) == {
         "strategy_id": "fixture",
         "display_name": "Row fixture",

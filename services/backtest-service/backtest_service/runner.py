@@ -19,6 +19,7 @@ from backtest_service.adapters.clock import BacktestClock
 from backtest_service.adapters.cost_model import BacktestCostModel
 from backtest_service.adapters.data_feed import BacktestDataFeed, ReadConnection
 from backtest_service.adapters.evidence_sink import BacktestEvidenceSink
+from backtest_service.adapters.money_management_registry import BacktestMoneyManagementRegistry
 from backtest_service.adapters.strategy_registry import BacktestStrategyRegistry
 from backtest_service.config import RunConfig
 from backtest_service.engine import Engine, RunResult
@@ -66,6 +67,7 @@ def _manager(signal_connection: ReadConnection) -> AdapterManager:
         BacktestStrategyRegistry(signal_connection),
         build_strategy_registry(),
         money_management_policies=registered_money_management(),
+        money_management_registrations=BacktestMoneyManagementRegistry(signal_connection).list(),
     )
 
 

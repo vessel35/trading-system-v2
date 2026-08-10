@@ -4,6 +4,7 @@ import sqlite3
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from copy import deepcopy
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from itertools import product
 from math import prod
@@ -18,6 +19,11 @@ from backtest_service.adapters.catalog_store import (
 )
 from backtest_service.config import RunConfig
 from core_lib import __version__ as core_lib_version
+from core_lib.money_management import (
+    MoneyManagementAvailability,
+    MoneyManagementBase,
+    reconcile_money_management_availability,
+)
 from core_lib.strategy import InProcessStrategyRegistry
 from fastapi import Body, Depends, FastAPI, Query, Request
 from fastapi.encoders import jsonable_encoder
@@ -25,7 +31,10 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import SkipValidation, ValidationError
-from trading_plugins import build_strategy_registry
+from trading_plugins import (
+    build_strategy_registry,
+    registered_money_management,
+)
 
 from web_api import __version__ as web_api_version
 from web_api.data_jobs import (
@@ -111,6 +120,7 @@ from web_api.models import (
     Trade,
     TradeFeature,
 )
+from web_api.money_management_registry import read_money_management_registrations
 from web_api.repository import (
     CatalogRepository,
     DeletedFilter,
@@ -139,6 +149,7 @@ class ApiError(Exception):
 @asynccontextmanager
 async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     application.state.strategy_registry = build_strategy_registry()
+    application.state.money_management_policies = registered_money_management()
     start_executor()
     try:
         yield
@@ -320,12 +331,43 @@ def market_repository(
     return MarketDataRepository(connection)
 
 
+@dataclass(frozen=True, slots=True)
+class _MoneyManagementContext:
+    policies: dict[str, type[MoneyManagementBase]]
+    registrations: list[dict[str, object]] | None
+    availability: tuple[MoneyManagementAvailability, ...]
+
+
+def money_management_context(
+    request: Request,
+    connection: Annotated[SignalConnection, Depends(signal_connection)],
+) -> _MoneyManagementContext:
+    policies = dict(
+        cast(
+            "dict[str, type[MoneyManagementBase]]",
+            request.app.state.money_management_policies,
+        )
+    )
+    registrations = read_money_management_registrations(connection)
+    return _MoneyManagementContext(
+        policies=policies,
+        registrations=registrations,
+        availability=reconcile_money_management_availability(registrations, policies),
+    )
+
+
 def strategy_repository(
     request: Request,
     connection: Annotated[SignalConnection, Depends(signal_connection)],
+    money_management: Annotated[_MoneyManagementContext, Depends(money_management_context)],
 ) -> StrategyRepository:
     registry = cast(InProcessStrategyRegistry, request.app.state.strategy_registry)
-    return StrategyRepository(connection, registry)
+    return StrategyRepository(
+        connection,
+        registry,
+        money_management_policies=money_management.policies,
+        money_management_registrations=money_management.registrations,
+    )
 
 
 def _validation_details(exc: ValidationError | RequestValidationError) -> list[dict[str, str]]:
@@ -339,10 +381,37 @@ def _validation_details(exc: ValidationError | RequestValidationError) -> list[d
     ]
 
 
-def _validated_run_config(value: object) -> RunConfig:
+def _validated_run_config(
+    value: object,
+    money_management_availability: tuple[MoneyManagementAvailability, ...] | None = None,
+) -> RunConfig:
     try:
         config = RunConfig.model_validate(value)
         validate_catalog_run_name(config.run_name)
+        availability = (
+            reconcile_money_management_availability(None, registered_money_management())
+            if money_management_availability is None
+            else money_management_availability
+        )
+        if config.money_management is not None:
+            mode = config.money_management.mode
+            finding = next((item for item in availability if item.mode == mode), None)
+            if finding is None or not finding.runnable:
+                reason = None if finding is None or finding.reason is None else finding.reason.value
+                raise ApiError(
+                    status_code=422,
+                    code="invalid_run_config",
+                    message="The run configuration is invalid.",
+                    details=[
+                        {
+                            "field": "money_management.mode",
+                            "message": (
+                                f"money-management mode {mode!r} is not runnable: {reason}"
+                            ),
+                            "type": "money_management_unavailable",
+                        }
+                    ],
+                )
         return config
     except ValidationError as exc:
         raise ApiError(
@@ -471,8 +540,11 @@ def _validate_sweep_boundaries(config: RunConfig, payload: SweepSubmission) -> N
         )
 
 
-def _prepare_sweep(payload: SweepSubmission) -> SweepPlan:
-    base = _validated_run_config(payload.config)
+def _prepare_sweep(
+    payload: SweepSubmission,
+    money_management_availability: tuple[MoneyManagementAvailability, ...] | None = None,
+) -> SweepPlan:
+    base = _validated_run_config(payload.config, money_management_availability)
     _validate_sweep_boundaries(base, payload)
     sweep_id = f"S-{uuid4().hex}"
     sweep_meta = {
@@ -483,7 +555,7 @@ def _prepare_sweep(payload: SweepSubmission) -> SweepPlan:
     base_payload["sweep"] = sweep_meta
 
     if payload.type != "grid":
-        config = _validated_run_config(base_payload)
+        config = _validated_run_config(base_payload, money_management_availability)
         return SweepPlan(
             sweep_id=sweep_id,
             type=payload.type,
@@ -509,7 +581,7 @@ def _prepare_sweep(payload: SweepSubmission) -> SweepPlan:
             **sweep_meta,
             "fold_label": f"grid-{index + 1}",
         }
-        configs.append(_validated_run_config(cell))
+        configs.append(_validated_run_config(cell, money_management_availability))
     return SweepPlan(
         sweep_id=sweep_id,
         type="grid",
@@ -561,8 +633,9 @@ def _epoch_ms(value: datetime | None) -> int | None:
 )
 def validate_run_config(
     payload: Annotated[SkipValidation[RunConfig], Body()],
+    money_management: Annotated[_MoneyManagementContext, Depends(money_management_context)],
 ) -> RunConfig:
-    return _validated_run_config(payload)
+    return _validated_run_config(payload, money_management.availability)
 
 
 @app.post(
@@ -571,8 +644,11 @@ def validate_run_config(
     status_code=202,
     responses={422: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
 )
-async def trigger_run(payload: RunSubmission) -> RunAccepted:
-    config = _validated_run_config(payload.config)
+async def trigger_run(
+    payload: RunSubmission,
+    money_management: Annotated[_MoneyManagementContext, Depends(money_management_context)],
+) -> RunAccepted:
+    config = _validated_run_config(payload.config, money_management.availability)
     prereg = payload.prereg.model_dump(exclude_none=True) if payload.prereg is not None else {}
     state = submit_job(config, prereg)
     base = f"/api/v1/jobs/{state.job_id}"
@@ -590,8 +666,11 @@ async def trigger_run(payload: RunSubmission) -> RunAccepted:
     status_code=202,
     responses={422: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
 )
-async def trigger_sweep(payload: SweepSubmission) -> RunAccepted:
-    plan = _prepare_sweep(payload)
+async def trigger_sweep(
+    payload: SweepSubmission,
+    money_management: Annotated[_MoneyManagementContext, Depends(money_management_context)],
+) -> RunAccepted:
+    plan = _prepare_sweep(payload, money_management.availability)
     prereg = payload.prereg.model_dump(exclude_none=True) if payload.prereg is not None else {}
     state = submit_sweep_job(plan, prereg)
     base = f"/api/v1/jobs/{state.job_id}"

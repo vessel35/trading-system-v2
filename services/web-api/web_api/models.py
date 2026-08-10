@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Literal, Self
 
 from backtest_service.config import RunConfig
+from core_lib.money_management import MoneyManagementReconciliationState
 from core_lib.strategy import StrategyReconciliationState
 from pydantic import (
     BaseModel,
@@ -33,6 +34,15 @@ UnrunnableReason = Literal[
     StrategyReconciliationState.DEPRECATED,
     StrategyReconciliationState.DECLARATION_MISMATCH,
     StrategyReconciliationState.DECLARATION_READ_FAILED,
+]
+
+MoneyManagementUnrunnableReason = Literal[
+    MoneyManagementReconciliationState.REGISTERED_ONLY,
+    MoneyManagementReconciliationState.DEPLOYED_ONLY,
+    MoneyManagementReconciliationState.IDENTITY_MISMATCH,
+    MoneyManagementReconciliationState.DECLARATION_MISMATCH,
+    MoneyManagementReconciliationState.DEPRECATED,
+    MoneyManagementReconciliationState.INACTIVE,
 ]
 
 
@@ -923,6 +933,18 @@ class StrategyProfileResponse(BaseModel):
     envelope_status: str
 
 
+class MoneyManagementAvailabilityResponse(BaseModel):
+    mode: str
+    runnable: bool
+    unrunnable_reason: MoneyManagementUnrunnableReason | None
+
+    @model_validator(mode="after")
+    def validate_response_invariant(self) -> Self:
+        if self.runnable != (self.unrunnable_reason is None):
+            raise ValueError("runnable must be true exactly when unrunnable_reason is null")
+        return self
+
+
 class StrategyOption(BaseModel):
     strategy_id: str
     display_name: str
@@ -937,6 +959,7 @@ class StrategyOption(BaseModel):
     # the set of modes is whatever is registered in the running process; naming
     # two of them here hid every deployed policy from the client.
     supported_money_management: list[str]
+    money_management_availability: list[MoneyManagementAvailabilityResponse]
     default_money_management: dict[str, object]
     is_active: bool
     is_deprecated: bool
