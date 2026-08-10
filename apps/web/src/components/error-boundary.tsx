@@ -6,7 +6,7 @@ import { Card, CardContent } from "./ui/card";
 
 interface ErrorBoundaryProps {
   children: ReactNode;
-  scope: "app" | "evidence";
+  scope: "app" | "evidence" | "equity-chart";
 }
 
 interface ErrorBoundaryState {
@@ -36,25 +36,40 @@ export class ErrorBoundary extends Component<
     const { error } = this.state;
     if (!error) return children;
 
+    const body = (
+      <div>
+        <AlertTriangle className="mx-auto h-8 w-8 text-amber-400" />
+        <p className="mt-3 font-medium">
+          {scope === "app"
+            ? "화면을 표시하는 중 문제가 발생했습니다."
+            : scope === "evidence"
+              ? "이 Evidence 탭을 표시하지 못했습니다."
+              : "이 자본곡선 차트를 표시하지 못했습니다."}
+        </p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {scope === "equity-chart"
+            ? "같은 탭의 다른 Evidence는 계속 표시됩니다."
+            : "다른 화면은 계속 사용할 수 있습니다. 다시 시도해도 반복되면 실행 Evidence를 확인하세요."}
+        </p>
+        <Button className="mt-4" variant="outline" onClick={this.reset}>
+          <RotateCcw className="mr-1.5 h-4 w-4" />
+          다시 시도
+        </Button>
+      </div>
+    );
+
+    if (scope === "equity-chart") {
+      return (
+        <div className="grid min-h-[310px] place-items-center p-8 text-center" role="alert">
+          {body}
+        </div>
+      );
+    }
+
     const content = (
       <Card>
         <CardContent className="grid min-h-64 place-items-center p-8 text-center">
-          <div>
-            <AlertTriangle className="mx-auto h-8 w-8 text-amber-400" />
-            <p className="mt-3 font-medium">
-              {scope === "app"
-                ? "화면을 표시하는 중 문제가 발생했습니다."
-                : "이 Evidence 탭을 표시하지 못했습니다."}
-            </p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              다른 화면은 계속 사용할 수 있습니다. 다시 시도해도 반복되면 실행 Evidence를
-              확인하세요.
-            </p>
-            <Button className="mt-4" variant="outline" onClick={this.reset}>
-              <RotateCcw className="mr-1.5 h-4 w-4" />
-              다시 시도
-            </Button>
-          </div>
+          {body}
         </CardContent>
       </Card>
     );

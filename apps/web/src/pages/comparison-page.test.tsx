@@ -1,13 +1,32 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import { http, HttpResponse } from "msw";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { RunComparisonItem } from "../api/client";
 import {
+  EquityOverlap,
+  fetchEquity,
   flattenSettings,
   IndicatorVersionWarning,
   indicatorVersionMismatches,
   resolvedSeries,
 } from "./comparison-page";
+import { server } from "../test/server";
+
+const chartHarness = vi.hoisted(() => ({
+  setData: vi.fn(),
+}));
+
+vi.mock("lightweight-charts", () => ({
+  ColorType: { Solid: "Solid" },
+  LineSeries: "LineSeries",
+  createChart: () => ({
+    addSeries: () => ({ setData: chartHarness.setData }),
+    applyOptions: vi.fn(),
+    remove: vi.fn(),
+    timeScale: () => ({ fitContent: vi.fn() }),
+  }),
+}));
 
 function comparisonItem(
   runName: string,
@@ -63,5 +82,68 @@ describe("실행 비교의 지표 계산 판", () => {
     expect(warning).toHaveTextContent("ema:period=9@1h");
     expect(warning).toHaveTextContent("기준 실행 (1.0.0)");
     expect(warning).toHaveTextContent("비교 실행 (2.0.0)");
+  });
+});
+
+describe("실행 비교의 자본곡선", () => {
+  beforeEach(() => {
+    chartHarness.setData.mockReset();
+  });
+
+  it("원본 자본 Evidence로 내려가도 같은 초에는 마지막 점만 남긴다", async () => {
+    server.use(
+      http.get("http://localhost/api/v1/runs/:runId/chart-summaries", () =>
+        HttpResponse.json({
+          data: [],
+          page: {
+            limit: 200,
+            after_seq: 0,
+            next_after_seq: null,
+            total: 0,
+            has_more: false,
+          },
+        }),
+      ),
+      http.get("http://localhost/api/v1/runs/:runId/equity", () =>
+        HttpResponse.json({
+          data: [
+            {
+              equity_seq: 1,
+              ts: "2025-07-03T15:00:00.000Z",
+              total_equity: "7994.92543575",
+            },
+            {
+              equity_seq: 2,
+              ts: "2025-07-03T15:00:00.001Z",
+              total_equity: "7992.65787561",
+            },
+          ],
+          page: {
+            limit: 200,
+            after_seq: 0,
+            next_after_seq: null,
+            total: 2,
+            has_more: false,
+          },
+        }),
+      ),
+    );
+
+    const points = await fetchEquity("fixture-comparison");
+
+    expect(points).toEqual([
+      {
+        time: Date.parse("2025-07-03T15:00:00Z") / 1_000,
+        value: 7_992.65787561,
+      },
+    ]);
+
+    render(
+      <EquityOverlap
+        runs={[comparisonItem("비교 실행", "1.0.0")]}
+        series={[points]}
+      />,
+    );
+    await waitFor(() => expect(chartHarness.setData).toHaveBeenCalledWith(points));
   });
 });

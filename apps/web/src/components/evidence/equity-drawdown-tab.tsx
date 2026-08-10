@@ -28,6 +28,7 @@ import {
 import type {
   ChartSummary,
   DrawdownEpisode,
+  EquityPoint,
   Execution,
 } from "../../api/client";
 import {
@@ -41,6 +42,11 @@ import {
   formatMetric,
   formatTimestamp,
 } from "../../lib/utils";
+import {
+  projectEquitySeries,
+  type EquityDatum,
+} from "../../lib/equity-series";
+import { ErrorBoundary } from "../error-boundary";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
@@ -57,8 +63,6 @@ import {
   EvidenceLoading,
   EvidenceTruncationNotice,
 } from "./evidence-state";
-
-export type EquityDatum = { time: UTCTimestamp; value: number };
 
 export interface EquityMarkerScale {
   first: number;
@@ -95,6 +99,26 @@ export function equityMarkerTime(
   const instant = Number(epochSeconds(value));
   const bucket = Math.max(0, Math.floor((instant - first) / bucketWidth));
   return (first + bucket * bucketWidth) as UTCTimestamp;
+}
+
+export type DrawdownDatum = { ts: string; value: number };
+
+export function drawdownSeriesFromEvidence(
+  chart: readonly ChartSummary[],
+  equity: readonly EquityPoint[],
+): DrawdownDatum[] {
+  const stored = chart
+    .filter(
+      (point): point is ChartSummary & { value: number } =>
+        point.series_name === "drawdown" && point.value !== null,
+    )
+    .map((point) => ({ ts: point.bucket_ts, value: point.value * 100 }));
+  return stored.length > 0
+    ? stored
+    : equity.map((point) => ({
+        ts: point.ts,
+        value: point.drawdown_pct * 100,
+      }));
 }
 
 function EquityChart({
@@ -277,35 +301,23 @@ export function EquityDrawdownTab({
     null,
   );
 
-  const equitySeries = useMemo(() => {
+  const projectedEquity = useMemo(() => {
     const stored = (chart.data ?? []).filter((point) => point.series_name === "equity");
     if (stored.length > 0) {
-      return stored.flatMap((point) =>
+      return projectEquitySeries(stored.flatMap((point) =>
         point.value === null
           ? []
-          : [{ time: epochSeconds(point.bucket_ts), value: point.value }],
-      );
+          : [{ timestamp: point.bucket_ts, value: point.value }],
+      ));
     }
-    return (equity.data ?? []).map((point) => ({
-      time: epochSeconds(point.ts),
+    return projectEquitySeries((equity.data ?? []).map((point) => ({
+      timestamp: point.ts,
       value: Number(point.total_equity),
-    }));
+    })));
   }, [chart.data, equity.data]);
+  const equitySeries = projectedEquity.points;
   const drawdownSeries = useMemo(
-    () => {
-      const stored = (chart.data ?? [])
-        .filter(
-          (point): point is ChartSummary & { value: number } =>
-            point.series_name === "drawdown" && point.value !== null,
-        )
-        .map((point) => ({ ts: point.bucket_ts, value: point.value! * 100 }));
-      return stored.length > 0
-        ? stored
-        : (equity.data ?? []).map((point) => ({
-            ts: point.ts,
-            value: point.drawdown_pct * 100,
-          }));
-    },
+    () => drawdownSeriesFromEvidence(chart.data ?? [], equity.data ?? []),
     [chart.data, equity.data],
   );
 
@@ -333,7 +345,11 @@ export function EquityDrawdownTab({
               자본곡선
             </CardTitle>
             <CardDescription>
-              CHART_SUMMARY 우선 · {equitySeries.length.toLocaleString()}개 저장 포인트
+              CHART_SUMMARY 우선 · {projectedEquity.sourcePointCount.toLocaleString()}개 저장
+              포인트 · {equitySeries.length.toLocaleString()}개 그림 포인트
+              {projectedEquity.foldedPointCount > 0 && (
+                <> · {projectedEquity.foldedPointCount.toLocaleString()}개 접힘</>
+              )}
             </CardDescription>
           </div>
           <div className="flex gap-2">
@@ -356,12 +372,14 @@ export function EquityDrawdownTab({
         </CardHeader>
         <CardContent>
           {equitySeries.length ? (
-            <EquityChart
-              data={equitySeries}
-              executions={executions.data ?? []}
-              markersVisible={markersVisible}
-              logarithmic={logarithmic}
-            />
+            <ErrorBoundary scope="equity-chart">
+              <EquityChart
+                data={equitySeries}
+                executions={executions.data ?? []}
+                markersVisible={markersVisible}
+                logarithmic={logarithmic}
+              />
+            </ErrorBoundary>
           ) : (
             <p className="py-24 text-center text-sm text-muted-foreground">
               자본곡선 포인트가 없습니다.

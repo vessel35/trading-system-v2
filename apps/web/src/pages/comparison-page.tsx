@@ -3,7 +3,6 @@ import {
   ColorType,
   createChart,
   LineSeries,
-  type UTCTimestamp,
 } from "lightweight-charts";
 import {
   AlertTriangle,
@@ -30,6 +29,10 @@ import { Skeleton } from "../components/ui/skeleton";
 import { useComparisonBasket } from "../contexts/comparison-basket";
 import { allPages } from "../hooks/use-evidence";
 import {
+  projectEquitySeries,
+  type EquityDatum,
+} from "../lib/equity-series";
+import {
   cn,
   formatDecimalString,
   formatMetric,
@@ -46,8 +49,6 @@ const SERIES_COLORS = [
   "#34d399",
   "#f97316",
 ];
-
-type EquityDatum = { time: UTCTimestamp; value: number };
 
 type MetricDefinition = {
   key: keyof NonNullable<RunComparisonItem["summary"]>;
@@ -206,7 +207,7 @@ export function IndicatorVersionWarning({
   );
 }
 
-async function fetchEquity(runId: string): Promise<EquityDatum[]> {
+export async function fetchEquity(runId: string): Promise<EquityDatum[]> {
   const chart = await allPages<ChartSummary>(async (after_seq) => {
     const { data, error } = await apiClient.GET(
       "/api/v1/runs/{run_id}/chart-summaries",
@@ -222,16 +223,11 @@ async function fetchEquity(runId: string): Promise<EquityDatum[]> {
     return data;
   });
   if (chart.rows.some((point) => point.value !== null)) {
-    return chart.rows.flatMap((point) =>
+    return projectEquitySeries(chart.rows.flatMap((point) =>
       point.value === null
         ? []
-        : [
-            {
-              time: Math.floor(new Date(point.bucket_ts).getTime() / 1000) as UTCTimestamp,
-              value: point.value,
-            },
-          ],
-    );
+        : [{ timestamp: point.bucket_ts, value: point.value }],
+    )).points;
   }
   const equity = await allPages<EquityPoint>(async (after_seq) => {
     const { data, error } = await apiClient.GET("/api/v1/runs/{run_id}/equity", {
@@ -241,13 +237,13 @@ async function fetchEquity(runId: string): Promise<EquityDatum[]> {
     if (!data) throw new Error("자본 Evidence 응답이 비어 있습니다.");
     return data;
   });
-  return equity.rows.map((point) => ({
-    time: Math.floor(new Date(point.ts).getTime() / 1000) as UTCTimestamp,
+  return projectEquitySeries(equity.rows.map((point) => ({
+    timestamp: point.ts,
     value: Number(point.total_equity),
-  }));
+  }))).points;
 }
 
-function EquityOverlap({
+export function EquityOverlap({
   runs,
   series,
 }: {
