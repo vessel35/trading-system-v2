@@ -35,8 +35,8 @@ changes without any platform change, so ask the code:
 .venv/bin/python -m trading_plugins.facts series
 .venv/bin/python -m trading_plugins.facts deployed strategy
 .venv/bin/python -m trading_plugins.facts deployed money_management
-.venv/bin/python -m trading_plugins.facts declaration strategy vessel-reference
-.venv/bin/python -m trading_plugins.facts declaration money_management manual
+.venv/bin/python -m trading_plugins.facts declaration strategy <deployed-strategy-identifier>
+.venv/bin/python -m trading_plugins.facts declaration money_management <deployed-money-management-identifier>
 ```
 
 Use the identifier returned by the matching `deployed` lookup when reading a declaration.

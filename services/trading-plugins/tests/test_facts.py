@@ -320,6 +320,19 @@ def test_command_line_failure_is_one_json_error_on_stdout() -> None:
 def test_author_strategy_fact_commands_are_accepted() -> None:
     repository_root = Path(__file__).resolve().parents[3]
     skill = repository_root / ".claude/skills/author-strategy/SKILL.md"
+    strategies = cast(
+        "list[dict[str, facts.JSONValue]]",
+        facts.deployed("strategy")["items"],
+    )
+    policies = cast(
+        "list[dict[str, facts.JSONValue]]",
+        facts.deployed("money_management")["items"],
+    )
+    assert strategies and policies
+    placeholders = {
+        "<deployed-strategy-identifier>": cast(str, strategies[0]["identifier"]),
+        "<deployed-money-management-identifier>": cast(str, policies[0]["identifier"]),
+    }
     commands = re.findall(
         r"^\.venv/bin/python -m trading_plugins\.facts .+$",
         skill.read_text(),
@@ -328,6 +341,8 @@ def test_author_strategy_fact_commands_are_accepted() -> None:
 
     assert commands
     for command in commands:
+        for placeholder, identifier in placeholders.items():
+            command = command.replace(placeholder, identifier)
         arguments = shlex.split(command)
         completed = subprocess.run(
             [sys.executable, *arguments[1:]],
