@@ -24,6 +24,7 @@ from core_lib.money_management import (
     RiskLimits,
 )
 from core_lib.patterns import TALIB_PATTERN_REGISTRY
+from core_lib.strategy import FieldSpec, ParameterSchema, StrategyMetadata
 from core_lib.types import DecisionIntent
 from trading_plugins import facts
 from trading_plugins.discovery import (
@@ -32,6 +33,7 @@ from trading_plugins.discovery import (
     discover_strategies,
     registered_money_management,
 )
+from trading_plugins.strategies.vessel_reference import VesselReference
 
 _PATTERN_DEFINITION_CHECK = (
     "Check this pattern definition against docs/references/candlestick_pattern_calc_spec.md."
@@ -114,6 +116,149 @@ class _RequiredSettingPolicy(MoneyManagementBase):
         global_limits: RiskLimits,
     ) -> MoneyManagementPlan:
         raise AssertionError("fact lookup must not plan an entry")
+
+
+class _GeneratedStrategy(VesselReference):
+    __module__ = "trading_plugins.strategies.generated_test"
+
+    STRATEGY_ID = "generated-test"
+    VERSION = "7.8.9"
+    history: ClassVar[int] = 3
+    reverse_series: ClassVar[bool] = False
+    timeframes: ClassVar[tuple[str, ...]] = ("5m", "1h", "4h")
+
+    @classmethod
+    def get_metadata(cls) -> StrategyMetadata:
+        metadata = VesselReference.get_metadata()
+        metadata.min_history = cls.history
+        metadata.supported_timeframes = list(cls.timeframes)
+        if cls.reverse_series:
+            metadata.required_indicators.reverse()
+        return metadata
+
+
+class _DefaultedStrategy(_GeneratedStrategy):
+    __module__ = "trading_plugins.strategies.defaulted_test"
+
+    STRATEGY_ID = "defaulted-test"
+    VERSION = "7.8.9"
+
+    @classmethod
+    def get_parameter_schema(cls) -> ParameterSchema:
+        return ParameterSchema(fields={"threshold": FieldSpec(type="number", default=0.75)})
+
+
+@dataclass(frozen=True, slots=True)
+class _NoSettingsPolicy(MoneyManagementBase):
+    id: ClassVar[str] = "no-settings-test"
+    version: ClassVar[str] = "1.0.0"
+
+    def required_indicators(self) -> tuple[PolicyIndicatorRequirement, ...]:
+        return ()
+
+    def resolved_config(self) -> Mapping[str, object]:
+        return {"mode": self.id}
+
+    def plan_entry(
+        self,
+        decision: DecisionIntent,
+        market: MarketSnapshot,
+        account: AccountRiskSnapshot,
+        global_limits: RiskLimits,
+    ) -> MoneyManagementPlan:
+        raise AssertionError("registration generation must not plan an entry")
+
+
+_NoSettingsPolicy.__module__ = "trading_plugins.money_management.no_settings_test"
+
+
+@dataclass(frozen=True, slots=True)
+class _ParsedRegistration:
+    table: str
+    row: dict[str, object]
+    update_columns: tuple[str, ...]
+    guard_current: tuple[str, ...]
+    guard_excluded: tuple[str, ...]
+
+
+def _split_sql_items(value: str) -> list[str]:
+    items: list[str] = []
+    start = 0
+    depth = 0
+    quoted = False
+    index = 0
+    while index < len(value):
+        character = value[index]
+        if quoted:
+            if character == "'":
+                if index + 1 < len(value) and value[index + 1] == "'":
+                    index += 1
+                else:
+                    quoted = False
+        elif character == "'":
+            quoted = True
+        elif character in "([":
+            depth += 1
+        elif character in ")]":
+            depth -= 1
+        elif character == "," and depth == 0:
+            items.append(value[start:index].strip())
+            start = index + 1
+        index += 1
+    items.append(value[start:].strip())
+    return items
+
+
+def _parse_sql_string(value: str) -> str:
+    assert value.startswith("'") and value.endswith("'")
+    return value[1:-1].replace("''", "'")
+
+
+def _parse_sql_value(value: str) -> object:
+    if value.endswith("::jsonb"):
+        return json.loads(_parse_sql_string(value[: -len("::jsonb")]))
+    if value.startswith("ARRAY[") and value.endswith("]::text[]"):
+        inner = value[len("ARRAY[") : -len("]::text[]")]
+        return [] if not inner else [_parse_sql_string(item) for item in _split_sql_items(inner)]
+    if value.startswith("'"):
+        return _parse_sql_string(value)
+    if value in {"true", "false"}:
+        return value == "true"
+    return int(value)
+
+
+def _parse_registration(statement: str) -> _ParsedRegistration:
+    insert = re.search(
+        r"INSERT INTO (?P<table>\S+) \((?P<columns>.*?)\)\s*"
+        r"VALUES \((?P<values>.*?)\)\s*ON CONFLICT",
+        statement,
+        flags=re.DOTALL,
+    )
+    updates = re.search(r"DO UPDATE\s+SET\s+(?P<set>.*?)\s+WHERE \(", statement, re.DOTALL)
+    guard = re.search(
+        r"WHERE \((?P<current>.*?)\) IS DISTINCT FROM \((?P<excluded>.*?)\);",
+        statement,
+        flags=re.DOTALL,
+    )
+    assert insert is not None and updates is not None and guard is not None
+    columns = [item.strip() for item in _split_sql_items(insert.group("columns"))]
+    values = [_parse_sql_value(item) for item in _split_sql_items(insert.group("values"))]
+    update_columns = tuple(
+        assignment.split("=", 1)[0].strip() for assignment in _split_sql_items(updates.group("set"))
+    )
+    current = tuple(
+        item.strip().rsplit(".", 1)[-1] for item in _split_sql_items(guard.group("current"))
+    )
+    excluded = tuple(
+        item.strip().removeprefix("excluded.") for item in _split_sql_items(guard.group("excluded"))
+    )
+    return _ParsedRegistration(
+        table=insert.group("table"),
+        row=dict(zip(columns, values, strict=True)),
+        update_columns=update_columns,
+        guard_current=current,
+        guard_excluded=excluded,
+    )
 
 
 def test_capabilities_match_the_source_entry_for_entry() -> None:
@@ -301,6 +446,329 @@ def test_unknown_strategy_is_rejected() -> None:
 def test_unknown_kind_is_rejected() -> None:
     with pytest.raises(facts.FactsError, match="unknown plugin kind"):
         facts.deployed("not-a-kind")
+
+
+def test_vessel_registration_matches_the_committed_declaration_and_display_columns() -> None:
+    repository_root = Path(__file__).resolve().parents[3]
+    committed = _parse_registration(
+        (
+            repository_root
+            / "init-scripts/signal-service/20260724/02-register-vessel-reference.sql"
+        ).read_text()
+    )
+    generated = _parse_registration(
+        facts.registration_sql(
+            "strategy",
+            "vessel-reference",
+            "Vessel Reference",
+            "EMA decision-only Vessel Adaptee with injected money-management policies.",
+            True,
+            {},
+        )
+    )
+    compared_columns = {
+        "strategy_id",
+        "class_name",
+        "module_path",
+        "display_name",
+        "description",
+        "strategy_version",
+        "supported_timeframes",
+        "required_indicators_json",
+        "min_history",
+        "default_params_json",
+    }
+
+    assert {name: generated.row[name] for name in compared_columns} == {
+        name: committed.row[name] for name in compared_columns
+    }
+
+
+def test_registration_update_and_guard_exclude_lifecycle_and_match_exactly() -> None:
+    generated = _parse_registration(
+        facts.registration_sql(
+            "strategy",
+            "vessel-reference",
+            "Vessel Reference",
+            "description",
+            True,
+        )
+    )
+
+    assert generated.update_columns == generated.guard_current
+    assert generated.update_columns == generated.guard_excluded
+    assert "is_active" not in generated.update_columns
+    assert "is_deprecated" not in generated.update_columns
+
+    existing = dict(generated.row)
+    existing["is_active"] = False
+    existing["is_deprecated"] = True
+    for column in generated.update_columns:
+        existing[column] = generated.row[column]
+
+    assert existing["is_active"] is False
+    assert existing["is_deprecated"] is True
+
+
+def test_registration_quotes_non_ascii_module_paths_and_json_survive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        facts,
+        "discover_strategies",
+        lambda: ({_GeneratedStrategy.STRATEGY_ID: _GeneratedStrategy}, ()),
+    )
+    monkeypatch.setattr(
+        _GeneratedStrategy,
+        "__module__",
+        "trading_plugins.strategies.o'brien",
+    )
+    generated = _parse_registration(
+        facts.registration_sql(
+            "strategy",
+            _GeneratedStrategy.STRATEGY_ID,
+            "O'Brien 전략",
+            "인용 '문장'도 보존한다.",
+            True,
+            {"operator_note": "d'Artagnan"},
+        )
+    )
+
+    assert generated.row["module_path"] == "trading_plugins.strategies.o'brien"
+    assert generated.row["display_name"] == "O'Brien 전략"
+    assert generated.row["description"] == "인용 '문장'도 보존한다."
+    assert generated.row["default_params_json"] == {"operator_note": "d'Artagnan"}
+
+
+def test_strategy_and_policy_declaration_shapes_generate_canonical_statements(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        facts,
+        "discover_strategies",
+        lambda: ({_GeneratedStrategy.STRATEGY_ID: _GeneratedStrategy}, ()),
+    )
+    strategy = _parse_registration(
+        facts.registration_sql(
+            "strategy",
+            _GeneratedStrategy.STRATEGY_ID,
+            "Generated",
+            "Several timeframes and an empty strategy parameter schema.",
+            False,
+        )
+    )
+    policy = _parse_registration(
+        facts.registration_sql(
+            "money_management",
+            "manual",
+            "Manual",
+            "Several policy settings.",
+            True,
+        )
+    )
+    monkeypatch.setattr(
+        facts,
+        "discover_money_management",
+        lambda: ({_NoSettingsPolicy.id: _NoSettingsPolicy}, ()),
+    )
+    empty_policy_sql = facts.registration_sql(
+        "money_management",
+        _NoSettingsPolicy.id,
+        "No settings",
+        "No setting names.",
+        True,
+    )
+
+    assert strategy.row["supported_timeframes"] == ["5m", "1h", "4h"]
+    assert strategy.row["default_params_json"] == {}
+    assert policy.row["settings_names"] == [
+        "atr_stop_multiple",
+        "leverage",
+        "reward_risk",
+    ]
+    assert "ARRAY[]::text[]" in empty_policy_sql
+
+
+def test_strategy_schema_defaults_never_become_operator_default_params(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        facts,
+        "discover_strategies",
+        lambda: ({_DefaultedStrategy.STRATEGY_ID: _DefaultedStrategy}, ()),
+    )
+    absent = _parse_registration(
+        facts.registration_sql(
+            "strategy",
+            _DefaultedStrategy.STRATEGY_ID,
+            "Defaulted",
+            "The operator column is independent.",
+            True,
+        )
+    )
+    supplied = _parse_registration(
+        facts.registration_sql(
+            "strategy",
+            _DefaultedStrategy.STRATEGY_ID,
+            "Defaulted",
+            "The operator column is independent.",
+            True,
+            {"threshold": 0.5},
+        )
+    )
+
+    assert absent.row["default_params_json"] == {}
+    assert supplied.row["default_params_json"] == {"threshold": 0.5}
+
+
+def test_registration_guard_is_stable_and_changes_for_a_declared_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        facts,
+        "discover_strategies",
+        lambda: ({_GeneratedStrategy.STRATEGY_ID: _GeneratedStrategy}, ()),
+    )
+    first_sql = facts.registration_sql(
+        "strategy",
+        _GeneratedStrategy.STRATEGY_ID,
+        "Generated",
+        "Stable declaration.",
+        True,
+    )
+    first = _parse_registration(first_sql)
+    unchanged_row = dict(first.row)
+    assert not any(unchanged_row[column] != first.row[column] for column in first.update_columns)
+
+    monkeypatch.setattr(_GeneratedStrategy, "reverse_series", True)
+    reordered_sql = facts.registration_sql(
+        "strategy",
+        _GeneratedStrategy.STRATEGY_ID,
+        "Generated",
+        "Stable declaration.",
+        True,
+    )
+    assert reordered_sql == first_sql
+
+    first_history = first.row["min_history"]
+    assert isinstance(first_history, int)
+    monkeypatch.setattr(_GeneratedStrategy, "history", first_history + 1)
+    changed = _parse_registration(
+        facts.registration_sql(
+            "strategy",
+            _GeneratedStrategy.STRATEGY_ID,
+            "Generated",
+            "Stable declaration.",
+            True,
+        )
+    )
+    assert any(first.row[column] != changed.row[column] for column in first.update_columns)
+
+
+def test_registration_rejects_non_finite_json_and_an_outside_module_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with pytest.raises(facts.FactsError, match="non-finite"):
+        facts.registration_sql(
+            "strategy",
+            "vessel-reference",
+            "Vessel",
+            "description",
+            True,
+            {"not_finite": float("nan")},
+        )
+
+    monkeypatch.setattr(
+        facts,
+        "discover_strategies",
+        lambda: ({_GeneratedStrategy.STRATEGY_ID: _GeneratedStrategy}, ()),
+    )
+    monkeypatch.setattr(_GeneratedStrategy, "__module__", "outside_plugins.generated")
+    with pytest.raises(facts.FactsError, match="module_path must be inside"):
+        facts.registration_sql(
+            "strategy",
+            _GeneratedStrategy.STRATEGY_ID,
+            "Generated",
+            "description",
+            True,
+        )
+
+
+def test_catalog_precheck_passes_matching_rows_and_names_runtime_mismatches() -> None:
+    strategy_row = _parse_registration(
+        facts.registration_sql(
+            "strategy",
+            "vessel-reference",
+            "Vessel",
+            "description",
+            True,
+        )
+    ).row
+    strategy_pass = facts.catalog_precheck("strategy", "vessel-reference", strategy_row)
+    mismatched_strategy_row = dict(strategy_row)
+    mismatched_strategy_row["min_history"] = cast(int, strategy_row["min_history"]) + 1
+    strategy_failure = facts.catalog_precheck(
+        "strategy", "vessel-reference", mismatched_strategy_row
+    )
+
+    policy_row = _parse_registration(
+        facts.registration_sql(
+            "money_management",
+            "manual",
+            "Manual",
+            "description",
+            True,
+        )
+    ).row
+    policy_pass = facts.catalog_precheck("money_management", "manual", policy_row)
+    mismatched_policy_row = dict(policy_row)
+    mismatched_policy_row["settings_names"] = []
+    policy_failure = facts.catalog_precheck("money_management", "manual", mismatched_policy_row)
+
+    assert strategy_pass["passed"] is True
+    assert policy_pass["passed"] is True
+    assert strategy_failure["passed"] is False
+    assert policy_failure["passed"] is False
+    strategy_findings = cast("list[dict[str, facts.JSONValue]]", strategy_failure["findings"])
+    policy_findings = cast("list[dict[str, facts.JSONValue]]", policy_failure["findings"])
+    assert [finding["state"] for finding in strategy_findings] == ["declaration_mismatch"]
+    assert [finding["reason"] for finding in policy_findings] == ["declaration_mismatch"]
+    expected_not_checked = [
+        "execution timeframe support",
+        "series resolution",
+        "policy input arity",
+        "live-signal capability",
+        "return-type violation on the first decision",
+    ]
+    for result in (strategy_pass, strategy_failure, policy_pass, policy_failure):
+        assert result["not_checked"] == expected_not_checked
+
+
+def test_registration_tools_are_reachable_from_the_facts_command_line() -> None:
+    repository_root = Path(__file__).resolve().parents[3]
+    commands = (
+        (
+            "registration_sql",
+            "strategy",
+            "vessel-reference",
+            "Vessel",
+            "설명",
+            "true",
+            '{"operator": "value"}',
+        ),
+        ("catalog_precheck", "strategy", "vessel-reference"),
+    )
+
+    for command in commands:
+        completed = subprocess.run(
+            [sys.executable, "-m", "trading_plugins.facts", *command],
+            cwd=repository_root,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert completed.returncode == 0, completed.stdout
+        assert json.loads(completed.stdout)
 
 
 def test_command_line_failure_is_one_json_error_on_stdout() -> None:
