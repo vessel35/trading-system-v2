@@ -12,7 +12,11 @@ from typing import Any, Final, Literal, cast
 
 from core_lib.capabilities import PLATFORM_CAPABILITIES, Capability
 from core_lib.indicators.registry import build_default_registry
-from core_lib.money_management import MoneyManagementBase, policy_settings
+from core_lib.money_management import (
+    MoneyManagementBase,
+    PolicyIndicatorRequirement,
+    policy_settings,
+)
 from core_lib.patterns import TALIB_PATTERN_REGISTRY
 from core_lib.strategy import StrategyConfig
 
@@ -153,9 +157,17 @@ def deployed(kind: str) -> JSONObject:
 
 
 def _strategy_declaration(identifier: str) -> JSONObject:
-    found, _ = discover_strategies()
+    found, faults = discover_strategies()
     strategy_class = found.get(identifier)
     if strategy_class is None:
+        if faults:
+            return {
+                "kind": "strategy",
+                "identifier": identifier,
+                "discovery_faults": [
+                    {"module": fault.module, "reason": fault.reason} for fault in faults
+                ],
+            }
         raise FactsError(f"unknown strategy: {identifier}")
     try:
         metadata = strategy_class.get_metadata()
@@ -192,12 +204,13 @@ def _strategy_declaration(identifier: str) -> JSONObject:
     }
 
 
-def _policy_defaults(
-    identifier: str,
+def _policy_settings(
     policy_class: type[MoneyManagementBase],
-) -> JSONObject:
+) -> tuple[JSONObject, dict[str, object] | None]:
     setting_names = policy_settings(policy_class)
-    defaults: JSONObject = {}
+    settings: JSONObject = {}
+    constructor_values: dict[str, object] = {}
+    every_setting_has_default = True
     for declared in fields(cast(Any, policy_class)):
         if declared.name not in setting_names:
             continue
@@ -206,11 +219,24 @@ def _policy_defaults(
         elif declared.default_factory is not MISSING:
             value = declared.default_factory()
         else:
-            raise FactsError(
-                f"money-management setting has no default: {identifier}.{declared.name}"
-            )
-        defaults[declared.name] = _plain(value)
-    return defaults
+            settings[declared.name] = {"has_default": False}
+            every_setting_has_default = False
+            continue
+        settings[declared.name] = {
+            "has_default": True,
+            "default": _plain(value),
+        }
+        constructor_values[declared.name] = value
+    return settings, constructor_values if every_setting_has_default else None
+
+
+def _policy_requirement(requirement: PolicyIndicatorRequirement) -> JSONObject:
+    return {
+        "name": requirement.name,
+        "params": _object(requirement.params),
+        "timeframe": requirement.timeframe,
+        "min_history": requirement.min_history,
+    }
 
 
 def _policy_declaration(identifier: str) -> JSONObject:
@@ -219,18 +245,31 @@ def _policy_declaration(identifier: str) -> JSONObject:
     if policy_class is None:
         raise FactsError(f"unknown money-management policy: {identifier}")
     try:
-        defaults = _policy_defaults(identifier, policy_class)
-        policy = policy_class(**defaults)
-        requirements = policy.required_indicators()
-    except FactsError:
-        raise
+        settings, constructor_values = _policy_settings(policy_class)
     except (Exception, SystemExit) as error:
         raise FactsError(f"could not read money-management declaration: {identifier}") from error
-    if len(requirements) != 1:
-        raise FactsError(
-            f"money-management policy must declare one indicator requirement: {identifier}"
-        )
-    requirement = requirements[0]
+
+    requirements: list[JSONObject] = []
+    requirements_unavailable_reason: str | None = None
+    if constructor_values is None:
+        requirements_unavailable_reason = "policy has settings without defaults"
+    else:
+        try:
+            policy = policy_class(**constructor_values)
+        except (Exception, SystemExit):
+            requirements_unavailable_reason = "policy could not be constructed from defaults"
+        else:
+            try:
+                requirements = [
+                    _policy_requirement(requirement) for requirement in policy.required_indicators()
+                ]
+            except FactsError:
+                raise
+            except (Exception, SystemExit) as error:
+                raise FactsError(
+                    f"could not read money-management declaration: {identifier}"
+                ) from error
+
     version = getattr(policy_class, "version", None)
     if not isinstance(version, str):
         raise FactsError(f"money-management version is not a string: {identifier}")
@@ -239,18 +278,14 @@ def _policy_declaration(identifier: str) -> JSONObject:
         "identifier": identifier,
         "class_name": policy_class.__name__,
         "module_path": policy_class.__module__,
-        "settings": defaults,
+        "settings": settings,
         "version": version,
         "requires_signal_exit": policy_class.requires_signal_exit,
         "protection_and_leverage_ignore_account_state": (
             policy_class.protection_and_leverage_ignore_account_state
         ),
-        "indicator_requirement": {
-            "name": requirement.name,
-            "params": _object(requirement.params),
-            "timeframe": requirement.timeframe,
-            "min_history": requirement.min_history,
-        },
+        "indicator_requirements": cast(JSONValue, requirements),
+        "indicator_requirements_unavailable_reason": requirements_unavailable_reason,
     }
 
 
