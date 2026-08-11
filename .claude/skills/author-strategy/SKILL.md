@@ -16,23 +16,31 @@ one that was asked, and nothing in the result says so.
 
 1. `docs/strategy-authoring-contract.md`, completely. It owns the rules a strategy must
    follow and it is the only document that overrides this one.
-2. `services/core-lib/core_lib/capabilities.py`. It records what the platform can express.
-   Read the statements, not just the values.
+2. The recorded platform capability list. Query it with the command below, and read the
+   statements, not just the values.
 3. The `develop-trading-strategies` skill, for the ownership boundary between a strategy, a
    money-management policy, and execution.
 
-**Query inventory; do not read it out of a list.** What is registered right now changes
-without any platform change, so ask the code:
+These commands are the interface this procedure relies on. They call the facts module
+directly, and no long-running server is required.
 
-```python
-from core_lib.indicators.registry import build_default_registry
-from core_lib.patterns import TALIB_PATTERN_REGISTRY
-from trading_plugins.discovery import registered_money_management
-
-{(spec.name, dict(spec.params)) for spec in build_default_registry().list()}
-{spec.name for spec in TALIB_PATTERN_REGISTRY.list()}
-set(registered_money_management())
+```console
+.venv/bin/python -m trading_plugins.facts capabilities
 ```
+
+**Query inventory; do not read it out of a list.** What is registered or deployed right now
+changes without any platform change, so ask the code:
+
+```console
+.venv/bin/python -m trading_plugins.facts series
+.venv/bin/python -m trading_plugins.facts deployed strategy
+.venv/bin/python -m trading_plugins.facts deployed money_management
+.venv/bin/python -m trading_plugins.facts declaration strategy vessel-reference
+.venv/bin/python -m trading_plugins.facts declaration money_management manual
+```
+
+Use the identifier returned by the matching `deployed` lookup when reading a declaration.
+The final two commands use identifiers from the current deployed inventory.
 
 **Do not infer a capability by reading runtime code.** `core_lib/sizing/exposure_limit.py`
 offers `single_market`, `correlation_group`, and `single_direction`, which read like
@@ -62,10 +70,13 @@ just the first.
 | Missing material | A needed indicator/parameter combination or pattern is not registered, or is registered under a name whose definition differs. | Report what has to be built first. This is platform work, not strategy work. |
 | Missing capability | The document needs something `capabilities.py` records as unsupported. | Report it. Do not route around it. |
 
-**A name in the registry is not a definition.** Indicators pin the standard section they were
-ported from and every pattern is a port of TA-Lib 0.7.1, whose rules are stricter and
-different from the informal ones documents usually give. `pat_hammer` is not "lower wick at
-least twice the body"; it is TA-Lib's `CDLHAMMER`. Check the definition against
+**A name in the registry is not a definition.** Read a deployed plugin's `declaration` to find
+the registry names it declares, then query each name with `series <name>`. The series lookup
+carries the pinned adoption record for an indicator. For a pattern, it says that the
+candlestick calculation standard still has to be read. Indicators pin the standard section
+they were ported from and every pattern is a port of TA-Lib 0.7.1, whose rules are stricter
+and different from the informal ones documents usually give. `pat_hammer` is not "lower wick
+at least twice the body"; it is TA-Lib's `CDLHAMMER`. Check the definition against
 `docs/references/technical_indicators_calc_spec.md` and
 `docs/references/candlestick_pattern_calc_spec.md` before treating a name as a match.
 

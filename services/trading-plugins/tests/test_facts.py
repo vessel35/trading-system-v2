@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 import subprocess
 import sys
 from collections.abc import Mapping
@@ -314,3 +315,26 @@ def test_command_line_failure_is_one_json_error_on_stdout() -> None:
     assert completed.returncode != 0
     assert completed.stderr == ""
     assert json.loads(completed.stdout) == {"error": "unknown capability: unknown"}
+
+
+def test_author_strategy_fact_commands_are_accepted() -> None:
+    repository_root = Path(__file__).resolve().parents[3]
+    skill = repository_root / ".claude/skills/author-strategy/SKILL.md"
+    commands = re.findall(
+        r"^\.venv/bin/python -m trading_plugins\.facts .+$",
+        skill.read_text(),
+        flags=re.MULTILINE,
+    )
+
+    assert commands
+    for command in commands:
+        arguments = shlex.split(command)
+        completed = subprocess.run(
+            [sys.executable, *arguments[1:]],
+            cwd=repository_root,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert completed.returncode == 0, (command, completed.stdout, completed.stderr)
