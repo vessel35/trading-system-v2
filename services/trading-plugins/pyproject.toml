@@ -34,7 +34,13 @@ addopts = [
     "--import-mode=importlib",
     "--strict-config",
     "--strict-markers",
+    "-m",
+    "not integration",
 ]
+markers = [
+    "integration: uses the local development PostgreSQL instance",
+]
+testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100
