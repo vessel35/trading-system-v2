@@ -1943,7 +1943,7 @@ export interface components {
             /** Profile Ref */
             profile_ref: string;
             /** Money Management */
-            money_management?: components["schemas"]["ManualMoneyManagementConfig"] | components["schemas"]["TurtleMoneyManagementConfig"];
+            money_management?: components["schemas"]["ManualMoneyManagementConfig"] | components["schemas"]["TurtleMoneyManagementConfig"] | components["schemas"]["SignalExitAtrMoneyManagementConfig"];
             /** Sweep */
             sweep?: {
                 [key: string]: unknown;
@@ -2260,7 +2260,7 @@ export interface components {
                 /** Profile Ref */
                 profile_ref: string;
                 /** Money Management */
-                money_management?: components["schemas"]["ManualMoneyManagementConfig"] | components["schemas"]["TurtleMoneyManagementConfig"];
+                money_management?: components["schemas"]["ManualMoneyManagementConfig"] | components["schemas"]["TurtleMoneyManagementConfig"] | components["schemas"]["SignalExitAtrMoneyManagementConfig"];
                 /** Sweep */
                 sweep?: {
                     [key: string]: unknown;
@@ -2453,6 +2453,29 @@ export interface components {
             derived_side: string | null;
             /** Is Warmup */
             is_warmup: boolean;
+        };
+        /** SignalExitAtrMoneyManagementConfig */
+        SignalExitAtrMoneyManagementConfig: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            mode: "signal_exit_atr";
+            /**
+             * Atr Period
+             * @default 14
+             */
+            atr_period: number;
+            /**
+             * Atr Stop Multiple
+             * @default 2.5
+             */
+            atr_stop_multiple: number;
+            /**
+             * Leverage Cap
+             * @default 5
+             */
+            leverage_cap: number;
         };
         /** StrategyListResponse */
         StrategyListResponse: {
@@ -2659,7 +2682,7 @@ export interface components {
                 /** Profile Ref */
                 profile_ref: string;
                 /** Money Management */
-                money_management?: components["schemas"]["ManualMoneyManagementConfig"] | components["schemas"]["TurtleMoneyManagementConfig"];
+                money_management?: components["schemas"]["ManualMoneyManagementConfig"] | components["schemas"]["TurtleMoneyManagementConfig"] | components["schemas"]["SignalExitAtrMoneyManagementConfig"];
                 /** Sweep */
                 sweep?: {
                     [key: string]: unknown;
@@ -2983,7 +3006,7 @@ export interface operations {
                     /** Profile Ref */
                     profile_ref: string;
                     /** Money Management */
-                    money_management?: components["schemas"]["ManualMoneyManagementConfig"] | components["schemas"]["TurtleMoneyManagementConfig"];
+                    money_management?: components["schemas"]["ManualMoneyManagementConfig"] | components["schemas"]["TurtleMoneyManagementConfig"] | components["schemas"]["SignalExitAtrMoneyManagementConfig"];
                     /** Sweep */
                     sweep?: {
                         [key: string]: unknown;

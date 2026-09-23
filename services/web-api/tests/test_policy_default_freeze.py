@@ -392,7 +392,7 @@ class _MissingTableConnection:
 
 @pytest.mark.parametrize(
     ("target", "expected"),
-    [("backtest", {"create": 0, "resolved": 0}), ("web", {"create": 2, "resolved": 2})],
+    [("backtest", {"create": 0, "resolved": 0}), ("web", {"create": 3, "resolved": 3})],
 )
 def test_only_the_web_api_cold_import_builds_form_defaults(
     target: str,
@@ -404,6 +404,7 @@ import sys
 
 from core_lib.money_management import MoneyManagementFactory
 from trading_plugins.money_management.manual import ManualMoneyManagement
+from trading_plugins.money_management.signal_exit_atr import SignalExitAtrMoneyManagement
 from trading_plugins.money_management.turtle import TurtleMoneyManagement
 
 counts = {"create": 0, "resolved": 0}
@@ -414,7 +415,11 @@ def counted_create(*args, **kwargs):
     return real_create(*args, **kwargs)
 
 MoneyManagementFactory.create = staticmethod(counted_create)
-for policy_class in (ManualMoneyManagement, TurtleMoneyManagement):
+for policy_class in (
+    ManualMoneyManagement,
+    SignalExitAtrMoneyManagement,
+    TurtleMoneyManagement,
+):
     original = policy_class.resolved_config
     def counted_resolved(self, original=original):
         counts["resolved"] += 1
