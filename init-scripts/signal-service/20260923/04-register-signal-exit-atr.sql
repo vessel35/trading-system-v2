@@ -14,7 +14,7 @@ INSERT INTO public.money_management_registry (
     is_deprecated
 )
 VALUES (
-    'signal_exit_atr',
+    'signal-exit-atr',
     'SignalExitAtrMoneyManagement',
     'trading_plugins.money_management.signal_exit_atr',
     'Signal Exit ATR',

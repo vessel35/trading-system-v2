@@ -209,7 +209,7 @@
                       "mapping": {
                         "manual": "#/components/schemas/ManualMoneyManagementConfig",
                         "turtle": "#/components/schemas/TurtleMoneyManagementConfig",
-                        "signal_exit_atr": "#/components/schemas/SignalExitAtrMoneyManagementConfig"
+                        "signal-exit-atr": "#/components/schemas/SignalExitAtrMoneyManagementConfig"
                       }
                     }
                   },
@@ -7212,7 +7212,7 @@
               "propertyName": "mode",
               "mapping": {
                 "manual": "#/components/schemas/ManualMoneyManagementConfig",
-                "signal_exit_atr": "#/components/schemas/SignalExitAtrMoneyManagementConfig",
+                "signal-exit-atr": "#/components/schemas/SignalExitAtrMoneyManagementConfig",
                 "turtle": "#/components/schemas/TurtleMoneyManagementConfig"
               }
             }
@@ -8161,7 +8161,7 @@
                   "propertyName": "mode",
                   "mapping": {
                     "manual": "#/components/schemas/ManualMoneyManagementConfig",
-                    "signal_exit_atr": "#/components/schemas/SignalExitAtrMoneyManagementConfig",
+                    "signal-exit-atr": "#/components/schemas/SignalExitAtrMoneyManagementConfig",
                     "turtle": "#/components/schemas/TurtleMoneyManagementConfig"
                   }
                 }
@@ -8925,9 +8925,9 @@
         "properties": {
           "mode": {
             "type": "string",
-            "const": "signal_exit_atr",
+            "const": "signal-exit-atr",
             "title": "Mode",
-            "default": "signal_exit_atr"
+            "default": "signal-exit-atr"
           },
           "atr_period": {
             "type": "integer",
@@ -9512,7 +9512,7 @@
                   "propertyName": "mode",
                   "mapping": {
                     "manual": "#/components/schemas/ManualMoneyManagementConfig",
-                    "signal_exit_atr": "#/components/schemas/SignalExitAtrMoneyManagementConfig",
+                    "signal-exit-atr": "#/components/schemas/SignalExitAtrMoneyManagementConfig",
                     "turtle": "#/components/schemas/TurtleMoneyManagementConfig"
                   }
                 }

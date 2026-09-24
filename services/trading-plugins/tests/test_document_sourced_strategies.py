@@ -150,7 +150,7 @@ def test_supertrend_declares_the_document_series_and_signal_exit() -> None:
     ]
     assert metadata.min_history == 1
     assert metadata.decision_contract is StrategyDecisionContract.DECISION_INTENT
-    assert metadata.money_management.default == "signal_exit_atr"
+    assert metadata.money_management.default == "signal-exit-atr"
     assert metadata.money_management.supports_signal_exit is True
     assert _FORBIDDEN_PARAMETER_NAMES.isdisjoint(strategy.get_parameter_schema().fields)
 

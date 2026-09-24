@@ -49,7 +49,7 @@ _EXPECTED_WARMUP = {
 }
 _MONEY_MANAGEMENT: dict[str, dict[str, object]] = {
     "supertrend-ema200-flip": {
-        "mode": "signal_exit_atr",
+        "mode": "signal-exit-atr",
         "atr_period": 14,
         "atr_stop_multiple": 2.5,
         "leverage_cap": 5,
@@ -61,7 +61,7 @@ _MONEY_MANAGEMENT: dict[str, dict[str, object]] = {
         "atr_stop_multiple": 2.5,
     },
     "bollinger-rsi-reversion": {
-        "mode": "signal_exit_atr",
+        "mode": "signal-exit-atr",
         "atr_period": 14,
         "atr_stop_multiple": 2.5,
         "leverage_cap": 5,

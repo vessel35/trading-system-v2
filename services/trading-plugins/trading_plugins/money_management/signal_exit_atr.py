@@ -32,7 +32,7 @@ class SignalExitAtrMoneyManagement(MoneyManagementBase):
     atr_stop_multiple: float = 2.5
     leverage_cap: int = 5
 
-    id: ClassVar[str] = "signal_exit_atr"
+    id: ClassVar[str] = "signal-exit-atr"
     version: ClassVar[str] = "1.0.0"
     requires_signal_exit: ClassVar[bool] = True
 

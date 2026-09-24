@@ -58,9 +58,9 @@ def _limits() -> RiskLimits:
 def test_policy_is_deployed_and_declares_that_the_strategy_must_exit() -> None:
     assert SignalExitAtrMoneyManagement.requires_signal_exit is True
     assert SignalExitAtrMoneyManagement.protection_and_leverage_ignore_account_state is False
-    assert registered_money_management()["signal_exit_atr"] is SignalExitAtrMoneyManagement
+    assert registered_money_management()["signal-exit-atr"] is SignalExitAtrMoneyManagement
     assert SignalExitAtrMoneyManagement().resolved_config() == {
-        "mode": "signal_exit_atr",
+        "mode": "signal-exit-atr",
         "atr_period": 14,
         "atr_stop_multiple": 2.5,
         "leverage_cap": 5,
@@ -85,7 +85,7 @@ def test_long_plan_places_the_stop_below_entry_and_no_target() -> None:
     assert plan.requested_quantity == pytest.approx(100.0 / 5.0)
     assert plan.requested_leverage == 1
     assert plan.diagnostics["stop_distance"] == pytest.approx(5.0)
-    assert plan.diagnostics["policy_id"] == "signal_exit_atr"
+    assert plan.diagnostics["policy_id"] == "signal-exit-atr"
 
 
 def test_short_plan_places_the_stop_above_entry() -> None:
@@ -172,7 +172,7 @@ def test_policy_does_not_mutate_its_inputs() -> None:
 def test_registration_script_matches_the_deployed_policy() -> None:
     sql = _REGISTRATION_FILE.read_text()
     identity = re.search(
-        r"VALUES \(\s*'(?P<mode>[a-z_]+)',\s*'(?P<class_name>\w+)',\s*'(?P<module>[\w.]+)',",
+        r"VALUES \(\s*'(?P<mode>[a-z0-9-]+)',\s*'(?P<class_name>\w+)',\s*'(?P<module>[\w.]+)',",
         sql,
     )
     assert identity is not None

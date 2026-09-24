@@ -2460,7 +2460,7 @@ export interface components {
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
              */
-            mode: "signal_exit_atr";
+            mode: "signal-exit-atr";
             /**
              * Atr Period
              * @default 14

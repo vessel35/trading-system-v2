@@ -316,7 +316,7 @@ def test_a_deployed_policy_becomes_configurable_without_touching_the_factory(
     assert money_management_modes(registered) == (
         "atr-only",
         "manual",
-        "signal_exit_atr",
+        "signal-exit-atr",
         "turtle",
     )
 
@@ -325,7 +325,7 @@ def test_money_management_package_contents_are_the_only_registered_policies() ->
     found, faults = discovery.discover_money_management()
 
     assert faults == ()
-    assert set(found) == {"manual", "signal_exit_atr", "turtle"}
+    assert set(found) == {"manual", "signal-exit-atr", "turtle"}
     assert discovery.registered_money_management() == found
     assert not hasattr(money_management, "BUILTIN_POLICIES")
     assert not hasattr(money_management, "MONEY_MANAGEMENT_MODES")

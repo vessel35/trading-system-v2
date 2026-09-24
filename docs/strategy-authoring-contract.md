@@ -1208,8 +1208,9 @@ class SignalExitAtrPolicy(MoneyManagementBase):
     atr_stop_multiple: float = 2.5
     leverage_cap: int = 5
 
-    id: ClassVar[str] = "signal_exit_atr"
+    id: ClassVar[str] = "signal-exit-atr"  # 등록 표의 mode는 kebab-case만 받는다(§6.4)
     version: ClassVar[str] = "1.0.0"
+    requires_signal_exit: ClassVar[bool] = True  # 목표가를 두지 않으므로 선언한다(§5.3.2)
 
     def __post_init__(self) -> None:
         # 설정 범위는 생성 시점에 막는다. 실행 도중에 드러나면 늦다.
@@ -1519,6 +1520,10 @@ services/trading-plugins/trading_plugins/
 **전략은 `signal_db.strategy_registry`에 넣는다.** 이 표는 이미 있으며 담는
 것은 §4.6에 있다. `is_active`가 거짓이거나 `is_deprecated`가 참이면 실행할 수
 없으므로, **켜고 끄는 것은 코드가 아니라 이 두 열이 맡는다.**
+
+**정책의 `id`는 등록 표의 `mode`가 되므로 kebab-case여야 한다.** 표가
+`^[a-z0-9]+(-[a-z0-9]+)*$`로 검사하며, 밑줄이 든 id는 등록 문장 적용 단계에서 거부된다.
+전략의 `STRATEGY_ID`에 같은 규칙이 걸린다.
 
 **정책은 `signal_db.money_management_registry`에 넣는다.** mode와 클래스 이름과 모듈
 경로와 설정 이름, 표시 정보, 활성 여부와 폐기 여부를 담는다. 발견된 정책과 등록 행의 신원과

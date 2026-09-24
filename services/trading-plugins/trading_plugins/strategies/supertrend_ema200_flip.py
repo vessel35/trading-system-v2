@@ -79,8 +79,8 @@ class SupertrendEma200Flip(StrategyBase):
                 envelope_status="provisional",
             ),
             money_management=MoneyManagementSupport(
-                supported=("signal_exit_atr", "manual", "turtle"),
-                default="signal_exit_atr",
+                supported=("signal-exit-atr", "manual", "turtle"),
+                default="signal-exit-atr",
                 supports_external_stop=True,
                 supports_external_take_profit=True,
                 supports_signal_exit=True,
