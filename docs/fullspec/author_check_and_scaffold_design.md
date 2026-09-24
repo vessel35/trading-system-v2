@@ -114,7 +114,9 @@
   셋만**(`vessel-reference`는 빠져 있다) 실제 Engine에 태우고 Evidence 완전성과 결정성을
   본다. `backtest_service` 패키지에는 `synthetic`·`dry_run`·`fixture`라는 이름의 모듈도
   `__main__`도 없고, `tests/conftest.py`와 다른 시험 파일에 `DataFeed` 대역이 여럿 있다.
-  `web_api`는 `backtest_service`의 설정과 runner 경로만 import한다.
+  `web_api`는 `backtest_service`의 실행 설정(`config.run_config`), 카탈로그 어댑터
+  (`adapters.catalog_store`)와 runner 같은 운영 모듈을 import하며, 진단 목적의 모듈은
+  import하지 않는다.
 - **규범의 코드 예시는 시험되지 않고, 하나는 두 가지로 규범을 어긴다.** 규범을 읽는 시험이
   없다. 4.1절의 `EmaEngulfingExample`은 첫째로 `STRATEGY_ID`를 모듈 상수로만 두고 클래스에
   선언하지 않아 발견 검사가 "must declare its own non-empty STRATEGY_ID"로 거부하고(6.5절
@@ -510,3 +512,7 @@ id, 클래스 이름, series 목록, 지원 시간대, `min_history`, 지원 정
   실패한다.** 생성기가 언제나 `DECISION_INTENT`를 내고 legacy 뼈대는 만들지 않게 했다(3.5).
 - 외부 검토가 확인한 것: `diagnostics` 하위 패키지를 일반 모듈이 import하지 않는 한 순환도
   import 비용도 생기지 않는다.
+- **확인 검토(같은 Codex)가 고친 판에서 찾은 것 하나.** 2장의 "`web_api`는 설정과 runner
+  경로만 import한다"는 틀렸다. `web_api/main.py`는 `backtest_service.adapters.catalog_store`도
+  import한다. 운영 모듈을 import하되 진단 모듈은 import하지 않는다는 뜻으로 고쳤다. 아홉
+  항목의 반영은 모두 본문에 있음을 같은 검토가 확인했다.
