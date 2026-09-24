@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import ClassVar
 
+from core_lib.indicators import DEFAULT_REGISTRY
 from core_lib.money_management import (
     AccountRiskSnapshot,
     MarketSnapshot,
@@ -53,6 +54,15 @@ class SignalExitAtrMoneyManagement(MoneyManagementBase):
             raise TypeError("leverage_cap must be an integer")
         if not 1 <= self.leverage_cap <= 100:
             raise ValueError("leverage_cap must be an integer in [1, 100]")
+        # The requirement below is resolved against the indicator registry when the run
+        # starts. Refusing an unregistered period here keeps a configuration the run
+        # would only reject at series resolution from being accepted at submission.
+        try:
+            DEFAULT_REGISTRY.get("ATR", {"period": self.atr_period})
+        except KeyError as error:
+            raise ValueError(
+                f"atr_period {self.atr_period} is not a registered ATR combination"
+            ) from error
 
     def required_indicators(self) -> tuple[PolicyIndicatorRequirement, ...]:
         return (
@@ -87,16 +97,28 @@ class SignalExitAtrMoneyManagement(MoneyManagementBase):
         if stop_loss <= 0.0:
             raise MoneyManagementError("stop price must remain positive")
 
+        notional = market.reference_price * quantity
         if account.market_type is MarketType.SPOT:
             leverage = 1
-            if market.reference_price * quantity > account.available_cash:
+            if notional > account.available_cash:
                 raise MoneyManagementError("spot plan exceeds available cash")
         else:
-            notional = market.reference_price * quantity
             needed = max(1, math.ceil(notional / account.available_cash))
             if needed > min(self.leverage_cap, global_limits.max_leverage):
                 raise MoneyManagementError("plan requires leverage above the cap")
             leverage = needed
+
+        # A stop placed beyond the liquidation price is never honoured: the position is
+        # liquidated first (contract section 4.1). Refuse the plan rather than record a
+        # stop the run cannot keep.
+        liquidation_price = _liquidation_price(
+            market.reference_price, leverage, global_limits.maintenance_margin_rate, side
+        )
+        liquidation_safe = (
+            liquidation_price < stop_loss if side > 0 else liquidation_price > stop_loss
+        )
+        if not liquidation_safe:
+            raise MoneyManagementError("liquidation would occur before the stop")
 
         return MoneyManagementPlan(
             stop_loss=stop_loss,
@@ -112,6 +134,15 @@ class SignalExitAtrMoneyManagement(MoneyManagementBase):
                 "volatility_timestamp": market.volatility_timestamp.isoformat(),
                 "stop_distance": stop_distance,
                 "risk_budget": risk_budget,
-                "liquidation_safe": True,
+                "requested_notional": notional,
+                "liquidation_price": liquidation_price,
+                "liquidation_safe": liquidation_safe,
             },
         )
+
+
+def _liquidation_price(price: float, leverage: int, mmr: float, side: int) -> float:
+    """Return the isolated-margin liquidation price for an entry at ``price``."""
+    if side > 0:
+        return price * (1.0 - 1.0 / leverage + mmr)
+    return price * (1.0 + 1.0 / leverage - mmr)

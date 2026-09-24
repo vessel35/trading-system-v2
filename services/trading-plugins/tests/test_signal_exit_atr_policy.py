@@ -68,11 +68,12 @@ def test_policy_is_deployed_and_declares_that_the_strategy_must_exit() -> None:
 
 
 def test_policy_requires_one_atr_input_on_the_strategy_timeframe() -> None:
-    (requirement,) = SignalExitAtrMoneyManagement(atr_period=20).required_indicators()
+    # 14 is the one registered ATR period today; the requirement mirrors the setting.
+    (requirement,) = SignalExitAtrMoneyManagement(atr_period=14).required_indicators()
     assert requirement.name == "ATR"
-    assert requirement.params == {"period": 20}
+    assert requirement.params == {"period": 14}
     assert requirement.timeframe == "strategy"
-    assert requirement.min_history == 20
+    assert requirement.min_history == 14
 
 
 def test_long_plan_places_the_stop_below_entry_and_no_target() -> None:
@@ -86,6 +87,28 @@ def test_long_plan_places_the_stop_below_entry_and_no_target() -> None:
     assert plan.requested_leverage == 1
     assert plan.diagnostics["stop_distance"] == pytest.approx(5.0)
     assert plan.diagnostics["policy_id"] == "signal-exit-atr"
+    assert plan.diagnostics["liquidation_safe"] is True
+    # Leverage 1 with a 0.4% maintenance rate liquidates a long only at 0.4% of entry.
+    assert plan.diagnostics["liquidation_price"] == pytest.approx(100.0 * 0.004)
+
+
+def test_plan_refuses_a_stop_the_liquidation_price_would_reach_first() -> None:
+    # risk 100 / stop 5 = 20 units at 100 -> notional 2000 over 50 cash -> leverage 40.
+    # A long at 40x liquidates near 97.9, above the 95 stop, so the stop is never kept.
+    with pytest.raises(MoneyManagementError, match="liquidation would occur before the stop"):
+        SignalExitAtrMoneyManagement(atr_stop_multiple=1.0, leverage_cap=100).plan_entry(
+            _decision(DecisionAction.ENTER_LONG),
+            _market(volatility=5.0),
+            _account(cash=50.0),
+            RiskLimits(risk_per_trade=0.01, maintenance_margin_rate=0.004, max_leverage=100),
+        )
+
+
+def test_policy_refuses_an_atr_period_that_is_not_registered() -> None:
+    # 20 sits inside the accepted range but no ATR(20) combination is registered, so a
+    # run would only fail at series resolution; the policy refuses it at construction.
+    with pytest.raises(ValueError, match="not a registered ATR combination"):
+        SignalExitAtrMoneyManagement(atr_period=20)
 
 
 def test_short_plan_places_the_stop_above_entry() -> None:

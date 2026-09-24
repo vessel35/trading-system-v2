@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import MISSING as DATACLASS_MISSING
 from dataclasses import fields as dataclass_fields
 from datetime import UTC, datetime
@@ -61,7 +61,9 @@ def _config_model_for(mode: str, policy_class: type[MoneyManagementBase]) -> typ
     """Build one config model from a deployed policy's own dataclass fields.
 
     Only names, defaults, and types come from the dataclass. Range checks stay in
-    the policy's ``__post_init__`` so one place owns what a value may be.
+    the policy's ``__post_init__`` so one place owns what a value may be. The model
+    does construct the policy once while validating, so a value ``__post_init__``
+    refuses is refused at submission rather than after a run has been accepted.
 
     The annotations are resolved through ``get_type_hints`` rather than read off
     ``field.type``. A plugin written with ``from __future__ import annotations``
@@ -90,9 +92,25 @@ def _config_model_for(mode: str, policy_class: type[MoneyManagementBase]) -> typ
             definitions[field.name] = (annotation, Field(default_factory=field.default_factory))
         else:
             definitions[field.name] = (annotation, ...)
+
+    def _constructs_the_policy(config: BaseModel) -> BaseModel:
+        # The policy's own ``__post_init__`` is the one owner of value ranges and of
+        # any inventory the settings must match. Running it here surfaces a refusal
+        # as a validation error instead of a run that fails after it was queued.
+        try:
+            policy_class(**{name: getattr(config, name) for name in settings})
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"money-management mode {mode!r}: {error}") from error
+        return config
+
     model: type[BaseModel] = create_model(
         f"{policy_class.__name__}Config",
         __config__=ConfigDict(extra="forbid"),
+        __validators__={
+            "_constructs_the_policy": cast(
+                "Callable[..., Any]", model_validator(mode="after")(_constructs_the_policy)
+            )
+        },
         **definitions,
     )
     # Ask for the schema here. Pydantic defers this, so a type it cannot express

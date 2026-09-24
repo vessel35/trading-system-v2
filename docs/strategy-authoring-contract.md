@@ -1220,6 +1220,14 @@ class SignalExitAtrPolicy(MoneyManagementBase):
             raise ValueError("atr_stop_multiple must be finite and in [0.1, 10]")
         if not 1 <= self.leverage_cap <= 100:
             raise ValueError("leverage_cap must be an integer in [1, 100]")
+        # 아래 요구는 실행이 시작될 때 registry에서 풀린다. 등록되지 않은 기간을 여기서
+        # 거부해야 제출은 받아들이고 실행은 거부하는 설정이 생기지 않는다(§4.7).
+        try:
+            DEFAULT_REGISTRY.get("ATR", {"period": self.atr_period})
+        except KeyError as error:
+            raise ValueError(
+                f"atr_period {self.atr_period} is not a registered ATR combination"
+            ) from error
 
     def required_indicators(self) -> tuple[PolicyIndicatorRequirement, ...]:
         # 실행 timeframe의 ATR을 요구하므로 전략의 indicators에 함께 합류한다.
@@ -1258,17 +1266,28 @@ class SignalExitAtrPolicy(MoneyManagementBase):
         if stop_loss <= 0.0:
             raise MoneyManagementError("stop price must remain positive")
 
+        notional = market.reference_price * quantity
         if account.market_type is MarketType.SPOT:
             leverage = 1
-            if market.reference_price * quantity > account.available_cash:
+            if notional > account.available_cash:
                 raise MoneyManagementError("spot plan exceeds available cash")
         else:
-            notional = market.reference_price * quantity
             needed = max(1, math.ceil(notional / account.available_cash))
             if needed > min(self.leverage_cap, global_limits.max_leverage):
                 # 줄여서 통과시키지 않는다. 설정과 다른 것이 조용히 실행된다.
                 raise MoneyManagementError("plan requires leverage above the cap")
             leverage = needed
+
+        # 손절이 청산가 너머에 놓이면 청산이 이긴다(§4.1). 지킬 수 없는 손절을 기록하지
+        # 않고 계획을 거부한다(§5.1.4).
+        liquidation_price = _liquidation_price(
+            market.reference_price, leverage, global_limits.maintenance_margin_rate, side
+        )
+        liquidation_safe = (
+            liquidation_price < stop_loss if side > 0 else liquidation_price > stop_loss
+        )
+        if not liquidation_safe:
+            raise MoneyManagementError("liquidation would occur before the stop")
 
         return MoneyManagementPlan(
             stop_loss=stop_loss,
@@ -1284,9 +1303,25 @@ class SignalExitAtrPolicy(MoneyManagementBase):
                 "volatility_timestamp": market.volatility_timestamp.isoformat(),
                 "stop_distance": stop_distance,
                 "risk_budget": risk_budget,
+                "requested_notional": notional,
+                "liquidation_price": liquidation_price,
+                "liquidation_safe": liquidation_safe,
             },
         )
+
+
+def _liquidation_price(price: float, leverage: int, mmr: float, side: int) -> float:
+    """격리 증거금에서 진입가 price, 정수 leverage일 때의 청산가."""
+    if side > 0:
+        return price * (1.0 - 1.0 / leverage + mmr)
+    return price * (1.0 + 1.0 / leverage - mmr)
 ```
+
+**예시가 import하는 것.** 위 코드는 `core_lib.indicators`의 `DEFAULT_REGISTRY`와
+`core_lib.money_management`의 여덟 이름과 `core_lib.types`의 `DecisionIntent`·`MarketType`, 그리고
+표준 라이브러리의 `math`·`Mapping`·`dataclass`·`ClassVar`를 쓴다. 배포된 파일
+`services/trading-plugins/trading_plugins/money_management/signal_exit_atr.py`가 이 예시와 같은
+내용이다.
 
 **`take_profit`이 `None`이므로 이 정책은 `supports_signal_exit`가 참인
 전략에서만 쓸 수 있다.** 청산을 낼 수 없는 전략과 짝지으면 진입한 자리를
@@ -1601,6 +1636,10 @@ API 스키마가 데이터베이스 상태에 따라 흔들리지 않는다. 기
 **기존 둘의 설정 모델은 손으로 쓴 그대로 둔다.** 배포된 정책만 그 클래스의
 필드에서 모델을 만들어 union에 더한다. 그래야 클라이언트가 이미 보는 스키마와
 오류 문구가 움직이지 않는다.
+
+**생성된 모델은 검증할 때 정책을 실제로 한 번 만든다.** `__post_init__`이 거부하는 값은
+그래서 제출 시점에 검증 오류(422)로 드러나고, 실행이 큐에 들어간 뒤에 실패하지 않는다.
+범위를 두 곳에 적는 것이 아니라, 한 곳(`__post_init__`)의 판정을 검증이 빌려 쓰는 것이다.
 
 **범위 검사는 정책의 `__post_init__`이 계속 소유한다.** 생성되는 모델이 가져가는
 것은 이름과 기본값과 type뿐이다. 값이 무엇일 수 있는지를 두 곳이 나눠 가지면
