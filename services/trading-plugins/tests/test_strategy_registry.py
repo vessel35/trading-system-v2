@@ -13,6 +13,7 @@ def test_strategy_package_scan_alone_discovers_vessel_reference() -> None:
     assert found[STRATEGY_ID] is VesselReference
     assert sorted(found) == [
         "bollinger-rsi-reversion",
+        "donchian-breakout-atr",
         "macd-ema200-zero-line",
         "supertrend-ema200-flip",
         STRATEGY_ID,
@@ -27,6 +28,7 @@ def test_registry_builder_returns_fresh_discovery_only_registries() -> None:
 
     deployed = [
         "bollinger-rsi-reversion",
+        "donchian-breakout-atr",
         "macd-ema200-zero-line",
         "supertrend-ema200-flip",
         STRATEGY_ID,

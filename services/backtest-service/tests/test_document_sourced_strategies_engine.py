@@ -28,6 +28,7 @@ from core_lib.strategy import AdapterManager, InProcessStrategyRegistry, Strateg
 from core_lib.types import Candle
 from trading_plugins import registered_money_management
 from trading_plugins.strategies.bollinger_rsi_reversion import BollingerRsiReversion
+from trading_plugins.strategies.donchian_breakout_atr import DonchianBreakoutAtr
 from trading_plugins.strategies.macd_ema200_zero_line import MacdEma200ZeroLine
 from trading_plugins.strategies.supertrend_ema200_flip import SupertrendEma200Flip
 
@@ -40,13 +41,18 @@ _STRATEGIES: dict[str, type[StrategyAdapter]] = {
     "supertrend-ema200-flip": SupertrendEma200Flip,
     "macd-ema200-zero-line": MacdEma200ZeroLine,
     "bollinger-rsi-reversion": BollingerRsiReversion,
+    "donchian-breakout-atr": DonchianBreakoutAtr,
 }
-# The longest declared warm-up: EMA 200 for the two trend strategies, Bollinger 20 otherwise.
+# The longest declared warm-up: EMA 200 for the two trend strategies, Bollinger 20 for the
+# reversion strategy, and the 21 bars the breakout strategy reads back from the candles.
 _EXPECTED_WARMUP = {
     "supertrend-ema200-flip": 200,
     "macd-ema200-zero-line": 200,
     "bollinger-rsi-reversion": 20,
+    "donchian-breakout-atr": 21,
 }
+# Strategies whose document leaves every exit to the policy's stop and target.
+_PROTECTION_ONLY = {"macd-ema200-zero-line", "donchian-breakout-atr"}
 _MONEY_MANAGEMENT: dict[str, dict[str, object]] = {
     "supertrend-ema200-flip": {
         "mode": "signal-exit-atr",
@@ -66,8 +72,14 @@ _MONEY_MANAGEMENT: dict[str, dict[str, object]] = {
         "atr_stop_multiple": 2.5,
         "leverage_cap": 5,
     },
+    "donchian-breakout-atr": {
+        "mode": "manual",
+        "leverage": 1,
+        "reward_risk": 2.0,
+        "atr_stop_multiple": 1.5,
+    },
 }
-_DECLARED_KEYS = {
+_DECLARED_KEYS: dict[str, set[str]] = {
     "supertrend-ema200-flip": {"supertrend:multiplier=3,period=10@1h", "ema:period=200@1h"},
     "macd-ema200-zero-line": {
         "macd:fast_period=12,signal_period=9,slow_period=26@1h",
@@ -77,6 +89,8 @@ _DECLARED_KEYS = {
         "bollinger_bands:multiplier=2,period=20@1h",
         "rsi:period=14@1h",
     },
+    # The breakout strategy declares no series; only the policy's ATR reaches the run.
+    "donchian-breakout-atr": set(),
 }
 
 
@@ -334,7 +348,7 @@ def test_document_sourced_strategy_runs_end_to_end_with_complete_evidence(
     )
     assert trades, "the synthetic path must produce at least one trade"
     exit_reasons = {row[1] for row in trades}
-    if strategy_id == "macd-ema200-zero-line":
+    if strategy_id in _PROTECTION_ONLY:
         assert exit_reasons <= {"STOP_LOSS", "TAKE_PROFIT", "END_OF_DATA"}
         assert exit_reasons & {"STOP_LOSS", "TAKE_PROFIT"}
     else:
