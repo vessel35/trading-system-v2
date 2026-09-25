@@ -458,6 +458,7 @@ def test_code_fallback_lists_every_strategy_in_the_common_registry() -> None:
     response = StrategyRepository(connection, registry).list()
 
     assert [strategy.strategy_id for strategy in response.data] == [
+        "bollinger-band-bounce",
         "bollinger-rsi-reversion",
         "deployed-strategy",
         "donchian-breakout-atr",
@@ -495,7 +496,7 @@ def test_the_app_builds_the_common_strategy_registry_once_for_multiple_requests(
 def test_strategy_repository_falls_back_to_code_registry() -> None:
     connection = cast(SignalConnection, _MissingTableConnection())
     response = StrategyRepository(connection, build_strategy_registry()).list()
-    assert len(response.data) == 6
+    assert len(response.data) == 7
     strategy = next(item for item in response.data if item.strategy_id == "vessel-reference")
     assert strategy.strategy_id == "vessel-reference"
     assert strategy.supported_timeframes == ["1h"]

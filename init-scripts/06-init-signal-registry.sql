@@ -12,3 +12,4 @@
 \ir signal-service/20260923/04-register-signal-exit-atr.sql
 \ir signal-service/20260923/05-register-donchian-breakout-atr.sql
 \ir signal-service/20260923/06-register-three-bar-reversion.sql
+\ir signal-service/20260923/07-register-bollinger-band-bounce.sql

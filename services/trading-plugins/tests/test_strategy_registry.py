@@ -12,6 +12,7 @@ def test_strategy_package_scan_alone_discovers_vessel_reference() -> None:
     assert faults == ()
     assert found[STRATEGY_ID] is VesselReference
     assert sorted(found) == [
+        "bollinger-band-bounce",
         "bollinger-rsi-reversion",
         "donchian-breakout-atr",
         "macd-ema200-zero-line",
@@ -28,6 +29,7 @@ def test_registry_builder_returns_fresh_discovery_only_registries() -> None:
     second = build_strategy_registry()
 
     deployed = [
+        "bollinger-band-bounce",
         "bollinger-rsi-reversion",
         "donchian-breakout-atr",
         "macd-ema200-zero-line",
