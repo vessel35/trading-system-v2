@@ -51,7 +51,25 @@ mistake the capability list exists to prevent.
 ## 2. Turn the document into a structure
 
 Write down, from the document alone: direction rule, entry conditions, exit rules, risk
-rules, timeframes, symbol scope, and every series it needs. Record where each came from.
+rules, timeframes, symbol scope, and every series it needs. Record where each came from:
+the page and the sentence. A sentence that belongs to a study-wide description or to another
+page of the same source is not a statement of this strategy's page; mark it as such rather
+than presenting it as the page's own claim.
+
+Then write down two more things the document never states but the implementation will carry:
+
+- **Profile values.** `StrategyProfile` has twelve fields (expected win rate, expected payoff,
+  tail shape, holding horizon, primary metric, and the rest). Every one of them is a blank the
+  author fills. Take what the source's reported results support (a reported win rate and
+  profit factor bound the expected win rate and payoff) and say which values were chosen
+  without support. Record each in the difference table.
+- **Platform-fixed rules.** Read the capability list for every rule that changes what the
+  backtest measures: when a decision fills (`run.fill_timing`), from which bar protection is
+  checked (`execution.protection_checked_from_bar_after_fill`), what happens when stop and
+  target are touched in one bar (`execution.simultaneous_stop_and_target`), how many positions
+  a run holds (`run.concurrent_directional_positions`), and how much series history a strategy
+  sees. Record each with its capability id. Where the source fixes the same thing differently,
+  it is a difference, not a platform detail.
 
 Then find the two kinds of hole:
 
@@ -115,6 +133,15 @@ Only with no blockages left, or with the deviations approved.
 
 - Place the strategy in `services/trading-plugins/trading_plugins/strategies/`, and any new
   policy in `.../money_management/`. Declare `STRATEGY_ID` on the class itself.
+- **Declare no more than the document states.** `supported_timeframes` holds the timeframes
+  the document tested, symbol and market scope follow the document, and a parameter exists
+  only where the document names a value. Advertising a timeframe or a market the document
+  never mentions is a second strategy nobody asked for.
+- **Put the document's protection values into `default_settings`.** When the document fixes a
+  policy setting - a stop multiple, a reward-to-risk ratio, a leverage - declare it in
+  `MoneyManagementSupport.default_settings` under the supported mode, so a run submitted
+  without settings and the screen's prefilled values reproduce the document instead of the
+  policy's own defaults. The run's Evidence records what the strategy declared.
 - Keep entry and exit decisions in the strategy. Protection prices, quantity, and leverage
   belong to the policy; rounding, margin, and liquidation belong to execution.
 - Put the code, the registration SQL, and the tests in one changeset. The contract's section
