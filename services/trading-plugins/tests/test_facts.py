@@ -24,7 +24,13 @@ from core_lib.money_management import (
     RiskLimits,
 )
 from core_lib.patterns import TALIB_PATTERN_REGISTRY
-from core_lib.strategy import FieldSpec, ParameterSchema, StrategyMetadata
+from core_lib.strategy import (
+    FieldSpec,
+    MoneyManagementSupport,
+    ParameterSchema,
+    ResolvedConfig,
+    StrategyMetadata,
+)
 from core_lib.types import DecisionIntent
 from trading_plugins import facts
 from trading_plugins.discovery import (
@@ -821,3 +827,80 @@ def test_author_strategy_fact_commands_are_accepted() -> None:
         )
 
         assert completed.returncode == 0, (command, completed.stdout, completed.stderr)
+
+
+class _MisdeclaringVessel(VesselReference):
+    """Declare a manual setting the manual policy has no name for."""
+
+    STRATEGY_ID = "misdeclaring-vessel"
+    VERSION = "1.0.0"
+
+    def __init__(self, config: ResolvedConfig) -> None:
+        self.config = config
+
+    @classmethod
+    def get_metadata(cls) -> StrategyMetadata:
+        metadata = super().get_metadata()
+        metadata.money_management = MoneyManagementSupport(
+            supported=("manual",),
+            default="manual",
+            default_settings={"manual": {"not_a_setting": 1.0}},
+            supports_external_stop=True,
+            supports_external_take_profit=True,
+            supports_signal_exit=True,
+        )
+        return metadata
+
+
+def test_declaration_reports_the_default_settings_a_strategy_declares(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _Declaring(VesselReference):
+        STRATEGY_ID = "declaring-vessel"
+        VERSION = "1.0.0"
+
+        @classmethod
+        def get_metadata(cls) -> StrategyMetadata:
+            metadata = super().get_metadata()
+            metadata.money_management = MoneyManagementSupport(
+                supported=("manual",),
+                default="manual",
+                default_settings={"manual": {"atr_stop_multiple": 1.5}},
+                supports_external_stop=True,
+                supports_external_take_profit=True,
+                supports_signal_exit=True,
+            )
+            return metadata
+
+    monkeypatch.setattr(
+        facts, "discover_strategies", lambda: ({"declaring-vessel": _Declaring}, ())
+    )
+
+    declared = facts.declaration("strategy", "declaring-vessel")
+
+    metadata = cast("dict[str, facts.JSONValue]", declared["metadata"])
+    support = cast("dict[str, facts.JSONValue]", metadata["money_management"])
+    assert support["default_settings"] == {"manual": {"atr_stop_multiple": 1.5}}
+
+
+def test_catalog_precheck_refuses_default_settings_the_policy_does_not_accept(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        facts,
+        "discover_strategies",
+        lambda: ({"misdeclaring-vessel": _MisdeclaringVessel}, ()),
+    )
+    monkeypatch.setattr(
+        _MisdeclaringVessel, "__module__", "trading_plugins.strategies.vessel_reference"
+    )
+
+    result = facts.catalog_precheck("strategy", "misdeclaring-vessel")
+
+    assert result["passed"] is False
+    assert result["adapter_construction_error"] is None
+    findings = cast("list[dict[str, facts.JSONValue]]", result["findings"])
+    assert [finding["rule"] for finding in findings] == ["policy-default-settings-refused"]
+    assert findings[0]["mode"] == "manual"
+    assert "not_a_setting" in str(findings[0]["detail"])
+    assert "policy default settings" in cast("list[str]", result["checks_performed"])

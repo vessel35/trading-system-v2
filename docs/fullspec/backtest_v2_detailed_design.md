@@ -4169,7 +4169,7 @@ classDiagram
       Source Data Snapshot은 전략 주기 OHLCV 정책과, 전략 주기가 1분이 아니면 그 근거가 되는 1분 OHLCV 정책을
       각각 정확히 한 건 기록한다. 정상 원천 부재·부분 버킷·독립 원천 대조 결과와 결측이 삼킨 도달 불가 펀딩 경계
       수를 함께 남긴다.
-      현재 Evidence 스키마 판은 `1.5.0`이며 기본 테이블 14개와 확장 테이블 7개, 합계 21개다.
+      현재 Evidence 스키마 판은 `1.11.0`이며(판 이력은 `services/backtest-service/tests/test_engine_and_harness.py`의 고정 해시 표가 갖는다) 기본 테이블 14개와 확장 테이블 7개, 합계 21개다.
       `INDICATOR_DEFINITION`은 지표와 패턴을 같은 snapshot 경로에 기록하기 위해 `series_kind`(`indicator` 또는
       `pattern`), `category`, `impl_note`를 필수로 갖는다. 지표는 `IndicatorSpec.category`와 `pinned_impl`을,
       패턴은 `category="candlestick"`와 TA-Lib 판·함수명을 `impl_note`에 기록한다.

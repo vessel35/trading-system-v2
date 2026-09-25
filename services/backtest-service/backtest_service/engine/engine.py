@@ -2000,6 +2000,21 @@ class Engine:
             )
         return turtle_n_series(daily, period=period)
 
+    def _declared_money_management_evidence(self) -> dict[str, object]:
+        """Record the settings the strategy declared for the policy mode that ran.
+
+        The resolved configuration alone cannot say which values came from the
+        strategy's document and which from the policy's defaults, and the class
+        that declared them may change after the run. Keeping the declaration in
+        the Evidence lets a later reader answer that from the file.
+        """
+        policy = self._money_management
+        strategy = self._strategy
+        if policy is None or strategy is None:
+            return {}
+        declared = strategy.get_metadata().money_management.default_settings.get(policy.id, {})
+        return dict(declared)
+
     def _money_management_evidence(self) -> dict[str, object]:
         """Record who resolved the money-management config and under which version.
 
@@ -2015,12 +2030,14 @@ class Engine:
                 "policy_version": "1.0.0",
                 "config_schema_version": schema_version,
                 "resolved_config": {},
+                "declared_by_strategy": {},
             }
         return {
             "policy_id": policy.id,
             "policy_version": policy.version,
             "config_schema_version": schema_version,
             "resolved_config": dict(policy.resolved_config()),
+            "declared_by_strategy": self._declared_money_management_evidence(),
         }
 
     def _prepare_funding_sources(self) -> None:
@@ -2285,9 +2302,7 @@ class Engine:
                     "strategy_name": self._run_meta["strategy_name"],
                     "strategy_version": self._run_meta["strategy_version"],
                     "params_json": self._run_meta["params_json"],
-                    "submitted_money_management_json": (
-                        config.money_management.model_dump(exclude_unset=True)
-                    ),
+                    "submitted_money_management_json": dict(config.money_management_submitted),
                     "money_management_json": self._money_management_evidence(),
                     "resolved_indicators_json": self._run_meta["resolved_indicators_json"],
                     "params_schema_version": self._run_meta["params_schema_version"],

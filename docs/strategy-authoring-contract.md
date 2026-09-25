@@ -455,6 +455,8 @@ class EmaEngulfingExample(StrategyBase):
             money_management=MoneyManagementSupport(
                 supported=("manual",),
                 default="manual",
+                # 문서가 정한 보호 값. 설정 없는 실행과 화면의 처음 값이 이것을 쓴다.
+                default_settings={"manual": {"atr_stop_multiple": 1.5, "reward_risk": 2.0}},
                 supports_external_stop=True,
                 supports_external_take_profit=True,
                 supports_signal_exit=True,
@@ -682,6 +684,7 @@ min_strength = float(self.config.params["min_strength"])
 MoneyManagementSupport(
     supported=("manual", "turtle"),
     default="manual",
+    default_settings={"manual": {"atr_stop_multiple": 1.5, "reward_risk": 2.0}},
     supports_external_stop=True,
     supports_external_take_profit=True,
     supports_signal_exit=True,
@@ -689,14 +692,17 @@ MoneyManagementSupport(
 )
 ```
 
-여섯 자리의 뜻은 아래와 같다. `supported`에 같은 이름을 두 번 적거나 `default`를
-`supported` 밖의 값으로 두면 생성 자체가 실패한다.
+일곱 자리의 뜻은 아래와 같다. `supported`에 같은 이름을 두 번 적거나 `default`를
+`supported` 밖의 값으로 두면 생성 자체가 실패한다. `default_settings`의 키가 `supported`
+밖이거나, 값이 mapping이 아니거나, `mode`라는 이름을 담거나, 값이 숫자·문자열·참거짓이
+아니거나 유한하지 않은 숫자이면 생성이 실패한다.
 
 
 | 자리                              | 뜻                                          |
 | ------------------------------- | ------------------------------------------ |
 | `supported`                     | 이 전략으로 쓸 수 있는 정책 이름. 여기 없는 정책으로는 실행할 수 없다  |
 | `default`                       | 사용자가 고르지 않았을 때 쓸 정책. `supported` 안에 있어야 한다 |
+| `default_settings`              | mode마다 전략 문서가 정한 정책 설정 값. 실행 설정이 비운 설정은 정책 기본값보다 먼저 여기서 채워지고, 화면의 처음 값도 여기서 온다(5.5절, 7장). 이름이 정책에 있는지와 값이 범위 안인지는 정책을 구성하는 자리(배포 전 점검 `catalog_precheck`, 제출 검증, 런타임 구성)가 본다 |
 | `supports_external_stop`        | `stop_loss`를 정책이 정해 주어도 되는가                       |
 | `supports_external_take_profit` | `take_profit`을 정책이 정해 주어도 되는가                       |
 | `supports_signal_exit`          | 전략이 청산 판단을 스스로 낼 수 있는가                     |
@@ -1444,8 +1450,13 @@ version을 Evidence에 기록하고 역사적 Turtle 전체 시스템과 동일�
 
 ### 5.5 하위 호환성
 
-**`money_management`가 없는 설정은 `manual`로 해석한다.** 이때 기본값은
-`leverage` 1, `reward_risk` 2.0, `atr_stop_multiple` 2.0이다.
+**`money_management`가 없는 설정은 `manual`로 해석한다.** 비운 설정은 **먼저 전략이
+`MoneyManagementSupport.default_settings`에 그 mode에 대해 선언한 값으로, 그 다음 정책의
+기본값으로** 채워진다. manual 정책의 기본값은 `leverage` 1, `reward_risk` 2.0,
+`atr_stop_multiple` 2.0이다. 채우는 순서는 사용자가 지정한 값, 전략 선언, 정책 기본값이며,
+실행 설정이 검증될 때 한 번 적용되고 그 뒤로는 명시된 값으로 남는다. 그래서 스윕과
+walk-forward의 파생 실행도 같은 값을 갖는다. `AdapterManager.create_runtime`이 같은 규칙을
+한 번 더 적용하므로 실행 설정을 거치지 않는 호출자(신호 생성 세션)에도 같은 값이 닿는다.
 
 **과거 값을 옮겨 담는 것은 `vessel-reference` 전략 하나에만 적용된다.** 그
 전략의 설정에 `money_management`가 없으면 `params` 안의 `leverage`,
@@ -1454,8 +1465,11 @@ version을 Evidence에 기록하고 역사적 Turtle 전체 시스템과 동일�
 자금관리로 옮겨지지 않고 §4.2를 어기는 것으로 남는다.
 
 **원본 설정과 정규화 설정은 둘 다 기록된다.** run 수준 Evidence의
-`submitted_money_management_json`이 **사용자가 실제로 지정한 필드만** 담고,
-`money_management_json`이 정책 id와 version과 정규화된 설정을 담는다.
+`submitted_money_management_json`이 **실행 설정이 검증될 때 받은 mapping**(사용자가 실제로
+지정한 필드만, 없었으면 `mode`만)을 담고, `money_management_json`이 정책 id와 version과
+정규화된 설정, 그리고 **전략이 그 mode에 대해 선언한 설정**(`declared_by_strategy`)을 담는다.
+전략 선언은 뒤에 바뀔 수 있으므로 실행 당시의 값을 파일에 남긴다. 파생 실행(스윕, walk-forward)은
+부모의 전체 설정으로 다시 검증되므로 그 제출 값은 부모의 해석된 전체 mapping이다.
 
 **다만 옮겨 담긴 경우에는 그 둘이 같아진다.** `vessel-reference`의 과거 설정은
 해석 전에 `params`에서 자금관리 설정으로 옮겨지므로, `submitted`에 남는 것은
@@ -1466,10 +1480,11 @@ version을 Evidence에 기록하고 역사적 Turtle 전체 시스템과 동일�
 `MoneyManagementFactory`가 소유하며 Evidence에 기록된다. **받는 이름이나
 기본값이나 범위가 바뀌면 이 version을 올린다.**
 
-**현재 판은 `1.1.0`이다.** Factory 안쪽에서 `mode`를 생략하면 `manual`로 읽던 기본을
-없애고, 이미 어떤 정책 설정인지 정한 호출자가 `mode`와 발견된 정책 mapping을 반드시
-넘기게 한 변경에서 올랐다. `money_management` 자체가 없는 실행 설정을 manual로
-정규화하는 위 호환 규칙은 실행 설정 층에 그대로 남는다.
+**현재 판은 `1.2.0`이다.** `1.1.0`은 Factory 안쪽에서 `mode`를 생략하면 `manual`로 읽던
+기본을 없애고, 이미 어떤 정책 설정인지 정한 호출자가 `mode`와 발견된 정책 mapping을 반드시
+넘기게 한 변경에서 올랐다. `1.2.0`은 실행 설정 층이 비운 설정을 정책 기본값보다 먼저 전략의
+`default_settings`로 채우게 된 변경에서 올랐다. `money_management` 자체가 없는 실행 설정을
+manual로 정규화하는 위 호환 규칙은 실행 설정 층에 그대로 남는다.
 
 **판이 필요한 이유는 같은 설정 재실행 때문이다.** 저장되는 것은 사용자가 적은
 원본이고 기본값은 해석할 때 채워진다. 그래서 기본값이 바뀌면 **같은 원본이 다른
@@ -1784,7 +1799,8 @@ UI는 `StrategyMetadata`가 허용한 정책만 보여준다.
 - 기존 두 정책이 아닌 정책을 선택하면 그 정책의 설정을 JSON으로 적는 입력을
 보인다. 화면은 배포된 정책의 필드 이름을 알 수 없으므로 전용 입력을 만들 수
 없고, 적힌 값은 서버가 그 정책의 정의로 검증한다. 비우면 정책의 기본값이 쓰인다.
-- 처음 값은 전략이 그 mode에 대해 밝힌 기본값에서 채우되 **처음 한 번만** 채운다.
+- 처음 값은 전략이 그 mode에 대해 밝힌 기본값(`MoneyManagementSupport.default_settings`를
+정책 기본값 위에 덮은 값, 4.3절)에서 채우되 **처음 한 번만** 채운다.
 다른 mode의 기본값은 필드 이름부터 다르므로 가져오지 않고, 이미 적어 둔 값을 다시
 덮지도 않는다.
 - 적어 둔 설정은 **mode마다 따로 남는다.** 하나에 모아 두면 mode를 옮길 때 앞

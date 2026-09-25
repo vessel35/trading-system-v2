@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from importlib.metadata import version
 from pathlib import Path
+from types import MappingProxyType
 from typing import ClassVar, cast
 
 import backtest_service.adapters.evidence_sink as evidence_sink_module
@@ -26,6 +27,7 @@ from backtest_service.adapters.evidence_schema import (
 )
 from backtest_service.adapters.evidence_sink import BacktestEvidenceSink
 from backtest_service.config import RunConfig
+from backtest_service.config import declarations as declarations_module
 from backtest_service.engine import Engine, RunResult
 from backtest_service.harness import Harness
 from core_lib.capabilities import capability
@@ -3792,6 +3794,12 @@ _EVIDENCE_GOLDEN_HASHES: dict[str, dict[str, str]] = {
         "funding": "56dbfe6a1f745d86586bd7ef60d2fc4ec3b42e442e7f72e072e9d3fd8e82c742",
         "hold": "3fb4f8bb25892388724a5f174aa2ba5ad1a84501bd256a97d5247d64e465439a",
     },
+    "1.11.0": {
+        "legacy": "4e247ec3bc7ddc5c8ebd5644c865ee795e5ac4154383e011288bc634644c5cac",
+        "managed": "4f4b38effdb96c5da5877e068cd28b071b832528f54f0198b2bba4a837844181",
+        "funding": "5466bd3e3269cfa187ab7944098c5b8788e4dc7bc0ae3b1c8a8e26a034d61440",
+        "hold": "3a231324393829fa486facddb0e5a7bda8a36eb0a8b56267cab155ddc0e85635",
+    },
 }
 
 # The three analysis extension tables stay empty because the engine does not write
@@ -3844,7 +3852,10 @@ def test_hashed_evidence_content_is_pinned_to_its_schema_version(tmp_path: Path)
     not an Evidence format change, raises the version once so later strategy changes
     cannot drag the Evidence pin forward. Version 1.10.0 records the money-management
     interpretation version changing to 1.1.0. The Evidence format is unchanged, but
-    the recorded value is hashed and therefore requires a new pin.
+    the recorded value is hashed and therefore requires a new pin. Version 1.11.0
+    records the settings the strategy declared for the policy mode that ran
+    (``declared_by_strategy`` inside ``money_management_json``) and the interpretation
+    version changing to 1.2.0, which fills an omitted setting from that declaration.
     """
     legacy = _engine(tmp_path, _Catalog(), []).run(_config())
 
@@ -3933,4 +3944,95 @@ def test_recorded_config_schema_version_comes_from_the_resolver(tmp_path: Path) 
             connection.execute("SELECT money_management_json FROM BACKTEST_RUN_LOCAL").fetchone()[0]
         )
 
-    assert recorded["config_schema_version"] == MoneyManagementFactory.version() == "1.1.0"
+    assert recorded["config_schema_version"] == MoneyManagementFactory.version() == "1.2.0"
+
+
+class _DeclaringPinStrategy(_ManagedPinStrategy):
+    """Declare the document's manual protection so a bare submission runs it."""
+
+    @classmethod
+    def get_metadata(cls) -> StrategyMetadata:
+        metadata = super().get_metadata()
+        metadata.money_management = MoneyManagementSupport(
+            supported=("manual",),
+            default="manual",
+            default_settings={"manual": {"atr_stop_multiple": 1.5, "reward_risk": 1.5}},
+            supports_external_stop=True,
+            supports_external_take_profit=True,
+            supports_signal_exit=True,
+        )
+        return metadata
+
+
+class _DeclaringPinCatalog(StrategyRegistry):
+    def get(self, strategy_id: str) -> dict[str, object]:
+        assert strategy_id == "declaring-pin-fixture"
+        return {
+            "strategy_id": strategy_id,
+            "class_name": _DeclaringPinStrategy.__name__,
+            "module_path": _DeclaringPinStrategy.__module__,
+            "is_active": True,
+            "is_deprecated": False,
+        }
+
+    def list(self) -> list[dict[str, object]]:
+        return [self.get("declaring-pin-fixture")]
+
+    def register(self, strategy_id: str, meta: dict[str, object]) -> None:
+        del strategy_id, meta
+        raise PermissionError("read-only fixture")
+
+
+def test_a_bare_submission_runs_the_declared_settings_and_records_them(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A run submitted without settings uses the strategy's declaration end to end.
+
+    The Evidence must let a later reader tell the three sources apart: what the
+    caller sent, what the strategy declared, and what the policy finally ran with.
+    """
+    monkeypatch.setattr(
+        declarations_module,
+        "_declarations",
+        lambda: MappingProxyType(
+            {"declaring-pin-fixture": _DeclaringPinStrategy.get_metadata().money_management}
+        ),
+    )
+    payload = _managed_pin_config().model_dump()
+    payload.update({"run_name": "declaring-pin", "strategy_id": "declaring-pin-fixture"})
+    del payload["money_management"]
+    config = RunConfig.model_validate(payload)
+    candles = _managed_pin_candles()
+    costs = BacktestCostModel(config.cost_values)
+    plugins = InProcessStrategyRegistry()
+    plugins.register("declaring-pin-fixture", _DeclaringPinStrategy)
+
+    result = Engine(
+        _Feed(candles),
+        _Broker(costs),
+        BacktestClock.from_candles(candles),
+        costs,
+        BacktestEvidenceSink(tmp_path),
+        _Catalog(),
+        AdapterManager(
+            _DeclaringPinCatalog(),
+            plugins,
+            money_management_policies=registered_money_management(),
+        ),
+        prereg=_prereg(),
+    ).run(config)
+
+    with sqlite3.connect(result.evidence_path) as connection:
+        submitted_json, recorded_json = connection.execute(
+            "SELECT submitted_money_management_json, money_management_json FROM BACKTEST_RUN_LOCAL"
+        ).fetchone()
+    recorded = json.loads(recorded_json)
+    assert json.loads(submitted_json) == {"mode": "manual"}
+    assert recorded["resolved_config"] == {
+        "mode": "manual",
+        "leverage": 1,
+        "reward_risk": 1.5,
+        "atr_stop_multiple": 1.5,
+    }
+    assert recorded["declared_by_strategy"] == {"atr_stop_multiple": 1.5, "reward_risk": 1.5}
+    assert recorded["config_schema_version"] == "1.2.0"

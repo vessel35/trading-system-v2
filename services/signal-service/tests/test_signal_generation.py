@@ -1157,3 +1157,56 @@ def test_slice_has_no_order_exchange_or_wallet_database_surface() -> None:
     assert "OrderRequest" not in source
     assert "Broker" not in source
     assert "wallet_db" not in source
+
+
+class _DeclaringEntryProbeStrategy(_TargetEntryProbeStrategy):
+    """Declare the document's stop multiple so a session without params runs it."""
+
+    @classmethod
+    def get_metadata(cls) -> StrategyMetadata:
+        metadata = super().get_metadata()
+        metadata.money_management = MoneyManagementSupport(
+            supported=("manual",),
+            default="manual",
+            default_settings={"manual": {"atr_stop_multiple": 1.5}},
+            supports_external_stop=True,
+            supports_external_take_profit=True,
+        )
+        return metadata
+
+
+def test_live_session_fills_omitted_protection_from_the_strategy_declaration() -> None:
+    values = _candles(22)
+    service = SignalGenerationService(
+        _Feed(values), _manager(_DeclaringEntryProbeStrategy), _Sink()
+    )
+
+    service.start(_config(), values[-1].close_time)
+
+    assert service._money_management is not None
+    assert dict(service._money_management.resolved_config()) == {
+        "mode": "manual",
+        "leverage": 1,
+        "reward_risk": 2.0,
+        "atr_stop_multiple": 1.5,
+    }
+
+
+def test_live_session_keeps_a_caller_supplied_protection_over_the_declaration() -> None:
+    values = _candles(22)
+    service = SignalGenerationService(
+        _Feed(values), _manager(_DeclaringEntryProbeStrategy), _Sink()
+    )
+    config = SignalGenerationConfig(
+        strategy_id=_STRATEGY_ID,
+        params={"atr_stop_multiple": 2.5},
+        symbol="BTCUSDT",
+        timeframe="1h",
+        market_type=MarketType.FUTURES,
+        mode=SignalMode.PAPER,
+    )
+
+    service.start(config, values[-1].close_time)
+
+    assert service._money_management is not None
+    assert service._money_management.resolved_config()["atr_stop_multiple"] == 2.5

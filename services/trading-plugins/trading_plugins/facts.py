@@ -14,6 +14,7 @@ from core_lib.capabilities import PLATFORM_CAPABILITIES, Capability
 from core_lib.indicators.registry import build_default_registry
 from core_lib.money_management import (
     MoneyManagementBase,
+    MoneyManagementFactory,
     PolicyIndicatorRequirement,
     policy_settings,
     reconcile_money_management_availability,
@@ -209,6 +210,9 @@ def _strategy_declaration(identifier: str) -> JSONObject:
             "money_management": {
                 "supported": list(support.supported),
                 "default": support.default,
+                "default_settings": {
+                    mode: _object(settings) for mode, settings in support.default_settings.items()
+                },
                 "supports_external_stop": support.supports_external_stop,
                 "supports_external_take_profit": support.supports_external_take_profit,
                 "supports_signal_exit": support.supports_signal_exit,
@@ -566,6 +570,7 @@ def _precheck_strategy(identifier: str, row: Mapping[str, object]) -> JSONObject
     adapters.register(identifier, strategy_class)
     findings = list(reconcile_strategy_registries(catalog, adapters))
     construction_error: str | None = None
+    policies: Mapping[str, type[MoneyManagementBase]] = {}
     try:
         policies, _ = discover_money_management()
         params = row.get("default_params_json", {})
@@ -576,20 +581,57 @@ def _precheck_strategy(identifier: str, row: Mapping[str, object]) -> JSONObject
         ).create(identifier, {"strategy_id": identifier, "params": params})
     except (Exception, SystemExit) as error:  # runtime owns the rules being reported here
         construction_error = f"{type(error).__name__}: {error}"
+    refused_defaults = _refused_default_settings(strategy_class, policies)
+    reported: list[JSONValue] = [_plain(asdict(finding)) for finding in findings]
     result: JSONObject = {
         "kind": "strategy",
         "identifier": identifier,
-        "passed": not findings and construction_error is None,
-        "findings": _plain([asdict(finding) for finding in findings]),
+        "passed": not findings and construction_error is None and not refused_defaults,
+        "findings": reported + refused_defaults,
         "adapter_construction_error": construction_error,
         "checks_performed": [
             "catalog identity and declaration",
             "catalog lifecycle",
             "adapter construction",
+            "policy default settings",
         ],
         "not_checked": list(_NOT_CHECKED),
     }
     return result
+
+
+def _refused_default_settings(
+    strategy_class: AdapterClass,
+    policies: Mapping[str, type[MoneyManagementBase]],
+) -> list[JSONValue]:
+    """Construct each deployed policy with the strategy's declared settings for it.
+
+    The declaration only knows names, so a name the policy does not have or a
+    value outside its range is found here, at deployment, rather than when the
+    first run without explicit settings is submitted. A mode whose policy is not
+    deployed is left to the availability finding that already names it.
+    """
+    try:
+        support = strategy_class.get_metadata().money_management
+    except (Exception, SystemExit) as error:  # the declaration finding already covers this
+        del error
+        return []
+    refused: list[JSONValue] = []
+    for mode in support.supported:
+        if mode not in policies:
+            continue
+        declared = support.default_settings.get(mode, {})
+        try:
+            MoneyManagementFactory.create({"mode": mode, **declared}, policies)
+        except (Exception, SystemExit) as error:
+            refused.append(
+                {
+                    "rule": "policy-default-settings-refused",
+                    "mode": mode,
+                    "detail": f"{type(error).__name__}: {error}",
+                }
+            )
+    return refused
 
 
 def _precheck_policy(identifier: str, row: Mapping[str, object]) -> JSONObject:
