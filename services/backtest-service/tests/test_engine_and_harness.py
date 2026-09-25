@@ -4036,3 +4036,123 @@ def test_a_bare_submission_runs_the_declared_settings_and_records_them(
     }
     assert recorded["declared_by_strategy"] == {"atr_stop_multiple": 1.5, "reward_risk": 1.5}
     assert recorded["config_schema_version"] == "1.2.0"
+
+
+class _CandlesOnlyTurtleStrategy(_ManagedPinStrategy):
+    """Declare no series at all, so only Turtle's daily N reaches the run.
+
+    Turtle needs the strategy's own exit, so this fixture enters on the first bar
+    of the period and leaves two bars later, reading nothing but the candle.
+    """
+
+    @classmethod
+    def get_metadata(cls) -> StrategyMetadata:
+        metadata = super().get_metadata()
+        metadata.required_indicators = []
+        metadata.min_history = 3
+        return metadata
+
+    def analyze(
+        self,
+        market_data: dict[str, object],
+        current_position: Position | None,
+    ) -> DecisionIntent | None:
+        candle = market_data["candle"]
+        assert isinstance(candle, Candle)
+        assert "indicators" in market_data and market_data["indicators"] == {}
+        if current_position is None:
+            if candle.open_time != _BASE:
+                return None
+            action = DecisionAction.ENTER_LONG
+            reason = "candles-only-entry"
+        else:
+            if candle.open_time < _BASE + timedelta(hours=2):
+                return None
+            action = DecisionAction.EXIT
+            reason = "candles-only-exit"
+        return DecisionIntent(
+            action=action,
+            symbol=candle.symbol,
+            timestamp=candle.close_time,
+            reference_price=float(candle.close),
+            confidence=0.8,
+            reason=reason,
+            metadata={"fixture": True},
+        )
+
+
+class _CandlesOnlyTurtleCatalog(StrategyRegistry):
+    def get(self, strategy_id: str) -> dict[str, object]:
+        assert strategy_id == "candles-only-turtle-fixture"
+        return {
+            "strategy_id": strategy_id,
+            "class_name": _CandlesOnlyTurtleStrategy.__name__,
+            "module_path": _CandlesOnlyTurtleStrategy.__module__,
+            "is_active": True,
+            "is_deprecated": False,
+        }
+
+    def list(self) -> list[dict[str, object]]:
+        return [self.get("candles-only-turtle-fixture")]
+
+    def register(self, strategy_id: str, meta: dict[str, object]) -> None:
+        del strategy_id, meta
+        raise PermissionError("read-only fixture")
+
+
+def test_a_strategy_without_series_runs_under_the_turtle_policy(tmp_path: Path) -> None:
+    """A candles-only strategy paired with Turtle leaves the strategy-timeframe series list empty.
+
+    Roadmap 3-1 plan chapter 5 recorded that the engine could not run this pairing.
+    The run must warm up, complete one trade closed by the strategy's own exit (which
+    Turtle requires), and record only the policy's daily N as a resolved series.
+    """
+    payload = _managed_pin_config().model_dump()
+    payload.update(
+        {"run_name": "candles-only-turtle", "strategy_id": "candles-only-turtle-fixture"}
+    )
+    config = RunConfig.model_validate(payload)
+    candles = _managed_pin_candles()
+    costs = BacktestCostModel(config.cost_values)
+    plugins = InProcessStrategyRegistry()
+    plugins.register("candles-only-turtle-fixture", _CandlesOnlyTurtleStrategy)
+
+    result = Engine(
+        _TurtleDailyFeed(candles, _turtle_daily_candles()),
+        BacktestBroker(costs),
+        BacktestClock.from_candles(candles),
+        costs,
+        BacktestEvidenceSink(tmp_path),
+        _Catalog(),
+        AdapterManager(
+            _CandlesOnlyTurtleCatalog(),
+            plugins,
+            money_management_policies=registered_money_management(),
+        ),
+        prereg=_prereg(),
+    ).run(config)
+
+    with sqlite3.connect(result.evidence_path) as connection:
+        warmup, resolved_json, money_json = connection.execute(
+            "SELECT warmup_candles, resolved_indicators_json, money_management_json "
+            "FROM BACKTEST_RUN_LOCAL"
+        ).fetchone()
+        signals = connection.execute("SELECT COUNT(*) FROM SIGNAL").fetchone()[0]
+        trades = connection.execute(
+            "SELECT side, exit_reason, reason FROM TRADE ORDER BY trade_id"
+        ).fetchall()
+        definitions = [
+            row[0]
+            for row in connection.execute(
+                "SELECT indicator_key FROM INDICATOR_DEFINITION ORDER BY indicator_key"
+            )
+        ]
+    resolved = json.loads(resolved_json)
+    assert signals == 2  # the entry and the strategy's own exit
+    assert len(trades) == 1
+    assert trades[0][0] == "LONG"
+    assert trades[0][1] == "SIGNAL_EXIT"
+    assert warmup == 3
+    assert [item["timeframe"] for item in resolved] == ["1d"]
+    assert json.loads(money_json)["policy_id"] == "turtle"
+    assert definitions == [key for key in definitions if key.endswith("@1d")]
