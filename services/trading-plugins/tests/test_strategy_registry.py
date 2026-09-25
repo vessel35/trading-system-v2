@@ -16,6 +16,7 @@ def test_strategy_package_scan_alone_discovers_vessel_reference() -> None:
         "donchian-breakout-atr",
         "macd-ema200-zero-line",
         "supertrend-ema200-flip",
+        "three-bar-reversion",
         STRATEGY_ID,
     ]
     assert not hasattr(core_strategy, "STRATEGY_ALLOWLIST")
@@ -31,6 +32,7 @@ def test_registry_builder_returns_fresh_discovery_only_registries() -> None:
         "donchian-breakout-atr",
         "macd-ema200-zero-line",
         "supertrend-ema200-flip",
+        "three-bar-reversion",
         STRATEGY_ID,
     ]
     assert first is not second
