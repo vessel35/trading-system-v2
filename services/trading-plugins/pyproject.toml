@@ -9,6 +9,7 @@ description = "Drop-in strategies and money-management policies discovered at im
 requires-python = ">=3.12"
 dependencies = [
     "core-lib==0.2.0",
+    "mcp>=1.29,<2",
 ]
 
 [project.optional-dependencies]
@@ -33,7 +34,13 @@ addopts = [
     "--import-mode=importlib",
     "--strict-config",
     "--strict-markers",
+    "-m",
+    "not integration",
 ]
+markers = [
+    "integration: uses the local development PostgreSQL instance",
+]
+testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100

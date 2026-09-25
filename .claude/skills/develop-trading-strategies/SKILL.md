@@ -8,6 +8,18 @@ description: Develop, refactor, or review trading strategies and reusable money-
 Apply the repository's strategy-authoring contract without moving account, sizing, or
 execution responsibilities into strategy code.
 
+## Two neighbouring skills own the ends of this work
+
+This skill owns the rules for writing and changing strategy and policy code. It does not own
+the two ends around it.
+
+- Starting from a document a person wrote, and deciding whether it can be built here at all,
+  belongs to `author-strategy`. It classifies what blocks a document and reads
+  `core_lib/capabilities.py` rather than guessing at runtime code.
+- Checking that an implemented strategy computes what its document says belongs to
+  `verify-strategy`, which is read-only and derives its expected values from the document and
+  the calculation standards rather than from the implementation.
+
 ## Start with the canonical contract
 
 Read `docs/strategy-authoring-contract.md` completely before designing, editing, or

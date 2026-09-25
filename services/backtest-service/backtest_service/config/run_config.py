@@ -5,11 +5,12 @@ from __future__ import annotations
 import json
 import logging
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import MISSING as DATACLASS_MISSING
 from dataclasses import fields as dataclass_fields
 from datetime import UTC, datetime
 from decimal import Decimal
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Annotated, Any, Final, Literal, Union, cast, get_type_hints
 
 from core_lib.candles import _TIMEFRAME_PATTERN
@@ -20,6 +21,8 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    ModelWrapValidatorHandler,
+    PrivateAttr,
     TypeAdapter,
     create_model,
     field_validator,
@@ -28,6 +31,8 @@ from pydantic import (
 from trading_plugins import registered_money_management
 
 from backtest_service.adapters.cost_model import BacktestCostModel
+
+from .declarations import declared_money_management
 
 _LOGGER = logging.getLogger(__name__)
 _RUN_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -61,7 +66,9 @@ def _config_model_for(mode: str, policy_class: type[MoneyManagementBase]) -> typ
     """Build one config model from a deployed policy's own dataclass fields.
 
     Only names, defaults, and types come from the dataclass. Range checks stay in
-    the policy's ``__post_init__`` so one place owns what a value may be.
+    the policy's ``__post_init__`` so one place owns what a value may be. The model
+    does construct the policy once while validating, so a value ``__post_init__``
+    refuses is refused at submission rather than after a run has been accepted.
 
     The annotations are resolved through ``get_type_hints`` rather than read off
     ``field.type``. A plugin written with ``from __future__ import annotations``
@@ -90,9 +97,25 @@ def _config_model_for(mode: str, policy_class: type[MoneyManagementBase]) -> typ
             definitions[field.name] = (annotation, Field(default_factory=field.default_factory))
         else:
             definitions[field.name] = (annotation, ...)
+
+    def _constructs_the_policy(config: BaseModel) -> BaseModel:
+        # The policy's own ``__post_init__`` is the one owner of value ranges and of
+        # any inventory the settings must match. Running it here surfaces a refusal
+        # as a validation error instead of a run that fails after it was queued.
+        try:
+            policy_class(**{name: getattr(config, name) for name in settings})
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"money-management mode {mode!r}: {error}") from error
+        return config
+
     model: type[BaseModel] = create_model(
         f"{policy_class.__name__}Config",
         __config__=ConfigDict(extra="forbid"),
+        __validators__={
+            "_constructs_the_policy": cast(
+                "Callable[..., Any]", model_validator(mode="after")(_constructs_the_policy)
+            )
+        },
         **definitions,
     )
     # Ask for the schema here. Pydantic defers this, so a type it cannot express
@@ -319,6 +342,24 @@ def freeze_money_management_config(
     return encoded
 
 
+def _move_legacy_money_fields(normalized: dict[str, object]) -> dict[str, object]:
+    """Map stored Vessel money fields to the explicit manual policy."""
+    if "money_management" in normalized or normalized.get("strategy_id") != "vessel-reference":
+        return normalized
+    params = normalized.get("params")
+    legacy = dict(params) if isinstance(params, Mapping) else {}
+    normalized["money_management"] = {
+        "mode": "manual",
+        "leverage": legacy.get("leverage", 1),
+        "reward_risk": legacy.get("reward_risk", 2.0),
+        "atr_stop_multiple": legacy.get("atr_stop_multiple", 2.0),
+    }
+    for name in ("leverage", "reward_risk", "atr_stop_multiple"):
+        legacy.pop(name, None)
+    normalized["params"] = legacy
+    return normalized
+
+
 class RunConfig(BaseModel):
     """A fully validated deterministic backtest-run configuration."""
 
@@ -349,27 +390,51 @@ class RunConfig(BaseModel):
     money_management: MoneyManagementConfig = Field(default_factory=ManualMoneyManagementConfig)
     sweep: dict[str, object] | None = None
 
-    @model_validator(mode="before")
+    _money_management_submitted: dict[str, object] = PrivateAttr(default_factory=dict)
+
+    @property
+    def money_management_submitted(self) -> Mapping[str, object]:
+        """The money-management mapping this configuration was validated from.
+
+        It holds what the caller sent (after the Vessel legacy move, when that
+        applied), before the strategy's declared settings and the policy's own
+        defaults filled the rest. It is not a field: a caller cannot claim a
+        submission it did not make, and a configuration rebuilt from a full dump,
+        as a sweep or a walk-forward segment is, reports that dump as what it was
+        given.
+        """
+        return MappingProxyType(self._money_management_submitted)
+
+    @model_validator(mode="wrap")
     @classmethod
-    def _normalize_legacy_money_management(cls, value: Any) -> Any:
-        """Map stored Vessel money fields to the explicit manual policy."""
-        if not isinstance(value, Mapping) or "money_management" in value:
-            return value
-        normalized = dict(value)
-        if normalized.get("strategy_id") != "vessel-reference":
-            return normalized
-        params = normalized.get("params")
-        legacy = dict(params) if isinstance(params, Mapping) else {}
-        normalized["money_management"] = {
-            "mode": "manual",
-            "leverage": legacy.get("leverage", 1),
-            "reward_risk": legacy.get("reward_risk", 2.0),
-            "atr_stop_multiple": legacy.get("atr_stop_multiple", 2.0),
-        }
-        for name in ("leverage", "reward_risk", "atr_stop_multiple"):
-            legacy.pop(name, None)
-        normalized["params"] = legacy
-        return normalized
+    def _resolve_money_management(
+        cls, value: Any, handler: ModelWrapValidatorHandler[RunConfig]
+    ) -> RunConfig:
+        """Move legacy Vessel money fields, keep the submission, apply the declaration.
+
+        One validator does all three because Pydantic runs several ``before``
+        validators of one class in reverse declaration order: split in two, the
+        declaration would be applied before the legacy move and the move would
+        then find ``money_management`` already present and leave the old values in
+        ``params``.
+        """
+        submitted: dict[str, object] | None = None
+        if isinstance(value, Mapping):
+            normalized = _move_legacy_money_fields(dict(value))
+            raw = normalized.get("money_management")
+            if raw is None:
+                raw = {"mode": "manual"}
+            if isinstance(raw, Mapping):
+                submitted = dict(raw)
+                support = declared_money_management(normalized.get("strategy_id"))
+                normalized["money_management"] = (
+                    submitted if support is None else support.resolve_settings(submitted)
+                )
+            value = normalized
+        instance = handler(value)
+        if submitted is not None:
+            instance._money_management_submitted = submitted
+        return instance
 
     @field_validator("run_name")
     @classmethod

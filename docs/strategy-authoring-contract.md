@@ -84,13 +84,14 @@ required_indicators=[
 이름이 아니라 execution key다.
 
 ```python
+# 5분봉으로 도는 실행이므로 key 뒤에 @5m이 붙는다. 붙이는 규칙은 §4.4.1에 있다.
 market_data["indicators"] == {
-    "ema:period=21": 142.02,
-    "pat_engulfing": {
-        "pat_engulfing": 1.0,          # 성립
-        "pat_engulfing_dir": 1.0,      # 방향
-        "pat_engulfing_strength": 1.0, # 강도
-        "pat_engulfing_confirm": 0.0,  # 뒤 봉에서의 확인
+    "ema:period=21@5m": 142.02,
+    "pat_engulfing@5m": {
+        "occurred": 1.0,   # 성립
+        "direction": 1.0,  # 방향
+        "strength": 1.0,   # 강도
+        "confirmed": 0.0,  # 뒤 봉에서의 확인
     },
 }
 ```
@@ -126,15 +127,27 @@ parameter뿐이고 나머지는 registry에서 온다.**
 아니라 **execution key**이며 만드는 규칙은 §4.4에 있다.
 
 
-| 선언                                                                                       | execution key                                        | 종류  | 한 봉의 값                                      |
-| ---------------------------------------------------------------------------------------- | ---------------------------------------------------- | --- | ------------------------------------------- |
-| `{"name": "EMA", "params": {"period": 21}}`                                              | `ema:period=21`                                      | 지표  | `float` 하나                                  |
-| `{"name": "MACD", "params": {"fast_period": 12, "slow_period": 26, "signal_period": 9}}` | `macd:fast_period=12,signal_period=9,slow_period=26` | 지표  | `macd`·`signal`·`histogram` 세 출력을 담은 `dict` |
-| `{"name": "pat_engulfing", "params": {}}`                                                | `pat_engulfing`                                      | 패턴  | 성립·방향·강도·확인 네 출력을 담은 `dict`                 |
+아래 execution key의 `@5m`은 5분봉으로 도는 실행을 예로 든 것이다. 실행
+timeframe이 1시간봉이면 같은 선언이 `@1h`로 들어온다.
+
+| 선언                                                                                       | execution key                                           | 종류  | 한 봉의 값                                      |
+| ---------------------------------------------------------------------------------------- | ------------------------------------------------------- | --- | ------------------------------------------- |
+| `{"name": "EMA", "params": {"period": 21}}`                                              | `ema:period=21@5m`                                      | 지표  | `float` 하나                                  |
+| `{"name": "MACD", "params": {"fast_period": 12, "slow_period": 26, "signal_period": 9}}` | `macd:fast_period=12,signal_period=9,slow_period=26@5m` | 지표  | `macd`·`signal`·`histogram` 세 출력을 담은 `dict` |
+| `{"name": "pat_engulfing", "params": {}}`                                                | `pat_engulfing@5m`                                      | 패턴  | `occurred`·`direction`·`strength`·`confirmed` 네 출력을 담은 `dict` |
 
 
-등록된 것은 지표 91 조합과 캔들 패턴 61종이다. 이 수는 늘어나며, 어느 시점의
-수가 규칙을 바꾸지는 않는다.
+**무엇이 등록되어 있는지는 여기 적지 않고 registry에 묻는다.** 수는 늘어나며
+어느 시점의 수도 규칙을 바꾸지 않는다. 적어 두면 늘어날 때마다 이 문서가
+낡는다.
+
+```python
+from core_lib.indicators.registry import build_default_registry
+from core_lib.patterns import TALIB_PATTERN_REGISTRY
+
+{(spec.name, dict(spec.params)) for spec in build_default_registry().list()}
+{spec.name for spec in TALIB_PATTERN_REGISTRY.list()}
+```
 
 ## 2. 전략이 반드시 지켜야 하는 것
 
@@ -368,9 +381,10 @@ class DecisionIntent:
 명시하고, 새로운 자금관리 수식을 전략에 추가하지 않는다.
 
 **선언한 이름을 그대로 읽지 않는다.** `indicators`의 key는 이름을 소문자로
-바꾸고 parameter를 붙인 execution key이며,
-`{"name": "EMA", "params": {"period": 21}}`은 `ema:period=21`이 된다.
-규칙 전체는 §4.4에 있다.
+바꾸고 parameter와 timeframe을 붙인 execution key이며, 1시간봉으로 도는 실행에서
+`{"name": "EMA", "params": {"period": 21}}`은 `ema:period=21@1h`가 된다.
+**key를 글자로 적어 두지 않고 `series_key_of`로 만든다** — 적어 두면 그 전략이
+한 timeframe에서만 돌게 된다. 규칙 전체는 §4.4에 있다.
 
 아래는 이 규범을 모두 지키는 최소 전략이다. 추세는 두 EMA의 위치로 보고 진입은
 장악형 캔들로 확정하며, `stop_loss`와 quantity는 전혀 다루지 않는다.
@@ -392,15 +406,16 @@ from core_lib.strategy import (
     StrategyMetadata,
     StrategyProfile,
 )
+from core_lib.series import series_key_of
 from core_lib.types import Candle, DecisionAction, DecisionIntent, Position, PositionSide
 
 STRATEGY_ID = "ema-engulfing-example"
 
-# [series 2] 아래 get_metadata가 선언한 series 셋을 execution key로 옮긴 것이다.
-# 이 문자열이 market_data["indicators"]에서 값을 꺼낼 때 쓰는 key가 된다.
-_FAST = "ema:period=21"     # <- {"name": "EMA", "params": {"period": 21}}
-_SLOW = "ema:period=55"     # <- {"name": "EMA", "params": {"period": 55}}
-_PATTERN = "pat_engulfing"  # <- {"name": "pat_engulfing", "params": {}}
+# [series 2] 아래 get_metadata가 선언한 series 셋을 execution key로 옮기는 자리다.
+# key에는 실행 timeframe이 붙으므로 판단할 때 만들고, 글자로 적어 두지 않는다.
+_FAST_PARAMS = {"period": 21}     # <- {"name": "EMA", "params": {"period": 21}}
+_SLOW_PARAMS = {"period": 55}     # <- {"name": "EMA", "params": {"period": 55}}
+_PATTERN_NAME = "pat_engulfing"   # <- {"name": "pat_engulfing", "params": {}}
 
 
 class EmaEngulfingExample(StrategyBase):
@@ -440,6 +455,8 @@ class EmaEngulfingExample(StrategyBase):
             money_management=MoneyManagementSupport(
                 supported=("manual",),
                 default="manual",
+                # 문서가 정한 보호 값. 설정 없는 실행과 화면의 처음 값이 이것을 쓴다.
+                default_settings={"manual": {"atr_stop_multiple": 1.5, "reward_risk": 2.0}},
                 supports_external_stop=True,
                 supports_external_take_profit=True,
                 supports_signal_exit=True,
@@ -462,15 +479,17 @@ class EmaEngulfingExample(StrategyBase):
         current_position: Position | None,
     ) -> DecisionIntent | None:
         candle = market_data["candle"]
+        timeframe = market_data["timeframe"]
 
         # [series 3] 선언한 series의 이번 봉 값이 여기 들어 있다. 위에서 선언한
         # 셋이 그대로 오고, 선언하지 않은 것은 오지 않는다.
         series = market_data["indicators"]
         assert isinstance(candle, Candle) and isinstance(series, Mapping)
+        assert isinstance(timeframe, str)
 
         # 출력이 하나인 series는 값이 float이다.
-        fast = float(series[_FAST])
-        slow = float(series[_SLOW])
+        fast = float(series[series_key_of("EMA", _FAST_PARAMS, timeframe)])
+        slow = float(series[series_key_of("EMA", _SLOW_PARAMS, timeframe)])
 
         if current_position is not None:
             trend_broke = (current_position.side is PositionSide.LONG and fast <= slow) or (
@@ -481,19 +500,20 @@ class EmaEngulfingExample(StrategyBase):
             return self._intent(candle, DecisionAction.EXIT, "trend-broke")
 
         # 출력이 여럿인 series는 값이 dict다. 캔들 패턴은 언제나 넷을 낸다(§1.1).
-        pattern = series[_PATTERN]
+        # 안쪽 이름에는 timeframe이 붙지 않는다. 바깥 key가 이미 말하고 있다.
+        pattern = series[series_key_of(_PATTERN_NAME, {}, timeframe)]
         assert isinstance(pattern, Mapping)
 
         # 미실행 사유를 하나로 뭉치지 않는다. 나중에 무엇이 몇 번 걸렀는지 세려면
         # 사유가 갈려 있어야 한다.
-        if pattern[_PATTERN] != 1.0:
+        if pattern["occurred"] != 1.0:
             return self._intent(candle, DecisionAction.HOLD, "no-engulfing")
-        if pattern[f"{_PATTERN}_strength"] < float(self.config.params["min_strength"]):
+        if pattern["strength"] < float(self.config.params["min_strength"]):
             return self._intent(candle, DecisionAction.HOLD, "engulfing-too-weak")
 
         # 장악형은 패턴 표준이 부호를 이번 봉의 색으로 정의하므로 양수가 bullish다.
         # 다른 패턴에 같은 가정을 옮기지 않는다(§4.4).
-        bullish = pattern[f"{_PATTERN}_dir"] > 0
+        bullish = pattern["direction"] > 0
         if fast > slow and bullish:
             return self._intent(candle, DecisionAction.ENTER_LONG, "uptrend-engulfing")
         if fast < slow and not bullish:
@@ -515,8 +535,8 @@ class EmaEngulfingExample(StrategyBase):
 
 **`min_history`는 series의 warm-up을 모아 적는 자리가 아니다.** 각 series가 값을
 내기까지 필요한 봉 수는 **그 series가 저마다 들고 있고 registry가 소유한다.** 위
-예시에서 `ema:period=55`는 55봉, `ema:period=21`은 21봉, `pat_engulfing`은
-3봉이며, 이 숫자를 전략이 다시 적지 않는다.
+예시에서 55봉 EMA는 55봉, 21봉 EMA는 21봉, 장악형은 3봉이며, 이 숫자를 전략이
+다시 적지 않는다.
 
 전략이 적는 `min_history`는 **series를 빼고 전략 자신의 판단 로직이 필요로 하는
 봉 수**다. 위 예시는 이번 봉의 값만 보므로 1이다. 20봉 전 고가와 비교하는
@@ -664,6 +684,7 @@ min_strength = float(self.config.params["min_strength"])
 MoneyManagementSupport(
     supported=("manual", "turtle"),
     default="manual",
+    default_settings={"manual": {"atr_stop_multiple": 1.5, "reward_risk": 2.0}},
     supports_external_stop=True,
     supports_external_take_profit=True,
     supports_signal_exit=True,
@@ -671,14 +692,17 @@ MoneyManagementSupport(
 )
 ```
 
-여섯 자리의 뜻은 아래와 같다. `supported`에 같은 이름을 두 번 적거나 `default`를
-`supported` 밖의 값으로 두면 생성 자체가 실패한다.
+일곱 자리의 뜻은 아래와 같다. `supported`에 같은 이름을 두 번 적거나 `default`를
+`supported` 밖의 값으로 두면 생성 자체가 실패한다. `default_settings`의 키가 `supported`
+밖이거나, 값이 mapping이 아니거나, `mode`라는 이름을 담거나, 값이 숫자·문자열·참거짓이
+아니거나 유한하지 않은 숫자이면 생성이 실패한다.
 
 
 | 자리                              | 뜻                                          |
 | ------------------------------- | ------------------------------------------ |
 | `supported`                     | 이 전략으로 쓸 수 있는 정책 이름. 여기 없는 정책으로는 실행할 수 없다  |
 | `default`                       | 사용자가 고르지 않았을 때 쓸 정책. `supported` 안에 있어야 한다 |
+| `default_settings`              | mode마다 전략 문서가 정한 정책 설정 값. 실행 설정이 비운 설정은 정책 기본값보다 먼저 여기서 채워지고, 화면의 처음 값도 여기서 온다(5.5절, 7장). 이름이 정책에 있는지와 값이 범위 안인지는 정책을 구성하는 자리(배포 전 점검 `catalog_precheck`, 제출 검증, 런타임 구성)가 본다 |
 | `supports_external_stop`        | `stop_loss`를 정책이 정해 주어도 되는가                       |
 | `supports_external_take_profit` | `take_profit`을 정책이 정해 주어도 되는가                       |
 | `supports_signal_exit`          | 전략이 청산 판단을 스스로 낼 수 있는가                     |
@@ -796,11 +820,15 @@ market_data["indicators"]["pat_engulfing@4h"] == {
 덕분에 **구체 timeframe은 실행 timeframe과 절대 같아질 수 없고, 서로 다른 두
 선언이 같은 execution key로 겹치는 일이 생기지 않는다.**
 
-**어디까지 구현되었나.** 선언의 `timeframe` 자리와 위의 key 형식, 그리고 패턴
-안쪽 이름은 구현되어 있다. **아직 캔들 흐름은 하나뿐이다.** 그래서 실행
-timeframe이 아닌 값을 선언하면 아직 지원하지 않는다는 사유로 거부되며,
-`market_data`의 `candles`와 `timeframe`도 실행 timeframe 하나를 가리킨다.
-**여러 흐름을 읽고 위의 정렬 규칙을 지키는 것은 아직 남아 있다.**
+**어디까지 구현되었나.** 선언의 `timeframe` 자리와 위의 key 형식과 패턴 안쪽
+이름에 더해, **여러 캔들 흐름을 읽고 위의 정렬 규칙을 지키는 것까지
+구현되어 있다.** 실행 timeframe이 아닌 값을 선언하면 그 흐름을 따로 읽어
+판단 시점까지 마감된 봉의 값만 넘긴다.
+
+**다만 원본 캔들은 여전히 하나다.** `market_data`의 `candles`와 `timeframe`은
+실행 timeframe 하나를 가리키므로, **상위 timeframe의 봉을 직접 훑어야 하는
+요구는 그것이 series로 표현될 때에만 된다.** 4시간봉 EMA를 15분봉 실행에서
+읽는 것은 되고, 4시간봉 스윙 고점을 봉마다 훑는 것은 되지 않는다.
 
 **key를 만드는 곳은 하나로 모여 있어야 한다.** 값을 쓸 때와 기록에서 읽어 되만들
 때가 서로 다른 규칙을 쓰면 같은 series를 찾지 못한다. 그래서 서버 쪽은 한 함수가
@@ -823,9 +851,9 @@ key를 만들고, **그 함수는 timeframe을 반드시 받는다** — 받지 
 전략의 `indicators`에는 들어가지 않는다. 지금 이 경로를 실제로 쓰는 것은
 Turtle 정책의 일간 `N` 하나뿐이다.
 
-**그 경로는 위의 정렬 규칙을 이미 지킨다.** 판단 시각보다 늦게 마감된 일봉의
-값은 후보에서 빼고 마지막으로 마감된 것을 쓴다. 전략 쪽 multi-timeframe을
-구현할 때 따를 본보기가 여기 있다.
+**그 경로는 위의 정렬 규칙을 지킨다.** 판단 시각보다 늦게 마감된 일봉의 값은
+후보에서 빼고 마지막으로 마감된 것을 쓴다. 전략이 선언하는 상위 timeframe
+series도 같은 규칙을 따른다.
 
 단순히 1시간 ATR을 쓰면서 역사적 Turtle 규칙과 동일하다고 표시하면 안 된다.
 
@@ -851,10 +879,10 @@ timeframe으로 환산하고 그중 가장 넓은 구간을 취한다.
 warm-up을 채우지 못하면 구현은 구간 제한을 풀고 다시 읽어야 한다. 결측이 있는
 구간에서는 같은 개수를 얻는 데 더 넓은 달력 구간이 필요하기 때문이다.
 
-**위 식의 둘째 항은 지금 자금관리 정책을 통해서만 닿는다.** 요구마다
-timeframe을 가질 수 있는 것은 `PolicyIndicatorRequirement`뿐이고, 전략이 선언한
-series는 모두 실행 timeframe으로 계산된다(§4.4.1). 전략 쪽 multi-timeframe이
-열리면 이 식은 그대로 쓰인다.
+**위 식의 둘째 항에는 전략과 정책이 함께 닿는다.** 전략이 선언한 series도
+`timeframe`을 가질 수 있고(§4.4.1), 정책은 `PolicyIndicatorRequirement`로
+가진다. 흐름마다 필요한 봉 수를 따로 셈한 뒤 각 흐름의 달력 구간으로
+환산한다.
 
 ### 4.6 등록은 Adaptee와 일치해야 한다
 
@@ -893,13 +921,14 @@ API는 없으므로, 아래처럼 이름과 warm-up을 함께 뽑아 확인한�
 
 ```python
 from core_lib.indicators.registry import build_default_registry
-from core_lib.patterns.specs import build_talib_pattern_registry
-from core_lib.series import series_key
+from core_lib.patterns import TALIB_PATTERN_REGISTRY
 
-for spec in sorted(build_default_registry().list(), key=series_key):
-    print(series_key(spec), spec.min_history)
+# 선언에 적는 것은 이름과 parameter다. execution key는 실행 timeframe이 정해질 때
+# 만들어지므로 여기서는 만들지 않는다(§4.4.1).
+for spec in build_default_registry().list():
+    print(spec.name, dict(spec.params), spec.min_history)
 
-print(sorted(build_talib_pattern_registry().names()))
+print(sorted(TALIB_PATTERN_REGISTRY.names()))
 ```
 
 새 지표 조합이나 새 패턴이 필요하면 **전략 작업과 같은 변경에서 registry에
@@ -1185,8 +1214,9 @@ class SignalExitAtrPolicy(MoneyManagementBase):
     atr_stop_multiple: float = 2.5
     leverage_cap: int = 5
 
-    id: ClassVar[str] = "signal_exit_atr"
+    id: ClassVar[str] = "signal-exit-atr"  # 등록 표의 mode는 kebab-case만 받는다(§6.4)
     version: ClassVar[str] = "1.0.0"
+    requires_signal_exit: ClassVar[bool] = True  # 목표가를 두지 않으므로 선언한다(§5.3.2)
 
     def __post_init__(self) -> None:
         # 설정 범위는 생성 시점에 막는다. 실행 도중에 드러나면 늦다.
@@ -1196,6 +1226,14 @@ class SignalExitAtrPolicy(MoneyManagementBase):
             raise ValueError("atr_stop_multiple must be finite and in [0.1, 10]")
         if not 1 <= self.leverage_cap <= 100:
             raise ValueError("leverage_cap must be an integer in [1, 100]")
+        # 아래 요구는 실행이 시작될 때 registry에서 풀린다. 등록되지 않은 기간을 여기서
+        # 거부해야 제출은 받아들이고 실행은 거부하는 설정이 생기지 않는다(§4.7).
+        try:
+            DEFAULT_REGISTRY.get("ATR", {"period": self.atr_period})
+        except KeyError as error:
+            raise ValueError(
+                f"atr_period {self.atr_period} is not a registered ATR combination"
+            ) from error
 
     def required_indicators(self) -> tuple[PolicyIndicatorRequirement, ...]:
         # 실행 timeframe의 ATR을 요구하므로 전략의 indicators에 함께 합류한다.
@@ -1234,17 +1272,28 @@ class SignalExitAtrPolicy(MoneyManagementBase):
         if stop_loss <= 0.0:
             raise MoneyManagementError("stop price must remain positive")
 
+        notional = market.reference_price * quantity
         if account.market_type is MarketType.SPOT:
             leverage = 1
-            if market.reference_price * quantity > account.available_cash:
+            if notional > account.available_cash:
                 raise MoneyManagementError("spot plan exceeds available cash")
         else:
-            notional = market.reference_price * quantity
             needed = max(1, math.ceil(notional / account.available_cash))
             if needed > min(self.leverage_cap, global_limits.max_leverage):
                 # 줄여서 통과시키지 않는다. 설정과 다른 것이 조용히 실행된다.
                 raise MoneyManagementError("plan requires leverage above the cap")
             leverage = needed
+
+        # 손절이 청산가 너머에 놓이면 청산이 이긴다(§4.1). 지킬 수 없는 손절을 기록하지
+        # 않고 계획을 거부한다(§5.1.4).
+        liquidation_price = _liquidation_price(
+            market.reference_price, leverage, global_limits.maintenance_margin_rate, side
+        )
+        liquidation_safe = (
+            liquidation_price < stop_loss if side > 0 else liquidation_price > stop_loss
+        )
+        if not liquidation_safe:
+            raise MoneyManagementError("liquidation would occur before the stop")
 
         return MoneyManagementPlan(
             stop_loss=stop_loss,
@@ -1260,9 +1309,25 @@ class SignalExitAtrPolicy(MoneyManagementBase):
                 "volatility_timestamp": market.volatility_timestamp.isoformat(),
                 "stop_distance": stop_distance,
                 "risk_budget": risk_budget,
+                "requested_notional": notional,
+                "liquidation_price": liquidation_price,
+                "liquidation_safe": liquidation_safe,
             },
         )
+
+
+def _liquidation_price(price: float, leverage: int, mmr: float, side: int) -> float:
+    """격리 증거금에서 진입가 price, 정수 leverage일 때의 청산가."""
+    if side > 0:
+        return price * (1.0 - 1.0 / leverage + mmr)
+    return price * (1.0 + 1.0 / leverage - mmr)
 ```
+
+**예시가 import하는 것.** 위 코드는 `core_lib.indicators`의 `DEFAULT_REGISTRY`와
+`core_lib.money_management`의 여덟 이름과 `core_lib.types`의 `DecisionIntent`·`MarketType`, 그리고
+표준 라이브러리의 `math`·`Mapping`·`dataclass`·`ClassVar`를 쓴다. 배포된 파일
+`services/trading-plugins/trading_plugins/money_management/signal_exit_atr.py`가 이 예시와 같은
+내용이다.
 
 **`take_profit`이 `None`이므로 이 정책은 `supports_signal_exit`가 참인
 전략에서만 쓸 수 있다.** 청산을 낼 수 없는 전략과 짝지으면 진입한 자리를
@@ -1385,8 +1450,13 @@ version을 Evidence에 기록하고 역사적 Turtle 전체 시스템과 동일�
 
 ### 5.5 하위 호환성
 
-**`money_management`가 없는 설정은 `manual`로 해석한다.** 이때 기본값은
-`leverage` 1, `reward_risk` 2.0, `atr_stop_multiple` 2.0이다.
+**`money_management`가 없는 설정은 `manual`로 해석한다.** 비운 설정은 **먼저 전략이
+`MoneyManagementSupport.default_settings`에 그 mode에 대해 선언한 값으로, 그 다음 정책의
+기본값으로** 채워진다. manual 정책의 기본값은 `leverage` 1, `reward_risk` 2.0,
+`atr_stop_multiple` 2.0이다. 채우는 순서는 사용자가 지정한 값, 전략 선언, 정책 기본값이며,
+실행 설정이 검증될 때 한 번 적용되고 그 뒤로는 명시된 값으로 남는다. 그래서 스윕과
+walk-forward의 파생 실행도 같은 값을 갖는다. `AdapterManager.create_runtime`이 같은 규칙을
+한 번 더 적용하므로 실행 설정을 거치지 않는 호출자(신호 생성 세션)에도 같은 값이 닿는다.
 
 **과거 값을 옮겨 담는 것은 `vessel-reference` 전략 하나에만 적용된다.** 그
 전략의 설정에 `money_management`가 없으면 `params` 안의 `leverage`,
@@ -1395,8 +1465,11 @@ version을 Evidence에 기록하고 역사적 Turtle 전체 시스템과 동일�
 자금관리로 옮겨지지 않고 §4.2를 어기는 것으로 남는다.
 
 **원본 설정과 정규화 설정은 둘 다 기록된다.** run 수준 Evidence의
-`submitted_money_management_json`이 **사용자가 실제로 지정한 필드만** 담고,
-`money_management_json`이 정책 id와 version과 정규화된 설정을 담는다.
+`submitted_money_management_json`이 **실행 설정이 검증될 때 받은 mapping**(사용자가 실제로
+지정한 필드만, 없었으면 `mode`만)을 담고, `money_management_json`이 정책 id와 version과
+정규화된 설정, 그리고 **전략이 그 mode에 대해 선언한 설정**(`declared_by_strategy`)을 담는다.
+전략 선언은 뒤에 바뀔 수 있으므로 실행 당시의 값을 파일에 남긴다. 파생 실행(스윕, walk-forward)은
+부모의 전체 설정으로 다시 검증되므로 그 제출 값은 부모의 해석된 전체 mapping이다.
 
 **다만 옮겨 담긴 경우에는 그 둘이 같아진다.** `vessel-reference`의 과거 설정은
 해석 전에 `params`에서 자금관리 설정으로 옮겨지므로, `submitted`에 남는 것은
@@ -1407,10 +1480,11 @@ version을 Evidence에 기록하고 역사적 Turtle 전체 시스템과 동일�
 `MoneyManagementFactory`가 소유하며 Evidence에 기록된다. **받는 이름이나
 기본값이나 범위가 바뀌면 이 version을 올린다.**
 
-**현재 판은 `1.1.0`이다.** Factory 안쪽에서 `mode`를 생략하면 `manual`로 읽던 기본을
-없애고, 이미 어떤 정책 설정인지 정한 호출자가 `mode`와 발견된 정책 mapping을 반드시
-넘기게 한 변경에서 올랐다. `money_management` 자체가 없는 실행 설정을 manual로
-정규화하는 위 호환 규칙은 실행 설정 층에 그대로 남는다.
+**현재 판은 `1.2.0`이다.** `1.1.0`은 Factory 안쪽에서 `mode`를 생략하면 `manual`로 읽던
+기본을 없애고, 이미 어떤 정책 설정인지 정한 호출자가 `mode`와 발견된 정책 mapping을 반드시
+넘기게 한 변경에서 올랐다. `1.2.0`은 실행 설정 층이 비운 설정을 정책 기본값보다 먼저 전략의
+`default_settings`로 채우게 된 변경에서 올랐다. `money_management` 자체가 없는 실행 설정을
+manual로 정규화하는 위 호환 규칙은 실행 설정 층에 그대로 남는다.
 
 **판이 필요한 이유는 같은 설정 재실행 때문이다.** 저장되는 것은 사용자가 적은
 원본이고 기본값은 해석할 때 채워진다. 그래서 기본값이 바뀌면 **같은 원본이 다른
@@ -1497,6 +1571,10 @@ services/trading-plugins/trading_plugins/
 것은 §4.6에 있다. `is_active`가 거짓이거나 `is_deprecated`가 참이면 실행할 수
 없으므로, **켜고 끄는 것은 코드가 아니라 이 두 열이 맡는다.**
 
+**정책의 `id`는 등록 표의 `mode`가 되므로 kebab-case여야 한다.** 표가
+`^[a-z0-9]+(-[a-z0-9]+)*$`로 검사하며, 밑줄이 든 id는 등록 문장 적용 단계에서 거부된다.
+전략의 `STRATEGY_ID`에 같은 규칙이 걸린다.
+
 **정책은 `signal_db.money_management_registry`에 넣는다.** mode와 클래스 이름과 모듈
 경로와 설정 이름, 표시 정보, 활성 여부와 폐기 여부를 담는다. 발견된 정책과 등록 행의 신원과
 설정 이름이 맞고 활성 상태여야 고르고 실행할 수 있다. 정책 판은 알아야 할 사실이지만 대조로
@@ -1548,11 +1626,17 @@ services/trading-plugins/trading_plugins/
 정책에서 만들어지므로 데이터베이스 상태에 흔들리지 않는다. 남은 결합은 Engine이 정책에
 넘길 변동성을 정책 id로 갈라 고르는 자리다(§5.3.2).
 
-**넷째는 실행 timeframe을 쓰는 정책에 한해 지금 풀 수 있다.** 정책이
+**넷째는 실행 timeframe을 쓰는 정책에 한해 풀렸다.** 정책이
 `required_indicators()`로 이미 선언하므로 그 선언에서 execution key를 만들어
-조회하면 분기가 사라진다. **다른 timeframe의 값을 쓰는 정책은 그렇게 풀리지
-않는다** — Turtle의 일간 `N`은 지표 registry에 등록된 것이 아니라 Engine이 따로
-계산하는 값이며, 이 문제는 §4.4.1의 multi-timeframe 작업과 같은 것이다.
+조회하며, 그 자리에는 정책 이름이 없다.
+
+**다른 timeframe의 값을 쓰는 정책은 아직 그렇게 풀리지 않는다.** 막는 것은
+timeframe도 등록도 아니고 **Engine에 남은 Turtle 전용 자리 둘**이다. 하나는
+정책 id가 `turtle`일 때에만 일봉 `N`을 미리 계산해 두는 자리이고, 다른 하나는
+실행 timeframe이 아닌 요구를 registry에서 찾지 않고 그 미리 계산해 둔 값에서
+읽는 자리다. 그래서 **다른 정책이 `1d` 요구를 선언하면 등록을 더해도 값을 받지
+못한다.** 여러 캔들 흐름 자체는 이미 있으므로(§4.4.1) 남은 것은 이 두 자리를
+선언 기준으로 옮기는 일이다.
 
 **실행 설정 union은 가장 조심스러웠다.** 자금관리 설정을 두 형으로 정적으로 묶어 두면 mode를
 늘릴 때마다 그 파일을 고쳐야 한다. **union은 발견된 정책에서 만들어 낸다.** 발견이
@@ -1567,6 +1651,10 @@ API 스키마가 데이터베이스 상태에 따라 흔들리지 않는다. 기
 **기존 둘의 설정 모델은 손으로 쓴 그대로 둔다.** 배포된 정책만 그 클래스의
 필드에서 모델을 만들어 union에 더한다. 그래야 클라이언트가 이미 보는 스키마와
 오류 문구가 움직이지 않는다.
+
+**생성된 모델은 검증할 때 정책을 실제로 한 번 만든다.** `__post_init__`이 거부하는 값은
+그래서 제출 시점에 검증 오류(422)로 드러나고, 실행이 큐에 들어간 뒤에 실패하지 않는다.
+범위를 두 곳에 적는 것이 아니라, 한 곳(`__post_init__`)의 판정을 검증이 빌려 쓰는 것이다.
 
 **범위 검사는 정책의 `__post_init__`이 계속 소유한다.** 생성되는 모델이 가져가는
 것은 이름과 기본값과 type뿐이다. 값이 무엇일 수 있는지를 두 곳이 나눠 가지면
@@ -1711,7 +1799,8 @@ UI는 `StrategyMetadata`가 허용한 정책만 보여준다.
 - 기존 두 정책이 아닌 정책을 선택하면 그 정책의 설정을 JSON으로 적는 입력을
 보인다. 화면은 배포된 정책의 필드 이름을 알 수 없으므로 전용 입력을 만들 수
 없고, 적힌 값은 서버가 그 정책의 정의로 검증한다. 비우면 정책의 기본값이 쓰인다.
-- 처음 값은 전략이 그 mode에 대해 밝힌 기본값에서 채우되 **처음 한 번만** 채운다.
+- 처음 값은 전략이 그 mode에 대해 밝힌 기본값(`MoneyManagementSupport.default_settings`를
+정책 기본값 위에 덮은 값, 4.3절)에서 채우되 **처음 한 번만** 채운다.
 다른 mode의 기본값은 필드 이름부터 다르므로 가져오지 않고, 이미 적어 둔 값을 다시
 덮지도 않는다.
 - 적어 둔 설정은 **mode마다 따로 남는다.** 하나에 모아 두면 mode를 옮길 때 앞

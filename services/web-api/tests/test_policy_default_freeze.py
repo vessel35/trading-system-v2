@@ -104,7 +104,13 @@ def _adapter_for(
 def test_fixed_policy_hooks_run_during_freeze_and_not_during_two_responses(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The documented 1/1/1/1/2/1 counts belong to this exact fixture."""
+    """The documented 3/3/1/1/2/1 counts belong to this exact fixture.
+
+    The freeze builds the policy once to read its defaults, then validates the frozen
+    value through the money-management adapter twice; each validation constructs the
+    policy once more so that its ``__post_init__`` refusals surface as validation
+    errors (contract section 6.5). Hence three constructions, and none during responses.
+    """
     policies: dict[str, type[MoneyManagementBase]] = dict(registered_money_management())
     policies[_CountedPolicy.id] = _CountedPolicy
     adapter = _adapter_for({_CountedPolicy.id: _CountedPolicy})
@@ -135,8 +141,8 @@ def test_fixed_policy_hooks_run_during_freeze_and_not_during_two_responses(
     )
 
     assert _HOOKS == {
-        "construct": 1,
-        "post_init": 1,
+        "construct": 3,
+        "post_init": 3,
         "resolved_config": 1,
         "default_factory": 1,
         "validator": 2,
@@ -392,7 +398,7 @@ class _MissingTableConnection:
 
 @pytest.mark.parametrize(
     ("target", "expected"),
-    [("backtest", {"create": 0, "resolved": 0}), ("web", {"create": 2, "resolved": 2})],
+    [("backtest", {"create": 0, "resolved": 0}), ("web", {"create": 3, "resolved": 3})],
 )
 def test_only_the_web_api_cold_import_builds_form_defaults(
     target: str,
@@ -404,6 +410,7 @@ import sys
 
 from core_lib.money_management import MoneyManagementFactory
 from trading_plugins.money_management.manual import ManualMoneyManagement
+from trading_plugins.money_management.signal_exit_atr import SignalExitAtrMoneyManagement
 from trading_plugins.money_management.turtle import TurtleMoneyManagement
 
 counts = {"create": 0, "resolved": 0}
@@ -414,7 +421,11 @@ def counted_create(*args, **kwargs):
     return real_create(*args, **kwargs)
 
 MoneyManagementFactory.create = staticmethod(counted_create)
-for policy_class in (ManualMoneyManagement, TurtleMoneyManagement):
+for policy_class in (
+    ManualMoneyManagement,
+    SignalExitAtrMoneyManagement,
+    TurtleMoneyManagement,
+):
     original = policy_class.resolved_config
     def counted_resolved(self, original=original):
         counts["resolved"] += 1

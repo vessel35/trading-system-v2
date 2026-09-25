@@ -8,12 +8,16 @@ from typing import Any, Final, cast
 
 from .policies import MoneyManagementBase
 
-MONEY_MANAGEMENT_SCHEMA_VERSION: Final = "1.1.0"
+MONEY_MANAGEMENT_SCHEMA_VERSION: Final = "1.2.0"
 """How a submitted ``money_management`` mapping is interpreted.
 
 Raise this whenever the accepted names, their defaults, or their ranges change,
-so a stored configuration can be replayed the way it was originally read instead
-of being reinterpreted under whatever the current defaults happen to be.
+or when the run-configuration layer that fills omitted settings changes, so a
+stored configuration can be replayed the way it was originally read instead of
+being reinterpreted under whatever the current defaults happen to be. Version
+1.2.0: an omitted setting is filled from the strategy's declared
+``MoneyManagementSupport.default_settings`` for the mode before the policy's own
+default applies.
 """
 
 

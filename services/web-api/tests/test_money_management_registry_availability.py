@@ -133,7 +133,7 @@ def test_inactive_mode_has_the_same_screen_and_submission_verdict() -> None:
         money_management_registrations=registrations,
     )
 
-    option = repository.list().data[0]
+    option = next(item for item in repository.list().data if item.strategy_id == "vessel-reference")
     manual = next(item for item in option.money_management_availability if item.mode == "manual")
     assert option.supported_money_management == ["manual", "turtle"]
     assert manual.runnable is False

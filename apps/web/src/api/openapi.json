@@ -198,6 +198,9 @@
                       },
                       {
                         "$ref": "#/components/schemas/TurtleMoneyManagementConfig"
+                      },
+                      {
+                        "$ref": "#/components/schemas/SignalExitAtrMoneyManagementConfig"
                       }
                     ],
                     "title": "Money Management",
@@ -205,7 +208,8 @@
                       "propertyName": "mode",
                       "mapping": {
                         "manual": "#/components/schemas/ManualMoneyManagementConfig",
-                        "turtle": "#/components/schemas/TurtleMoneyManagementConfig"
+                        "turtle": "#/components/schemas/TurtleMoneyManagementConfig",
+                        "signal-exit-atr": "#/components/schemas/SignalExitAtrMoneyManagementConfig"
                       }
                     }
                   },
@@ -7198,6 +7202,9 @@
               },
               {
                 "$ref": "#/components/schemas/TurtleMoneyManagementConfig"
+              },
+              {
+                "$ref": "#/components/schemas/SignalExitAtrMoneyManagementConfig"
               }
             ],
             "title": "Money Management",
@@ -7205,6 +7212,7 @@
               "propertyName": "mode",
               "mapping": {
                 "manual": "#/components/schemas/ManualMoneyManagementConfig",
+                "signal-exit-atr": "#/components/schemas/SignalExitAtrMoneyManagementConfig",
                 "turtle": "#/components/schemas/TurtleMoneyManagementConfig"
               }
             }
@@ -8143,6 +8151,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/TurtleMoneyManagementConfig"
+                  },
+                  {
+                    "$ref": "#/components/schemas/SignalExitAtrMoneyManagementConfig"
                   }
                 ],
                 "title": "Money Management",
@@ -8150,6 +8161,7 @@
                   "propertyName": "mode",
                   "mapping": {
                     "manual": "#/components/schemas/ManualMoneyManagementConfig",
+                    "signal-exit-atr": "#/components/schemas/SignalExitAtrMoneyManagementConfig",
                     "turtle": "#/components/schemas/TurtleMoneyManagementConfig"
                   }
                 }
@@ -8909,6 +8921,34 @@
         ],
         "title": "Signal"
       },
+      "SignalExitAtrMoneyManagementConfig": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "const": "signal-exit-atr",
+            "title": "Mode",
+            "default": "signal-exit-atr"
+          },
+          "atr_period": {
+            "type": "integer",
+            "title": "Atr Period",
+            "default": 14
+          },
+          "atr_stop_multiple": {
+            "type": "number",
+            "title": "Atr Stop Multiple",
+            "default": 2.5
+          },
+          "leverage_cap": {
+            "type": "integer",
+            "title": "Leverage Cap",
+            "default": 5
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "SignalExitAtrMoneyManagementConfig"
+      },
       "StrategyListResponse": {
         "properties": {
           "data": {
@@ -9462,6 +9502,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/TurtleMoneyManagementConfig"
+                  },
+                  {
+                    "$ref": "#/components/schemas/SignalExitAtrMoneyManagementConfig"
                   }
                 ],
                 "title": "Money Management",
@@ -9469,6 +9512,7 @@
                   "propertyName": "mode",
                   "mapping": {
                     "manual": "#/components/schemas/ManualMoneyManagementConfig",
+                    "signal-exit-atr": "#/components/schemas/SignalExitAtrMoneyManagementConfig",
                     "turtle": "#/components/schemas/TurtleMoneyManagementConfig"
                   }
                 }

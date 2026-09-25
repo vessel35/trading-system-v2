@@ -458,7 +458,13 @@ def test_code_fallback_lists_every_strategy_in_the_common_registry() -> None:
     response = StrategyRepository(connection, registry).list()
 
     assert [strategy.strategy_id for strategy in response.data] == [
+        "bollinger-band-bounce",
+        "bollinger-rsi-reversion",
         "deployed-strategy",
+        "donchian-breakout-atr",
+        "macd-ema200-zero-line",
+        "supertrend-ema200-flip",
+        "three-bar-reversion",
         "vessel-reference",
     ]
 
@@ -490,8 +496,8 @@ def test_the_app_builds_the_common_strategy_registry_once_for_multiple_requests(
 def test_strategy_repository_falls_back_to_code_registry() -> None:
     connection = cast(SignalConnection, _MissingTableConnection())
     response = StrategyRepository(connection, build_strategy_registry()).list()
-    assert len(response.data) == 1
-    strategy = response.data[0]
+    assert len(response.data) == 7
+    strategy = next(item for item in response.data if item.strategy_id == "vessel-reference")
     assert strategy.strategy_id == "vessel-reference"
     assert strategy.supported_timeframes == ["1h"]
     assert strategy.default_params == {}
@@ -515,7 +521,8 @@ def test_the_strategy_list_does_not_restrict_the_money_management_modes() -> Non
 def test_a_mode_default_comes_from_the_policy_rather_than_a_manual_shaped_dict() -> None:
     """The prefilled settings used to be manual's fields regardless of the mode."""
     connection = cast(SignalConnection, _MissingTableConnection())
-    strategy = StrategyRepository(connection, build_strategy_registry()).list().data[0]
+    strategies = StrategyRepository(connection, build_strategy_registry()).list().data
+    strategy = next(item for item in strategies if item.strategy_id == "vessel-reference")
 
     assert strategy.default_money_management == dict(
         MoneyManagementFactory.create(
@@ -551,10 +558,13 @@ def test_one_policy_that_fails_to_build_does_not_break_the_strategy_list(
     assert dict(_freeze_money_management_defaults({}, ["turtle"])) == {}
 
 
+def _support(supported: list[str], default: str) -> MoneyManagementSupport:
+    return MoneyManagementSupport(supported=tuple(supported), default=default)
+
+
 def test_a_rejected_declared_default_does_not_invent_another_default() -> None:
     modes, default = _money_management_options(
-        ["manual", "not-in-the-run-union"],
-        "not-in-the-run-union",
+        _support(["manual", "not-in-the-run-union"], "not-in-the-run-union")
     )
 
     assert modes == ["manual"]
@@ -562,10 +572,48 @@ def test_a_rejected_declared_default_does_not_invent_another_default() -> None:
 
 
 def test_all_rejected_modes_leave_both_the_list_and_default_empty() -> None:
-    assert _money_management_options(["not-in-the-run-union"], "not-in-the-run-union") == (
-        [],
-        {},
+    assert _money_management_options(
+        _support(["not-in-the-run-union"], "not-in-the-run-union")
+    ) == ([], {})
+
+
+def test_a_declared_setting_is_laid_over_the_policy_default() -> None:
+    """Contract section 7: the screen's first values are what the strategy states."""
+    support = MoneyManagementSupport(
+        supported=("manual",),
+        default="manual",
+        default_settings={"manual": {"atr_stop_multiple": 1.5, "reward_risk": 1.5}},
     )
+
+    modes, default = _money_management_options(support)
+
+    assert modes == ["manual"]
+    assert default == {
+        "mode": "manual",
+        "leverage": 1,
+        "reward_risk": 1.5,
+        "atr_stop_multiple": 1.5,
+    }
+    assert validate_money_management_config(default) == default
+    default["leverage"] = 99
+    assert _money_management_options(support)[1]["leverage"] == 1
+
+
+def test_a_declaration_the_policy_refuses_falls_back_to_its_defaults(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    support = MoneyManagementSupport(
+        supported=("manual",),
+        default="manual",
+        default_settings={"manual": {"atr_stop_multiple": 20.0}},
+    )
+
+    with caplog.at_level("ERROR", logger="web_api.repository"):
+        modes, default = _money_management_options(support)
+
+    assert modes == ["manual"]
+    assert default == _default_money_management("manual")
+    assert any("refuses the settings a strategy declared" in r.message for r in caplog.records)
 
 
 @pytest.mark.parametrize(
@@ -580,7 +628,7 @@ def test_projected_default_is_empty_or_valid_for_a_selectable_mode(
     supported: list[str],
     declared_default: str,
 ) -> None:
-    modes, default = _money_management_options(supported, declared_default)
+    modes, default = _money_management_options(_support(supported, declared_default))
 
     if not default:
         return

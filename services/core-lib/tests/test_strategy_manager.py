@@ -609,3 +609,107 @@ def test_catalog_reconciliation_adds_declaration_mismatch_and_isolates_read_fail
         "read-failed": StrategyReconciliationState.DECLARATION_READ_FAILED,
     }
     assert ReconciliationReadProbe.metadata_calls == 1
+
+
+class DeclaringAdaptee(MoneyManagedAdaptee):
+    """Declare the document's manual settings so a bare submission runs them."""
+
+    @classmethod
+    def get_metadata(cls) -> StrategyMetadata:
+        metadata = super().get_metadata()
+        metadata.money_management = MoneyManagementSupport(
+            supported=("manual",),
+            default="manual",
+            default_settings={"manual": {"leverage": 4}},
+            supports_external_stop=True,
+            supports_external_take_profit=True,
+            supports_signal_exit=True,
+        )
+        return metadata
+
+
+class MisdeclaringAdaptee(MoneyManagedAdaptee):
+    """Declare a setting name the manual policy does not have."""
+
+    @classmethod
+    def get_metadata(cls) -> StrategyMetadata:
+        metadata = super().get_metadata()
+        metadata.money_management = MoneyManagementSupport(
+            supported=("manual",),
+            default="manual",
+            default_settings={"manual": {"not_a_setting": 1}},
+            supports_external_stop=True,
+            supports_external_take_profit=True,
+            supports_signal_exit=True,
+        )
+        return metadata
+
+
+@pytest.mark.parametrize(
+    ("declared", "message"),
+    [
+        ({"turtle": {"leverage": 2}}, "unsupported money-management mode"),
+        ({"manual": {"mode": "manual"}}, "may not set 'mode'"),
+        ({"manual": {"leverage": float("nan")}}, "finite number"),
+        ({"manual": {"leverage": [1]}}, "number, text, or boolean"),
+        ({"manual": 1.5}, "mapping of setting values"),
+    ],
+)
+def test_default_settings_are_checked_for_structure_at_declaration(
+    declared: object, message: str
+) -> None:
+    with pytest.raises((ValueError, TypeError), match=message):
+        MoneyManagementSupport(
+            supported=("manual",),
+            default="manual",
+            default_settings=declared,  # type: ignore[arg-type]
+        )
+
+
+def test_default_settings_are_frozen_and_resolve_under_the_submission() -> None:
+    support = MoneyManagementSupport(
+        supported=("manual", "turtle"),
+        default="manual",
+        default_settings={"manual": {"leverage": 4, "reward_risk": 1.5}},
+    )
+
+    with pytest.raises(TypeError):
+        support.default_settings["manual"]["leverage"] = 9  # type: ignore[index]
+    assert support.resolve_settings({"mode": "manual"}) == {
+        "mode": "manual",
+        "leverage": 4,
+        "reward_risk": 1.5,
+    }
+    assert support.resolve_settings({"mode": "manual", "leverage": 2}) == {
+        "mode": "manual",
+        "leverage": 2,
+        "reward_risk": 1.5,
+    }
+    resolved = support.resolve_settings({"mode": "manual", "leverage": 2})
+    assert support.resolve_settings(resolved) == resolved
+    assert support.resolve_settings({"mode": "turtle"}) == {"mode": "turtle"}
+    assert support.resolve_settings({"leverage": 2}) == {"leverage": 2}
+
+
+def test_runtime_fills_a_bare_submission_from_the_strategy_declaration() -> None:
+    manager = _manager_for(DeclaringAdaptee)
+    raw = {"strategy_id": "contract-fixture", "params": {"fast": 10}}
+
+    declared = manager.create_runtime("contract-fixture", raw, {"mode": "manual"})
+    explicit = manager.create_runtime("contract-fixture", raw, {"mode": "manual", "leverage": 3})
+
+    assert declared.money_management is not None
+    assert declared.money_management.resolved_config()["leverage"] == 4
+    assert explicit.money_management is not None
+    assert explicit.money_management.resolved_config()["leverage"] == 3
+
+
+def test_runtime_refuses_a_declaration_the_policy_does_not_accept() -> None:
+    manager = _manager_for(MisdeclaringAdaptee)
+
+    with pytest.raises(ValueError, match="unexpected money-management parameters"):
+        manager.create_runtime(
+            "contract-fixture",
+            {"strategy_id": "contract-fixture", "params": {"fast": 10}},
+            {"mode": "manual"},
+        )

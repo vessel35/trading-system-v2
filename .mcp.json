@@ -25,6 +25,10 @@
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-postgres@0.6.2"],
       "env": { "DATABASE_URL": "${CRYPTO_DATA_RO_URL}" }
+    },
+    "trading_plugin_facts": {
+      "command": ".venv/bin/python",
+      "args": ["-m", "trading_plugins.mcp_server"]
     }
   }
 }

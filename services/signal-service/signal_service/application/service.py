@@ -111,15 +111,14 @@ class SignalGenerationService:
         if self._config is not None:
             raise RuntimeError("signal generation session is already started")
         boundary = self._utc(decision_time, name="decision_time")
-        manual_config = {
-            "mode": "manual",
-            "leverage": config.params.get("leverage", 1),
-            "reward_risk": config.params.get("reward_risk", 2.0),
-            "atr_stop_multiple": config.params.get("atr_stop_multiple", 2.0),
-        }
+        # Only the legacy names the caller actually set are passed on. What is left
+        # out is filled by the runtime from the strategy's declared settings and
+        # then the policy's own defaults, the same way a backtest run is filled.
+        manual_config: dict[str, object] = {"mode": "manual"}
         strategy_params = dict(config.params)
         for name in ("leverage", "reward_risk", "atr_stop_multiple"):
-            strategy_params.pop(name, None)
+            if name in strategy_params:
+                manual_config[name] = strategy_params.pop(name)
         runtime = self._manager.create_runtime(
             config.strategy_id,
             {"strategy_id": config.strategy_id, "params": strategy_params},

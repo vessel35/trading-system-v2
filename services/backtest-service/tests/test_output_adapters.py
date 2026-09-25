@@ -642,6 +642,9 @@ def test_catalog_tag_mutations_are_parameterized_and_idempotent() -> None:
 _MONEY_CONFIG_SURFACE: dict[str, str] = {
     "1.0.0": "fb89fc1be12e54134c8027f997b6801f6e3e454fed6944087903ddb442bf0f56",
     "1.1.0": "fb89fc1be12e54134c8027f997b6801f6e3e454fed6944087903ddb442bf0f56",
+    # 1.2.0 fills an omitted setting from the strategy declaration first; the
+    # names, defaults, and ranges these models read with are unchanged.
+    "1.2.0": "fb89fc1be12e54134c8027f997b6801f6e3e454fed6944087903ddb442bf0f56",
 }
 
 

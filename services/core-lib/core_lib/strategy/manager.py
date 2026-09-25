@@ -103,6 +103,10 @@ class AdapterManager:
                     f"money-management mode {mode!r} is not runnable: "
                     f"{None if reason is None else reason.value}"
                 )
+            # The run configuration already applied the strategy's declared settings
+            # when it was validated; this repeats the same rule for callers that build
+            # a policy without one, and changes nothing for a resolved mapping.
+            money_management_config = support.resolve_settings(money_management_config)
         policy = MoneyManagementFactory.create(
             money_management_config, self._money_management_policies
         )

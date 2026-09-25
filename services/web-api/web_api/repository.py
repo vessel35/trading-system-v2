@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import asdict
 from datetime import datetime, timedelta
 from decimal import Decimal
+from functools import lru_cache
 from types import MappingProxyType
 from typing import Any, Final, Literal, cast
 
@@ -22,6 +23,7 @@ from core_lib.money_management import (
 )
 from core_lib.strategy import (
     InProcessStrategyRegistry,
+    MoneyManagementSupport,
     ParameterSchema,
     StrategyConfig,
     StrategyMetadata,
@@ -230,15 +232,56 @@ def _default_money_management(mode: str | None) -> dict[str, object]:
     return cast("dict[str, object]", decoded)
 
 
+@lru_cache(maxsize=256)
+def _declared_money_management_json(mode: str, declared_json: str) -> str | None:
+    """Overlay a strategy's declared settings on the policy's frozen defaults, once.
+
+    The result is validated through the final run-configuration union and kept as
+    strict JSON text, so a request never runs a deployed policy's constructor and
+    every response decodes its own copy. A declaration the policy refuses (a name
+    it does not have, a value outside its range) is logged and the policy's own
+    defaults are returned: the strategy stays selectable and the screen shows the
+    values a run would otherwise be refused with, rather than nothing.
+    """
+    base = _FROZEN_MONEY_MANAGEMENT_DEFAULTS.get(mode)
+    if base is None or declared_json == "{}":
+        return base
+    merged = {**json.loads(base), **json.loads(declared_json)}
+    try:
+        return freeze_money_management_config(merged, expected_mode=mode)
+    except (Exception, SystemExit):  # noqa: BLE001 - isolate one strategy's declaration
+        _LOGGER.exception(
+            "money-management mode %s refuses the settings a strategy declared for it; "
+            "the policy defaults are offered instead",
+            mode,
+        )
+        return base
+
+
 def _money_management_options(
-    supported: Sequence[str],
-    default: str | None,
+    support: MoneyManagementSupport,
 ) -> tuple[list[str], dict[str, object]]:
-    """Project one consistent selectable-mode list and declared default."""
-    modes = _selectable_modes(supported)
-    if default not in modes:
+    """Project one consistent selectable-mode list and the declared default.
+
+    The default is the policy's own defaults with the strategy's declared
+    settings for that mode laid over them (contract section 7: the screen's first
+    values come from what the strategy states for the mode).
+    """
+    modes = _selectable_modes(support.supported)
+    default = support.default
+    if default is None or default not in modes:
         return modes, {}
-    return modes, _default_money_management(default)
+    declared = support.default_settings.get(default, {})
+    if not declared:
+        return modes, _default_money_management(default)
+    declared_json = json.dumps(dict(declared), allow_nan=False, sort_keys=True)
+    encoded = _declared_money_management_json(default, declared_json)
+    if encoded is None:
+        return modes, {}
+    decoded = json.loads(encoded)
+    if not isinstance(decoded, dict):
+        raise TypeError("frozen money-management default must be a JSON object")
+    return modes, cast("dict[str, object]", decoded)
 
 
 def _money_management_availability_response(
@@ -658,10 +701,7 @@ class StrategyRepository:
                 metadata = strategy_class.get_metadata()
                 schema = strategy_class.get_parameter_schema()
                 default_params = self._parameter_defaults(schema)
-                modes, default = _money_management_options(
-                    metadata.money_management.supported,
-                    metadata.money_management.default,
-                )
+                modes, default = _money_management_options(metadata.money_management)
             except (Exception, SystemExit):  # noqa: BLE001 - isolate deployed code per strategy
                 _LOGGER.exception("strategy %s declaration could not be read", strategy_id)
                 metadata = None
@@ -740,10 +780,7 @@ class StrategyRepository:
                 metadata = strategy_class.get_metadata()
                 schema = strategy_class.get_parameter_schema()
                 default_params = self._parameter_defaults(schema)
-                modes, default = _money_management_options(
-                    metadata.money_management.supported,
-                    metadata.money_management.default,
-                )
+                modes, default = _money_management_options(metadata.money_management)
             except (Exception, SystemExit):  # noqa: BLE001 - isolate deployed code per strategy
                 _LOGGER.exception("strategy %s declaration could not be read", strategy_id)
                 metadata = None

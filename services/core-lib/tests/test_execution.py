@@ -377,6 +377,41 @@ def test_trigger_gap_uses_unfavorable_open_and_skips_the_fill_candle() -> None:
     assert fill.gap_filled is True
 
 
+def test_take_profit_and_liquidation_are_not_checked_on_the_fill_candle() -> None:
+    """The fill candle is skipped for every trigger, not only for the stop.
+
+    Each scenario touches its level inside the fill candle and again in the next
+    candle. The exit lands in the next candle both times, which is what the
+    capability list states for the target and the forced liquidation.
+    """
+    fill_candle = make_candle(1, open_price=100.0, high=112.0, low=99.0, close=101.0)
+    later_candle = make_candle(2, open_price=101.0, high=106.0, low=100.0, close=102.0)
+    target = resolve_triggers(
+        make_position(liquidation_price=Decimal("80")),
+        [fill_candle, later_candle],
+        FakeCostModel(),
+        take_profit_price=Decimal("105"),
+        entry_time=fill_candle.open_time,
+    )
+    assert target is not None
+    assert target.exit_reason is ExitReason.TAKE_PROFIT
+    assert target.timestamp == later_candle.close_time
+    assert target.reference_price == Decimal("105.00000000")
+
+    crash_candle = make_candle(1, open_price=100.0, high=101.0, low=70.0, close=95.0)
+    next_candle = make_candle(2, open_price=95.0, high=96.0, low=79.0, close=90.0)
+    liquidated = resolve_triggers(
+        make_position(liquidation_price=Decimal("80")),
+        [crash_candle, next_candle],
+        FakeCostModel(),
+        entry_time=crash_candle.open_time,
+    )
+    assert liquidated is not None
+    assert liquidated.exit_reason is ExitReason.LIQUIDATION
+    assert liquidated.timestamp == next_candle.close_time
+    assert liquidated.reference_price == Decimal("80.00000000")
+
+
 def test_position_book_owns_open_increase_reduce_close_and_accounting_identity() -> None:
     book = PositionBook()
     book.apply(

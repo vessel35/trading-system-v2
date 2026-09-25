@@ -12,6 +12,7 @@ from threading import Event
 from typing import ClassVar, cast
 
 import pytest
+from core_lib.capabilities import capability
 from core_lib.indicators import DEFAULT_REGISTRY, IndicatorRegistry, IndicatorSpec
 from core_lib.money_management import (
     AccountRiskSnapshot,
@@ -116,6 +117,21 @@ class _SignalSafePolicy(_AccountStateSensitivePolicy):
             requested_leverage=3,
             initial_risk_amount=account.equity * global_limits.risk_per_trade,
             diagnostics={"decision": decision.action.value},
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class _DailyInputSignalPolicy(_SignalSafePolicy):
+    """Ignore account state, but ask for a value only the backtest engine prepares."""
+
+    def required_indicators(self) -> tuple[PolicyIndicatorRequirement, ...]:
+        return (
+            PolicyIndicatorRequirement(
+                name="TURTLE_N",
+                params={"period": 20},
+                timeframe="1d",
+                min_history=20,
+            ),
         )
 
 
@@ -913,6 +929,32 @@ def test_signal_service_rejects_policy_without_signal_account_state_capability()
         service.start(_config(), values[-1].close_time)
 
 
+def test_signal_generation_refuses_an_account_dependent_policy() -> None:
+    """Pin the second half of what live signal generation asks of a policy.
+
+    ``core_lib.capabilities`` records that a policy which backtests may still be
+    refused here: it must ignore account state, and its one input must be on the
+    strategy timeframe. The refusal above covers the first half; a daily input
+    fails on the second even though the engine prepares exactly that for Turtle.
+    """
+    values = _candles(15)
+    service = SignalGenerationService(
+        _Feed(values),
+        _manager(
+            _TargetEntryProbeStrategy,
+            money_management_policies={"manual": _DailyInputSignalPolicy},
+        ),
+        _Sink(),
+    )
+
+    with pytest.raises(ValueError, match="one strategy-timeframe policy input"):
+        service.start(_config(), values[-1].close_time)
+    assert capability("money_management.live_signal_requirements").value == (
+        "protection_and_leverage_ignore_account_state",
+        "one strategy-timeframe input",
+    )
+
+
 def test_signal_service_accepts_declared_signal_account_state_capability() -> None:
     values = _candles(15)
     service = SignalGenerationService(
@@ -1115,3 +1157,56 @@ def test_slice_has_no_order_exchange_or_wallet_database_surface() -> None:
     assert "OrderRequest" not in source
     assert "Broker" not in source
     assert "wallet_db" not in source
+
+
+class _DeclaringEntryProbeStrategy(_TargetEntryProbeStrategy):
+    """Declare the document's stop multiple so a session without params runs it."""
+
+    @classmethod
+    def get_metadata(cls) -> StrategyMetadata:
+        metadata = super().get_metadata()
+        metadata.money_management = MoneyManagementSupport(
+            supported=("manual",),
+            default="manual",
+            default_settings={"manual": {"atr_stop_multiple": 1.5}},
+            supports_external_stop=True,
+            supports_external_take_profit=True,
+        )
+        return metadata
+
+
+def test_live_session_fills_omitted_protection_from_the_strategy_declaration() -> None:
+    values = _candles(22)
+    service = SignalGenerationService(
+        _Feed(values), _manager(_DeclaringEntryProbeStrategy), _Sink()
+    )
+
+    service.start(_config(), values[-1].close_time)
+
+    assert service._money_management is not None
+    assert dict(service._money_management.resolved_config()) == {
+        "mode": "manual",
+        "leverage": 1,
+        "reward_risk": 2.0,
+        "atr_stop_multiple": 1.5,
+    }
+
+
+def test_live_session_keeps_a_caller_supplied_protection_over_the_declaration() -> None:
+    values = _candles(22)
+    service = SignalGenerationService(
+        _Feed(values), _manager(_DeclaringEntryProbeStrategy), _Sink()
+    )
+    config = SignalGenerationConfig(
+        strategy_id=_STRATEGY_ID,
+        params={"atr_stop_multiple": 2.5},
+        symbol="BTCUSDT",
+        timeframe="1h",
+        market_type=MarketType.FUTURES,
+        mode=SignalMode.PAPER,
+    )
+
+    service.start(config, values[-1].close_time)
+
+    assert service._money_management is not None
+    assert service._money_management.resolved_config()["atr_stop_multiple"] == 2.5

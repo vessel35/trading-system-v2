@@ -1,9 +1,11 @@
 """Define the StrategyAdapter decision protocol."""
 
+import math
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
+from types import MappingProxyType
 from typing import Protocol, runtime_checkable
 
 from core_lib.money_management import MoneyManagementBase
@@ -31,12 +33,75 @@ class MoneyManagementSupport:
     supports_external_take_profit: bool = False
     supports_signal_exit: bool = False
     supports_pyramiding: bool = False
+    default_settings: Mapping[str, Mapping[str, object]] = field(default_factory=dict)
+    """Policy settings the strategy's document fixed, keyed by the mode they belong to.
+
+    A run submitted without a setting reads it from here before the policy's own
+    default, so a document that says "1.5 times ATR" is run that way unless the
+    user asks for something else. Only the structure is checked here: whether a
+    name exists on the policy and whether a value is in range is decided where the
+    policy is constructed, because this module does not know the policies.
+    """
 
     def __post_init__(self) -> None:
         if len(set(self.supported)) != len(self.supported):
             raise ValueError("money-management modes must be unique")
         if self.default is not None and self.default not in self.supported:
             raise ValueError("default money-management mode must be supported")
+        object.__setattr__(
+            self,
+            "default_settings",
+            _frozen_default_settings(self.supported, self.default_settings),
+        )
+
+    def resolve_settings(self, submitted: Mapping[str, object]) -> dict[str, object]:
+        """Fill what a submission left out from the settings declared for its mode.
+
+        The submission wins, this declaration comes second, and the policy's own
+        defaults come last (they are applied where the policy is constructed).
+        Resolving an already resolved mapping changes nothing, so every boundary
+        that builds a configuration may call this without checking who called first.
+        A submission without a string ``mode`` is returned as it came; the policy
+        factory is the one that refuses it.
+        """
+        mode = submitted.get("mode")
+        if not isinstance(mode, str):
+            return dict(submitted)
+        declared = self.default_settings.get(mode, {})
+        return {
+            "mode": mode,
+            **declared,
+            **{name: value for name, value in submitted.items() if name != "mode"},
+        }
+
+
+def _frozen_default_settings(
+    supported: tuple[str, ...],
+    declared: Mapping[str, Mapping[str, object]],
+) -> Mapping[str, Mapping[str, object]]:
+    if not isinstance(declared, Mapping):
+        raise TypeError("default_settings must map a supported mode to its settings")
+    frozen: dict[str, Mapping[str, object]] = {}
+    for mode, settings in declared.items():
+        if mode not in supported:
+            raise ValueError(f"default_settings names unsupported money-management mode {mode!r}")
+        if not isinstance(settings, Mapping):
+            raise TypeError(f"default_settings[{mode!r}] must be a mapping of setting values")
+        values: dict[str, object] = {}
+        for name, value in settings.items():
+            if not isinstance(name, str) or not name:
+                raise TypeError(f"default_settings[{mode!r}] has a setting name that is not text")
+            if name == "mode":
+                raise ValueError(f"default_settings[{mode!r}] may not set 'mode'")
+            if isinstance(value, float) and not math.isfinite(value):
+                raise ValueError(f"default_settings[{mode!r}][{name!r}] must be a finite number")
+            if not isinstance(value, bool | int | float | str):
+                raise TypeError(
+                    f"default_settings[{mode!r}][{name!r}] must be a number, text, or boolean"
+                )
+            values[name] = value
+        frozen[mode] = MappingProxyType(values)
+    return MappingProxyType(frozen)
 
 
 @dataclass(slots=True)
