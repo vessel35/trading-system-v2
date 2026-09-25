@@ -107,6 +107,7 @@ _PLUGIN_TESTS: Final = "services/trading-plugins/tests/test_trading_plugins_capa
 _SIGNAL_TESTS: Final = "services/signal-service/tests/test_signal_generation.py"
 _ENGINE_TESTS: Final = "services/backtest-service/tests/test_engine_and_harness.py"
 _MANAGER_TESTS: Final = "services/core-lib/tests/test_strategy_manager.py"
+_EXECUTION_TESTS: Final = "services/core-lib/tests/test_execution.py"
 _WALLET_TESTS: Final = "services/wallet-service/tests/test_wallet_service.py"
 
 
@@ -348,6 +349,35 @@ PLATFORM_CAPABILITIES: Final[Mapping[str, Capability]] = _entries(
         verified_by=(
             f"{_SIGNAL_TESTS}::test_signal_service_rejects_policy_without_signal_account_state_capability",
             f"{_SIGNAL_TESTS}::test_signal_generation_refuses_an_account_dependent_policy",
+        ),
+    ),
+    # ----- execution -----------------------------------------------------------
+    Capability(
+        id="execution.protection_checked_from_bar_after_fill",
+        statement=(
+            "A stop, a target, and a forced liquidation are not checked on the bar that "
+            "filled the entry; the trigger walk starts at the next bar. A level touched "
+            "inside the fill bar does not close the position on that bar, and no run "
+            "configuration or API turns this off."
+        ),
+        value=True,
+        proof=CapabilityProof.BEHAVIOR,
+        verified_by=(
+            f"{_EXECUTION_TESTS}::test_trigger_gap_uses_unfavorable_open_and_skips_the_fill_candle",
+            f"{_EXECUTION_TESTS}::test_take_profit_and_liquidation_are_not_checked_on_the_fill_candle",
+        ),
+    ),
+    Capability(
+        id="execution.simultaneous_stop_and_target",
+        statement=(
+            "When one bar touches both the stop and the target, the position closes at the "
+            "stop. The conservative reading is fixed; a bar cannot be read as reaching the "
+            "target first."
+        ),
+        value="stop_loss",
+        proof=CapabilityProof.BEHAVIOR,
+        verified_by=(
+            f"{_EXECUTION_TESTS}::test_simultaneous_stop_and_take_profit_resolves_to_stop_loss",
         ),
     ),
     # ----- exits ---------------------------------------------------------------
