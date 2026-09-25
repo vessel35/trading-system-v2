@@ -2,102 +2,80 @@
 
 > Edit this each sprint. `guardrails.sh` injects it at SessionStart.
 > After editing, register the Done-when block as a `/goal` so each turn is auto-evaluated.
-> 세 단계 전체 계획은 `docs/roadmap-stage-3.md`에, 3-0의 실행 계획과 경과는
-> `docs/roadmap-stage-3-0-plan.md`에 있다. 이 파일은 목표와 완료 조건만 담는다.
+> 세 단계 전체 계획은 `docs/roadmap-stage-3.md`에, 3-1의 실행 계획과 경과는
+> `docs/roadmap-stage-3-1-plan.md`와 `docs/fullspec/stage_3_1_acceptance_three_strategies.md`에
+> 있다. 이 파일은 목표와 완료 조건만 담는다.
 
-**Goal:** 3-0이 남긴 것을 닫고 **3-1로 넘어간다.** 지표 구현 본체는 끝났다. 남은 것은 증거
-기록의 결함과, 이식 방법이 새로 열어 준 지표들과, 실제로 막힌 것을 사유와 함께 못박는 일이다.
+**Goal:** 3-1의 절차는 완성됐다(전략 작성 Agent가 여섯 회차 가운데 마지막 둘을 개입 없이
+통과, PR #47·#48 병합). 남은 것은 **검증 층**이다. 사람이 읽는 절차와 기록표가 아니라 프로그램이
+잡는 검사를 두 승인된 설계대로 세운다.
 
-**끝난 것(2026-08-05 확인).** 3-0의 지표 구현은 완료 상태다. 등록은 **84 조합 / 81 이름 /
-표준 89종 중 81종**이고, 캔들스틱 패턴 **61종**이 TA-Lib v0.7.1 직접 이식으로 판
-`2.0.0+talib.0.7.1`에 올라 있다. 패턴은 국면 일곱 22000봉의 427개 조합에서 TA-Lib 0.7.1
-포획값과 봉 단위로 완전히 일치하며, 비영 봉 44177개의 성립·부호·크기가 모두 같다. 이 경과는
-3-0 실행 계획서의 8장과 10장에 기록되어 있다.
-
-**전제가 하나 바뀌었다.** 사용자가 TA-Lib의 계산 값을 원본으로 확정했고 소스를 가져와
-비교하라고 지시했다. 패턴 61종이 그 방식으로 이식되었으므로 **같은 방식이 지표에도 쓰인다.**
-"원저서 상수를 확보하지 못해 구현하지 않는다"고 적어 둔 항목 가운데 TA-Lib이 구현을 갖고
-있는 것은 더 이상 막혀 있지 않다.
+**끝난 것(2026-09-25 확인).** 전략 일곱(vessel-reference와 문서 출처 여섯)이 배포·등록·실행되고,
+`MoneyManagementSupport.default_settings`로 원문의 보호 값이 배포에 실리며, 절차
+`author-strategy`·`verify-strategy`가 기록 규칙까지 갖췄다. 3-1 완료 기준 열두 가운데 열하나가
+달성이고 하나(공통 규범 검사)가 미구현이다.
 
 **In scope:**
 
-- **R-1. 증거 기록의 결함 넷.** 첫째, `INDICATOR_DEFINITION`의 열쇠가 이름 그대로여서 판이
-  다른 기록을 화면에서 구분할 수 없다. 둘째, 그 표에 종류와 채택 근거를 담을 열이 없고
-  `IndicatorSpec.pinned_impl`이 담고 있는 채택 기록을 엔진이 참거짓으로 눌러 기록한다. 셋째,
-  증거 차트가 값이 사전형인 행을 건너뛰어 패턴 61종이 한 봉도 그려지지 않는다. 넷째, 이식의
-  근거가 된 TA-Lib 소스 파일을 저장소에 반입할지 정한다.
-- **R-2. Hilbert 계열 7종 이식.** `HT_DCPERIOD`, `HT_DCPHASE`, `HT_PHASOR`, `HT_SINE`,
-  `HT_TRENDLINE`, `HT_TRENDMODE`, `MAMA`를 TA-Lib v0.7.1 C 소스에서 직접 이식한다. 패턴과
-  같은 순서를 따른다 — **표준 문서에 절을 먼저 쓰고 출처를 명기한 뒤 구현한다.** 코드가
-  표준보다 앞서지 않는다는 규칙은 그대로다. 이것으로 표준 §12가 남겨 둔 MAMA/FAMA와
-  Sinewave/Instantaneous Trendline도 함께 풀린다.
-- **R-3. 두 번째 계열 입력 경로와 BETA·CORREL.** 두 지표를 막고 있는 것은 계산이 아니라
-  두 번째 가격 계열을 넘길 경로가 레지스트리에 없다는 것이다. 그 경로를 설계해 구현하고 두
-  지표를 등록한다. 시장폭 3종이 같은 사유로 막혀 있으므로 **같은 경로가 그것까지 덮는지**를
-  함께 판단해 기록한다.
-- **R-4. 실제로 막힌 것을 사유와 함께 못박는다.** 무엇이 있어야 풀리는지를 항목마다 적는다.
-  막연히 "보류"라고 적지 않고, 필요한 것이 데이터인지 1차 출처인지 표준 규칙인지를 가른다.
-- **R-5. 3-1로 넘어간다.** 로드맵 3-1의 네 갈래(기존 skill 보완, 단계별 산출물과 등록 절차,
-  기반 방침 유지와 계산 검증 추가, 신규 전략 개발 Agent)를 실행 계획으로 옮긴다.
+- **V-1. 공통 규범 검사, 전략 단위 층.** `docs/fullspec/strategy_contract_suite_design.md`를
+  검증 층별로 구현한다(2026-09-25 사용자 결정). 첫 층은 전략 단위다. 발견된 전략 전체를 방식
+  사례표로 매개변수화하고, 결정성 두 갈래, 정책 독립성(생산 입력 모양), 방어적 시간 무결성, 금지된
+  의존(정적·실행 중), 선언과 접근의 일치(추적 Mapping), 진입과 청산의 대응, 시그니처, 결함 주입
+  검증을 둔다. 둘째 층(Engine 조합: 시간 무결성 주 검사, 지원하지 않는 조합의 거부)은 그 뒤다.
+- **V-2. 배포 전 검사와 초안 생성기.** `docs/fullspec/author_check_and_scaffold_design.md`의
+  changeset 여섯을 순서대로 구현한다. 첫 changeset은 식별자 모듈과 능력 항목 둘
+  (`series.history_depth`, `plugin.identifier_format`)과 절차 규칙("부딪힌 제약은 같은 changeset에서
+  항목과 시험을 더한다")이다. 닫힘 기준의 대상은 배포된 전략 일곱이다.
+- **V-3. 설계가 남긴 갭의 반영.** 차이 기록표의 종류 어휘를 Agent가 실제로 쓴 분류(플랫폼 고정,
+  값은 원문대로이나 정의는 채움)를 담게 고치고, `verify-strategy`가 기록표 행마다 확인하게 한다.
+  시장 종류·종목 범위 선언 자리는 `author_check` 2단계와 같은 자리이므로 그 설계에 붙인다.
 
 **Out of scope (필요하면 에스컬레이션):**
 
-- 증거의 빈 껍데기 네 엔티티(`MISSED_OPPORTUNITY`, `CONDITION_SIGNATURE`,
-  `CONDITIONAL_EXPECTANCY`, `FINDING_CLAIM`)를 채우는 것. 3-2 소관이다.
-- `claude -p` 분석 파이프라인. 3-2 소관이다.
-- 표준이 정의하지 않은 규칙을 원저서 지식으로 메우는 것. TD Sequential의 countdown, Woodies
-  CCI의 패턴 판정, Market Facilitation Index의 색 분류가 여기 해당한다. **1차 출처가 오기
-  전에는 구현하지 않는다.**
-- 증거 열쇠의 형식을 바꾸는 것. 증거 파일은 실행 하나에 하나이므로 파일 안에서는 충돌이 없다.
-- 전략을 만드는 것. 3-1은 만드는 방법을 정하는 단계이지 전략을 내놓는 단계가 아니다.
+- 화면의 mode별 선언 값(z8nrz7e40t), 체결 뒤 청산 안전성 재검사(z8nrz7e3k8), 공통 리스크
+  가드(z8nrz7bxn5). 별도 항목이다.
+- 3-2(`claude -p` 분석 파이프라인)와 증거의 빈 엔티티 넷.
+- 전략을 새로 만드는 것. 검증 층을 세운 뒤 Agent 회차를 한 번 더 도는 것은 확인 절차이지 이
+  스프린트의 산출물이 아니다.
 
 **Done when (transcript-verifiable, turn-capped):**
 
-- R-1: 실행을 하나 돌리면 `INDICATOR_DEFINITION`의 모든 행에 종류와 갈래와 채택 근거가
-  채워지고 빈 것이 없다. 엔진에 `"pinned_impl": True` 상수가 남아 있지 않다. 차트가 패턴이
-  성립한 봉에 표식을 그리고 강도 0.5와 1.0이 구분된다. 차트가 열쇠와 함께 판을 보인다.
-  TA-Lib 소스 반입 여부가 결정되어 근거와 함께 기록된다.
-- R-2: 7종이 구현되고 등록되며, **표준 문서의 해당 절이 구현보다 먼저 들어와 있다.** 값이
-  TA-Lib 0.7.1 실측과 일치함이 수치와 함께 보인다. 어긋나면 원인을 밝히고, 맞추려고 상수를
-  끼워 넣지 않는다. 등록 수의 전후 비교가 제시된다.
-- R-3: BETA와 CORREL이 등록되어 값이 TA-Lib과 대조된다. 두 번째 계열이 어디서 오고 누가
-  넘기는지가 문서에 남는다. 시장폭 3종이 같은 경로로 풀리는지 아닌지가 판단과 근거로 남는다.
-- R-4: 막힌 항목마다 무엇이 없어서 막혔고 무엇이 있으면 풀리는지가 한 줄로 읽힌다.
-- R-5: 3-1의 실행 계획서가 생기고 네 갈래가 각각 무엇을 산출하는지 적힌다.
-- 독립 리뷰가 Blocking 0건으로 관찰된다. 특히 "표준보다 코드가 먼저 가지 않았는가",
-  "대조를 맞추려 상수를 끼워 넣지 않았는가", "포획된 표본을 계약으로 착각하지 않았는가"를
-  적대적으로 확인한다.
-- 저장소 루트에서 `.venv/bin/python -m pytest services -q` exit 0, ruff·ruff format·mypy
-  exit 0, 웹 쪽 `npm test` exit 0. 기존 84 조합과 패턴 61종의 값이 변하지 않음이 회귀로
-  확인된다.
-- Turn budget: ≤ 70 orchestrator turns. 초과하면 중단하고 보고한다.
+- V-1: 발견된 전략 일곱 전부에 공통 검사가 자동으로 적용되고 발견 목록과 사례표의 id 집합이 같다.
+  결함 주입 전략 일곱 종류(클래스 전역 상태, 호출 횟수, 입력·설정 변경, 숨은 계열 접근, 금지된
+  의존, 방향이 어긋난 청산 증거, 지원하지 않는 정책·자금관리 소유 필드)가 각각 대응하는 검사에서
+  실패하는 것이 transcript에 보인다. 검사 설명이 전략 단위 층의 한계(Engine 조합의 시간 보증을
+  대체하지 않음)를 적는다.
+- V-2: `python -m backtest_service.author_check <id>`가 전략 일곱에 대해 exit 0이고, 설계 6장의
+  닫힘 기준(결함 주입 셋, 규범 예시 시험, 식별자 시험, 능력 항목 둘, 초안 생성기 산출물이 1~5단계와
+  7단계를 통과)이 transcript에서 확인된다.
+- V-3: 기록표 종류 어휘와 `verify-strategy`의 행별 확인 규칙이 두 skill과 규범에서 grep으로
+  확인되고, 시장·종목 범위 선언이 설계 문서에 들어간다.
+- 독립 리뷰(Codex)가 각 changeset에서 Blocking 0으로 관찰된다.
+- 저장소 루트에서 `.venv/bin/python -m pytest services -q` exit 0, ruff·ruff format·바뀐 서비스의
+  mypy exit 0. 배포된 전략 일곱의 기존 시험과 Evidence golden이 변하지 않는다.
+- Turn budget: ≤ 80 orchestrator turns. 초과하면 중단하고 보고한다.
 
 **Register with /goal:**
 
 ```
-/goal Close what roadmap 3-0 left behind and move to 3-1. Fix the four Evidence-recording
-  defects: surface the implementation version in the chart so runs from different registry
-  editions are distinguishable, add kind and adoption-record columns to INDICATOR_DEFINITION
-  and stop the engine flattening IndicatorSpec.pinned_impl to a boolean, draw dictionary-valued
-  outputs so the 61 candlestick patterns render, and decide whether to vendor the TA-Lib source
-  files the port derived from. Port the seven Hilbert-transform functions from TA-Lib v0.7.1 C
-  source, writing the standard's sections before the code as the pattern port did. Design the
-  second-price-series input channel and register BETA and CORREL on it, judging whether the same
-  channel unblocks the three market-breadth indicators. Record for every still-blocked item what
-  is missing and what would unblock it. Then produce the 3-1 execution plan.
-  DONE iff (a) every INDICATOR_DEFINITION row carries kind, category, and adoption record with
-  none blank, no "pinned_impl": True constant remains in the engine, the chart draws pattern
-  marks distinguishing strength 0.5 from 1.0 and shows the version beside the key, and the
-  vendoring decision is recorded with its reason, (b) the seven Hilbert functions are implemented
-  and registered with their standard sections landing before the code and their values shown to
-  match TA-Lib 0.7.1 by number with no constant inserted to force agreement, (c) BETA and CORREL
-  are registered against a documented second-series channel and checked against TA-Lib, with a
-  reasoned verdict on market breadth, (d) each blocked item states what is missing and what would
-  unblock it, (e) the 3-1 execution plan exists with an output named for each of its four
-  branches, (f) one independent review returns zero Blocking after adversarially checking that
-  code never preceded the standard, that no constant was inserted to match a comparison, and that
-  no captured sample was mistaken for a contract, and (g) repository-root
-  `.venv/bin/python -m pytest services -q` exit 0 with ruff, ruff format, and mypy exit 0, web
-  `npm test` exit 0, and the existing 84 indicator combinations and 61 patterns unchanged.
-  Hard stop at 70 orchestrator turns; report and wait.
+/goal Stand up the 3-1 verification layers from the two approved designs. V-1: implement the
+  strategy-unit layer of docs/fullspec/strategy_contract_suite_design.md — a suite parametrized
+  over every discovered strategy through a test-only scenario table whose id set must equal the
+  discovery set, with both determinism paths, policy-independence on production-shaped inputs,
+  a defensive time-integrity check that states its limit, static and runtime forbidden-dependency
+  checks, a tracing Mapping for declared-versus-actual series and parameter access, per-direction
+  entry/exit correspondence, signature checks, and seven fault-injection strategies each caught
+  by its check. V-2: implement the six changesets of
+  docs/fullspec/author_check_and_scaffold_design.md in order, starting with the identifier module,
+  the two capability entries (series.history_depth, plugin.identifier_format) and the
+  add-a-capability-when-you-hit-a-wall rule in the author-strategy skill; the closing criteria
+  apply to all seven deployed strategies. V-3: fix the difference-table vocabulary to cover
+  platform-fixed rules and partially filled rows, add the per-row check to verify-strategy, and
+  fold market/symbol scope declaration into the author_check design.
+  DONE iff (a) every discovered strategy passes the suite and each of the seven fault strategies
+  fails its check in the transcript, (b) author_check exits 0 for all seven strategies and the
+  design's closing criteria are observed, (c) the vocabulary and per-row rule are grep-visible in
+  both skills and the contract, (d) each changeset's Codex review shows zero Blocking, and (e)
+  repository-root pytest, ruff, ruff format, and per-service mypy exit 0 with existing goldens
+  unchanged. Hard stop at 80 orchestrator turns; report and wait.
 ```
