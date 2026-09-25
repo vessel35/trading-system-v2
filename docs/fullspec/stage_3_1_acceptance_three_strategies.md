@@ -386,6 +386,104 @@ Evidence, backtest_db 기록이 모두 일치한다. 두 부검사는 실행 자
 닫힌다.
 
 
+### 5.8 여섯 번째 전략: 회차 사이에 고친 것과 Agent 회차 재실행 (2026-09-25)
+
+**회차 사이에 고친 것.** 다섯 번째 회차가 남긴 셋 가운데 제 소유인 둘을 닫고 절차를 보강했다.
+첫째, 능력 목록에 보호 검사 시점 둘(`execution.protection_checked_from_bar_after_fill`,
+`execution.simultaneous_stop_and_target`)을 넣고 목표·강제청산이 체결 봉에서 건너뛰어지는 시험을
+더했다(커밋 84d081b). 둘째, 절차 `author-strategy`에 프로필 값 기록, 플랫폼 고정 규칙 기록, 출처
+문장 위치 인용, 선언 범위 제한, 보호 값의 `default_settings` 선언 규칙을 더했다(2d16374). 셋째,
+전략이 정책 설정의 기본값을 선언하는 자리 `MoneyManagementSupport.default_settings`를 설계
+(`docs/fullspec/policy_default_settings_and_record_rules_design.md`, Codex 설계 검토 두 번)하고
+구현했다(d376163). 해석 순서는 사용자 값, 전략 선언, 정책 기본값이며 실행 설정 검증기와
+`create_runtime`이 같은 규칙을 적용한다. Evidence 판 1.11.0과 해석 판 1.2.0으로 올렸고, 화면 기본값과
+`facts declaration`·`catalog_precheck`가 선언을 다룬다. Donchian과 MACD에 원문 값을 선언했다(0093d04).
+세 봉 전략은 Agent 산출물이라 손대지 않았다. 규범 9.1절 공통 시험(z8nrz7e3k1)은 아직 남아 있다.
+
+**전략 선정.** Secuora 목록에서 Bollinger 밴드 되돌림(`docs/samples_for_strategy_agent/06.Bollinger_Band_Bounce.md`)을
+골랐다. 하단 밴드에 닿으면 롱, 상단 밴드에 닿으면 숏, 20기간 2 표준편차, 1.5×ATR 손절, 1.5R 목표,
+1시간봉이다. 다섯 번째와 달리 등록된 series(`bollinger_bands:multiplier=2,period=20@1h`)를 읽어야
+하므로 series 선언과 현재 봉 값 비교가 시험되고, 출처가 한 문장뿐이라 "touch"의 정의, ATR 기간,
+재진입이 비어 있어 새 절차 규칙(프로필 값, 플랫폼 규칙, 문장 위치, `default_settings`)이 모두 쓰일
+자리가 있다. 세 번째 전략(Bollinger + RSI, 중간 밴드 청산)과는 규칙이 다르다.
+
+**실행 규칙.** 다섯 번째 회차와 같다. 입력 문서는 출처 원문만 인용했고, sub-agent는 절차의 새 규칙까지
+따르며 산출물은 제가 손대지 않는다.
+
+**sub-agent의 산출물.** 전략 모듈 `services/trading-plugins/trading_plugins/strategies/bollinger_band_bounce.py`
+(식별자 `bollinger-band-bounce`, `Bollinger Bands period=20, multiplier=2.0` 선언, `min_history` 1, `1h` 하나,
+manual만 지원, `default_settings` = manual {`atr_stop_multiple` 1.5, `reward_risk` 1.5}), 단위 시험
+`services/trading-plugins/tests/test_bollinger_band_bounce.py`(18개 함수, 25건), Engine 시험
+`services/backtest-service/tests/test_bollinger_band_bounce_engine.py`(4개), 등록 SQL
+`init-scripts/signal-service/20260923/07-register-bollinger-band-bounce.sql`과 include 한 줄, 배포 목록 수를
+고정한 기존 시험 둘의 갱신, 입력 문서에 덧붙인 5절(규칙의 빈 값 9항목, 프로필 값 열두 필드와 뒷받침,
+플랫폼이 고정한 규칙 8항목과 능력 id)과 6절(차이 기록표 20행). 저는 이 파일들을 한 글자도 고치지
+않았다. 새 절차 규칙 넷이 모두 쓰였다. 출처 문장의 위치를 절마다 적고 연구 공통 문장을 구분했고,
+프로필 값마다 원문의 결과가 뒷받침하는지 아닌지를 적었으며(예: `expected_payoff` (0.5, 1.5)는 4절의
+Profit Factor와 승률에서 역산한 0.53~1.26을 감싼다), 플랫폼 규칙을 능력 id로 가리켰고, 원문의 1.5×ATR과
+1.5R을 `default_settings`로 선언해 화면의 처음 값이 그 값으로 채워졌다.
+
+**sub-agent의 QA 보고.** 첫 실행에서 넷이 실패했고 모두 자기 시험 코드의 문제였다(4시간봉 Candle의
+`close_time` 계산, 100자 넘는 줄, 형식, mypy 형 오류 둘). 한 번의 수정으로 고쳤고 두 번째 실행부터
+전부 통과했다. 전략 코드는 한 번도 고치지 않았다. 변이 아홉(등호 제거 둘, 밴드 폭 0 분기 제거, spot 숏
+거부 제거, `reward_risk` 기본값 변경, `min_history` 변경, 사유 바꿔치기, 보유 중 보류 제거, 중심선 읽기)이
+모두 시험에 잡혔다고 보고했다.
+
+**제가 다시 돌린 QA.** 루트 pytest 2229 passed(54 skipped), ruff와 형식 검사 통과, trading-plugins·
+backtest-service·web-api의 mypy 통과. 첫 실행에서 모두 통과했다.
+
+**화면 실행.** 등록 SQL을 dev signal_db에 적용하고 web-api를 다시 띄우자 전략이 목록에 나타났고, 자금관리
+칸의 처음 값이 **전략 선언대로 손익비 1.5, ATR 손절 배수 1.5**로 채워져 있었다(회차 사이에 만든 자리가
+화면까지 닿은 것을 처음 확인). 출처와 같은 기간(2025-06-01 00:00부터 2026-06-01 00:00 UTC), BTC/USDT 선물
+1시간봉, 자본 10,000, 위험 1%, 수수료 편도 0.05%, slippage 0, funding 대체율 0으로 돌렸다. 실행
+`BT_20260925_001552_bt-bollinger-band-bounce`는 83초 만에 EVALUATED로 끝났고 무결성 검사 여섯 항목이
+모두 통과했으며, Evidence의 `money_management_json`에 `declared_by_strategy` {1.5, 1.5}와 해석 판 1.2.0이
+기록됐다.
+
+| 지표 | 플랫폼 실행 | 출처(BTC) |
+|---|---|---|
+| 거래 수 | 509 (롱 251, 숏 258) | 773 |
+| 승률 | 41.1% | 39.5% |
+| Profit factor | 0.823 | 0.79 |
+| 최대 낙폭 | 46.5% | 73.3% |
+| 순손익 | −42.7% | −70.3% |
+
+거래 수가 출처보다 적은 것은 Agent가 "touch"를 종가로 읽었기 때문이며, 기록표가 "저가 읽기보다 진입이
+적은 쪽"이라고 미리 적은 그대로다. 검산은 저가·고가가 밴드를 찔렀으나 종가가 안으로 돌아온 봉이 546개
+있었고 그중 진입이 0건임을 확인했다. 출처의 "touch"가 저가·고가 기준이면 이 봉들이 진입에 더해진다.
+이것은 원문이 비워 둔 값이며 Agent가 정하고 기록한 것이다.
+
+**독립 검산(`verify-strategy` 절차, 별도 sub-agent).** 다섯 항목 모두 통과했다. Bollinger 밴드와 ATR(14)의
+스냅샷 8,760개씩이 표준대로 재계산한 값과 일치했고(밴드 상대 오차 4e-12, ATR 2e-13), 8,760봉의 판단
+전부가 문서 규칙과 일치했으며(롱 251건 모두 종가 ≤ 하단, 숏 258건 모두 종가 ≥ 상단, 밴드 안 3,749봉과
+보유 중 598봉에서 진입 0건), 509건 전부의 진입가·수수료·보호가격·손익·R 배수·funding 정산 620건이 정의와
+맞고 순손익 합이 최종 자본과 같다. 판단 시각은 모두 판단 봉 마감이고 체결은 다음 봉 시가다. 클래스,
+등록 행, Evidence의 `declared_by_strategy`가 모두 일치한다. 결정성 부검사는 선행 실행이 없어 못 했다.
+검산이 남긴 관찰 하나는 재진입 문구다. 5.1절의 "손절이나 목표로 나온 뒤 다음 봉의 종가"는 실제로는
+"청산이 일어난 봉의 종가"(254건이 그 봉 마감에서 재진입)이므로 문구를 그렇게 못 박는 편이 낫다.
+
+**Codex 검토.** 코드 리뷰는 아직 돌리지 않았고 충실도 검토는 Blocking 둘과 Should-fix 다섯, Nit 하나를
+냈다. 제가 저장소와 대조한 판정은 다음과 같다.
+
+| 지적 | 내용 | 판정과 소유 |
+|---|---|---|
+| Blocking 1 | 빈 값 다섯(touch 가격, ATR 기간, 체결 시점, 손절 기준, 재진입)을 묻지 않고 정했다 | 다섯 번째 회차와 같다. 이 회차의 실행 규칙이 시킨 것이고 기록은 빠짐없다. 실제 서비스에서는 절차 5단계대로 묻는다 |
+| Blocking 2 | 출처는 네 시장·spot인데 전략은 모든 종목과 두 시장을 받고 spot 숏만 보류하므로 출처보다 넓은 전략을 광고한다 | 맞는 관찰이나 전략이 시장 종류와 종목 범위를 선언할 자리가 플랫폼에 없다(7장 17번, ClickUp z8nrz7e41h). Agent는 기록표에 실행 단위와 자료 원천의 차이로 적었다 |
+| Should-fix 3 | "20-period / 2 SD"와 "1.5x ATR stop" 행이 정의(계산 가격·표준편차, ATR 기간·기준)를 채웠는데 "차이 없음"으로 분류됐다 | 맞다. 행의 근거 칸에는 채운 사실이 적혀 있으나 분류가 "빈 값을 정함"이어야 한다. Agent의 기록 분류 결함 |
+| Should-fix 4 | Engine 시험이 출처의 기간·자료를 쓰지 않는다 | 받아들이지 않는다. 기록표의 "차이 없음"은 재현 실행의 설정을 말하며, 그 실행은 화면에서 출처와 같은 기간으로 돌렸다. Engine 시험은 구조 시험이다 |
+| Should-fix 5 | `tail_shape` "symmetric"의 근거(손실 1R, 이익 1.5R)는 대칭이 아니다 | 맞다. 기록은 뒷받침 없음으로 표시했으나 붙인 이유가 틀렸다. Agent의 기록 결함(경미) |
+| Should-fix 6 | Engine 시험의 배포 행 픽스처가 선언 필드를 비워 등록 대조를 하지 못한다 | 맞다. 등록 대조는 단위 시험이 SQL을 읽어 한다. 시험 서술의 과장(경미) |
+| Should-fix 7 | 규범 9.1절의 정책 독립성 시험이 없고 4시간봉으로 클래스를 직접 부르는 시험이 있다 | 9.1절 공통 시험 부재는 7장 16번(z8nrz7e3k1). 4시간봉 시험은 키 생성 규칙의 시험이며 광고가 아니다 |
+| Nit 8 | "이번 봉의 series 값만 온다"를 `run.strategy_inputs`로 가리켰는데 그 항목은 입력 키 여섯을 말할 뿐이다 | 맞다. 이력 깊이를 말하는 능력 항목(`series.history_depth`)이 아직 없어 가장 가까운 항목을 인용했다. 승인된 설계 changeset 1이 넣는다(7장 18번) |
+
+**회차 판정.** Agent의 두 책임은 이 회차에서도 제 개입 없이 충족됐다. 코드는 첫 QA에서 통과했고
+등록·화면·실행·무결성이 모두 통과했으며, 독립 검산이 판단 8,760개와 거래 509건 전부를 원문 규칙과 표준
+정의로 확인했다. 다섯 번째 회차에서 남긴 기록 결함 셋(spot 단정, 프로필 값 미기록, 플랫폼 규칙 미기록)은
+절차 규칙을 더한 뒤 이 회차에서 모두 사라졌고, 원문의 보호 값은 선언으로 배포에 실려 화면과 실행에
+닿았다. 남은 것은 기록의 분류·문구 결함 셋(부분 채움 행의 분류, `tail_shape` 근거, 재진입 문구)과 플랫폼
+갭 둘(시장·종목 범위 선언 자리, `series.history_depth` 능력 항목)이며, 코드 결함은 없다.
+
+
 ## 6. 하지 못한 것과 그 이유
 
 - **작업 첫날에는 로컬 PostgreSQL이 내려가 있었다.** `localhost:5432` 연결이 거부됐고, Docker
@@ -463,3 +561,9 @@ Evidence, backtest_db 기록이 모두 일치한다. 두 부검사는 실행 자
     독립성, 미확정 캔들 배제, 금지 import, 선언과 실제 접근의 일치는 전략마다 같은 검사이므로 배포된
     전략을 자동으로 도는 공통 시험이어야 한다. 앞선 네 전략에도 없었다. 층별 공통 규범 시험(ClickUp
     z8nrz7e3k1)이 이것을 닫는다.
+17. **전략이 시장 종류와 종목 범위를 선언할 자리가 없다(여섯 번째 회차, Codex).** 출처가 네 시장과
+    spot을 정해도 `StrategyMetadata`에는 `supported_timeframes`만 있어 모든 종목과 두 시장이 받아들여지고,
+    spot에서는 숏만 보류된다. Agent는 차이로 기록할 수 있을 뿐 선언하지 못한다(ClickUp z8nrz7e41h).
+18. **series 이력 깊이를 말하는 능력 항목이 아직 없다.** Agent가 "이번 봉의 값만 온다"를 가장 가까운
+    `run.strategy_inputs`로 가리켰다. 승인된 배포 전 검사 설계의 changeset 1(`series.history_depth`)이
+    넣는다.
