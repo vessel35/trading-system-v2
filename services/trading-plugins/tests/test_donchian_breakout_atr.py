@@ -104,6 +104,10 @@ def test_donchian_declares_no_series_and_reads_twenty_one_bars_back() -> None:
     assert metadata.min_history == 21
     assert metadata.decision_contract is StrategyDecisionContract.DECISION_INTENT
     assert metadata.money_management.supported == ("manual",)
+    assert dict(metadata.money_management.default_settings["manual"]) == {
+        "atr_stop_multiple": 1.5,
+        "reward_risk": 2.0,
+    }
     assert metadata.money_management.supports_signal_exit is False
     assert metadata.money_management.supports_external_take_profit is True
     assert strategy.get_parameter_schema().fields == {}

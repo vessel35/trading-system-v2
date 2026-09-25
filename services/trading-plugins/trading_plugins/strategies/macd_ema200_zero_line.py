@@ -80,6 +80,10 @@ class MacdEma200ZeroLine(StrategyBase):
             money_management=MoneyManagementSupport(
                 supported=("manual",),
                 default="manual",
+                # The document fixes the protection: stop 2.5 x ATR, target 3.75 ATR, which
+                # is 1.5 times the stop distance. A run submitted without settings and the
+                # screen's first values use these.
+                default_settings={"manual": {"atr_stop_multiple": 2.5, "reward_risk": 1.5}},
                 supports_external_stop=True,
                 supports_external_take_profit=True,
                 supports_signal_exit=False,

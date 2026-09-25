@@ -77,6 +77,9 @@ class DonchianBreakoutAtr(StrategyBase):
             money_management=MoneyManagementSupport(
                 supported=("manual",),
                 default="manual",
+                # The document fixes the protection: stop 1.5 x ATR(14), target 2R. A run
+                # submitted without settings and the screen's first values use these.
+                default_settings={"manual": {"atr_stop_multiple": 1.5, "reward_risk": 2.0}},
                 supports_external_stop=True,
                 supports_external_take_profit=True,
                 supports_signal_exit=False,

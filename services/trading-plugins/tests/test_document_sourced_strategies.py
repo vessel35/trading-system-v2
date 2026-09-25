@@ -253,6 +253,10 @@ def test_macd_declares_the_document_series_and_no_signal_exit() -> None:
         {"name": "EMA", "params": {"period": 200}},
     ]
     assert metadata.money_management.supported == ("manual",)
+    assert dict(metadata.money_management.default_settings["manual"]) == {
+        "atr_stop_multiple": 2.5,
+        "reward_risk": 1.5,
+    }
     assert metadata.money_management.supports_signal_exit is False
     assert metadata.money_management.supports_external_take_profit is True
     assert _FORBIDDEN_PARAMETER_NAMES.isdisjoint(strategy.get_parameter_schema().fields)
