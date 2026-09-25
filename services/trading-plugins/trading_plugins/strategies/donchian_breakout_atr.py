@@ -57,7 +57,9 @@ class DonchianBreakoutAtr(StrategyBase):
         return StrategyMetadata(
             required_indicators=[],
             min_history=_BARS_READ - 1,
-            supported_timeframes=["1h", "4h"],
+            # The source tested hourly candles only; a 20-bar channel on another timeframe
+            # would be a different strategy and is not advertised.
+            supported_timeframes=["1h"],
             profile=StrategyProfile(
                 id="donchian-breakout-atr-v1",
                 family="breakout",
