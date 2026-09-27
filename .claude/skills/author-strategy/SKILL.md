@@ -152,6 +152,13 @@ Only with no blockages left, or with the deviations approved.
   belong to the policy; rounding, margin, and liquidation belong to execution.
 - Put the code, the registration SQL, and the tests in one changeset. The contract's section
   9 lists the tests, and its closing checklist is the gate.
+- **Add the strategy's rows to the two common-check case tables**, in the same changeset:
+  `_CASES` in `services/trading-plugins/tests/test_strategy_contract_suite.py` (a deterministic
+  entry and exit scenario per direction, with the series values the document's rule needs) and
+  `_ENGINE_CASES` in `services/backtest-service/tests/test_strategy_contract_engine_layer.py`
+  (the representative parameters). Then run the repository-root `pytest`. A strategy without
+  its rows fails the first test of each suite, and that failure is yours to resolve, not a
+  platform defect to report.
 - Restart the services. A changed file that is already imported keeps its old body.
 
 ## 7. Finish at the screen
