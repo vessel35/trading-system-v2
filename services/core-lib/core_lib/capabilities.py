@@ -46,6 +46,8 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Final
 
+from core_lib.identifiers import PLUGIN_IDENTIFIER_PATTERN
+
 __all__ = [
     "PLATFORM_CAPABILITIES",
     "Capability",
@@ -108,6 +110,8 @@ _SIGNAL_TESTS: Final = "services/signal-service/tests/test_signal_generation.py"
 _ENGINE_TESTS: Final = "services/backtest-service/tests/test_engine_and_harness.py"
 _MANAGER_TESTS: Final = "services/core-lib/tests/test_strategy_manager.py"
 _EXECUTION_TESTS: Final = "services/core-lib/tests/test_execution.py"
+_IDENTIFIER_TESTS: Final = "services/core-lib/tests/test_identifiers.py"
+_RUN_CONFIG_TESTS: Final = "services/backtest-service/tests/test_run_config.py"
 _WALLET_TESTS: Final = "services/wallet-service/tests/test_wallet_service.py"
 
 
@@ -254,6 +258,22 @@ PLATFORM_CAPABILITIES: Final[Mapping[str, Capability]] = _entries(
         value=("float", "dict[str, float]"),
         proof=CapabilityProof.STRUCTURE,
         verified_by=(f"{_CORE_TESTS}::test_a_series_value_is_a_number_or_named_numbers",),
+    ),
+    Capability(
+        id="series.history_depth",
+        statement=(
+            "A strategy receives one value per registered series: the value at the deciding "
+            "bar. Earlier values of a series are not passed and a strategy cannot keep state, "
+            "so a crossing of two indicators, or of price and an indicator, is not judged "
+            "directly; it can only be written as a relation that holds on the deciding bar. "
+            "Every confirmed candle is passed, so a crossing of candle values is something "
+            "the strategy can judge. The shape of one value is what series.value_shapes states."
+        ),
+        value=1,
+        proof=CapabilityProof.BEHAVIOR,
+        verified_by=(
+            f"{_ENGINE_TESTS}::test_a_strategy_receives_one_value_per_resolved_series_at_each_bar",
+        ),
     ),
     Capability(
         id="candles.kinds",
@@ -487,6 +507,24 @@ PLATFORM_CAPABILITIES: Final[Mapping[str, Capability]] = _entries(
         value=("trading_plugins.strategies", "trading_plugins.money_management"),
         proof=CapabilityProof.STRUCTURE,
         verified_by=(f"{_PLUGIN_TESTS}::test_deployment_scans_exactly_two_packages",),
+    ),
+    Capability(
+        id="plugin.identifier_format",
+        statement=(
+            "A strategy id and a policy mode are kebab-case: groups of lowercase letters and "
+            "digits joined by single hyphens. The registration tables' check constraints and "
+            "the run configuration refuse anything else by this same expression, which "
+            "core_lib.identifiers owns."
+        ),
+        value=PLUGIN_IDENTIFIER_PATTERN.pattern,
+        # Structural: the tables' expression is compared as text, never executed here, and
+        # the run configuration's refusal is observed. Discovery does not check the rule yet.
+        proof=CapabilityProof.STRUCTURE,
+        verified_by=(
+            f"{_IDENTIFIER_TESTS}"
+            "::test_the_code_expression_matches_the_ddl_check_character_for_character",
+            f"{_RUN_CONFIG_TESTS}::test_strategy_id_is_checked_by_the_shared_plugin_identifier_rule",
+        ),
     ),
     Capability(
         id="registry.name_does_not_fix_definition",

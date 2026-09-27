@@ -88,6 +88,12 @@ just the first.
 | Missing material | A needed indicator/parameter combination or pattern is not registered, or is registered under a name whose definition differs. | Report what has to be built first. This is platform work, not strategy work. |
 | Missing capability | The document needs something `capabilities.py` records as unsupported. | Report it. Do not route around it. |
 
+**A constraint the capability list does not record yet is platform work done in the same
+changeset.** When the document runs into a rule the platform fixes but `capabilities.py` does not
+state, add the entry and the test that proves it in the same changeset as the strategy work, and
+cite the new id in the difference table. Leaving it in a design note means the next author hits
+the same wall.
+
 **A name in the registry is not a definition.** Read a deployed plugin's `declaration` to find
 the registry names it declares, then query each name with `series <name>`. The series lookup
 carries the pinned adoption record for an indicator. For a pattern, it says that the

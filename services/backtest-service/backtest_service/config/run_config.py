@@ -14,6 +14,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Annotated, Any, Final, Literal, Union, cast, get_type_hints
 
 from core_lib.candles import _TIMEFRAME_PATTERN
+from core_lib.identifiers import PLUGIN_IDENTIFIER_PATTERN
 from core_lib.money_management import MoneyManagementBase, policy_settings
 from core_lib.series import series_descriptor_parts
 from core_lib.types import MarketType
@@ -36,7 +37,6 @@ from .declarations import declared_money_management
 
 _LOGGER = logging.getLogger(__name__)
 _RUN_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-_STRATEGY_ID_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
 class ManualMoneyManagementConfig(BaseModel):
@@ -446,7 +446,7 @@ class RunConfig(BaseModel):
     @field_validator("strategy_id")
     @classmethod
     def _validate_strategy_id(cls, value: str) -> str:
-        if _STRATEGY_ID_PATTERN.fullmatch(value) is None:
+        if PLUGIN_IDENTIFIER_PATTERN.fullmatch(value) is None:
             raise ValueError("strategy_id must be lowercase kebab-case")
         return value
 

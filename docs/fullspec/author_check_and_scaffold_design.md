@@ -373,6 +373,13 @@ id, 클래스 이름, series 목록, 지원 시간대, `min_history`, 지원 정
 1. **식별자 규칙과 능력 항목 둘.** `core_lib/identifiers.py`, `run_config`의 교체,
    `capabilities.py`의 두 항목, `services/core-lib/tests/test_identifiers.py`(DDL 대조),
    `test_engine_and_harness.py`의 series 값 범위 시험. 이 changeset만으로 능력 목록 시험이 초록이다.
+   2026-09-27에 구현했다. `plugin.identifier_format`의 문장은 이 changeset에서는 "등록 표의 check
+   제약과 실행 설정이 같은 표현식으로 거부한다"까지만 말하고, 발견 검사가 거부한다는 말은 changeset
+   2가 발견 fault를 넣을 때 더한다. 아직 없는 동작을 능력으로 적지 않기 위해서다. 3.2의 절차 규칙은
+   `author-strategy` skill 3장의 분류표 아래에 두었다. Codex 코드 리뷰(Blocking 0, P2 하나)의 지적으로
+   `plugin.identifier_format`의 증명 종류는 `STRUCTURE`다. DDL 대조 시험은 등록 표의 제약을 실행하지
+   않고 문자열로 견주며, 실행 설정의 거부는 `test_run_config.py`의 시험이 관찰한다. changeset 2가 발견
+   fault 시험을 더할 때 `BEHAVIOR`로 올린다.
 2. **발견 fault와 사전 점검 확장, 규범 예시 시험, 규범 편집.** `discovery.py`의 형식 fault,
    `facts.py`의 형식 finding과 `checks_performed`, `test_contract_examples.py`, 규범 4.1절
    예시의 클래스 선언과 `decision_contract` 선언, 표시 주석 둘, 6.4절과 6.5절의 문장.

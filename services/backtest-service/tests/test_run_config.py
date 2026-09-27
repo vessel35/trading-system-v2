@@ -1,5 +1,6 @@
 """Verify RunConfig owns run settings but not strategy parameter semantics."""
 
+import inspect
 import logging
 import subprocess
 import sys
@@ -10,6 +11,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, ClassVar, cast
 
+import backtest_service.config.run_config as run_config_module
 import pytest
 from backtest_service.config import RunConfig
 from backtest_service.config.run_config import (
@@ -477,3 +479,19 @@ def test_an_annotation_that_ends_the_process_is_caught_like_any_other_fault() ->
     policy = _policy_with_annotation("exiting-annotation", "__import__('sys').exit(7)")
 
     assert _deployed_money_management_models({"exiting-annotation": policy}) == ()
+
+
+def test_strategy_id_is_checked_by_the_shared_plugin_identifier_rule() -> None:
+    """``strategy_id`` is refused by the one expression ``core_lib.identifiers`` owns.
+
+    The registration tables check the same expression, so a run cannot name a strategy the
+    registry could never hold.
+    """
+    source = inspect.getsource(run_config_module)
+    assert "PLUGIN_IDENTIFIER_PATTERN.fullmatch(" in source
+    assert 're.compile(r"^[a-z0-9]' not in source, "run_config must not carry its own copy"
+    accepted = RunConfig.model_validate({**_raw_config(), "strategy_id": "fake-breakout-2"})
+    assert accepted.strategy_id == "fake-breakout-2"
+    for refused in ("fake_breakout", "Fake-Breakout", "-fake", "fake--breakout", "fake breakout"):
+        with pytest.raises(ValidationError, match="strategy_id must be lowercase kebab-case"):
+            RunConfig.model_validate({**_raw_config(), "strategy_id": refused})
