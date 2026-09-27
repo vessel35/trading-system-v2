@@ -454,6 +454,27 @@ id, 클래스 이름, series 목록, 지원 시간대, `min_history`, 지원 정
    exit 0이었고 단계 9는 로컬 PostgreSQL 위의 일회용 schema에서 통합 시험을 하나씩 실제로 돌렸다.
 5. **`core_lib` 보조 다섯과 전략 초안 생성기.** 그 뒤 기존 전략 넷을 보조로 다시 맞추는 changeset을
    따로 둔다.
+   2026-09-27에 구현했다. `StrategyBase`에 `read_inputs`(불변 `DecisionInputs`), `series`, `number`,
+   `outputs`, `decide` 다섯을 두고 `core_lib.strategy`가 `DecisionInputs`를 낸다. `series_value`는 그대로다.
+   초안 생성기 `python -m trading_plugins.scaffold <입력 JSON>`은 전략 모듈, 시험 모듈, 등록 SQL(`facts.registration_sql`로
+   생성, `init-scripts/signal-service/<날짜>/NN-register-<id>.sql`), `06-init-signal-registry.sql`의 `\ir`
+   줄을 만들고 존재하는 파일은 거부한다. 구현하며 정한 것 다섯. 첫째, 8장의 열린 결정 가운데
+   `StrategyProfile` 열두 값은 입력이 모두 주어야 하며 기본값을 채우지 않는다(규범 4.1절이 기준을 정하지
+   않은 값을 도구가 지어내지 않기 위해서다). 둘째, 등록 행이 요구하는 표시 이름과 설명도 입력이다(표시
+   이름은 60자 이하). 셋째, 등록 날짜는 입력이 없으면 오늘(UTC)이다. 넷째, 생성한 두 모듈은 `ruff format`을
+   하위 프로세스로 돌려 단계 7의 형식 검사를 지키고, 문서 문자열의 첫 줄은 입력 길이와 무관하게 고정한다.
+   다섯째, 시험은 저장소 모양의 임시 root에 생성하며 등록 문장 생성기를 파이썬 인자로 주입한다(사실
+   모듈의 발견은 고정 패키지만 보므로). 실제 저장소에 표본을 생성해 아홉 단계 명령을 돌린 뒤 지웠다.
+   규범 6.4절에 정책 배포 시 `npm run generate:api`가 필요하다는 문장을, skill 6장에 생성기로 시작하라는
+   문장을 더했다. 기존 전략 일곱을 보조로 다시 맞추는 일은 그대로 별도 changeset이다.
+   Codex 코드 리뷰(P1 하나, P2 셋)로 바로잡은 것 넷. 첫째, 별도 timeframe을 선언한 series를 생성된 코드가
+   실행 timeframe으로 읽어 `KeyError`가 났다. 보조 `series`에 선택 인자 `timeframe`을 더해(`None`과
+   `"strategy"`는 실행 timeframe) 생성기가 선언한 timeframe을 넘긴다. 둘째와 셋째, 등록되지 않은
+   series·잘못된 timeframe·배포되지 않은 mode·정책이 거부하는 `default_settings`·신호 청산이 필요한
+   정책과 `supports_signal_exit=False`의 조합이 파일을 만든 뒤에야 단계 2·3에서 드러났다. 생성기가 파일을
+   쓰기 전에 같은 검사(`validate_against_the_platform`)를 돌려 거부한다. 넷째, 표시 이름과 설명의 `"""`와
+   역슬래시가 문서 문자열을 깨뜨렸다. 입력에서 거부한다. 함께 쓰기를 원자적으로 만들어 등록 문장 생성이
+   실패하면 이미 쓴 파일을 지우고 init 스크립트를 되돌린다.
 6. **원문 대비 차이 기록표.** 전략 기술 문서 형식, 두 skill의 문구, 새 전략 셋의 문서에
    기록표를 소급해 적는다.
 

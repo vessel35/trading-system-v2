@@ -138,7 +138,13 @@ question, in one message. Finish everything that does not depend on an answer fi
 Only with no blockages left, or with the deviations approved.
 
 - Place the strategy in `services/trading-plugins/trading_plugins/strategies/`, and any new
-  policy in `.../money_management/`. Declare `STRATEGY_ID` on the class itself.
+  policy in `.../money_management/`. Declare `STRATEGY_ID` on the class itself. Start from the
+  scaffold: write the declaration (id, class name, series, timeframes, `min_history`, policies,
+  the four capabilities, parameters, the twelve profile values, display name and description)
+  as one JSON file and run `.venv/bin/python -m trading_plugins.scaffold <input.json>`. It
+  writes the strategy module (declaration filled, `analyze` reading every declared series
+  through the `StrategyBase` helpers and holding at the marked place), the test module, the
+  registration SQL, and the `\ir` line; what is left to write is the decision and its tests.
 - **Declare no more than the document states.** `supported_timeframes` holds the timeframes
   the document tested, symbol and market scope follow the document, and a parameter exists
   only where the document names a value. Advertising a timeframe or a market the document

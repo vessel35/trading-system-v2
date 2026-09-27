@@ -1600,6 +1600,11 @@ services/trading-plugins/trading_plugins/
 사유를 내므로 운영자가 배포 상태를 볼 수 있다. 실행 설정의 자금관리 union은 계속 발견 결과로
 정하며 데이터베이스 상태에 따라 OpenAPI 형식을 바꾸지 않는다.
 
+**새 정책을 배포하면 `apps/web`에서 `npm run generate:api`를 다시 돌린다.** 실행 설정의 자금관리
+union이 발견 결과로 정해지므로 OpenAPI 형식이 바뀌고, 화면의 생성 코드는 그것을 따라가야 한다. 전략
+초안 생성기(`python -m trading_plugins.scaffold`)는 정책 초안을 만들지 않으므로 이 재생성은 그 범위
+밖이다.
+
 **운영자는 배포 전에
 `init-scripts/signal-service/20260810/01-create-money-management-registry.sql`을 적용한다.**
 이 스크립트는 한 트랜잭션에서 표를 만들고 `manual`과 `turtle` 행을 함께 넣으므로 표만 있고 두
