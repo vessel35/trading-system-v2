@@ -298,6 +298,42 @@ JSON만 내며 플러그인 예외를 단계의 실패로 바꾼다는 사실 �
 저장소 뿌리에 `scripts/author_check.py`를 둔다면 이 명령을 부르는 얇은 호출자일 뿐이며, 판정
 코드는 서비스 안에 있어 그 서비스의 ruff·mypy·pytest를 지난다.
 
+#### 3.4.3 구현 전 대조(changeset 4, 2026-09-27)
+
+changeset 1부터 3이 들어간 뒤의 코드와 3.4를 대조해 정한 것이다.
+
+- **단계 5의 행.** `facts.catalog_precheck(kind, id)`는 행을 받지 않으면 `registration_sql`이 쓰는 같은
+  함수로 후보 행을 스스로 만든다. 단계 5는 그 경로를 그대로 쓰며 표시 이름과 설명은 검사의 입력이 아니다.
+- **단계 2의 두 검사.** series 등록은 `series_specs_from_descriptors`를 선언 항목 하나씩 지원 timeframe마다
+  불러 예외를 `series-unregistered`로 바꾼다. timeframe 형식은 `series_key_of`가 거부하는지로 보고
+  `timeframe-format`으로 낸다.
+- **단계 3의 순서.** 배포되지 않은 mode는 `create_runtime`에 가기 전에 `policy-mode-not-deployed`로
+  낸다(Factory의 문구를 되돌려 주지 않기 위해서다). 대표 설정은 선언(`default_settings`) 위에
+  `--mode-settings` 파일의 그 mode 값을 덮은 것이고, 정책의 dataclass 필드 가운데 기본값이 없는 이름이
+  남으면 `policy-settings-required`다. `create_runtime`의 거부는 `runtime-refused`다.
+- **단계 4의 이름 목록.** 규범 4.2절의 일곱 이름을 `trading_plugins.author_check`가 상수로 가진다.
+  공통 규범 검사의 전략 단위 층도 같은 목록을 자기 시험 안에 갖고 있으며, 시험 모듈은 import할 수 없으므로
+  둘을 하나로 합치지 않는다. 규범이 바뀌면 두 곳을 함께 고친다.
+- **단계 1이 실패하면 뒤 단계는 돌 수 없다.** 그 단계들은 건너뜀이 아니라 "앞 단계 실패로 돌지 못함"을
+  사유로 한 실패다. 건너뜀은 단계 9뿐이라는 규칙을 지키기 위해서다.
+- **단계 8의 "그 전략 클래스를 import하는 시험 모듈".** `services/trading-plugins/tests`에서 전략의
+  모듈 경로 또는 클래스 이름이 소스에 나오는 시험 파일을 고르고, 그 파일들로 pytest를 돌려 하나 이상
+  통과했는지 본다.
+- **단계 9의 건너뜀 판정.** 저장소 `.env`의 접속 정보로 짧은 시간 제한을 두고 연결을 시도해 실패하면
+  "건너뜀(데이터베이스 없음)"이고, 연결되면 `pytest -m integration -k <id>`를 돌려 종료 코드 5(수집
+  0건)는 실패, 0은 통과다. 통합 시험은 발견된 전략과 정책 전부로 매개변수화해 node id에 id가 들어간다.
+- **MCP wrapper의 범위.** MCP 서버는 trading-plugins에 있으므로 wrapper는 단계 1부터 5를 싣는다.
+  6부터 9는 `backtest_service.author_check` 명령으로만 돈다.
+- **규칙 이름 어휘.** `discovery-fault`, `identifier-format`, `timeframe-format`, `series-unregistered`,
+  `policy-mode-not-deployed`, `policy-settings-required`, `runtime-refused`, `parameter-policy-owned`,
+  `precheck-failed`, `declaration-unreadable`, `dry-run-error`, `dry-run-integrity`,
+  `dry-run-nondeterministic`, `qa-failed`, `unit-tests-failed`, `integration-tests-failed`,
+  `mode-settings-invalid`, `stage-not-run`. 시험이 이 집합을 고정한다.
+- **판정은 셋이다(Codex 코드 리뷰 P2 둘 반영).** 모든 단계가 통과면 `passed`, 실패가 하나라도 있으면
+  `failed`, 실패는 없지만 건너뜀(단계 9)이 있으면 `incomplete`다. 최상위 `passed`는 `passed` 판정에서만
+  참이고 종료 코드는 `failed`에서만 1이다. 그리고 mode별 설정 객체 안의 `mode` 키는 고른 mode를
+  덮을 수 있으므로 명령줄 경계와 단계 3·6이 `mode-settings-invalid`로 거부한다.
+
 ### 3.5 전략마다 반복되는 공통 코드를 플랫폼이 소유한다
 
 **기반 클래스에 보조 다섯을 더한다.** `core_lib.strategy.StrategyBase`에 정적 메서드
@@ -399,12 +435,23 @@ id, 클래스 이름, series 목록, 지원 시간대, `min_history`, 지원 정
    Evidence는 임시 디렉터리에 쓰고 지운다. 인수 시험 `test_document_sourced_strategies_engine.py`는
    자기 기대값 표만 남기고 모듈을 쓰며 판정이 그대로 통과한다. `test_synthetic_dry_run.py`가
    vessel-reference의 두 실행 hash 일치, 등록 행이 발견 목록 전부를 덮는 것, 운영 모듈과 web-api가
-   진단 패키지를 import하지 않는 것, 경로 길이와 seed의 고정을 본다.
+   진단 패키지를 import하지 않는 것, 경로 길이와 seed의 고정을 본다. changeset 4에서 하나를 더했다.
+   합성 feed가 1h와 1m만 내어 Turtle을 선언한 전략의 단계 6이 일봉 요구로 멈췄으므로, 별도 seed의
+   확정 일봉 계열(시작 전 60일부터 끝까지)을 feed가 `1d`로 낸다. 시간봉 경로는 13일치 warm-up뿐이라
+   일봉 스무 개를 합쳐 만들 수 없고, 시간봉 경로 자체는 바꾸지 않아 그 위의 판정은 그대로다.
 4. **`trading_plugins.author_check`(단계 1부터 5)와 `backtest_service.author_check`(6부터
    9), MCP wrapper, 통합 시험의 매개변수화, skill 문구.** 결함 주입 시험 셋을 함께 둔다. 밑줄 id
    정책은 발견 fault로, 미등록 조합을 선언한 전략은 단계 2의 `series-unregistered`로,
    `supported`에 배포되지 않은 mode를 적은 전략은 단계 3의 `policy-mode-not-deployed`로
    실패해야 한다. 배포된 전략 넷 전부에 대해 exit 0을 확인한다.
+   2026-09-27에 구현했다(3.4.3의 대조대로). 두 명령과 MCP 도구 `author_check`(단계 1부터 5),
+   통합 시험 둘의 발견 결과 매개변수화(node id에 전략 id와 mode), skill 6장의 완료 정의 교체,
+   등록 MCP 설계 10장의 한 줄. 시험은 배포된 전략 일곱이 단계 1부터 5를 통과하는 것, 주입한 결함
+   여섯(밑줄 id 정책, 미등록 조합, 잘못된 timeframe, 배포되지 않은 mode, 기본값 없는 설정,
+   런타임 거부, 정책 소유 parameter)이 각각의 규칙으로 잡히는 것, 규칙 어휘와 4.2절 이름 목록의
+   고정, 소스에 배포 재고 이름이 없는 것, 단계 6부터 9의 인자 구성과 결과 대응(가짜 runner), 명령줄
+   경계를 본다. `python -m backtest_service.author_check <id>`는 배포된 전략 일곱 전부에 대해
+   exit 0이었고 단계 9는 로컬 PostgreSQL 위의 일회용 schema에서 통합 시험을 하나씩 실제로 돌렸다.
 5. **`core_lib` 보조 다섯과 전략 초안 생성기.** 그 뒤 기존 전략 넷을 보조로 다시 맞추는 changeset을
    따로 둔다.
 6. **원문 대비 차이 기록표.** 전략 기술 문서 형식, 두 skill의 문구, 새 전략 셋의 문서에
