@@ -10,7 +10,7 @@ from uuid import uuid4
 import psycopg
 import pytest
 from psycopg import sql
-from trading_plugins import facts
+from trading_plugins import discover_strategies, facts, registered_money_management
 
 pytestmark = pytest.mark.integration
 
@@ -135,22 +135,24 @@ def _read_generated_columns(
     return dict(zip(columns, row, strict=True))
 
 
+@pytest.mark.parametrize("strategy_id", sorted(discover_strategies()[0]))
 def test_strategy_registration_round_trips_and_preserves_lifecycle(
-    disposable_registry: _DisposableRegistry,
+    disposable_registry: _DisposableRegistry, strategy_id: str
 ) -> None:
-    display_name = "Vessel 등록 검증"
+    """Every deployed strategy, so ``pytest -k <id>`` selects exactly its own round trip."""
+    display_name = f"{strategy_id} 등록 검증"
     description = "Generated registration with an operator's quoted value."
     default_params = {"operator_note": "O'Brien"}
     statement = facts.registration_sql(
         "strategy",
-        "vessel-reference",
+        strategy_id,
         display_name,
         description,
         True,
         default_params,
     )
     expected = facts._strategy_registration_row(
-        "vessel-reference",
+        strategy_id,
         display_name,
         description,
         True,
@@ -166,7 +168,7 @@ def test_strategy_registration_round_trips_and_preserves_lifecycle(
             disposable_registry,
             "strategy_registry",
             "strategy_id",
-            "vessel-reference",
+            strategy_id,
             expected,
         )
         == expected
@@ -181,7 +183,7 @@ def test_strategy_registration_round_trips_and_preserves_lifecycle(
             "SET description = %s, is_active = false, is_deprecated = true "
             "WHERE strategy_id = %s"
         ).format(sql.Identifier(disposable_registry.schema)),
-        ("stale declaration", "vessel-reference"),
+        ("stale declaration", strategy_id),
     )
     reapplied = disposable_registry.connection.execute(executable)
     lifecycle = disposable_registry.connection.execute(
@@ -189,27 +191,29 @@ def test_strategy_registration_round_trips_and_preserves_lifecycle(
             "SELECT description, is_active, is_deprecated "
             "FROM {}.strategy_registry WHERE strategy_id = %s"
         ).format(sql.Identifier(disposable_registry.schema)),
-        ("vessel-reference",),
+        (strategy_id,),
     ).fetchone()
 
     assert reapplied.rowcount == 1
     assert lifecycle == (description, False, True)
 
 
+@pytest.mark.parametrize("mode", sorted(registered_money_management()))
 def test_policy_registration_round_trips_canonical_settings_and_is_idempotent(
-    disposable_registry: _DisposableRegistry,
+    disposable_registry: _DisposableRegistry, mode: str
 ) -> None:
-    display_name = "Manual 정책 검증"
+    """Every deployed policy, so ``pytest -k <mode>`` selects exactly its own round trip."""
+    display_name = f"{mode} 정책 검증"
     description = "Generated policy registration."
     statement = facts.registration_sql(
         "money_management",
-        "manual",
+        mode,
         display_name,
         description,
         True,
     )
     expected = facts._policy_registration_row(
-        "manual",
+        mode,
         display_name,
         description,
         True,
@@ -221,7 +225,7 @@ def test_policy_registration_round_trips_canonical_settings_and_is_idempotent(
         disposable_registry,
         "money_management_registry",
         "mode",
-        "manual",
+        mode,
         expected,
     )
 

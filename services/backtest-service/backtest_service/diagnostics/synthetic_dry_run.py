@@ -61,6 +61,7 @@ __all__ = [
     "minute_candles",
     "run_config",
     "run_strategy",
+    "synthetic_daily_candles",
     "synthetic_hourly_candles",
 ]
 
@@ -71,6 +72,8 @@ BASE = datetime(2026, 1, 1, 1, tzinfo=UTC)
 WARMUP_HOURS = 320
 EVALUATION_HOURS = 240
 SEED = 20260923
+DAILY_SEED = 20260927
+DAILY_HISTORY_DAYS = 60
 DATA_SOURCE = "synthetic-regime-fixture"
 
 
@@ -107,6 +110,42 @@ def synthetic_hourly_candles(seed: int = SEED) -> list[Candle]:
     return candles
 
 
+def synthetic_daily_candles(seed: int = DAILY_SEED) -> list[Candle]:
+    """A separate finalized daily series on UTC day boundaries, for policies that read one.
+
+    Turtle's daily N is prepared outside the bar loop from this series. It is generated on its
+    own seed rather than aggregated from the hourly path, because the hourly path covers only
+    thirteen days of warm-up and the policy asks for twenty daily bars before the first
+    evaluated bar. The hourly path itself is unchanged, so every judgment made on it stands.
+    """
+    rng = random.Random(seed)
+    first_open = BASE.replace(hour=0) - timedelta(days=DAILY_HISTORY_DAYS)
+    last_close = BASE + timedelta(hours=EVALUATION_HOURS)
+    candles: list[Candle] = []
+    opened = first_open
+    while opened + timedelta(days=1) <= last_close:
+        open_price = 100.0 + rng.uniform(-3.0, 3.0)
+        close = open_price + rng.uniform(-2.0, 2.0)
+        candles.append(
+            Candle(
+                symbol=SYMBOL,
+                exchange=EXCHANGE,
+                timeframe="1d",
+                open_time=opened,
+                close_time=opened + timedelta(days=1),
+                open=open_price,
+                high=max(open_price, close) + rng.uniform(1.0, 4.0),
+                low=min(open_price, close) - rng.uniform(1.0, 4.0),
+                close=close,
+                volume=1000.0,
+                quote_volume=None,
+                trade_count=None,
+            )
+        )
+        opened += timedelta(days=1)
+    return candles
+
+
 def minute_candles(candles: Sequence[Candle]) -> list[Candle]:
     """Split each bar into flat minutes, the 1m origin the Engine validates against."""
     result: list[Candle] = []
@@ -134,11 +173,12 @@ def minute_candles(candles: Sequence[Candle]) -> list[Candle]:
 
 
 class SyntheticFeed(DataFeed):
-    """Serve the hourly path, its synthesized minutes, and a mark price from the last close."""
+    """Serve the hourly path, its minutes, the daily series, and the last close as mark price."""
 
-    def __init__(self, candles: Sequence[Candle]) -> None:
+    def __init__(self, candles: Sequence[Candle], daily: Sequence[Candle] | None = None) -> None:
         self._candles = list(candles)
         self._minutes = minute_candles(candles)
+        self._daily = list(synthetic_daily_candles() if daily is None else daily)
 
     def candles(self, symbol: str, tf: str, up_to: datetime) -> list[Candle]:
         if symbol != SYMBOL:
@@ -147,8 +187,10 @@ class SyntheticFeed(DataFeed):
             source = self._minutes
         elif tf == TIMEFRAME:
             source = self._candles
+        elif tf == "1d":
+            source = self._daily
         else:
-            raise LookupError(f"the synthetic feed serves {TIMEFRAME} and 1m only")
+            raise LookupError(f"the synthetic feed serves {TIMEFRAME}, 1m, and 1d only")
         return [candle for candle in source if candle.close_time <= up_to]
 
     def source_candles(
