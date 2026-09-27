@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from types import ModuleType
 from typing import Final
 
+from core_lib.identifiers import PLUGIN_IDENTIFIER_PATTERN, is_plugin_identifier
 from core_lib.money_management import MoneyManagementBase, policy_settings
 from core_lib.strategy import AdapterClass, InProcessStrategyRegistry, StrategyBase
 
@@ -101,6 +102,17 @@ def discover_strategies(
                     )
                 )
                 continue
+            if not is_plugin_identifier(strategy_id):
+                # The registration table refuses the same id, so a file that would never
+                # register is refused here, with its reason, instead of being deployed.
+                faults.append(
+                    PluginFault(
+                        name,
+                        f"{candidate.__name__} declares STRATEGY_ID {strategy_id!r}, which is "
+                        f"not kebab-case ({PLUGIN_IDENTIFIER_PATTERN.pattern})",
+                    )
+                )
+                continue
             previous = found.get(strategy_id)
             if previous is not None:
                 faults.append(
@@ -130,6 +142,15 @@ def discover_money_management(
             if not isinstance(mode, str) or not mode:
                 faults.append(
                     PluginFault(name, f"{candidate.__name__} must declare its own non-empty id")
+                )
+                continue
+            if not is_plugin_identifier(mode):
+                faults.append(
+                    PluginFault(
+                        name,
+                        f"{candidate.__name__} declares id {mode!r}, which is not kebab-case "
+                        f"({PLUGIN_IDENTIFIER_PATTERN.pattern})",
+                    )
                 )
                 continue
             previous = found.get(mode)
