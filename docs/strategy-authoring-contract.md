@@ -402,6 +402,7 @@ class DecisionIntent:
 표시해 둔다.
 
 ```python
+# contract-example: strategy
 from collections.abc import Mapping
 
 from core_lib.strategy import (
@@ -410,6 +411,7 @@ from core_lib.strategy import (
     ParameterSchema,
     ResolvedConfig,
     StrategyBase,
+    StrategyDecisionContract,
     StrategyMetadata,
     StrategyProfile,
 )
@@ -428,6 +430,7 @@ _PATTERN_NAME = "pat_engulfing"   # <- {"name": "pat_engulfing", "params": {}}
 class EmaEngulfingExample(StrategyBase):
     """추세 방향으로 장악형이 나올 때만 진입하고 추세가 꺾이면 청산한다."""
 
+    STRATEGY_ID = STRATEGY_ID  # 클래스 자신에 선언한다. 모듈 상수만으로는 발견되지 않는다(§6.5)
     VERSION = "1.0.0"
 
     def __init__(self, config: ResolvedConfig) -> None:
@@ -469,6 +472,8 @@ class EmaEngulfingExample(StrategyBase):
                 supports_signal_exit=True,
                 supports_pyramiding=False,
             ),
+            # 목표 방식을 선언한다. 기본값은 TradingSignal이라 정책을 붙일 수 없다(§5.2).
+            decision_contract=StrategyDecisionContract.DECISION_INTENT,
         )
 
     @classmethod
@@ -1196,11 +1201,13 @@ version, 쓴 변동성의 이름과 값과 확정 시각, 손절거리, 위험�
 ATR 배수로 손절만 두고 목표가는 두지 않아 청산을 전략에 맡기는 정책이다.
 
 ```python
+# contract-example: policy
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import ClassVar
 
+from core_lib.indicators import DEFAULT_REGISTRY
 from core_lib.money_management import (
     AccountRiskSnapshot,
     MarketSnapshot,
@@ -1579,8 +1586,9 @@ services/trading-plugins/trading_plugins/
 없으므로, **켜고 끄는 것은 코드가 아니라 이 두 열이 맡는다.**
 
 **정책의 `id`는 등록 표의 `mode`가 되므로 kebab-case여야 한다.** 표가
-`^[a-z0-9]+(-[a-z0-9]+)*$`로 검사하며, 밑줄이 든 id는 등록 문장 적용 단계에서 거부된다.
-전략의 `STRATEGY_ID`에 같은 규칙이 걸린다.
+`^[a-z0-9]+(-[a-z0-9]+)*$`로 검사하며, 밑줄이 든 id는 발견 단계에서 fault가 되어 배포되지 않는다.
+전략의 `STRATEGY_ID`에 같은 규칙이 걸린다. 규칙은 `core_lib/identifiers.py` 한 곳에 있고 능력 목록의
+`plugin.identifier_format`이 그것을 적는다.
 
 **정책은 `signal_db.money_management_registry`에 넣는다.** mode와 클래스 이름과 모듈
 경로와 설정 이름, 표시 정보, 활성 여부와 폐기 여부를 담는다. 발견된 정책과 등록 행의 신원과
@@ -1620,8 +1628,8 @@ services/trading-plugins/trading_plugins/
 파일은 막지 못한다** — import는 부르는 쪽 thread에서 도므로 밖에서 끊을 수 없고,
 최상위에서 막히는 파일은 그것을 읽는 서비스도 함께 막는다.
 
-**정책은 배포 시점에 선언 둘을 확인한다.** 설정 표면을 읽을 수 있는지와
-`requires_signal_exit`를 선언했는지다. 실행에서 그 mode를 부를 때까지 미루면
+**정책은 배포 시점에 선언 둘과 id 형식을 확인한다.** 설정 표면을 읽을 수 있는지와
+`requires_signal_exit`를 선언했는지, 그리고 `id`가 kebab-case인지다. 실행에서 그 mode를 부를 때까지 미루면
 **잘못 배포한 것이 첫 요청 때에야 드러난다.**
 
 **파일을 바꾸면 반드시 다시 띄워야 한다.** 이미 불러온 모듈은 같은 프로세스에서

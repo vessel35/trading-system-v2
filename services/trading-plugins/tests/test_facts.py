@@ -904,3 +904,28 @@ def test_catalog_precheck_refuses_default_settings_the_policy_does_not_accept(
     assert findings[0]["mode"] == "manual"
     assert "not_a_setting" in str(findings[0]["detail"])
     assert "policy default settings" in cast("list[str]", result["checks_performed"])
+
+
+def test_catalog_precheck_reports_a_row_identifier_the_registry_would_refuse() -> None:
+    """A candidate row whose id the table's check constraint refuses is a finding, by rule."""
+    strategy_row = _parse_registration(
+        facts.registration_sql("strategy", "vessel-reference", "Vessel", "description", True)
+    ).row
+    strategy = facts.catalog_precheck(
+        "strategy", "vessel-reference", {**strategy_row, "strategy_id": "vessel_reference"}
+    )
+    policy_row = _parse_registration(
+        facts.registration_sql("money_management", "manual", "Manual", "description", True)
+    ).row
+    policy = facts.catalog_precheck("money_management", "manual", {**policy_row, "mode": "Manual"})
+
+    for result, field in ((strategy, "strategy_id"), (policy, "mode")):
+        assert result["passed"] is False
+        findings = cast("list[dict[str, facts.JSONValue]]", result["findings"])
+        formats = [finding for finding in findings if finding.get("rule") == "identifier-format"]
+        assert [finding["field"] for finding in formats] == [field]
+        assert "kebab-case" in str(formats[0]["detail"])
+        assert "identifier format" in cast("list[str]", result["checks_performed"])
+    assert "identifier format" in cast(
+        "list[str]", facts.catalog_precheck("strategy", "vessel-reference")["checks_performed"]
+    )

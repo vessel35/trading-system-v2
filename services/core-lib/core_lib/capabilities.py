@@ -112,6 +112,7 @@ _MANAGER_TESTS: Final = "services/core-lib/tests/test_strategy_manager.py"
 _EXECUTION_TESTS: Final = "services/core-lib/tests/test_execution.py"
 _IDENTIFIER_TESTS: Final = "services/core-lib/tests/test_identifiers.py"
 _RUN_CONFIG_TESTS: Final = "services/backtest-service/tests/test_run_config.py"
+_DISCOVERY_TESTS: Final = "services/trading-plugins/tests/test_discovery.py"
 _WALLET_TESTS: Final = "services/wallet-service/tests/test_wallet_service.py"
 
 
@@ -512,15 +513,17 @@ PLATFORM_CAPABILITIES: Final[Mapping[str, Capability]] = _entries(
         id="plugin.identifier_format",
         statement=(
             "A strategy id and a policy mode are kebab-case: groups of lowercase letters and "
-            "digits joined by single hyphens. The registration tables' check constraints and "
-            "the run configuration refuse anything else by this same expression, which "
-            "core_lib.identifiers owns."
+            "digits joined by single hyphens. Discovery, the run configuration, and the "
+            "registration tables' check constraints refuse anything else by this same "
+            "expression, which core_lib.identifiers owns; a file with another id is a "
+            "discovery fault and is not deployed."
         ),
         value=PLUGIN_IDENTIFIER_PATTERN.pattern,
-        # Structural: the tables' expression is compared as text, never executed here, and
-        # the run configuration's refusal is observed. Discovery does not check the rule yet.
-        proof=CapabilityProof.STRUCTURE,
+        # Behavior for discovery and the run configuration; the tables' expression is
+        # compared as text, never executed here.
+        proof=CapabilityProof.BEHAVIOR,
         verified_by=(
+            f"{_DISCOVERY_TESTS}::test_an_id_that_is_not_kebab_case_is_a_discovery_fault",
             f"{_IDENTIFIER_TESTS}"
             "::test_the_code_expression_matches_the_ddl_check_character_for_character",
             f"{_RUN_CONFIG_TESTS}::test_strategy_id_is_checked_by_the_shared_plugin_identifier_rule",

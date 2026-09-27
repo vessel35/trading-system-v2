@@ -403,3 +403,27 @@ def test_a_policy_that_does_not_declare_its_exit_need_is_refused_at_deploy(
 
     assert found == {}
     assert any("must declare requires_signal_exit" in fault.reason for fault in faults)
+
+
+def test_an_id_that_is_not_kebab_case_is_a_discovery_fault(plugin_dir: ModuleType) -> None:
+    """The registration tables refuse such an id, so discovery refuses it first, with a reason.
+
+    ``core_lib.capabilities`` records the rule as ``plugin.identifier_format``.
+    """
+    _write(
+        plugin_dir,
+        "under_score",
+        _STRATEGY_BODY.format(class_name="UnderScore", strategy_id="under_score"),
+    )
+    _write(plugin_dir, "upper_mode", _POLICY_BODY.format(class_name="UpperMode", mode="Upper-Mode"))
+
+    strategies, strategy_faults = discovery.discover_strategies(plugin_dir)
+    policies, policy_faults = discovery.discover_money_management(plugin_dir)
+
+    assert strategies == {} and policies == {}
+    assert [fault.module for fault in strategy_faults] == [f"{plugin_dir.__name__}.under_score"]
+    assert "not kebab-case" in strategy_faults[0].reason
+    assert "'under_score'" in strategy_faults[0].reason
+    assert [fault.module for fault in policy_faults] == [f"{plugin_dir.__name__}.upper_mode"]
+    assert "not kebab-case" in policy_faults[0].reason
+    assert "'Upper-Mode'" in policy_faults[0].reason
