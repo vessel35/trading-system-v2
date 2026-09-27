@@ -384,6 +384,11 @@ id, 클래스 이름, series 목록, 지원 시간대, `min_history`, 지원 정
    `facts.py`의 형식 finding과 `checks_performed`, `test_contract_examples.py`, 규범 4.1절
    예시의 클래스 선언과 `decision_contract` 선언, 표시 주석 둘, 6.4절과 6.5절의 문장.
    `plugin.identifier_format`의 `verified_by`에 발견 fault 시험을 더한다.
+   2026-09-27에 구현했다. 예시 시험이 바로 드러낸 결함이 하나 더 있었다. 5.3.1절 정책 예시가
+   `DEFAULT_REGISTRY`를 쓰면서 import 문이 없어 생성 시점에 `NameError`가 났다(본문의 "예시가
+   import하는 것"은 그 이름을 적고 있었다). import 줄을 더했다. 같은 changeset에 author-strategy
+   skill 6장의 편집 하나를 붙였다. 공통 규범 검사 두 층이 새 전략마다 사례표 행을 요구하므로 그 행
+   둘을 같은 changeset에서 더하고 저장소 루트 pytest를 돌리라는 것이다.
 3. **`synthetic_dry_run` 진단 모듈.** 등록 행 fixture를 발견 결과 기반으로 바꾸고 기존 인수
    시험이 그 모듈을 쓰도록 옮긴다. 시험의 판정은 바뀌지 않는다.
 4. **`trading_plugins.author_check`(단계 1부터 5)와 `backtest_service.author_check`(6부터
