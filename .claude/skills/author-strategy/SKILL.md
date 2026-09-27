@@ -151,7 +151,16 @@ Only with no blockages left, or with the deviations approved.
 - Keep entry and exit decisions in the strategy. Protection prices, quantity, and leverage
   belong to the policy; rounding, margin, and liquidation belong to execution.
 - Put the code, the registration SQL, and the tests in one changeset. The contract's section
-  9 lists the tests, and its closing checklist is the gate.
+  9 lists the tests. **Saying the implementation is done takes three things.** First,
+  `.venv/bin/python -m backtest_service.author_check <id>` exits 0 and its stage 9 is not
+  skipped (it runs the nine pre-deployment stages: discovery, declaration, money-management
+  composition for every declared mode, parameters, registration precheck, the Engine on the
+  synthetic path, static QA, the unit tests that import the class, and the disposable-database
+  integration tests). Second, the `verify-strategy` procedure has confirmed every row of the
+  difference table against the source. Third, a person reads the checklist items no program
+  sees: that the strategy owns only the decision edge, that it reads no future value, and that
+  each direction has its own entry and exit evidence. Stages 1 to 5 alone are also reachable
+  as the `author_check` MCP tool and as `python -m trading_plugins.author_check <id>`.
 - **Add the strategy's rows to the two common-check case tables**, in the same changeset:
   `_CASES` in `services/trading-plugins/tests/test_strategy_contract_suite.py` (a deterministic
   entry and exit scenario per direction, with the series values the document's rule needs) and

@@ -13,6 +13,7 @@ from collections.abc import Callable, Mapping
 from mcp.server.fastmcp import FastMCP
 from mcp.types import CallToolResult, TextContent
 
+from . import author_check as pre_deployment
 from . import facts
 
 mcp = FastMCP("trading-plugin-facts")
@@ -90,6 +91,15 @@ def catalog_precheck(
     return _lookup(lambda: facts.catalog_precheck(kind, id, row))
 
 
+@mcp.tool(structured_output=False)
+def author_check(
+    id: str,
+    mode_settings: Mapping[str, Mapping[str, object]] | None = None,
+) -> object:
+    """Run pre-deployment stages 1 to 5 for one strategy id, without the Engine or a database."""
+    return _lookup(lambda: pre_deployment.check(id, mode_settings=mode_settings).as_json())
+
+
 def main() -> None:
     """Run the fact server over the MCP standard-input/output transport."""
     mcp.run()
@@ -100,6 +110,7 @@ if __name__ == "__main__":
 
 
 __all__ = [
+    "author_check",
     "capabilities",
     "catalog_precheck",
     "declaration",

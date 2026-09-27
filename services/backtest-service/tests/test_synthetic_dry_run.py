@@ -123,11 +123,18 @@ def test_the_synthetic_path_is_the_one_the_acceptance_tests_were_written_on() ->
 
 def test_no_operational_module_imports_the_diagnostics_package() -> None:
     """The stand-ins stay in ``diagnostics``; the service and web-api never import them."""
+    # The pre-deployment command is the one module allowed to import the diagnostics: it is
+    # a command, and the web-api must not import it either (checked below).
+    allowed = {_BACKTEST_PACKAGE / "author_check.py"}
     offenders: list[str] = []
     for package in (_BACKTEST_PACKAGE, _WEB_API_PACKAGE):
         for path in sorted(package.rglob("*.py")):
-            if "diagnostics" in path.parts:
+            if "diagnostics" in path.parts or path in allowed:
                 continue
             if _DIAGNOSTICS_IMPORT.search(path.read_text()):
                 offenders.append(str(path.relative_to(REPOSITORY_ROOT)))
     assert offenders == []
+    command_import = re.compile(r"^\s*(from|import)\s+backtest_service\.author_check\b", re.M)
+    assert not any(
+        command_import.search(path.read_text()) for path in _WEB_API_PACKAGE.rglob("*.py")
+    )
