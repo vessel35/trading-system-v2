@@ -11,6 +11,7 @@ from enum import Enum
 from typing import Any, Final, Literal, cast
 
 from core_lib.capabilities import PLATFORM_CAPABILITIES, Capability
+from core_lib.identifiers import PLUGIN_IDENTIFIER_PATTERN, is_plugin_identifier
 from core_lib.indicators.registry import build_default_registry
 from core_lib.money_management import (
     MoneyManagementBase,
@@ -563,6 +564,20 @@ class _MemoryStrategyRegistry(StrategyRegistry):
         raise PermissionError("catalog precheck is read-only")
 
 
+def _identifier_format_findings(field: str, value: object) -> list[JSONValue]:
+    """Report a candidate row value the registration table would refuse by its check."""
+    if is_plugin_identifier(value):
+        return []
+    return [
+        {
+            "rule": "identifier-format",
+            "field": field,
+            "value": _plain(value),
+            "detail": f"{field} must be kebab-case: {PLUGIN_IDENTIFIER_PATTERN.pattern}",
+        }
+    ]
+
+
 def _precheck_strategy(identifier: str, row: Mapping[str, object]) -> JSONObject:
     strategy_class = _strategy_class(identifier)
     catalog = _MemoryStrategyRegistry(identifier, row)
@@ -582,18 +597,25 @@ def _precheck_strategy(identifier: str, row: Mapping[str, object]) -> JSONObject
     except (Exception, SystemExit) as error:  # runtime owns the rules being reported here
         construction_error = f"{type(error).__name__}: {error}"
     refused_defaults = _refused_default_settings(strategy_class, policies)
+    format_findings = _identifier_format_findings("strategy_id", row.get("strategy_id", identifier))
     reported: list[JSONValue] = [_plain(asdict(finding)) for finding in findings]
     result: JSONObject = {
         "kind": "strategy",
         "identifier": identifier,
-        "passed": not findings and construction_error is None and not refused_defaults,
-        "findings": reported + refused_defaults,
+        "passed": (
+            not findings
+            and construction_error is None
+            and not refused_defaults
+            and not format_findings
+        ),
+        "findings": reported + refused_defaults + format_findings,
         "adapter_construction_error": construction_error,
         "checks_performed": [
             "catalog identity and declaration",
             "catalog lifecycle",
             "adapter construction",
             "policy default settings",
+            "identifier format",
         ],
         "not_checked": list(_NOT_CHECKED),
     }
@@ -641,15 +663,18 @@ def _precheck_policy(identifier: str, row: Mapping[str, object]) -> JSONObject:
         {identifier: policy_class},
     )
     findings = [item for item in availability if not item.runnable]
+    format_findings = _identifier_format_findings("mode", row.get("mode", identifier))
+    reported = cast("list[JSONValue]", _plain([asdict(finding) for finding in findings]))
     return {
         "kind": "money_management",
         "identifier": identifier,
-        "passed": not findings,
-        "findings": _plain([asdict(finding) for finding in findings]),
+        "passed": not findings and not format_findings,
+        "findings": reported + format_findings,
         "adapter_construction_error": None,
         "checks_performed": [
             "catalog identity and declaration",
             "catalog lifecycle",
+            "identifier format",
         ],
         "not_checked": list(_NOT_CHECKED),
     }
