@@ -3473,6 +3473,43 @@ def test_engine_passes_exactly_the_six_declared_inputs(tmp_path: Path) -> None:
     )
 
 
+def test_a_strategy_receives_one_value_per_resolved_series_at_each_bar(tmp_path: Path) -> None:
+    """Pin how deep a strategy sees into a series: the deciding bar's value and nothing earlier.
+
+    ``core_lib.capabilities`` records this as ``series.history_depth``. The keys the strategy
+    received are exactly the run's resolved series, and each value is the one the Engine
+    snapshotted for that bar, so a crossing of two series cannot be judged from the inputs
+    alone. The shape of a value is ``series.value_shapes``'s check and is not repeated here.
+    """
+    result = _run_multi_timeframe_fixture(tmp_path / "depth", changed_tail=False)
+    observed = list(_MultiTimeframeStrategy.observed_market_data)
+    assert observed
+    assert capability("series.history_depth").value == 1
+    with sqlite3.connect(result.evidence_path) as connection:
+        defined = [
+            str(row[0])
+            for row in connection.execute(
+                "SELECT indicator_key FROM INDICATOR_DEFINITION ORDER BY indicator_key"
+            )
+        ]
+        rows = connection.execute(
+            "SELECT indicator_key, value, value_json FROM INDICATOR_SNAPSHOT ORDER BY snapshot_seq"
+        ).fetchall()
+    assert defined
+    width = len(defined)
+    assert len(rows) == width * len(observed)
+    for index, item in enumerate(observed):
+        indicators = cast(Mapping[str, object], item["indicators"])
+        assert set(indicators) == set(defined)
+        snapshot = {
+            str(key): (value if value_json is None else json.loads(value_json))
+            for key, value, value_json in rows[index * width : (index + 1) * width]
+        }
+        for key, value in indicators.items():
+            assert not isinstance(value, list | tuple), f"{key} carried a history, not a value"
+            assert value == snapshot[key]
+
+
 def _paired_candles(
     *, changed_unfinished_tail: bool
 ) -> tuple[list[Candle], list[Candle], list[Candle]]:
