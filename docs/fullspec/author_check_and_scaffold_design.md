@@ -391,6 +391,15 @@ id, 클래스 이름, series 목록, 지원 시간대, `min_history`, 지원 정
    둘을 같은 changeset에서 더하고 저장소 루트 pytest를 돌리라는 것이다.
 3. **`synthetic_dry_run` 진단 모듈.** 등록 행 fixture를 발견 결과 기반으로 바꾸고 기존 인수
    시험이 그 모듈을 쓰도록 옮긴다. 시험의 판정은 바뀌지 않는다.
+   2026-09-27에 구현했다. `backtest_service/diagnostics/synthetic_dry_run.py`가 인공 캔들 경로(320봉
+   warm-up, 240봉 평가, seed 고정), 1m 원천, 합성 feed, 메모리 카탈로그, 발견 결과로 만든 등록 행,
+   실행 설정 생성, `run_strategy`, 그리고 같은 설정으로 두 번 돌려 거래 수·청산 사유 분포·무결성·
+   `warmup_candles`·hash 일치를 내는 `dry_run`과 JSON 명령줄(`python -m
+   backtest_service.diagnostics.synthetic_dry_run <id> <mode> [<settings.json>]`)을 가진다.
+   Evidence는 임시 디렉터리에 쓰고 지운다. 인수 시험 `test_document_sourced_strategies_engine.py`는
+   자기 기대값 표만 남기고 모듈을 쓰며 판정이 그대로 통과한다. `test_synthetic_dry_run.py`가
+   vessel-reference의 두 실행 hash 일치, 등록 행이 발견 목록 전부를 덮는 것, 운영 모듈과 web-api가
+   진단 패키지를 import하지 않는 것, 경로 길이와 seed의 고정을 본다.
 4. **`trading_plugins.author_check`(단계 1부터 5)와 `backtest_service.author_check`(6부터
    9), MCP wrapper, 통합 시험의 매개변수화, skill 문구.** 결함 주입 시험 셋을 함께 둔다. 밑줄 id
    정책은 발견 fault로, 미등록 조합을 선언한 전략은 단계 2의 `series-unregistered`로,
