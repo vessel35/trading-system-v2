@@ -79,3 +79,28 @@ def test_resample_excludes_the_unconfirmed_final_bucket() -> None:
     assert len(result.candles) == 1
     assert result.candles[0].open_time == base
     assert result.dropped_bucket_count == 0
+
+
+def test_any_whole_minute_timeframe_is_built_from_1m_rows() -> None:
+    """``candles.resampled_timeframes``: a run timeframe needs no table of its own.
+
+    Three minutes, five minutes, two hours, and one day are all regrouped from the same
+    confirmed 1m rows, so a 5m run is served by the 1m data the collector stores.
+    """
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    for timeframe, minutes in (("3m", 3), ("5m", 5), ("2h", 120), ("1d", 1440)):
+        rows = [_row(base + timedelta(minutes=index), 100 + index) for index in range(minutes)]
+        result = resample_confirmed_ohlcv(
+            rows,
+            symbol="BTCUSDT",
+            exchange="binance",
+            timeframe=timeframe,
+            boundary=base + timedelta(minutes=minutes),
+        )
+        assert len(result.candles) == 1, timeframe
+        candle = result.candles[0]
+        assert candle.timeframe == timeframe
+        assert candle.open_time == base
+        assert candle.close_time == base + timedelta(minutes=minutes)
+        assert candle.open == 100.0 and candle.close == 100 + minutes
+        assert result.dropped_bucket_count == 0

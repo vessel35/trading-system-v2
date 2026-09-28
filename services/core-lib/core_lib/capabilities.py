@@ -46,6 +46,7 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Final
 
+from core_lib.candles import _TIMEFRAME_PATTERN
 from core_lib.identifiers import PLUGIN_IDENTIFIER_PATTERN
 
 __all__ = [
@@ -113,6 +114,8 @@ _EXECUTION_TESTS: Final = "services/core-lib/tests/test_execution.py"
 _IDENTIFIER_TESTS: Final = "services/core-lib/tests/test_identifiers.py"
 _RUN_CONFIG_TESTS: Final = "services/backtest-service/tests/test_run_config.py"
 _DISCOVERY_TESTS: Final = "services/trading-plugins/tests/test_discovery.py"
+_RESAMPLE_TESTS: Final = "services/core-lib/tests/test_candle_resampling.py"
+_ADAPTER_TESTS: Final = "services/backtest-service/tests/test_input_execution_adapters.py"
 _WALLET_TESTS: Final = "services/wallet-service/tests/test_wallet_service.py"
 
 
@@ -288,6 +291,21 @@ PLATFORM_CAPABILITIES: Final[Mapping[str, Capability]] = _entries(
         verified_by=(
             f"{_CORE_TESTS}::test_a_candle_does_not_carry_a_kind",
             f"{_BACKTEST_TESTS}::test_run_config_cannot_select_a_candle_kind",
+        ),
+    ),
+    Capability(
+        id="candles.resampled_timeframes",
+        statement=(
+            "A run may use any timeframe that is a whole number of minutes, hours, or days "
+            "(the value is the accepted form): the data feed regroups confirmed 1m rows into "
+            "that timeframe, so a 5m run needs no 5m table. Which symbols and dates have 1m "
+            "rows is inventory, read from the data rather than from this list."
+        ),
+        value=_TIMEFRAME_PATTERN.pattern,
+        proof=CapabilityProof.BEHAVIOR,
+        verified_by=(
+            f"{_RESAMPLE_TESTS}::test_any_whole_minute_timeframe_is_built_from_1m_rows",
+            f"{_ADAPTER_TESTS}::test_data_feed_resamples_complete_1m_rows_and_enforces_up_to",
         ),
     ),
     # ----- what a decision is --------------------------------------------------
