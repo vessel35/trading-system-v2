@@ -46,7 +46,7 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Final
 
-from core_lib.candles import _TIMEFRAME_PATTERN
+from core_lib.candles import TIMEFRAME_PATTERN
 from core_lib.identifiers import PLUGIN_IDENTIFIER_PATTERN
 
 __all__ = [
@@ -301,7 +301,7 @@ PLATFORM_CAPABILITIES: Final[Mapping[str, Capability]] = _entries(
             "that timeframe, so a 5m run needs no 5m table. Which symbols and dates have 1m "
             "rows is inventory, read from the data rather than from this list."
         ),
-        value=_TIMEFRAME_PATTERN.pattern,
+        value=TIMEFRAME_PATTERN.pattern,
         proof=CapabilityProof.BEHAVIOR,
         verified_by=(
             f"{_RESAMPLE_TESTS}::test_any_whole_minute_timeframe_is_built_from_1m_rows",
