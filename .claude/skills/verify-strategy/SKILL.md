@@ -77,6 +77,11 @@ that fits the kind of difference:
   shows that behavior (the fill on the next bar, protection checked from the bar after the
   fill).
 - `차이 없음`: confirm the rule carried over in the representative decisions of check 2.
+- `재료 부재`: confirm with `facts series` that no registered series computes what the row
+  names, by definition and not by name alone, and that the implementation reads no stand-in
+  series for it; a stand-in needs its own `근사함` row with approval. When the strategy was not
+  built, confirm the row quotes the source quantity and that every capability id it cites is in
+  `facts capabilities`.
 
 A row the table lacks for a difference you found is a failure of the table, and a row whose
 check cannot be run is reported as not run, never as passed. Confirm the same table is in the

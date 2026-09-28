@@ -127,15 +127,21 @@ If the document sets out an experiment order, say how far it can be taken today.
 **Write the difference table before implementing, and get the kinds that need approval
 approved.** The table is a required section of the strategy document ("원문 대비 차이 기록표",
 contract section 6.6) with four columns: the source rule, the platform expression, the kind of
-difference, and the reason. The kind is one of six: `능력 부재로 강제됨` (a capability entry
+difference, and the reason. The kind is one of seven: `능력 부재로 강제됨` (a capability entry
 makes the source rule inexpressible and another rule stands in; cite the id), `근사함` (a
 slightly different rule stands in), `빈 값을 정함` (a number or definition the source never
 gave), `값은 원문대로이나 정의는 채움` (the source's value is kept but a calculation basis it
 never fixed is chosen, such as the ATR period or reading "touch" as the close), `플랫폼 고정` (a
-capability entry decides something the source never mentions; cite the id), and `차이 없음`
-(kept for rules that carry over, with the expression noted). The first two kinds change what
-the backtest measures, so a person approves them before implementation; the other kinds proceed
-with the reason recorded. A step that is feasible "except that fills land on the next bar" is a
+capability entry decides something the source never mentions; cite the id), `차이 없음`
+(kept for rules that carry over, with the expression noted), and `재료 부재` (the rule needs a
+series the registry does not have, so it cannot be expressed at all; registering an indicator
+is platform work, and standing in a similarly named registered series is not this kind but an
+approval-required `근사함`). The first two kinds change what the backtest measures, so a person
+approves them before implementation; the other kinds proceed with the reason recorded. When
+nothing can be built faithfully, the report still states the approval-required approximation
+as a distinct scope with its own rows (section 4 asks for the partial answer), and none of it
+is implemented until a person approves those rows. A step that is feasible "except that fills
+land on the next bar" is a
 row of the table, not a footnote: silent substitution produces a number that answers a question
 nobody asked. Copy the finished table into the strategy module's docstring, so the code carries
 its own differences. When told not to ask, proceed with the approval kinds too, write "승인
