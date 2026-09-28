@@ -9,6 +9,29 @@ class reads the MACD *state* at the deciding bar: long when the MACD line is abo
 line and still below zero on the 200 EMA's upper side. On a bar where the strategy is flat
 that state first holds on the cross bar itself; the reading differs from a cross-only rule
 when the strategy returns to flat while the state persists (after a stop or target fill).
+
+Difference table (contract section 6.6), the same rows as section 5 of the source document:
+
+- [능력 부재로 강제됨, series.history_depth] "MACD crosses the signal below zero": read as the
+  state on the deciding bar; after a stop or target fill a persisting state re-enters without a
+  cross. Approval pending (proceeded on the 2026-09-23 instruction not to ask).
+- [근사함] the zero condition macd[1] < 0 of source 2: the deciding bar's MACD sign. Approval
+  pending (same instruction).
+- [값은 원문대로이나 정의는 채움] the EMA 200 price: the close (source 1), not the low or high of
+  source 2.
+- [값은 원문대로이나 정의는 채움] stop 2.5 ATR and target 1.5R: manual policy with
+  default_settings 2.5 and 1.5; the ATR period 14 is chosen.
+- [능력 부재로 강제됨, risk.max_risk_per_trade] risk per trade 2%: 1%, the platform cap. Approval
+  pending (same instruction).
+- [차이 없음] exits are the stop and the target only: no signal exit, manual only.
+- [빈 값을 정함] timeframe, symbols, leverage: 1h and 4h, every symbol, leverage 1.
+- [플랫폼 고정] a short on spot: HOLD, spot-short-not-available.
+- [플랫폼 고정, run.fill_timing] fills on the next bar's open.
+- [플랫폼 고정, execution.protection_checked_from_bar_after_fill] protection checked from the
+  bar after the fill.
+- [플랫폼 고정, execution.simultaneous_stop_and_target] stop wins when both are touched.
+- [빈 값을 정함] the twelve StrategyProfile values: only the 62% win rate in source 2's title
+  supports any of them.
 """
 
 from __future__ import annotations

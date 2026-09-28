@@ -10,6 +10,20 @@ from the registered Donchian series, because that series includes the deciding b
 own window while the document's channel is the *prior* twenty bars. Reading candles also
 makes the once-only rule exact: the previous bar's close is compared with its own prior
 window, which a registered series could not provide (its earlier value never arrives).
+
+Difference table (contract section 6.6), the same rows as section 5 of the source document:
+
+- [차이 없음] the prior 20 bars' high and low: read from the candles themselves, since the
+  registered Donchian series includes the deciding bar; min_history 22.
+- [차이 없음] a breakout on the bar that leaves the channel: this close beyond the prior high
+  and the previous close not beyond its own prior high.
+- [차이 없음] stop 1.5 ATR(14), target 2R: manual policy with default_settings 1.5 and 2.0.
+- [차이 없음] the 1h timeframe: only 1h declared.
+- [차이 없음] risk per trade 1% and a 0.05% fee: the run's settings.
+- [빈 값을 정함] a leverage cap of 10: leverage 1; the cap never binds at 1% risk.
+- [빈 값을 정함] both channel edges broken on one bar: the upper edge is looked at first; it
+  cannot happen since the high is at least the low.
+- [차이 없음] exits are the stop and the target only: no signal exit, manual only.
 """
 
 from __future__ import annotations

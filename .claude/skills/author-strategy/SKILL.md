@@ -68,8 +68,9 @@ Then write down two more things the document never states but the implementation
   checked (`execution.protection_checked_from_bar_after_fill`), what happens when stop and
   target are touched in one bar (`execution.simultaneous_stop_and_target`), how many positions
   a run holds (`run.concurrent_directional_positions`), and how much series history a strategy
-  sees. Record each with its capability id. Where the source fixes the same thing differently,
-  it is a difference, not a platform detail.
+  sees (`series.history_depth`). Record each with its capability id under the kind
+  "플랫폼 고정". Where the source fixes the same thing differently, it is not a platform detail
+  but a difference of the kind "능력 부재로 강제됨".
 
 Then find the two kinds of hole:
 
@@ -123,10 +124,22 @@ all - a fixed-percentage stop, for instance - is a missing capability, not a new
 
 If the document sets out an experiment order, say how far it can be taken today.
 
-**List every deviation and get them approved before implementing.** A step that is feasible
-"except that fills land on the next bar rather than the trigger bar's close" is a different
-measurement, and the person who wrote the document is the one who decides whether the answer
-still counts. Silent substitution produces a number that answers a question nobody asked.
+**Write the difference table before implementing, and get the kinds that need approval
+approved.** The table is a required section of the strategy document ("원문 대비 차이 기록표",
+contract section 6.6) with four columns: the source rule, the platform expression, the kind of
+difference, and the reason. The kind is one of six: `능력 부재로 강제됨` (a capability entry
+makes the source rule inexpressible and another rule stands in; cite the id), `근사함` (a
+slightly different rule stands in), `빈 값을 정함` (a number or definition the source never
+gave), `값은 원문대로이나 정의는 채움` (the source's value is kept but a calculation basis it
+never fixed is chosen, such as the ATR period or reading "touch" as the close), `플랫폼 고정` (a
+capability entry decides something the source never mentions; cite the id), and `차이 없음`
+(kept for rules that carry over, with the expression noted). The first two kinds change what
+the backtest measures, so a person approves them before implementation; the other kinds proceed
+with the reason recorded. A step that is feasible "except that fills land on the next bar" is a
+row of the table, not a footnote: silent substitution produces a number that answers a question
+nobody asked. Copy the finished table into the strategy module's docstring, so the code carries
+its own differences. When told not to ask, proceed with the approval kinds too, write "승인
+대기(지시에 따라 진행)" in those rows, and lead the report with them.
 
 ## 5. Ask once
 
