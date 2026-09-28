@@ -1,6 +1,7 @@
 """Define strategy contracts, configuration, profiles, and lifecycle."""
 
 from .base import (
+    DecisionInputs,
     MoneyManagementSupport,
     StrategyAdapter,
     StrategyBase,
@@ -42,6 +43,7 @@ __all__ = [
     "AdapterFactory",
     "AdapterManager",
     "CrossValidator",
+    "DecisionInputs",
     "FieldSpec",
     "InProcessStrategyRegistry",
     "MoneyManagementSupport",
