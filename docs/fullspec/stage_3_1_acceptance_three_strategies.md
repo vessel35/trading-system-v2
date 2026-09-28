@@ -567,3 +567,9 @@ backtest-service·web-api의 mypy 통과. 첫 실행에서 모두 통과했다.
 18. **series 이력 깊이를 말하는 능력 항목이 아직 없다.** Agent가 "이번 봉의 값만 온다"를 가장 가까운
     `run.strategy_inputs`로 가리켰다. 승인된 배포 전 검사 설계의 changeset 1(`series.history_depth`)이
     넣는다.
+
+**2026-09-28 덧붙임(changeset 6).** 규범 6.6절이 차이 기록표의 행을 전략 모듈 docstring에 옮겨 적으라고
+정했다. 플랫폼이 쓴 전략 넷(01부터 04)의 모듈에는 옮겨 적었으나, Agent가 쓴 다섯째(`three-bar-reversion`)와
+여섯째(`bollinger-band-bounce`)의 모듈은 플랫폼이 고치지 않는다는 원칙대로 두었다. 두 모듈의 docstring
+복사는 다음 Agent 회차에서 그 전략을 다시 다룰 때 채우거나 사용자 지시로 채운다. 그때까지 10장
+체크리스트의 그 항목은 두 전략에 대해 열려 있다.
