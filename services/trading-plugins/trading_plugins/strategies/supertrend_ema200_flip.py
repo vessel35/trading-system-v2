@@ -10,6 +10,27 @@ state and the 200 EMA side agree, and an exit on the first held bar where the st
 the position. The exit is therefore the flip bar exactly; the entry differs from a flip-only
 rule when the strategy is flat while the state already agrees (after a stop-out, or at the
 start of a run).
+
+Difference table (contract section 6.6), the same rows as section 5 of the source document:
+
+- [능력 부재로 강제됨, series.history_depth] entry "when the SuperTrend signals": read as the
+  SuperTrend state on the deciding bar agreeing with the EMA 200 side; a flat strategy enters
+  without a flip after a stop-out or at the start of a run. Approval pending (proceeded on the
+  2026-09-23 instruction not to ask).
+- [차이 없음] exit on the flip against the position: the flip bar is the first opposing bar.
+- [값은 원문대로이나 정의는 채움] "price" above or below the EMA 200: the close; equal holds.
+- [빈 값을 정함] stop and target only "set one": policy signal-exit-atr by default (ATR 14 times
+  2.5, no target); manual and turtle also declared.
+- [빈 값을 정함] timeframe: 1h and 4h declared, tested on 1h.
+- [빈 값을 정함] symbols: none declared; every symbol and both market types are accepted until
+  the declaration slot exists (author_check design section 3.4.4).
+- [빈 값을 정함] risk per trade and leverage: the run's risk_per_trade (cap 1%) and the policy's
+  leverage_cap.
+- [플랫폼 고정] a short on spot: HOLD, spot-short-not-available.
+- [플랫폼 고정, run.fill_timing] fills on the next bar's open.
+- [플랫폼 고정, execution.protection_checked_from_bar_after_fill] protection checked from the
+  bar after the fill.
+- [빈 값을 정함] the twelve StrategyProfile values: unsupported by any reported result.
 """
 
 from __future__ import annotations
