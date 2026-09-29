@@ -11,7 +11,9 @@ from typing import cast
 
 from core_lib.types import Candle
 
-_TIMEFRAME_PATTERN = re.compile(r"^(?P<count>[1-9]\d*)(?P<unit>[mhd])$")
+TIMEFRAME_PATTERN = re.compile(r"^(?P<count>[1-9]\d*)(?P<unit>[mhd])$")
+"""The accepted timeframe form: a positive count of minutes, hours, or days."""
+_TIMEFRAME_PATTERN = TIMEFRAME_PATTERN
 _TIMEFRAME_SECONDS = {"m": 60, "h": 3600, "d": 86400}
 _MINUTE = timedelta(minutes=1)
 
