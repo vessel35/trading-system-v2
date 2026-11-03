@@ -60,7 +60,7 @@ the reason the split is shaped this way.
 `mcp__codex-cli__codex` and `mcp__codex-cli__review` refuse every model name the MCP
 offers by default (`... is not supported when using Codex with a ChatGPT account`). **They work
 when `model` is set to the account's configured model** — read it from `~/.codex/config.toml`
-(`gpt-5.6-terra` as of 2026-09-24) — with `reasoningEffort` of `low` or higher (`minimal` is
+(`gpt-5.6-terra` as of 2026-09-24, `gpt-6.1-sol` as of 2026-11-03) — with `reasoningEffort` of `low` or higher (`minimal` is
 refused by that model). Plain `codex exec --sandbox read-only "<prompt>"` from Bash also works
 because it takes the configured model. The Orca worker terminal path (`orca orchestration`:
 create a task, dispatch it with `--inject`, wait for `worker_done`) remains the fallback.
