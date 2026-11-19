@@ -1,6 +1,6 @@
 # 새 PC의 첫 Claude Code 세션에 붙여 넣을 프롬프트
 
-> 외장 디스크 백업 `/Volumes/BackupDisk/Orca/trading-system-v2/`의 `RESTART_PROMPT.md`와 같은 내용이다. 백업의 `README-먼저읽기.md`가 복원 순서를, `docs/workstation-handover.md`가 옮길 것과 확인 목록을 적는다.
+> 외장 디스크 백업 `/Volumes/BackupDisk/Orca/trading-system-v2/`의 `RESTART_PROMPT.md`(2026-11-03)를 바탕으로 했다. 2026-11-19에 열린 항목의 추적 위치를 GitHub issue로 바꾸고 Codex 호출의 대체 경로를 더했으므로, 이제 백업본과 같지 않으며 이 파일이 최신이다. 백업의 `README-먼저읽기.md`가 복원 순서를, 저장소의 `docs/workstation-handover.md`가 옮길 것과 확인 목록을 적는다. 백업에 복사된 `handover/workstation-handover.md`는 2026-11-03 판이다.
 
 사용 조건: `restore.sh --with-secrets`를 돌렸고, 저장소 루트
 (`/Users/vincent/workspaces/CoinTrading/trading-system-v2`)에서 `claude`를 열었다. 아래 프롬프트를 그대로
@@ -24,16 +24,21 @@
 4. 데이터베이스를 확인해라. `.env`의 PGHOST와 PGPORT로 `signal_db`에 접속해 `strategy_registry`의 전략
    일곱이 있는지 읽기 전용으로 조회해라. 접속이 안 되면 백업의 `db/README.md`를 읽고 두 방법 가운데
    어느 쪽을 쓸지 나에게 물어라. 데이터베이스에 쓰는 명령은 내가 승인하기 전에 실행하지 마라.
-5. `handover/workstation-handover.md` 7절의 확인 목록을 위에서부터 하나씩 실행하고, 항목마다 통과·실패와
-   실제 출력 요약을 적어라. 루트 pytest 기준치는 2,539 passed다. 실패한 항목은 원인을 적고 고치지 말고
-   보고해라.
+5. 저장소의 `docs/workstation-handover.md` 7절의 확인 목록을 마지막 항목(OBJECTIVE와 `/goal`)을 빼고
+   위에서부터 하나씩 실행하고(백업의 `handover/` 사본은 옛 판이다), 항목마다 통과·실패와 실제 출력 요약을
+   적어라. 루트 pytest 기준치는 2,539 passed이고, 새로 설치한 환경에서는 mypy와 pydantic 버전 때문에
+   pytest 3건과 backtest-service mypy 1건의 알려진 실패가 있다(issue #61). 그 밖에 실패한 항목은 원인을
+   적고 고치지 말고 보고해라.
 6. Codex 호출이 되는지 확인해라. `~/.codex/config.toml`의 model 값을 읽어 `mcp__codex-cli__codex`에
    `model`로 넘기고 `reasoningEffort`는 `low`로, 프롬프트는 "저장소 루트의 README.md 유무만 답하라"로
-   짧게 호출해 답이 오는지 봐라. 안 되면 `codex login`이 필요한지 알려 줘라.
+   짧게 호출해 답이 오는지 봐라. 그 MCP가 꺼져 있으면 Bash에서
+   `codex exec --sandbox read-only "Reply with the single word OK."`로 확인해라. 안 되면 `codex login`이
+   필요한지 알려 줘라.
 7. 모두 끝나면 다음 작업을 제안해라. `.claude/OBJECTIVE.md`는 끝난 목표(일곱째 Agent 회차)이므로 새로
-   써야 한다. GitHub의 결정 issue #64(오렌지 지표 정의의 출처, 승인 필요 근사안 진행 여부)와
-   상위 issue #63 아래의 구현 하위 issue(#65~#69)를 `gh issue view`로 읽고, 리테스트 능력(#66)부터 시작하는 OBJECTIVE 초안을
-   제시해라. 초안을 쓰기만 하고 `/goal` 등록은 내가 한다. 새 브랜치는 main에서 만든다.
+   써야 한다. 열린 항목은 GitHub Project(https://github.com/users/vessel35/projects/1)의 issue다.
+   먼저 버전 고정 issue #61을 확인하고, 결정 issue #64(오렌지 지표 정의의 출처, 승인 필요 근사안
+   진행 여부)와 상위 issue #63 아래의 구현 하위 issue(#65~#69)를 `gh issue view`로 읽어라. 그다음
+   #61부터, 이어서 리테스트 능력(#66)을 하는 순서로 OBJECTIVE 초안을 제시해라. 초안을 쓰기만 하고 `/goal` 등록은 내가 한다. 새 브랜치는 main에서 만든다.
 
 규칙은 `.claude/HARNESS.md`를 따른다. 구현은 이 세션이 하고 설계 검토와 코드 리뷰는 Codex가 한다.
 push는 QA가 녹색이고 Codex 리뷰가 Blocking 0일 때만, 그리고 권한 프롬프트를 거쳐서 한다. 거부한
@@ -47,4 +52,5 @@ push는 QA가 녹색이고 Codex 리뷰가 Blocking 0일 때만, 그리고 권�
 외장 디스크 `/Volumes/BackupDisk/Orca/trading-system-v2/`에 trading-system-v2 작업의 백업이 있다.
 `README-먼저읽기.md`를 읽고, `restore.sh`가 무엇을 어디에 놓는지 설명한 뒤, 내가 승인하면
 `bash restore.sh --with-secrets`를 실행하고 출력 전체를 보여 줘라. 비밀 파일의 내용은 출력하지 마라.
-끝나면 `RESTART_PROMPT.md`의 본 프롬프트로 넘어간다.
+끝나면 저장소의 `docs/workstation-restart-prompt.md`에 있는 본 프롬프트로 넘어간다. 백업의
+`RESTART_PROMPT.md`는 2026-11-03 판이라 열린 항목을 ClickUp으로 안내하므로 쓰지 않는다.
