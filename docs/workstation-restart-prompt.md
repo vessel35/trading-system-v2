@@ -31,8 +31,8 @@
    `model`로 넘기고 `reasoningEffort`는 `low`로, 프롬프트는 "저장소 루트의 README.md 유무만 답하라"로
    짧게 호출해 답이 오는지 봐라. 안 되면 `codex login`이 필요한지 알려 줘라.
 7. 모두 끝나면 다음 작업을 제안해라. `.claude/OBJECTIVE.md`는 끝난 목표(일곱째 Agent 회차)이므로 새로
-   써야 한다. ClickUp의 결정 항목 z8nrz7e6ha(오렌지 지표 정의의 출처, 승인 필요 근사안 진행 여부)와
-   구현 항목 z8nrz7e7zd의 하위 다섯을 읽고, 리테스트 능력(z8nrz7e7zf)부터 시작하는 OBJECTIVE 초안을
+   써야 한다. GitHub의 결정 issue #64(오렌지 지표 정의의 출처, 승인 필요 근사안 진행 여부)와
+   상위 issue #63 아래의 구현 하위 issue(#65~#69)를 `gh issue view`로 읽고, 리테스트 능력(#66)부터 시작하는 OBJECTIVE 초안을
    제시해라. 초안을 쓰기만 하고 `/goal` 등록은 내가 한다. 새 브랜치는 main에서 만든다.
 
 규칙은 `.claude/HARNESS.md`를 따른다. 구현은 이 세션이 하고 설계 검토와 코드 리뷰는 Codex가 한다.

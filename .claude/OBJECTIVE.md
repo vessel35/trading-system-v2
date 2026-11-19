@@ -46,10 +46,10 @@ V-1·V-2·V-3은 모두 달성됐다.
 
 - 재료 부재로 판정된 지표(중앙 추세선, 편차 밴드, RSI 게이지)의 구현. 정의가 원문에 없으므로
   별도 항목이며 정의를 어디서 얻을지부터 사용자가 정한다.
-- 분할 청산, 이동 손절, 정책의 둘째 입력 같은 새 능력의 구현. 회차가 요구하면 ClickUp 항목으로
+- 분할 청산, 이동 손절, 정책의 둘째 입력 같은 새 능력의 구현. 회차가 요구하면 GitHub issue로
   올린다.
 - 기존 전략 일곱을 `StrategyBase` 보조 다섯으로 다시 맞추는 changeset, 시장·종목 범위 선언 구현
-  (z8nrz7e41h), Turtle 일봉 원천의 Evidence 기록(z8nrz7e4y0), Agent가 쓴 05·06 모듈의 docstring
+  (#71), Turtle 일봉 원천의 Evidence 기록(#72), Agent가 쓴 05·06 모듈의 docstring
   기록표 복사.
 
 **Done when (transcript-verifiable, turn-capped):**

@@ -37,7 +37,7 @@
 | 세션 메모리 | `~/.claude/projects/-Users-vincent-workspaces-CoinTrading-trading-system-v2/memory/`(`MEMORY.md`와 파일 50개) | 그대로 복사한다. 디렉터리 이름이 저장소 경로에서 만들어지므로, 새 PC에서도 `/Users/vincent/workspaces/CoinTrading/trading-system-v2`에 clone하거나, 다른 경로에 두면 그 경로에 맞게 디렉터리 이름을 바꾼다 |
 | 서브에이전트 메모리 | `.claude/agent-memory/strategy-architect/`(gitignore, 파일 2개) | 하네스가 서브에이전트를 쓰지 않으므로 선택이다 |
 | 로컬 설정 | `.claude/settings.local.json`(전역 git ignore) | 이 PC는 `disabledMcpjsonServers`로 `.mcp.json`의 서버 여섯을 모두 꺼 두었다. 새 PC에서 어떤 MCP를 켤지 정한 뒤 만들거나 생략한다 |
-| 사용자 범위 MCP | `~/.claude.json` | `clickup`(HTTP, `https://mcp.clickup.com/mcp`, 브라우저 인증), `codex-cli`(`npx codex-mcp-server`), `perplexity`(`npx`) 셋을 `claude mcp add`로 다시 등록한다. `.mcp.json`의 서버가 요구하는 환경 변수는 `OPENAI_API_KEY`, `PERPLEXITY_API_KEY`, `WALLET_DB_RO_URL`, `SIGNAL_DB_RO_URL`, `CRYPTO_DATA_RO_URL`(읽기 전용 계정)이다 |
+| 사용자 범위 MCP | `~/.claude.json` | `codex-cli`(`npx codex-mcp-server`), `perplexity`(`npx`) 둘을 `claude mcp add`로 다시 등록한다. `.mcp.json`의 서버가 요구하는 환경 변수는 `OPENAI_API_KEY`, `PERPLEXITY_API_KEY`, `WALLET_DB_RO_URL`, `SIGNAL_DB_RO_URL`, `CRYPTO_DATA_RO_URL`(읽기 전용 계정)이다 |
 | Codex CLI | `~/.codex/`(`auth.json`, `config.toml`) | 설치한 뒤 `codex login`(ChatGPT 계정)으로 로그인한다. 리뷰 호출은 `~/.codex/config.toml`의 `model` 값을 그대로 넘기고 `reasoningEffort`를 `low` 이상으로 준다. 이 PC의 값은 2026-11-03 기준 `gpt-6.1-sol`이다(2026-09-24에는 `gpt-5.6-terra`였다). 자세한 것은 `.claude/HARNESS.md`의 "Reaching Codex" |
 | Orca | 별도 앱 | Codex 호출의 대체 경로일 뿐이다. MCP가 동작하면 필요 없다 |
 
@@ -144,28 +144,32 @@ python3.12 -m venv .venv
 
 ## 6. 이어서 할 작업
 
-**사용자가 정할 것 둘**([z8nrz7e6ha](https://app.clickup.com/t/z8nrz7e6ha)). 오렌지 지표 셋(중앙
+열린 항목은 2026-11-19부터 ClickUp이 아니라 GitHub issue와 Project
+([trading-system-v2 초기 런칭](https://github.com/users/vessel35/projects/1))에서 관리한다. ClickUp의 옛 항목은
+issue 링크를 달고 닫았고, 옛 ID와 issue 번호의 대응은 `docs/design-revision-log.md`의 2026-11-19 절에 있다.
+
+**사용자가 정할 것 둘**([#64](https://github.com/vessel35/trading-system-v2/issues/64)). 오렌지 지표 셋(중앙
 추세선, 두 단계 편차 밴드, 연동형 RSI 게이지)의 정의를 어디서 얻어 등록할지, 그리고 그때까지 승인
 필요 근사안(등록된 Bollinger Bands 20/2.0과 RSI 14로 중앙선과 색상과 문턱을 사람이 정하고, 리테스트를
 빼거나 근사하고, 분할 청산 대신 전량 청산)을 별도 전략 작업으로 진행할지다.
 
-**구현 항목**([z8nrz7e7zd](https://app.clickup.com/t/z8nrz7e7zd) 아래 하위 다섯).
+**구현 항목**([#63](https://github.com/vessel35/trading-system-v2/issues/63) 아래 하위 다섯).
 
-1. 지표 셋의 정의 확보와 registry 등록([z8nrz7e7ze](https://app.clickup.com/t/z8nrz7e7ze)). 위 결정을
+1. 지표 셋의 정의 확보와 registry 등록([#65](https://github.com/vessel35/trading-system-v2/issues/65)). 위 결정을
    기다린다.
 2. 돌파 뒤 리테스트를 표현하는 능력, series의 앞 봉 값 또는 전략 상태
-   ([z8nrz7e7zf](https://app.clickup.com/t/z8nrz7e7zf)). 결정과 무관하게 바로 설계를 시작할 수 있고,
+   ([#66](https://github.com/vessel35/trading-system-v2/issues/66)). 결정과 무관하게 바로 설계를 시작할 수 있고,
    기존 전략 일곱의 교차 조건도 원문대로 되돌리므로 먼저 하는 것을 권한다.
-3. 분할 청산 `exit.partial`([z8nrz7e7zg](https://app.clickup.com/t/z8nrz7e7zg)).
-4. 가격 수준(중앙 추세선)에 두는 손절 정책([z8nrz7e7zh](https://app.clickup.com/t/z8nrz7e7zh)).
-5. 여덟째 Agent 회차, 문서 07 재실행([z8nrz7e7zj](https://app.clickup.com/t/z8nrz7e7zj)). 앞의 넷이
+3. 분할 청산 `exit.partial`([#67](https://github.com/vessel35/trading-system-v2/issues/67)).
+4. 가격 수준(중앙 추세선)에 두는 손절 정책([#68](https://github.com/vessel35/trading-system-v2/issues/68)).
+5. 여덟째 Agent 회차, 문서 07 재실행([#69](https://github.com/vessel35/trading-system-v2/issues/69)). 앞의 넷이
    끝난 뒤.
 
-**그 밖의 열린 항목.** `facts series`의 개념·계열 검색([z8nrz7e6hb](https://app.clickup.com/t/z8nrz7e6hb)),
-시장·종목 범위 선언 구현([z8nrz7e41h](https://app.clickup.com/t/z8nrz7e41h)), Turtle 일봉 원천의
-Evidence 기록([z8nrz7e4y0](https://app.clickup.com/t/z8nrz7e4y0)), 화면의 mode별 선언 값
-([z8nrz7e40t](https://app.clickup.com/t/z8nrz7e40t)), 체결 뒤 청산 안전성 재검사
-([z8nrz7e3k8](https://app.clickup.com/t/z8nrz7e3k8)), 기존 전략 일곱을 `StrategyBase` 보조 다섯으로 다시
+**그 밖의 열린 항목.** `facts series`의 개념·계열 검색([#74](https://github.com/vessel35/trading-system-v2/issues/74)),
+시장·종목 범위 선언 구현([#71](https://github.com/vessel35/trading-system-v2/issues/71)), Turtle 일봉 원천의
+Evidence 기록([#72](https://github.com/vessel35/trading-system-v2/issues/72)), 화면의 mode별 선언 값
+([#73](https://github.com/vessel35/trading-system-v2/issues/73)), 체결 뒤 청산 안전성 재검사
+([#70](https://github.com/vessel35/trading-system-v2/issues/70)), 기존 전략 일곱을 `StrategyBase` 보조 다섯으로 다시
 맞추는 changeset, Agent가 쓴 05·06 모듈의 docstring 기록표 복사.
 
 **먼저 읽을 문서.** `.claude/OBJECTIVE.md`(끝난 목표의 형식), `docs/roadmap-stage-3-1-plan.md`,
@@ -183,6 +187,6 @@ Evidence 기록([z8nrz7e4y0](https://app.clickup.com/t/z8nrz7e4y0)), 화면의 m
 - [ ] `author_check bollinger-band-bounce`가 exit 0에 판정 passed다.
 - [ ] uvicorn과 vite가 뜨고 `http://localhost:5173/`에서 과거 실행 또는 새 실행이 보인다.
 - [ ] `~/.claude/CLAUDE.md`와 메모리 디렉터리가 복사됐고 Claude Code 세션 시작 때 메모리 색인이 보인다.
-- [ ] `claude mcp list`에 clickup, codex-cli, perplexity가 있고 Codex 호출이 `config.toml`의 model로 답한다.
+- [ ] `claude mcp list`에 codex-cli, perplexity가 있고 Codex 호출이 `config.toml`의 model로 답한다.
 - [ ] `gh auth status`가 로그인 상태다.
 - [ ] OBJECTIVE를 새로 쓰고 `/goal`을 등록했다.
