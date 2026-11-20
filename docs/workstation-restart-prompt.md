@@ -29,16 +29,18 @@
    적어라. 루트 pytest 기준치는 2,539 passed이고, 새로 설치한 환경에서는 mypy와 pydantic 버전 때문에
    pytest 3건과 backtest-service mypy 1건의 알려진 실패가 있다(issue #61). 그 밖에 실패한 항목은 원인을
    적고 고치지 말고 보고해라.
-6. Codex 호출이 되는지 확인해라. `~/.codex/config.toml`의 model 값을 읽어 `mcp__codex-cli__codex`에
+6. Codex 호출이 되는지 확인해라. `~/.codex/config.toml` 첫 줄이 `model = "gpt-6.2-sol"`인지 확인하고(다른 값이면 그 줄을 바꾸고, 없으면 맨 위에 넣어라. model 줄이 둘이 되면 안 된다), 그 값을 `mcp__codex-cli__codex`에
    `model`로 넘기고 `reasoningEffort`는 `low`로, 프롬프트는 "저장소 루트의 README.md 유무만 답하라"로
-   짧게 호출해 답이 오는지 봐라. 그 MCP가 꺼져 있으면 Bash에서
-   `codex exec --sandbox read-only "Reply with the single word OK."`로 확인해라. 안 되면 `codex login`이
+   짧게 호출해 답이 오는지 봐라. MCP 응답은 실행된 모델을 보이지 않으므로(MCP 경로의 근거는 넘긴 model 값이다), 기계의 기본 모델은 Bash에서
+   `codex exec --sandbox read-only "Reply with the single word OK."`로 확인하고, 출력 머리에
+   `model: gpt-6.2-sol`이 찍히는지 봐라. 안 되면 `codex login`이
    필요한지 알려 줘라.
-7. 모두 끝나면 다음 작업을 제안해라. `.claude/OBJECTIVE.md`는 끝난 목표(일곱째 Agent 회차)이므로 새로
-   써야 한다. 열린 항목은 GitHub Project(https://github.com/users/vessel35/projects/1)의 issue다.
-   먼저 버전 고정 issue #61을 확인하고, 결정 issue #64(오렌지 지표 정의의 출처, 승인 필요 근사안
-   진행 여부)와 상위 issue #63 아래의 구현 하위 issue(#65~#69)를 `gh issue view`로 읽어라. 그다음
-   #61부터, 이어서 리테스트 능력(#66)을 하는 순서로 OBJECTIVE 초안을 제시해라. 초안을 쓰기만 하고 `/goal` 등록은 내가 한다. 새 브랜치는 main에서 만든다.
+7. 모두 끝나면 준비 상태를 보고하고 시작하지는 마라. 이 PC가 작업자라면 작업은 M4Pro의 작업 관리자가 Orca로
+   배정하므로(`.claude/HARNESS.md`의 "Who does what"), 스스로 issue를 고르거나 OBJECTIVE를 쓰지 말고 배정을
+   기다려라. 배정을 받으면 그 issue로 새 브랜치를 main에서 만들고 OBJECTIVE 초안을 쓴다. 초안을 쓰기만 하고
+   `/goal` 등록은 내가 한다. 작업 관리자 없이 이 PC 하나로 진행하는 경우에만, GitHub Project
+   (https://github.com/users/vessel35/projects/1)에서 제목의 순서 번호가 가장 앞선 열린 issue를 다음 작업으로
+   제안해라.
 
 규칙은 `.claude/HARNESS.md`를 따른다. 구현은 이 세션이 하고 설계 검토와 코드 리뷰는 Codex가 한다.
 push는 QA가 녹색이고 Codex 리뷰가 Blocking 0일 때만, 그리고 권한 프롬프트를 거쳐서 한다. 거부한

@@ -43,7 +43,7 @@ attention accelerate both the move and its exhaustion.
 | Loss aversion | holding losers, cutting winners early | losing holds 2–3x longer than winning holds | mechanical pre-set stop, executed without override |
 | Overconfidence | overtrading, concentration | turnover too high, single-position weight too large | cap trades/period and max position weight |
 | Anchoring | anchoring to entry or prior high | clustering of decisions near entry price | use relative valuation/z-scores, not absolute price |
-| Confirmation | only reading supporting evidence | single-source signal, ignored counter-signal | force the opposing read (review-agent's job) |
+| Confirmation | only reading supporting evidence | single-source signal, ignored counter-signal | force the opposing read (the Codex review's job) |
 | Recency | overweighting the latest bars | position size driven by last few outcomes | lengthen the evaluation window (≥ 60 bars) |
 
 This table is also a **design-review lens**: the cognitive-bias check is part of the

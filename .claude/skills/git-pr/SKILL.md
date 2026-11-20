@@ -27,13 +27,22 @@ description: >
 
 ## Push gate (in this order — QA first, review once on the final diff)
 1. Tests pass (test-gate will block stop otherwise).
-2. mech-agent ruff + mypy exit 0.
-3. review-agent (Codex/GPT-5.5, reasoning_effort xhigh) reviewed the final, test-passing
-   diff; zero Blocking findings. One review pass — no re-review for mechanical fixes.
+2. The worker session itself ran `ruff check`, `ruff format --check`, and mypy from inside each
+   changed service directory, all exit 0. Web changes also pass `npm test` and
+   `npm run typecheck` in `apps/web`.
+3. Codex (`gpt-6.2-sol`) reviewed the final, test-passing diff with zero Blocking findings, at
+   the reasoning level `.claude/HARNESS.md` stage 6 sets (xhigh when the diff touches money,
+   quantity, price, fees, or slippage, otherwise high). One review pass. After a mechanical
+   fix to a Blocking finding, Codex confirms only that finding is resolved; that confirmation
+   completes the zero-Blocking verdict. For the agent's files in a strategy authoring round,
+   the combined Codex faithfulness and code review takes this place.
 4. No secrets in the diff (secret-scan backstops this).
 5. Then push — the permission prompt that follows is the human confirmation.
 
+The retired definitions in `.claude/agents/` (`mech-agent`, `review-agent`, and the rest) are
+not part of this gate. `.claude/HARNESS.md` is the current split.
+
 ## Relationship to myclaude/skills/git-conventions
 - `git-conventions` (cross-cutting myclaude skill) covers global conventions.
-- This `git-pr` (preset-private) adds the human-checkpoint rule and review-agent dependency
-  specific to the quant-backend harness.
+- This `git-pr` (preset-private) adds the human-checkpoint rule and the Codex review
+  requirement specific to the quant-backend harness.

@@ -1,9 +1,9 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "model": "opus",
-  "_model_note": "Main session = ORCHESTRATOR on Opus 4.8. Subagents override via their own model: frontmatter. Pin exact IDs in frontmatter for reproducibility: claude-opus-4-8, claude-haiku-4-5-20251001. NOTE: the `sonnet` alias resolves to Sonnet 5 (claude-sonnet-5) since v2.1.197, so `model: sonnet` nodes run on Sonnet 5 (native 1M); pin claude-sonnet-4-6 only if you need the prior Sonnet.",
+  "_model_note": "Main session = worker or manager on Opus 5.5; Sonnet 5.5 only for simple mechanical changesets the manager marks (see .claude/HARNESS.md 'Who does what'). Codex gpt-6.2-sol reviews. The subagent definitions in .claude/agents/ are retired.",
   "disableAgentView": true,
-  "_view_note": "Multi-subagent dispatch이지만 --dangerously-skip-permissions가 dispatched bg session으로 전파되는 P0 위험을 회피하려고 v1에서 Agent View 비활성화. 정책상 필요해지면 해제.",
+  "_view_note": "v1에서 --dangerously-skip-permissions가 dispatched bg session으로 전파되는 P0 위험을 피하려고 Agent View를 비활성화했다. 지금은 전략 작성 회차의 sub-agent만 쓰므로 그대로 둔다.",
   "enabledPlugins": {
     "claude-mem@thedotmack": false
   },
@@ -37,7 +37,7 @@
     "ask": [
       "Bash(git push:*)"
     ],
-    "_ask_note": "git push는 차단(deny)이 아니라 확인 후 진행(ask). 리뷰 게이트(review-agent zero Blocking + 테스트 통과)를 지난 뒤 push하며, 권한 프롬프트가 human checkpoint 역할을 한다. git-pr skill 참조.",
+    "_ask_note": "git push는 차단(deny)이 아니라 확인 후 진행(ask). 리뷰 게이트(Codex gpt-6.2-sol 코드 리뷰 zero Blocking + QA 통과)를 지난 뒤 push하며, 권한 프롬프트가 human checkpoint 역할을 한다. git-pr skill 참조.",
     "deny": [
       "Bash(rm -rf:*)",
       "Bash(rm -fr:*)",
