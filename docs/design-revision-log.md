@@ -107,3 +107,48 @@ seed로 다시 돌리면 시뮬레이션이 만든 사실이 값 단위로 같�
 **적는 규칙은 그대로다.** 발견하면 가리지 않고 등록한다 — 명세가 요구한 것이든 검토가
 우연히 찾아낸 것이든 마찬가지다. **명세 밖이라는 이유로 빼면 그것이 덮는 것이다.** 항목마다
 어디서 나왔는지와 왜 아직 안 닫았는지와 무엇이 걸려 있는지를 함께 적는다.
+
+## 열린 항목 추적을 GitHub issue로 옮긴 기록 (2026-11-19)
+
+**옮긴 것.** 열린 항목을 ClickUp의 `코인-자동매매 > 개발` 목록에서 저장소의 GitHub issue와 Project
+([trading-system-v2 초기 런칭](https://github.com/users/vessel35/projects/1))로 옮겼다. 발주자 결정이다.
+issue는 #61부터 #80까지와 #82부터 #84까지이며(#81은 이 기록을 담은 PR이다), Project의 Status·Priority·Size
+필드로 관리한다.
+
+ClickUp 폴더 `코인-자동매매`에 열려 있던 항목은 열일곱이었다. 열다섯은 아래 표의 issue로 옮겼고, 각 항목에
+issue 링크를 댓글로 달고 닫았다. 나머지 둘은 옮기지 않고 사유를 댓글로 적어 닫았다. "백테스트 3차 개발
+(계획)"(`z8nrz7bxng`)은 `docs/roadmap-stage-3.md`가 대신하며 남은 3-2 작업은 #77이 맡는다. "신규 전략
+개발 Agent 구현·검산"(`z8nrz7bxne`)은 author-strategy Agent와 verify-strategy 검산 절차, 회차 일곱 번으로
+끝났다. 그 설명에 적힌 중간 언어 방향은 아직 구체적인 작업이 아니어서 issue로 만들지 않았다. 2026-11-19
+작업이 끝난 뒤 이 폴더에 열린 항목은 없다.
+
+ClickUp에서 오지 않은 issue도 있다. #61(mypy와 pydantic 버전 고정), #62(1분봉과 funding rate backfill), #75(전략 일곱을
+`StrategyBase` 보조로 다시 맞추기), #76(05·06 docstring 기록표 복사), #77부터 #80(3-2 분석 파이프라인)은
+인계 안내와 로드맵, 작업 환경 점검에서 나온 것이다.
+
+**옛 ID와 issue 번호.** 지난 설계 기록과 인수 기록에 남은 ClickUp ID는 기록이므로 지우지 않고, 지금
+추적하는 issue 번호를 옆에 덧붙였다. 이미 닫힌 항목(`z8nrz7e3k1`, `z8nrz7e3k9`)은 옮기지 않았다.
+`z8nrz7e3kb`는 ClickUp에 남아 있지 않으며, 내용(mode별 선언 값)이 `z8nrz7e40t`와 같아 #73으로 본다.
+
+| ClickUp ID | GitHub issue |
+|---|---|
+| `z8nrz7e7zd` | [#63](https://github.com/vessel35/trading-system-v2/issues/63) |
+| `z8nrz7e6ha` | [#64](https://github.com/vessel35/trading-system-v2/issues/64) |
+| `z8nrz7e7ze` | [#65](https://github.com/vessel35/trading-system-v2/issues/65) |
+| `z8nrz7e7zf` | [#66](https://github.com/vessel35/trading-system-v2/issues/66) |
+| `z8nrz7e7zg` | [#67](https://github.com/vessel35/trading-system-v2/issues/67) |
+| `z8nrz7e7zh` | [#68](https://github.com/vessel35/trading-system-v2/issues/68) |
+| `z8nrz7e7zj` | [#69](https://github.com/vessel35/trading-system-v2/issues/69) |
+| `z8nrz7e3k8` | [#70](https://github.com/vessel35/trading-system-v2/issues/70) |
+| `z8nrz7e41h` | [#71](https://github.com/vessel35/trading-system-v2/issues/71) |
+| `z8nrz7e4y0` | [#72](https://github.com/vessel35/trading-system-v2/issues/72) |
+| `z8nrz7e40t` | [#73](https://github.com/vessel35/trading-system-v2/issues/73) |
+| `z8nrz7e6hb` | [#74](https://github.com/vessel35/trading-system-v2/issues/74) |
+| `z8nrz7bxqy` | [#82](https://github.com/vessel35/trading-system-v2/issues/82) |
+| `z8nrz7bxn5` | [#83](https://github.com/vessel35/trading-system-v2/issues/83) |
+| `z8nrz7bxn3` | [#84](https://github.com/vessel35/trading-system-v2/issues/84) |
+| `z8nrz7bxng` | 옮기지 않음(`docs/roadmap-stage-3.md`, 남은 작업은 #77) |
+| `z8nrz7bxne` | 옮기지 않음(완료) |
+
+**적는 규칙은 그대로다.** 2026-08-09 절의 규칙(발견하면 가리지 않고 등록하고, 출처와 미해결 사유와
+걸린 것을 함께 적는다)을 issue 본문에 그대로 적용한다.
