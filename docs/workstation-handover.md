@@ -39,11 +39,11 @@
 | 과거 실행의 Evidence | `var/evidence/`(gitignore, 약 60 MB, SQLite 파일) | `backtest_db.backtest_run` 행이 이 파일들을 가리킨다. 데이터베이스를 복사(3.1절의 첫째 방법)하면 함께 복사해야 화면이 과거 실행을 연다. 과거 실행이 필요 없으면 생략한다 |
 | 전역 지침 | `~/.claude/CLAUDE.md` | 그대로 복사한다(출력 양식 규칙) |
 | 세션 메모리 | `~/.claude/projects/-Users-vincent-workspaces-CoinTrading-trading-system-v2/memory/`(`MEMORY.md`와 파일 50개) | 그대로 복사한다. 디렉터리 이름이 저장소 경로에서 만들어지므로, 새 PC에서도 `/Users/vincent/workspaces/CoinTrading/trading-system-v2`에 clone하거나, 다른 경로에 두면 그 경로에 맞게 디렉터리 이름을 바꾼다 |
-| 서브에이전트 메모리 | `.claude/agent-memory/strategy-architect/`(gitignore, 파일 2개) | 하네스가 서브에이전트를 쓰지 않으므로 선택이다 |
+| 서브에이전트 메모리 | `.claude/agent-memory/strategy-architect/`(gitignore, 파일 2개) | `.claude/agents/`의 옛 정의는 쓰지 않으므로(단계 agent와 전략 회차 agent는 Agent 도구로 새로 띄운다) 선택이다 |
 | 로컬 설정 | `.claude/settings.local.json`(전역 git ignore) | 이 PC는 `disabledMcpjsonServers`로 `.mcp.json`의 서버 여섯을 모두 꺼 두었다. 새 PC에서 어떤 MCP를 켤지 정한 뒤 만들거나 생략한다 |
 | 사용자 범위 MCP | `~/.claude.json` | `codex-cli`(`npx codex-mcp-server`), `perplexity`(`npx`) 둘을 `claude mcp add`로 다시 등록한다. `.mcp.json`의 서버가 요구하는 환경 변수는 `OPENAI_API_KEY`, `PERPLEXITY_API_KEY`, `WALLET_DB_RO_URL`, `SIGNAL_DB_RO_URL`, `CRYPTO_DATA_RO_URL`(읽기 전용 계정)이다 |
-| Codex CLI | `~/.codex/`(`auth.json`, `config.toml`) | 설치한 뒤 `codex login`(ChatGPT 계정)으로 로그인한다. 리뷰 호출은 `~/.codex/config.toml`의 `model` 값을 그대로 넘기고 `reasoningEffort`를 `low` 이상으로 준다. 이 PC의 값은 2026-11-03 기준 `gpt-6.1-sol`이다(2026-09-24에는 `gpt-5.6-terra`였다). 자세한 것은 `.claude/HARNESS.md`의 "Reaching Codex" |
-| Orca | 별도 앱 | Codex 호출의 대체 경로일 뿐이다. MCP가 동작하면 필요 없다 |
+| Codex CLI | `~/.codex/`(`auth.json`, `config.toml`) | 설치한 뒤 `codex login`(ChatGPT 계정)으로 로그인한다. 모델은 `gpt-6.2-sol`로 정했다(2026-11-20 사용자 결정). `~/.codex/config.toml` 첫 줄에 `model = "gpt-6.2-sol"`을 넣고, MCP 호출에도 그 이름을 넘기며 `reasoningEffort`를 `low` 이상으로 준다. 이전 값은 `gpt-6.1-sol`(2026-11-03)과 `gpt-5.6-terra`(2026-09-24)였다. 자세한 것은 `.claude/HARNESS.md`의 "Reaching Codex" |
+| Orca | 별도 앱 | 작업 관리자(M4Pro)가 issue를 작업자에게 배정하는 경로다(`.claude/HARNESS.md`의 "Who does what" 0단계). 작업자로 쓰는 PC에는 반드시 설치하고 페어링한다. Codex 호출의 대체 경로이기도 하다 |
 
 필요한 도구는 Python 3.12(이 PC는 3.12.10), Node 20.19.0 이상 또는 22.13.0 이상과 npm(잠긴 vite와 jsdom이
 요구한다. 이 PC는 20.19.4와 11.8.0, orca-m1은 Node 24), `jq`(훅이 쓴다,
@@ -136,15 +136,18 @@ python3.12 -m venv .venv
 
 1. 저장소 루트에서 `claude`를 연다(이 PC는 2.1.317). SessionStart 훅 `guardrails.sh`가 하네스 규칙과
    OBJECTIVE를 주입한다.
-2. 다음 작업을 정하고 `.claude/OBJECTIVE.md`를 새로 쓴다(6절). 그다음 문서 하단의 "Register with
-   /goal" 블록을 `/goal`로 등록한다. 등록은 사람이 한다. 등록 없이는 진행하지 않는 것이 하네스 규칙이다.
-3. 모델과 effort. 이 PC의 마지막 설정은 `/model`로 Opus 5.5 기본, `/effort`로 high였다.
-   `.claude/settings.json`은 `"model": "opus"`를 고정한다.
-4. 작업 규칙은 `.claude/HARNESS.md`가 전부다. 요약하면 설계를 쓰고 Codex 설계 검토를 받고, 이 세션이
-   구현하고, QA(pytest, ruff, format, 서비스별 mypy, 웹은 npm test와 typecheck)를 녹색으로 만들고,
-   Codex 코드 리뷰를 받아 Blocking 0을 확인한 뒤, 일부러 깨뜨리는 인수 시험을 하고, 새 브랜치에서
-   커밋한다. push는 그 뒤에만 하고 권한 프롬프트가 사람의 확인이며 거부는 최종이다. 데이터베이스는
-   읽기 전용이고, dev signal_db에 등록 SQL을 적용하는 쓰기만 사용자 승인 아래 한다.
+2. 작업자로 쓰는 PC는 다음 작업을 스스로 정하지 않는다. M4Pro의 작업 관리자가 Orca로 issue를 배정하면 그 issue로
+   `.claude/OBJECTIVE.md` 초안을 쓴다(6절). 그다음 문서 하단의 "Register with /goal" 블록을 사람이 `/goal`로
+   등록한다. 등록 없이는 진행하지 않는 것이 하네스 규칙이다.
+3. 모델과 effort. 2026-11-03 PC의 마지막 설정은 `/model`로 Opus 5.5 기본, `/effort`로 high였다. 2026-11-20부터는
+   작업자와 작업 관리자 세션을 Sonnet 5.5로 연다(`.claude/settings.json`의 기본값 `"model": "sonnet"`). 다른 모델이
+   필요한 단계는 세션이 Agent 도구로 모델과 effort를 지정한 단계 agent를 띄운다(`.claude/HARNESS.md`의 "Who does what").
+4. 작업 규칙은 `.claude/HARNESS.md`가 전부다. 요약하면 작업자 세션(Sonnet 5.5)이 단계를 조율하고, Opus 5.5 단계
+   agent가 UML 설계를 쓰고, Codex가 설계를 검토하고, 구현(일반은 세션, money-path는 Opus 단계 agent)과 Haiku 단계
+   agent의 QA를 녹색으로 만들고, Codex 코드 리뷰를 받아 Blocking 0을 확인한 뒤, Opus 단계 agent가 일부러 깨뜨리는
+   인수 시험을 하고, 커밋한다. 커밋과 push는 작업자 세션만 하고 권한 프롬프트가 사람의 확인이며 거부는 최종이다.
+   데이터베이스는 읽기 전용이고, 스스로 정리하는 시험 fixture와 사용자가 승인한 쓰기(예: dev signal_db 등록
+   SQL)만 예외다.
 5. 훅 셋이 자동으로 돈다. `secret-scan.sh`는 쓰기와 Bash에서 리터럴 비밀을 막는다(`${ENV_VAR}` 참조는
    허용). `test-gate.sh`는 Stop 때 `.py` 변경이 있으면 `.venv/bin/pytest`를 돌려 실패하면 멈춤을 막는다
    (180초를 넘기면 막지 않는다). `risk-guard.sh`와 `write-scope.sh`는 파일만 있고 등록되지 않았으며 다시
@@ -154,7 +157,7 @@ python3.12 -m venv .venv
    `prompt`를 함께 받지 않으므로, 커밋된 diff에 지시문을 붙여 검토하려면 `codex`에 "`git diff <base>..HEAD`만
    검토하라"고 적어 보낸다. 120초가 지나면 호출이 배경으로 넘어가고 결과는 알림으로 온다.
    orca-m1처럼 `codex-cli` MCP가 꺼져 있으면 Bash의 `codex exec --sandbox read-only "<지시문>"`을 쓴다.
-   이 경로는 `config.toml`에 model 줄이 없어도 계정의 기본 모델로 답한다(2026-11-18 확인).
+   이 경로는 `config.toml`의 model(`gpt-6.2-sol`)로 답한다(2026-11-20 orca-m1에서 확인).
 
 ## 6. 이어서 할 작업
 
@@ -216,6 +219,6 @@ issue 링크를 달고 닫았고, 옛 ID와 issue 번호의 대응은 `docs/desi
 - [ ] `author_check bollinger-band-bounce`가 exit 0에 판정 passed다.
 - [ ] uvicorn과 vite가 뜨고 `http://localhost:5173/`에서 과거 실행 또는 새 실행이 보인다.
 - [ ] `~/.claude/CLAUDE.md`와 메모리 디렉터리가 복사됐고 Claude Code 세션 시작 때 메모리 색인이 보인다.
-- [ ] Codex 호출이 답한다. `codex-cli` MCP를 쓰면 `claude mcp list`에 있고 `config.toml`의 model로 답해야 하며, MCP를 끈 환경에서는 `codex exec --sandbox read-only`가 답하면 된다(5절 6항).
+- [ ] Codex 호출이 `gpt-6.2-sol`로 답한다. `codex-cli` MCP를 쓰면 `claude mcp list`에 있어야 한다. `codex exec --sandbox read-only`의 출력 머리에 `model: gpt-6.2-sol`이 찍히는지로 기계의 기본 모델을 확인한다. MCP 응답은 실행된 모델을 보이지 않으므로, MCP 경로에서는 호출에 넘긴 model 값이 근거다(5절 6항).
 - [ ] `gh auth status`가 로그인 상태다.
 - [ ] OBJECTIVE를 새로 쓰고 `/goal`을 등록했다. 이 항목은 위 항목들을 모두 확인한 뒤 사람이 하는 마지막 단계다. 세션은 초안까지만 쓴다.
