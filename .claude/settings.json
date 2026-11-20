@@ -1,9 +1,9 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "model": "opus",
-  "_model_note": "Main session = worker or manager on Opus 5.5; Sonnet 5.5 only for simple mechanical changesets the manager marks (see .claude/HARNESS.md 'Who does what'). Codex gpt-6.2-sol reviews. The subagent definitions in .claude/agents/ are retired.",
+  "model": "sonnet",
+  "_model_note": "Worker and manager sessions run on Sonnet 5.5 (this default) and do assignment, start, ordinary implementation, commits, push, and merge. Stages that need another model run in stage agents launched with the Agent tool: Opus 5.5 for design, acceptance testing, money-path implementation, and reclassified work; Haiku 5.5 for QA and manager-marked mechanical changesets. Codex gpt-6.2-sol reviews. See .claude/HARNESS.md Who does what. The subagent definitions in .claude/agents/ are retired.",
   "disableAgentView": true,
-  "_view_note": "v1에서 --dangerously-skip-permissions가 dispatched bg session으로 전파되는 P0 위험을 피하려고 Agent View를 비활성화했다. 지금은 전략 작성 회차의 sub-agent만 쓰므로 그대로 둔다.",
+  "_view_note": "v1에서 --dangerously-skip-permissions가 dispatched bg session으로 전파되는 P0 위험을 피하려고 Agent View를 비활성화했다. 단계 agent와 전략 회차 agent는 Agent 도구로 띄우므로 Agent View 없이도 동작해 그대로 둔다.",
   "enabledPlugins": {
     "claude-mem@thedotmack": false
   },
@@ -19,6 +19,12 @@
       "Bash(python -m ruff:*)",
       "Bash(python -m black:*)",
       "Bash(python -m mypy:*)",
+      "Bash(.venv/bin/python -m pytest:*)",
+      "Bash(.venv/bin/ruff:*)",
+      "Bash(.venv/bin/mypy:*)",
+      "Bash(../../.venv/bin/mypy:*)",
+      "Bash(npm test:*)",
+      "Bash(npm run typecheck:*)",
       "Bash(git status)",
       "Bash(git diff:*)",
       "Bash(git log:*)",

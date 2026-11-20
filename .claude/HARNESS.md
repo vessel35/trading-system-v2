@@ -3,16 +3,19 @@
 > Imported into the project's CLAUDE.md via `@.claude/HARNESS.md`.
 > Read every session. This is the **working brain** for this repository.
 
-You plan, design, implement, and verify **yourself, in this session**. You do not route
-implementation to subagents. The only work that leaves this session is **review**, and it
-goes to Codex — a different model family, so it fails differently than you do. The one
-exception is a strategy authoring round, where writing the strategy is itself what is being
-tested (see "Who does what").
+You run the loop below **from this session**, which stays on Sonnet 5.5 and owns the issue
+from start to merge request. Stages that need a different model run in **stage agents**: fresh
+agents you launch with the Agent tool, each with the model and effort the stage table sets.
+Review goes to Codex — a different model family, so it fails differently than either.
 
-**Why direct implementation.** A subagent implements from a written spec and reports back a
-summary; you then have to reconstruct what it actually did before you can judge it. Doing
-the work here removes that round trip and keeps the person who decided the design
-accountable for the code that came out of it.
+**Why stage agents, and how they stay honest.** A session cannot change its own model, and the
+table puts design and acceptance testing on Opus 5.5 and QA on Haiku 5.5. The old
+objection to subagents was that one implements from a written spec and returns a summary you
+must reconstruct. Two rules close that gap. First, every hand-off between stages is a file
+the next stage and the review read directly: in the repository, the UML design document, the
+diff on the branch, and the acceptance test record; in the session's scratch directory, the QA
+log. A stage agent's summary is never the evidence. Second, this session reads those files before it moves the issue to the next
+stage, and Codex and the human checkpoints sit where they did before.
 
 **`.claude/agents/` still holds six subagent definitions and none of them are used.** They
 are kept for history, not as an option. Do not dispatch them, and do not read the split they
@@ -26,42 +29,117 @@ work order, such as `[01]`. The **manager** is the Claude session on M4Pro that 
 through Orca. The **worker** is the Claude session that holds the repository and runs the loop
 below (currently orca-m1).
 
-| Stage | Work | Owner | Model |
-|---|---|---|---|
-| 0. Assign | Pick the next issue by its order, send it as an Orca task, update the issue from the result | manager | Opus 5.5 |
-| 1. Start | Create the branch, draft `.claude/OBJECTIVE.md` | worker | Opus 5.5 |
-| 1a. Confirm goal | Approve the objective and register `/goal` | **human** | — |
-| 2. Design | Write the design document and verify every claim against the repository | worker | Opus 5.5, effort high |
-| 3. Design review | Find factual errors, gaps, and untestable claims | **Codex** | `gpt-6.2-sol`, reasoning high |
-| 4. Implement | One bounded changeset, exactly as designed | worker | Opus 5.5; Sonnet 5.5 for simple mechanical changesets (see below) |
-| 5. QA | pytest, ruff, ruff format, per-service mypy, web test and typecheck | worker | same model as stage 4, or Opus 5.5 once switched |
-| 6. Code review | Review the final green diff once | **Codex** | `gpt-6.2-sol`; reasoning xhigh when the diff touches money, quantity, price, fees, or slippage, otherwise high |
-| 7. Acceptance test | Break things on purpose and confirm a test catches each one | worker | Opus 5.5, effort high |
-| 8. Commit and PR | `git-conventions` and `git-pr`; push goes through the permission prompt | worker; push approval by **human** | same model as stage 4, or Opus 5.5 once switched |
-| 9. Merge | Merge the PR and close the issue | **human** decides; manager runs it | — |
+A **money-path change** is one that can change which orders are placed, filled, sized,
+priced, or charged, or what Evidence records, whether directly (a formula) or indirectly (a
+default value, the order of engine events, when an entry is rejected). Code under the engine,
+execution, money-management, or Evidence modules counts even when the change is meant to keep
+behavior identical, because only the tests can show that it did. When in doubt, treat the
+change as money-path. The worker session classifies the change at stage 1 and records the
+classification in `.claude/OBJECTIVE.md`; the design agent is launched at the effort that
+classification sets. If a design agent launched at high finds the change is money-path, it
+stops and reports, and the worker relaunches design at xhigh. Money-path overrides a
+manager's mechanical mark. Several rows below
+depend on this classification, and `.claude/skills/git-pr/SKILL.md` uses the same one.
+
+| Stage | Work | Runs in | Model | Effort |
+|---|---|---|---|---|
+| 0. Assign | Pick the next issue by its order, send it as an Orca task, update the issue from the result | manager session | Sonnet 5.5 | medium |
+| 1. Start | Create the branch, draft `.claude/OBJECTIVE.md` | worker session | Sonnet 5.5 | medium |
+| 1a. Confirm goal | Approve the objective and register `/goal` | **human** | — | — |
+| 2. Design | Write the design in UML and verify every claim against the repository | stage agent | **Opus 5.5** | high; xhigh for a money-path change |
+| 3. Design review | Find factual errors, gaps, and untestable claims | **Codex** | `gpt-6.2-sol` | high; xhigh for a money-path change |
+| 4. Implement | One bounded changeset, exactly as designed | worker session on Sonnet 5.5; a stage agent for Opus 5.5 or Haiku 5.5 | Sonnet 5.5; **Opus 5.5** for a money-path change; Haiku 5.5 for a mechanical changeset the manager marks | high; medium for a mechanical changeset |
+| 5. QA | pytest, ruff, ruff format, per-service mypy, web test and typecheck; write the output to a file | stage agent | Haiku 5.5; fixing a failure goes back to the stage 4 model | low |
+| 6. Code review | Review the final green diff once | **Codex** | `gpt-6.2-sol` | high; xhigh for a money-path change |
+| 7. Acceptance test | Break things on purpose, confirm a test catches each one, revert every mutation, write the record | stage agent | **Opus 5.5** | high |
+| 8. Commit and PR | Commit the acceptance record, push, open the PR by `git-conventions` and `git-pr`; the push permission prompt is the **human** approval | worker session | Sonnet 5.5 | low |
+| 9. Merge | Merge the PR and close the issue | **human** decides; manager session runs it | Sonnet 5.5 | low |
+
+Opus 5.5 is kept for the stages whose mistakes are hardest to undo: design, acceptance
+testing, and implementing a money-path change.
+
+**Running a stage agent.**
+
+- Launch it with the Agent tool, a general-purpose agent, passing `model` (`opus`, `sonnet`,
+  or `haiku`) and `effort` exactly as the table sets. This file is the instruction that
+  authorizes setting effort. Never use the retired definitions in `.claude/agents/`.
+- One stage agent at a time on a branch. Agents may run in the background and report by
+  notification; the worker launches the next agent, or touches the working tree itself, only
+  after the previous agent's completion notification has arrived. If an agent hangs, stop it
+  and confirm it has stopped before retrying. A stage agent never launches agents of its own.
+- The prompt names the issue, the branch, the files to read (the design document, the
+  objective, the previous stage's output file), the one stage to perform, and the file to write
+  its result to. The QA commands the stage 5 agent runs are pre-approved in
+  `.claude/settings.json` (`.venv/bin/python -m pytest`, `.venv/bin/ruff`, `.venv/bin/mypy` and
+  `../../.venv/bin/mypy` from a service directory, `npm test`, `npm run typecheck`); if one
+  still needs approval, the agent reports it and the worker runs that command itself. The prompt
+  forbids `git add`, `git commit`, `git push`, merging, opening a PR,
+  database writes beyond the test-fixture exception, and work outside the stage. A stage
+  agent that needs a permission it was not given reports a blocker instead of asking. Only the
+  worker session commits and pushes; the human denies any `git push` prompt that does not come
+  from the worker session at stage 8.
+- Stage agents write their output under `docs/` for design documents and acceptance records,
+  and under the session's scratch directory for QA logs. This session reads the output file
+  itself before the next stage; the agent's closing summary is not evidence.
+- Codex verdicts are recorded where the next reader looks: the design review's findings and
+  their reconciliation as a section at the end of the design document, the code review's
+  verdict in the PR body. Applying accepted design-review findings to the diagrams and the test
+  plan table is a design task, done by a design stage agent at the design effort.
+- Commits stay in the worker session; stage agents never run `git add` or `git commit`, which
+  the project's permissions do not pre-approve. After stage 6, before launching stage 7, the
+  worker commits the reviewed diff locally (no push). That commit is the snapshot the
+  acceptance test is measured against. The worker also saves the output of
+  `git status --porcelain --untracked-files=all` at that moment as the baseline, because files that were already
+  untracked (a local backup, for instance) are not mutations.
+- After stage 7, `git status --porcelain --untracked-files=all` must match the baseline except for the acceptance
+  record; it shows untracked files as well as changes, which `git diff HEAD` alone would miss. The acceptance
+  agent reverts its own mutations; any entry that is neither in the baseline nor the
+  acceptance record, for instance after an interruption, is a leftover mutation. The worker
+  moves only those entries aside with
+  `git --literal-pathspecs stash push --include-untracked -- <files>`, naming each file, so a
+  name containing `*` or `?` cannot match a baseline file. It checks the stash holds only
+  mutations, and drops it. Baseline entries are never stashed. This command is not
+  pre-approved, so it goes through a permission prompt in the worker session. (`git checkout -- <file>` and `git reset --hard` are denied in this project.) If
+  stage 7 finds a missing test, adding it is a code change: back to stage 4, then QA, then a
+  Codex confirmation limited to the added test, committed locally before stage 8.
+- If a stage agent stops, reports a blocker, or its output contradicts the design, this
+  session does not patch around it. It reruns the stage, escalates the model by the rule below,
+  or returns to stage 2.
+
+The worker and manager sessions start on Sonnet 5.5, the project default in
+`.claude/settings.json`. The human starts them; neither session changes its own model.
 
 **Review sits at two points and Codex holds both.** One before implementation begins, one
 after it is green. Implementation and review never sit on the same side — that separation is
 the reason the split is shaped this way.
 
-**When Sonnet 5.5 is allowed.** The manager decides, not the worker: an issue may run on
-Sonnet 5.5 only when its assignment says so. The manager marks only changesets that need no
-design decision, such as copying a record table into a docstring, a dependency version pin,
-or a refactor that must keep every existing test result and Evidence golden value unchanged.
-The worker switches its own model with `/model`; it does not hand the work to a subagent.
+**Mechanical changesets.** The manager decides, not the worker: an issue runs stage 4 on
+Haiku 5.5 only when its assignment marks it mechanical. The manager marks only changesets that
+need no design decision, such as copying a record table into a docstring, a dependency version
+pin, or a refactor that must keep every existing test result and Evidence golden value
+unchanged.
 
-The classification is checked by what the change does, not by which files it edits. Switch
-back to Opus 5.5 at whatever stage it happens, implementation, QA, or commit, as soon as any of
-these is true: a decision the design did not already make is needed; any test result, numeric
-output, or Evidence golden value changes; or the change alters how money, quantity, price,
-fees, slippage, or Evidence are computed. After switching, report the switch and its reason in
-the worker's result. Every other changeset runs on Opus 5.5 from the start.
+**Escalation and reclassification are different.**
 
-**Strategy authoring rounds are the one place subagents work.** A round, such as issue #69,
+- *Escalate one level* (Haiku 5.5 to Sonnet 5.5, Sonnet 5.5 to Opus 5.5) when a result differs
+  from what was expected, or a test result, numeric output, or Evidence golden value changes in
+  a change that was not meant to change it.
+- *Reclassify* when the change turns out to be a money-path change, or needs a decision the
+  design did not make. Go straight to Opus 5.5 at the effort the table sets for a money-path
+  change, return to stage 2 to add the decision to the design, and take it through stage 3
+  again before continuing.
+- Either way the higher model stays for the rest of the issue in the stages that make
+  decisions (2, 4, and 7, and any QA fix, which goes back to the stage 4 model then in effect).
+  QA itself keeps running on Haiku 5.5, because it only runs commands. If the
+  stage that hits the trigger is already on Opus 5.5, it stops and the worker returns to
+  stage 2. Report each switch and its reason in the worker's result.
+
+**Strategy authoring rounds use their own agents.** These are not stage agents. A round, such as issue #69,
 tests whether the authoring tooling closes on a real document, so the strategy must be written
 by an agent the worker does not steer.
 
-- The worker launches a fresh general-purpose agent with the Agent tool on Opus 5.5 and tells
+- The worker launches a fresh general-purpose agent with the Agent tool on Opus 5.5, effort
+  high, and tells
   it to follow the `author-strategy` skill. These are skills, not the retired definitions in
   `.claude/agents/`. The round's rules go in that prompt: no questions, a fixed file scope, no
   git operations, no service restarts, and no screen operations. The agent runs
@@ -76,7 +154,8 @@ by an agent the worker does not steer.
   running the agent again, never by the worker.
 - After the agent finishes, the worker runs QA, applies the registration SQL to dev
   `signal_db` with the user's approval, restarts the dev servers, and runs the strategy on the
-  screen. A second fresh Opus 5.5 agent then follows the `verify-strategy` skill independently.
+  screen. A second fresh agent, on Sonnet 5.5 at effort xhigh, then follows the
+  `verify-strategy` skill independently.
 - One Codex pass at reasoning xhigh reviews the agent's files for two things together:
   faithfulness to the source document, and the stage 6 code review of the strategy, its tests,
   and its registration SQL. It takes the place of stage 6 for those files. Platform changes the
@@ -87,8 +166,34 @@ by an agent the worker does not steer.
 1. **Design.** Write the design document. State what is wrong now, what you verified, what
    changes, what you will not do, and what has to be true to call it closed. Verify every
    factual claim against the repository before you write it down.
+
+   **The design is drawn, not narrated.** Its body is three kinds of mermaid diagram:
+   - a **class diagram** of every type the change adds or alters, with fields, method
+     signatures, and relationships;
+   - a **sequence diagram** of each call flow the change touches, across modules and services,
+     including the error and rejection paths;
+   - a **flowchart** of each decision the change adds or alters: branches, guards, and stop
+     conditions.
+
+   In all three, mark every element as existing, changed, or new (for example with
+   `<<new>>` and `<<changed>>` stereotypes or a legend), so the review can check existing
+   names against the code and judge new ones on their own. After the diagrams, a **test plan
+   table** maps each sequence path and flowchart branch to an existing or planned test and its
+   expected outcome.
+
+   Prose appears only where a diagram cannot carry the meaning: the definition of an
+   individual class or function, an invariant, a formula, or a rule about units and rounding.
+   Each diagram names the real module, class, and function identifiers it depicts so the
+   review can check them against the repository. A change too small for one of the three kinds
+   says so explicitly in the design ("no new decision; flowchart not needed") rather than
+   leaving it out silently. A mechanical changeset that alters no type, call flow, or decision
+   may omit all three; its design is then a short record of what changes, why nothing else
+   does, and which existing tests prove it, and that record still goes to stage 3.
 2. **Design review — Codex.** Ask it adversarially: which of these claims does the repository
-   contradict, what is missing, what cannot be tested. **A factual error in the design is the
+   contradict, what is missing, what cannot be tested. Ask it to check every element marked
+   existing or changed against the code, to check that elements marked new are consistent with
+   each other and with the code they attach to, and to name any sequence path or flowchart
+   branch the test plan table leaves without a test. **A factual error in the design is the
    most valuable finding**, so ask for it by name.
 3. **Reconcile.** Check each finding against the code yourself before accepting it. Fix the
    design. Say plainly which findings were yours to own.
@@ -152,9 +257,10 @@ Some domain skills still name roles from the retired split: `data-agent`,
 `validation-auditor`, `execution-realism-auditor`, `backtest-runner`, `review-agent`, an
 implementation agent, a design agent. The skills keep those names because they sit inside
 methodology text. Read them through the current split.
-Data reads, auditing your own work, implementation, and design are the worker session's job;
-data reads stay read-only queries run by the worker. Review is Codex's job at stages 3 and 6.
-None of these names is a reason to launch a subagent.
+Data reads, auditing your own work, implementation, and design are the worker session's job
+or its stage agents'; data reads stay read-only queries. Review is Codex's job at stages 3 and 6.
+None of these names is a reason to launch any agent other than a stage agent or a strategy
+round agent.
 
 ## Context discipline
 
